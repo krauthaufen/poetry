@@ -171,6 +171,7 @@ Confidence levels:
 |---|---|---|---|
 | Meta gems | every enabled group whose active gem is typed Meta; the group's other skill gems are triggered (copies with that group's supports, tagged Triggered); the group's supports never reach the character | data | data |
 | Energy sources | from the gem's stats: `*_centienergy_per_monster_power_on_crit / freeze / shock / ignite`, `*_centienergy_on_block`, `*_centienergy_per_10ms_base_cast_time` (spells the player casts) | data | data |
+| No energy from triggered skills | hits and ailments of triggered skills (and spells socketed in meta gems) give no energy, so triggers can't feed themselves | poe2wiki / poe2db: "Energy cannot be gained from direct effects of Triggered Skills" | community |
 | Energy per event | per-power value × monster power × (damage of the relevant types / enemy ailment threshold) × (1 + energy generated: gem + group supports) | PoB developer draft (GitHub issue #181); not confirmed game logic | community |
 | Monster power | normal 1, magic 2, rare 5, unique / boss 20 | Mobalytics; boss 20 agreed, magic / rare disputed | community |
 | Energy per trigger | 100 per second of base cast time of the socketed spells (cast time + `total_cast_time_+_ms`); Comet: 1 + 1 s = 200 | "10 per 0.1 s" (community); a guide quotes 300 for Comet (older version?) | community |

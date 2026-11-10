@@ -283,6 +283,16 @@ let main _ =
         | Some t when t > 4.0 && t < 9.0 -> ()
         | d -> failwithf "expected death between 4 and 9 s, got %A" d)
 
+    test "meta: triggered skills give no energy (no trigger loops)" (fun () ->
+        // a crit-only bolt feeds Cast on Crit; the triggered nova also always crits but must not feed it
+        let bolt = { fireSpell 100.0 with BaseCrit = 100.0 }
+        let nova = { fireSpell 100.0 with Name = "Nova"; BaseCrit = 100.0; Tags = Set.ofList [ Spell; Triggered ] }
+        let meta = { Meta.simple "CoC" 1.0 "Nova" with Sources = [ CritHits 1.0 ]; EnergyMult = 1e6 }
+        let player = { Actor.make "Player" [ noIgnite ] [ bolt; nova ] with Rotation = [ Actor.always "Bolt" ]; Metas = [ meta ] }
+        let o = Sim.run (Fight.single (boss 1e12) player 5.5) 1u
+        // 5 bolts -> 5 crits -> 5 triggers; the novas' own crits add nothing
+        equal 5 o.Counts.["trigger:Nova"])
+
     DataTests.run test near (fun a b -> equal a b)
 
     printfn "%d passed, %d failed" passed failures

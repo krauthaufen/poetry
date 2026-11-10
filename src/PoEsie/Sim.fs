@@ -925,8 +925,9 @@ module Sim =
                             w
                 // meta gem energy: crits and newly inflicted freeze / shock / ignite, scaled by
                 // monster power and by the share of the ailment threshold the hit deals
+                // "Energy cannot be gained from direct effects of Triggered Skills" (poe2wiki, poe2db)
                 let w =
-                    if actor.Metas.IsEmpty then w
+                    if actor.Metas.IsEmpty || skill.Tags.Contains Triggered then w
                     else
                         let threshold = max 1.0 (Ailments.threshold def)
                         let power = MonsterPower.ofRarity e.Def.Rarity
