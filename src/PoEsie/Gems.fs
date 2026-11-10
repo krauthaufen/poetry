@@ -223,12 +223,14 @@ module Gems =
             if isAttack then
                 weapon |> Option.map (fun w -> w.Damage) |> Option.defaultValue Map.empty
             else
+                // a stat listed more than once adds up (infused sets list base damage twice)
                 ownStats
                 |> List.choose (fun (id, v) -> baseDamageStat id |> Option.map (fun (isMin, t) -> t, isMin, v))
                 |> List.groupBy (fun (t, _, _) -> t)
                 |> List.map (fun (t, xs) ->
-                    let pick m = xs |> List.tryFind (fun (_, isMin, _) -> isMin = m) |> Option.map (fun (_, _, v) -> v) |> Option.defaultValue 0.0
-                    t, { Min = pick true; Max = pick false })
+                    let total m = xs |> List.filter (fun (_, isMin, _) -> isMin = m) |> List.sumBy (fun (_, _, v) -> v)
+                    t, { Min = total true; Max = total false })
+                |> List.filter (fun (_, r) -> r.Max > 0.0)
                 |> Map.ofList
         let setLevel = Map.tryFind level set.Levels
         let baseMultiplier =
@@ -250,7 +252,10 @@ module Gems =
                 | None -> 1.0 / (aps * speedMult)
             else
                 data.CastTime
-        let statOf id = ownStats |> List.tryFind (fst >> (=) id) |> Option.map snd
+        let statOf id =
+            match ownStats |> List.filter (fst >> (=) id) with
+            | [] -> None
+            | xs -> Some(xs |> List.sumBy snd)
         let flagOf id = statOf id |> Option.exists (fun v -> v <> 0.0)
         let allStats = ownStats @ supportStats
         let flagAny id = allStats |> List.exists (fun (s, v) -> s = id && v <> 0.0)

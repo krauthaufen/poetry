@@ -1044,22 +1044,20 @@ module Sim =
             let w = { w with Player = w.Player |> Option.map (fun p -> { p with StrikeLeech = 0.0 }) }
             // Spell Cascade: extra impacts per side along the line from the player through the target,
             // one radius apart (spacing: guess)
+            // Spell Cascade: extra impacts on either side of the target "along a randomly chosen
+            // axis"; side impacts have their own less area; spacing: user observation
             let cascades = int (Mods.sumBase ctx [ Named "CascadesPerSide" ] mods)
-            let impacts =
-                match delivery with
-                | AreaAtTarget r when cascades > 0 ->
-                    let d = Vec.length primary.Position
-                    let dir = if d > 0.0 then Vec.scale (1.0 / d) primary.Position else Vec.make 1.0 0.0
-                    let step = Geometry.radius r areaMult * env.Fight.CascadeSpacing
-                    [ for k in -cascades .. cascades -> { primary with Position = Vec.add primary.Position (Vec.scale (float k * step) dir); Size = 0.0 } ]
-                | _ -> [ primary ]
-            impacts
-            |> List.collect (fun centre ->
-                match delivery with
-                | AreaAtTarget r when cascades > 0 ->
-                    let rr = Geometry.radius r areaMult
-                    living |> List.filter (fun e -> Vec.dist centre.Position e.Position <= rr + e.Size) |> List.map (fun e -> e.Name)
-                | _ -> Geometry.targetsFrom rng env.Fight.Walls env.Fight.Reach delivery areaMult primary living)
+            match delivery with
+            | AreaAtTarget r when cascades > 0 ->
+                let axis = Vec.ofAngle (rng.Float() * 2.0 * System.Math.PI)
+                let centreR = Geometry.radius r areaMult
+                let sideR = Geometry.radius r (areaMult * Mods.more ctx [ Named "CascadeArea" ] mods)
+                let step = centreR * env.Fight.CascadeSpacing
+                [ for k in -cascades .. cascades ->
+                    Vec.add primary.Position (Vec.scale (float k * step) axis), (if k = 0 then centreR else sideR) ]
+                |> List.collect (fun (centre, rr) ->
+                    living |> List.filter (fun e -> Vec.dist centre e.Position <= rr + e.Size) |> List.map (fun e -> e.Name))
+            | _ -> Geometry.targetsFrom rng env.Fight.Walls env.Fight.Reach delivery areaMult primary living
             |> List.fold (fun w target -> hitEnemy env rng actor skill mult target w) w
 
     /// A monster's hit at the player: evasion, deflection, armour, resistances, then

@@ -349,6 +349,7 @@ module StatMap =
         | "triggered_skill_damage_+%" -> one (Mod.inc (Damage AllDamage) v |> Mod.whenever (SkillIs Triggered))
         | "cast_on_crit_global_critical_hit_chance_granted_+%" -> one (Mod.inc CritChance v)
         | "support_spell_cascade_number_of_cascades_per_side" -> one (Mod.base' (Named "CascadesPerSide") v)
+        | "support_spell_cascade_area_of_effect_+%_for_cascade" -> one (Mod.more (Named "CascadeArea") v)
         | "trigger_skills_refund_half_energy_spent_chance_%" -> one (Mod.base' (Named "EnergyRefundChance") v)
         | id when id.Contains "_centienergy_" || id.StartsWith "generic_ongoing_trigger_" || id = "total_cast_time_+_ms" || id.EndsWith "_fall_time_ms" ->
             Some Structural
