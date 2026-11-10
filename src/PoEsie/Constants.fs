@@ -95,5 +95,10 @@ module Constants =
     /// Hinder: hinder_movement_speed_+%_final; no value in the data, GUESS.
     let hinderSlow = 30.0
 
+    /// Meta gem trigger cost: fixed added cast time (`total_cast_time_+_ms`, Comet +1 s)
+    /// counts this many times. Comet = 1 s + 2 x 1 s = 300 energy (forum bug reports
+    /// 3623092 / 3860952, user recollection); the tooltip formula would give 200.
+    let addedCastTimeEnergyWeight = 2.0
+
     /// Server tick, PoB data.misc.ServerTickTime.
     let serverTick = 0.033

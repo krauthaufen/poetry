@@ -141,6 +141,7 @@ module Behaviours =
                                 (Gems.data db sp.Name |> Option.map (fun d -> d.CastTime) |> Option.defaultValue 1.0)
                                 + (Gems.rawStats db charMods { Gem = sp.Name; Level = sp.Level; Quality = sp.Quality; StatSet = 1; Supports = [] }
                                    |> List.filter (fun (id, _) -> id = "total_cast_time_+_ms") |> List.sumBy snd) / 1000.0
+                                  * Constants.addedCastTimeEnergyWeight
                             Some(rename skill, castTime)
                         | Error _ -> None)
                 let cost = triggered |> List.sumBy (fun (_, ct) -> 100.0 * ct)
