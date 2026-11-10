@@ -106,7 +106,7 @@ module Pob =
                         let gemId = Xml.attr "gemId" gem |> Option.defaultValue ""
                         { Name = Xml.attr "nameSpec" gem |> Option.defaultValue ""
                           Level = int' (Xml.attr "level" gem) 20
-                          Quality = int' (Xml.attr "quality" gem) 0
+                          Quality = int' (Xml.attr "quality" gem) 20
                           Enabled = Xml.attr "enabled" gem <> Some "false"
                           IsSupport = gemId.Contains "SupportGem" || skillId.StartsWith "Support" || skillId.Contains "SupportPlayer"
                           StatSet = int' (Xml.attr "statSetIndex" gem) 1 }) })
@@ -213,9 +213,10 @@ module Pob =
             (fun (sheet: CharacterSheet) r ->
                 match r with
                 | Ok (skill, cov) ->
-                    // only the buff's own effect, not the skill's damage-related base stats
+                    // Only the buff's character-wide effects: stats named after the skill itself
+                    // ("herald_of_ash_fire_damage_+%") describe that skill, not the character.
                     { sheet with
-                        Mods = sheet.Mods @ (skill.Mods |> List.map (Mod.from ("buff:" + skill.Name)))
+                        Mods = sheet.Mods @ (skill.Mods |> List.filter (fun m -> m.Source <> "skill-specific") |> List.map (Mod.from ("buff:" + skill.Name)))
                         Coverage = Coverage.merge sheet.Coverage { cov with Unmapped = cov.Unmapped |> List.map (fun (s, v) -> skill.Name + ": " + s, v) } }
                 | Error _ -> sheet)
             sheet

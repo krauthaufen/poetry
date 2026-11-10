@@ -137,7 +137,8 @@ module Gems =
             |> List.tryPick (fun k ->
                 if words.Length > k + 2 then
                     match StatMap.meaning (String.concat "_" (Array.skip k words)) v with
-                    | Mods ms -> Some(Mods ms)
+                    // marked: it came from a skill-specific stat, so it describes that skill only
+                    | Mods ms -> Some(Mods(ms |> List.map (Mod.from "skill-specific")))
                     | _ -> None
                 else None)
             |> Option.defaultValue original
@@ -292,3 +293,26 @@ module Gems =
                     |> List.unzip
                 let cov = List.fold Coverage.merge cov (supportCov @ partCov)
                 Ok({ main with Parts = parts }, cov)
+
+    /// The game stats of a socketed gem (own stat set, quality, alt quality, supports),
+    /// for behaviours that need raw numbers.
+    let rawStats (db: GameDb) (characterMods: ModDb) (setup: GemSetup) =
+        match skillOfGem db setup.Gem with
+        | None -> []
+        | Some data ->
+            match List.tryItem (setup.StatSet - 1) data.StatSets with
+            | None -> []
+            | Some set ->
+                let tags = data.Types |> Set.toList |> List.choose tagOfType |> Set.ofList
+                let ctx = { Ctx.empty with SkillName = data.Name; SkillTags = tags }
+                let maxLevel = data.Levels |> Map.toList |> List.map fst |> List.fold max 1
+                let level = min maxLevel (setup.Level + int (Mods.sumBase ctx [ Named "GemLevel" ] characterMods))
+                let quality = setup.Quality + int (Mods.sumBase ctx [ Named "GemQuality" ] characterMods)
+                let alt = Mods.flag ctx (Named "AltQuality") characterMods
+                let supports =
+                    setup.Supports
+                    |> List.collect (fun (name, lvl) ->
+                        match skillOfGem db name with
+                        | Some s when s.Support -> s.StatSets |> List.tryHead |> Option.map (fun set -> stats s set lvl 0) |> Option.defaultValue []
+                        | _ -> [])
+                statsWith alt data set level quality @ supports

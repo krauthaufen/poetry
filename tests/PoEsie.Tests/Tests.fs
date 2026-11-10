@@ -215,6 +215,17 @@ let main _ =
         let o = Sim.run (Fight.single boss player 1.5) 1u
         near 120.0 o.DamageBy.["Bolt (hit)"])
 
+    test "sim: a cycle switches its buff every period" (fun () ->
+        let bolt = fireSpell 100.0
+        let cycle = { Name = "Flux"; Period = 2.0; Variants = [ [ Mod.more (Damage(OfType Fire)) 100.0 ]; [ Mod.more (Damage(OfType Cold)) 100.0 ] ] }
+        let player = { Actor.make "Player" [ noIgnite ] [ bolt ] with Cycles = [ cycle ] }
+        let o = Sim.run (Fight.single (boss 1e9) player 9.5) 3u
+        // picks at t = 0, 2, 4, 6, 8; hits at t = 1..9, each doubled while the fire variant is active
+        let picks = o.Counts |> Map.filter (fun k _ -> k.StartsWith "cycle:") |> Map.toList |> List.sumBy snd
+        equal 5 picks
+        let dmg = o.DamageBy.["Bolt (hit)"]
+        if dmg < 900.0 || dmg > 1800.0 || dmg % 100.0 <> 0.0 then failwithf "unexpected damage %g" dmg)
+
     DataTests.run test near (fun a b -> equal a b)
 
     printfn "%d passed, %d failed" passed failures

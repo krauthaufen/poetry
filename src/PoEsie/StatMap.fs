@@ -240,6 +240,8 @@ module StatMap =
         | "max_frenzy_charges" -> one (Mod.base' (Named "MaxFrenzyCharge") v)
         | "max_endurance_charges" -> one (Mod.base' (Named "MaxEnduranceCharge") v)
         | "maximum_rage" -> one (Mod.base' (Named "MaxRage") v)
+        // Berserk's alternate quality: maximum Rage while Berserk is active (character-wide)
+        | "berserk_maximum_rage_granted_+" -> one (Mod.base' (Named "MaxRage") v)
         | "charge_skip_consume_chance_%" -> one (Mod.base' (Named "ChargeSkipConsume") v)
         | "skill_base_rage_effect_+%_to_apply" | "rage_effect_+%" -> one (Mod.inc (Named "RageEffect") v)
         | "chance_%_to_double_effect_of_removing_charges" -> Some(Unsimulated "double effect of removing charges")

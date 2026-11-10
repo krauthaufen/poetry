@@ -70,6 +70,18 @@ let main argv =
                 { sheet with
                     Mods = (sheet.Mods |> List.filter (fun m -> m.Stat <> Named "ChargeSkipConsume")) @ [ Mod.base' (Named "ChargeSkipConsume") (float p) ] }
             | None -> sheet
+        let cycles =
+            build.Groups
+            |> List.filter (fun g -> g.Enabled)
+            |> List.choose (fun g ->
+                match g.Gems |> List.tryFind (fun gem -> not gem.IsSupport && Gems.isPersistentBuff db gem.Name) with
+                | Some a ->
+                    Some
+                        { Gem = a.Name; Level = a.Level; Quality = a.Quality; StatSet = a.StatSet
+                          Supports = g.Gems |> List.filter (fun x -> x.IsSupport) |> List.map (fun x -> x.Name, x.Level) }
+                | None -> None)
+            |> Behaviours.cycles db (ModDb.ofList sheet.Mods)
+        for c in cycles do printfn "cycle: %s, %.1fs per element, %A" c.Name c.Period (c.Variants |> List.map (fun v -> v.Head.Stat, v.Head.Value))
         let resources =
             Pob.maxResources sheet
             |> List.map (fun (k, n) ->
@@ -144,7 +156,7 @@ let main argv =
                 printfn "  delivery: %A" skill.Delivery
                 let fight =
                     { Enemies = enemies
-                      Player = { Actor.make "Player" sheet.Mods [ skill ] with Resources = resources }
+                      Player = { Actor.make "Player" sheet.Mods [ skill ] with Resources = resources; Cycles = cycles }
                       Minions = []
                       Targeting = (if Map.tryFind "target" o = Some "nearest" then Nearest else Strongest)
                       MaxTime = get "time" 60.0 }

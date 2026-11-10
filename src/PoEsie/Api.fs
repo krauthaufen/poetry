@@ -119,11 +119,12 @@ module Api =
         |> Option.bind (fun s -> match System.Int32.TryParse s with | true, v -> Some v | _ -> None)
         |> Option.defaultValue 1
 
+    /// Skill gems are taken to have 20% quality unless the API says otherwise.
     let private gemQuality (gem: Json) =
         property "Quality" gem
         |> Option.map (fun s -> s.TrimStart('+').TrimEnd('%'))
         |> Option.bind (fun s -> match System.Int32.TryParse s with | true, v -> Some v | _ -> None)
-        |> Option.defaultValue 0
+        |> Option.defaultValue 20
 
     /// Convert an API character into the same shape a PoB build is read into.
     let read (json: string) : PobBuild * (string * DisplayedWeapon) list =

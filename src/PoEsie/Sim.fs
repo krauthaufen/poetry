@@ -62,6 +62,13 @@ type Step =
     { Use: string
       When: View -> bool }
 
+/// A buff that switches between variants at random every period
+/// (Elemental Conflux: more damage of one random element).
+type Cycle =
+    { Name: string
+      Period: float
+      Variants: Mod list list }
+
 /// The player or a minion.
 type Actor =
     { Name: string
@@ -76,7 +83,8 @@ type Actor =
       Metas: Meta list
       /// Charges, rage...: stacks the actor starts the fight with. They don't expire;
       /// skills that consume them remove them.
-      Resources: (string * int) list }
+      Resources: (string * int) list
+      Cycles: Cycle list }
 
 module Actor =
     let make name mods skills =
@@ -87,7 +95,8 @@ module Actor =
           Rotation = skills |> List.map (fun s -> { Use = s.Name; When = fun _ -> true })
           Rules = []
           Metas = []
-          Resources = [] }
+          Resources = []
+          Cycles = [] }
 
     let always skill = { Use = skill; When = fun _ -> true }
 
@@ -140,6 +149,8 @@ module Sim =
         | Strike of actor: string * skill: string * mult: float * aimedAt: string
         /// After a use's hits: the skill consumes its charges (unless the skip roll succeeds).
         | ConsumeCharges of actor: string * charge: string * skill: string
+        /// A cycle picks its next variant.
+        | CycleTick of actor: string * cycle: string
         | Expire
 
     type private ActorState =
@@ -602,6 +613,16 @@ module Sim =
             match ev with
             | Ready name -> onReady env rng name w
             | Strike (name, skill, mult, aimedAt) -> onStrike env rng name skill mult aimedAt w
+            | CycleTick (name, cycleName) ->
+                let actor = actorDef env name
+                match actor.Cycles |> List.tryFind (fun c -> c.Name = cycleName) with
+                | None -> w
+                | Some c ->
+                    let pick = min (c.Variants.Length - 1) (int (rng.Float() * float c.Variants.Length))
+                    let e = { Name = c.Name; Mods = c.Variants.[pick]; Stacks = 1; Expires = w.Time + c.Period }
+                    updateActor name (fun st -> { st with Buffs = Map.add c.Name e st.Buffs }) w
+                    |> fun w -> { w with Counts = bump (sprintf "cycle:%s:%d" c.Name pick) w.Counts }
+                    |> schedule (w.Time + c.Period) (CycleTick(name, cycleName))
             | ConsumeCharges (name, charge, skillName) ->
                 let actor = actorDef env name
                 let st = Map.find name w.Actors
@@ -666,6 +687,7 @@ module Sim =
               Uptime = Map.empty
               Kills = [] }
             |> fun w -> actors |> List.fold (fun w a -> schedule 0.0 (Ready a.Name) w) w
+            |> fun w -> actors |> List.fold (fun w a -> a.Cycles |> List.fold (fun w c -> schedule 0.0 (CycleTick(a.Name, c.Name)) w) w) w
             |> schedule fight.MaxTime Expire
         let rec loop (w: World) =
             if allDead w || Map.isEmpty w.Queue || fst (Seq.head w.Queue).Key > fight.MaxTime then w
