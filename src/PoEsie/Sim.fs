@@ -735,7 +735,8 @@ module Sim =
                         if held = 0 then w
                         else
                             let stacks = if rng.Chance doubleChance then 2 * held else held
-                            let e = { Name = name; Mods = perStack |> List.map (Mod.scaled (float stacks)); Stacks = stacks; Expires = w.Time + seconds * float stacks }
+                            // mods are per stack: the buff's stacks scale them
+                            let e = { Name = name; Mods = perStack; Stacks = stacks; Expires = w.Time + seconds * float stacks }
                             updateActor actor.Name (fun st -> { st with Buffs = Map.add name e st.Buffs }) w
                             |> schedule e.Expires Expire
                             |> fun w -> { w with Counts = bump ("buff:" + name) w.Counts }
@@ -1495,7 +1496,7 @@ module Sim =
                                             let stacks = if rng.Chance doubleChance then 2 * c.Stacks else c.Stacks
                                             // a random part of the duration has already passed
                                             let left = seconds * float stacks * (0.5 + 0.5 * rng.Float())
-                                            Map.add name { Name = name; Mods = perStack |> List.map (Mod.scaled (float stacks)); Stacks = stacks; Expires = left } res
+                                            Map.add name { Name = name; Mods = perStack; Stacks = stacks; Expires = left } res
                                         | _ -> res
                                     | _ -> res)
                                 res
