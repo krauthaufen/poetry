@@ -128,6 +128,15 @@ let main argv =
         printfn "player: life %.0f, mana %.0f, ES %.0f, ward %.0f (+%.0f/s), block %.0f%%%s | armour %.0f, evasion %.0f, deflection %.0f | res %s | regen life %.0f/s, mana %.0f/s"
             vitals.Life vitals.Mana vitals.EnergyShield vitals.Ward vitals.WardRegen vitals.Block (if vitals.LuckyBlock then " lucky" else "") vitals.Armour vitals.Evasion vitals.Deflection
             (vitals.Resist |> Map.toList |> List.map (fun (t, r) -> sprintf "%s %.0f" (DamageType.name t) r) |> String.concat " / ") vitals.LifeRegen vitals.ManaRegen
+        // what one hit may deal before it kills from full pools, and how often monsters of the fight's level connect
+        printfn "max hit: %s"
+            (DamageType.all |> List.map (fun t ->
+                let m = Defence.maxHit vitals t
+                sprintf "%s %s" (DamageType.name t) (if System.Double.IsInfinity m then "immune" else sprintf "%.0f" m)) |> String.concat ", ")
+        (let level = int (get "level" 83.0)
+         let acc = Constants.monsterAccuracy level
+         printfn "avoidance vs level %d: hit %.0f%% of the time, %.0f%% of hits deflected (-%.0f%%), %.0f%% blocked; stun threshold %.0f, ailment threshold %.0f"
+             level (Vitals.monsterHitChance vitals.Evasion acc) (Vitals.deflectChance vitals.Deflection acc) vitals.DeflectEffect vitals.Block vitals.StunThreshold vitals.AilmentThreshold)
         printfn "character: %d modifiers; starts with %s" sheet.Mods.Length (resources |> List.map (fun (k, n) -> sprintf "%d %s" n k) |> String.concat ", ")
         match sheet.MainHand with
         | Some w -> printfn "main hand: %A, %.1f%% crit, %.2f APS" (w.Damage |> Map.toList |> List.map (fun (t, r) -> sprintf "%s %.0f-%.0f" (DamageType.name t) r.Min r.Max)) w.CritChance w.AttacksPerSecond

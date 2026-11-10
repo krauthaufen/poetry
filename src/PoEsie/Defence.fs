@@ -188,3 +188,35 @@ module Defence =
           DeflectEffect = min 100.0 (Vitals.deflectEffect + named "DeflectEffect") }
 
     let compute bases sheet = computeWith Map.empty bases sheet
+
+    /// Damage taken from one unblocked, unevaded, non-critical hit of `raw` damage of one type.
+    let taken (v: PlayerStats) (t: DamageType) (melee: bool) (raw: float) =
+        let d =
+            match t with
+            | Physical ->
+                let d = if melee then max 0.0 (raw - v.FlatPhysicalTaken) else raw
+                d * (1.0 - Vitals.armourReduction v.Armour d / 100.0)
+            | t ->
+                let d = raw * (1.0 - (Map.tryFind t v.Resist |> Option.defaultValue 0.0) / 100.0)
+                match Map.tryFind t v.ArmourAppliesTo with
+                | Some pct -> d * (1.0 - Vitals.armourReduction (v.Armour * pct / 100.0) d / 100.0)
+                | None -> d
+        d * (Map.tryFind t v.TakenMult |> Option.defaultValue 1.0)
+
+    /// Damage of one type the pools absorb from full: energy shield (half as much against
+    /// chaos, less what bypasses it), life with the mana share before it, Runic Ward.
+    let pool (v: PlayerStats) (t: DamageType) =
+        let es = (if t = Chaos then v.EnergyShield / 2.0 else v.EnergyShield)
+        let es = if v.BypassES >= 100.0 then 0.0 else es
+        let m = min 0.99 (v.ManaBeforeLife / 100.0)
+        let lifeAndMana = if m <= 0.0 then v.Life else (if v.Mana >= m * v.Life / (1.0 - m) then v.Life / (1.0 - m) else v.Life + v.Mana)
+        es + lifeAndMana + v.Ward
+
+    /// The largest single hit of this type survived from full pools (before the
+    /// character's mitigation), by bisection: damage taken grows with the hit.
+    let maxHit (v: PlayerStats) (t: DamageType) =
+        let p = pool v t
+        if taken v t false 1e9 < p then infinity
+        else
+            let rec go lo hi n = if n = 0 then lo else (let mid = (lo + hi) / 2.0 in if taken v t false mid < p then go mid hi (n - 1) else go lo mid (n - 1))
+            go 0.0 1e9 60
