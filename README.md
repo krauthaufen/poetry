@@ -21,7 +21,8 @@ Written in F#: functional, readable, and portable. It runs on .NET and is kept c
 ## Run
 
 ```bash
-dotnet run --project tests/PoEsie.Tests          # test suite
+dotnet run --project tests/PoEsie.Tests          # test suite (.NET)
+dotnet fable tests/PoEsie.Tests -o out/js && node out/js/Tests.js   # same suite in JS (add {"type":"module"} package.json in out/js)
 dotnet run -c Release --project examples/Demo    # illustrative build, 2000 fights
 python3 tools/gen_tables.py <PoB>/src/Data/Misc.lua > src/PoEsie/Tables.fs
 ```
