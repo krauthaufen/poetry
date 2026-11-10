@@ -12,6 +12,8 @@
 ///   --charges N      power charges at the start (default: your maximum)
 ///   --skip P         override the chance (%) to not remove charges when consuming
 ///   --bonded         apply "Bonded:" rune lines (normally Shaman only)
+///   --without NAMES  drop these support gems (comma separated) from the simulated group
+///   --spread DEG     override the projectile fan angle of the simulated skill
 ///   --shotgun        let several projectiles of one use hit the same enemy
 ///   --layouts F      random boss and pack layouts (sizes, distances, slam reach, arena walls);
 ///                    write an HTML page with best / median / worst pictures to file F
@@ -119,6 +121,8 @@ let main argv =
         match List.tryItem (groupIdx - 1) build.Groups with
         | None -> printfn "no socket group %d" groupIdx; 1
         | Some group ->
+            let dropped = (Map.tryFind "without" o |> Option.defaultValue "").Split(',') |> Array.map (fun x -> x.Trim()) |> Array.filter ((<>) "") |> Set.ofArray
+            let group = { group with Gems = group.Gems |> List.filter (fun g -> not (dropped.Contains g.Name)) }
             match Pob.groupSkill db sheet group |> List.tryHead with
             | None -> printfn "group %d has no active gem" groupIdx; 1
             | Some (Error e) -> printfn "group %d: %s" groupIdx e; 1
@@ -133,6 +137,11 @@ let main argv =
                         Delivery = (match s.Delivery with Projectiles p -> Projectiles { p with CanShotgun = true } | d -> d)
                         Parts = s.Parts |> List.map shotgun }
                 let skill = if Map.containsKey "shotgun" o then shotgun skill else skill
+                let rec withSpread deg (s: Skill) =
+                    { s with
+                        Delivery = (match s.Delivery with Projectiles p -> Projectiles { p with Spread = deg } | d -> d)
+                        Parts = s.Parts |> List.map (withSpread deg) }
+                let skill = match Map.tryFind "spread" o with Some d -> withSpread (float d) skill | None -> skill
                 let level = int (get "level" 83.0)
                 let profile r =
                     let p = Rarity.defaults r
