@@ -9,6 +9,7 @@
 ///   --life X         override life of every enemy (e.g. 1e12 to measure sustained DPS)
 ///   --res X          override elemental resistance of every enemy
 ///   --target T       nearest | strongest (default strongest)
+///   --suite          run the standard scenarios (pack, pack + 2 rares, surrounded, boss) and print a table
 ///   --data DIR       exported game data (default: data/game next to the repo)
 module PoEsie.Cli
 
@@ -27,6 +28,7 @@ let decodeBuildCode (code: string) =
 
 let rec private opts (args: string list) =
     match args with
+    | "--suite" :: rest -> Map.add "suite" "1" (opts rest)
     | k :: v :: rest when k.StartsWith "--" -> Map.add (k.Substring 2) v (opts rest)
     | _ :: rest -> opts rest
     | [] -> Map.empty
@@ -112,5 +114,13 @@ let main argv =
                       Targeting = (if Map.tryFind "target" o = Some "nearest" then Nearest else Strongest)
                       MaxTime = get "time" 60.0 }
                 printfn ""
-                fight |> Summary.simulate (int (get "runs" 500.0)) |> Summary.format |> printfn "%s"
+                if Map.containsKey "suite" o then
+                    Scenarios.standard level profile
+                    |> List.map (fun (n, es) ->
+                        n, (match Map.tryFind "life" o with Some l -> es |> List.map (fun e -> { e with Life = float l }) | None -> es))
+                    |> Scenarios.run (int (get "runs" 200.0)) (get "time" 120.0) fight.Player [] fight.Targeting
+                    |> Scenarios.format
+                    |> printfn "%s"
+                else
+                    fight |> Summary.simulate (int (get "runs" 500.0)) |> Summary.format |> printfn "%s"
                 0

@@ -84,3 +84,33 @@ module Summary =
             @ [ "per fight:" ]
             @ (s.Counts |> List.sortBy fst |> List.map (fun (k, v) -> sprintf "  %-28s %8.1f" k v))
         String.concat "\n" lines
+
+/// Standard fights to compare builds on.
+module Scenarios =
+    /// (name, enemies). Packs are placed with a fixed seed so every build faces the same layout.
+    let standard level (profile: Rarity -> RarityProfile) =
+        [ "pack in front", Encounter.pack level profile [ Normal, 8; Magic, 3 ] 35.0 25.0 false 1u
+          "pack in front + 2 rares", Encounter.pack level profile [ Normal, 8; Magic, 3; Rare, 2 ] 35.0 25.0 false 1u
+          "surrounded", Encounter.pack level profile [ Normal, 8; Magic, 3 ] 25.0 10.0 true 1u
+          "single boss", Encounter.boss level profile 30.0 ]
+
+    /// Run each scenario `runs` times with the given player / minions.
+    let run runs (maxTime: float) (player: Actor) (minions: Actor list) targeting scenarios =
+        scenarios
+        |> List.map (fun (name, enemies) ->
+            name,
+            Summary.simulate
+                runs
+                { Enemies = enemies
+                  Player = player
+                  Minions = minions
+                  Targeting = targeting
+                  MaxTime = maxTime })
+
+    let format (results: (string * Summary) list) =
+        let header = sprintf "%-26s %8s %9s %17s %10s" "scenario" "cleared" "clear p50" "clear p10-p90" "DPS"
+        let row (name, s: Summary) =
+            match s.Ttk with
+            | Some t -> sprintf "%-26s %7.0f%% %8.2fs %17s %10.0f" name (s.KillRate * 100.0) t.P50 (sprintf "%.1f-%.1fs" t.P10 t.P90) s.Dps.Mean
+            | None -> sprintf "%-26s %7.0f%% %9s %17s %10.0f" name (s.KillRate * 100.0) "-" "-" s.Dps.Mean
+        String.concat "\n" (header :: List.map row results)

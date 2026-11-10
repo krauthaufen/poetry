@@ -93,7 +93,10 @@ Confidence levels:
 | Mechanic | Rule | Source | Confidence |
 |---|---|---|---|
 | Positions | 2D, game units (10 = 1 m), player at origin, enemies static | modelling choice | — |
-| Rarity profiles | life ×1 / ×2 / ×5 / ×20, ele resist 0 / 0 / 20 / 30, thresholds and poise scaled | unique resist 30 / pinnacle 50 and boss mods (50% less curse/exposure effect, 500% more poise) from PoB's boss config; **all life multipliers and non-boss resists are guesses**; the real values are the game's rarity monster mods (`monster_life_+%_final_from_rarity`), not exported by PoB | guess |
+| Rarity profiles | life ×2.48 / ×8 / ×29 (magic / rare / unique), poise +26% / +125% / +500%, curse and exposure effect −15% / −30% / −50%, rares 10% larger | game Mods.dat `MonsterMagicN` / `MonsterRareN` / `MonsterUniqueN`, generated into RarityData.fs | data |
+| Monster resistances | rarity gives none; 0 for packs, 30 for a boss, 50 pinnacle, all overridable | boss values: PoB's boss config | pob |
+| Ailment threshold by rarity | unchanged by rarity | no rarity mod touches it | data (absence) |
+| Monster energy shield | ignored (rarity mods scale ES, but base monster ES is not modelled) | — | missing |
 | Area radius | floor(base × floor(100 × sqrt(area multiplier)) / 100); hits enemies whose body overlaps | PoB calcRadius | pob |
 | Projectiles | fanned evenly over the spread angle towards the aimed enemy; first enemy along the path is hit; pierce continues, chains jump to the nearest unhit enemy in chain range | — | guess (geometry), data (counts) |
 | Default spread | 30° unless the skill sets `total_projectile_spread_angle_override` | — | guess |

@@ -74,25 +74,32 @@ module Rarity =
         | Rare -> 2
         | Unique -> 3
 
-    /// Default profiles. Sources:
-    /// - unique: PoB's "standard boss" config (30% ele resist) and the boss monster mods
-    ///   it cites (MonsterUnique2: 500% more poise, 13/14: 50% less curse/exposure effect).
-    /// - life multipliers and normal/magic/rare resists: GUESSES. The game has them as
-    ///   rarity mods (monster_life_+%_final_from_rarity) that PoB doesn't export.
+    /// A stat of the rarity's monster mods (game data, RarityData.fs), 0 if absent.
+    let private stat (r: Rarity) id =
+        let key =
+            match r with
+            | Normal -> ""
+            | Magic -> "Magic"
+            | Rare -> "Rare"
+            | Unique -> "Unique"
+        RarityData.stats
+        |> List.tryPick (fun (rr, s, v) -> if rr = key && s = id then Some v else None)
+        |> Option.defaultValue 0.0
+
+    /// Default profiles, from the game's rarity monster mods: life, poise, curse and
+    /// exposure effect, size. Rarity carries no resistances; those come from the
+    /// monster and the area (scenario settings). Unique resists default to PoB's
+    /// boss config (30%; pinnacle 50%). Ailment threshold is not changed by rarity.
     let defaults r =
-        match r with
-        | Normal ->
-            { Life = 1.0; ElementalResist = 0.0; ChaosResist = 0.0; AilmentThreshold = 1.0; Poise = 1.0
-              CurseEffect = 0.0; ExposureEffect = 0.0; Size = 4.0 }
-        | Magic ->
-            { Life = 2.0; ElementalResist = 0.0; ChaosResist = 0.0; AilmentThreshold = 2.0; Poise = 1.5
-              CurseEffect = 0.0; ExposureEffect = 0.0; Size = 4.0 }
-        | Rare ->
-            { Life = 5.0; ElementalResist = 20.0; ChaosResist = 0.0; AilmentThreshold = 5.0; Poise = 3.0
-              CurseEffect = 0.0; ExposureEffect = 0.0; Size = 5.0 }
-        | Unique ->
-            { Life = 20.0; ElementalResist = 30.0; ChaosResist = 0.0; AilmentThreshold = 20.0; Poise = 6.0
-              CurseEffect = -50.0; ExposureEffect = -50.0; Size = 10.0 }
+        let pct id = 1.0 + stat r id / 100.0
+        { Life = pct "monster_life_+%_final_from_rarity"
+          ElementalResist = (if r = Unique then 30.0 else 0.0)
+          ChaosResist = 0.0
+          AilmentThreshold = 1.0
+          Poise = pct "poise_threshold_+%_final_from_rarity"
+          CurseEffect = stat r "curse_effect_on_self_+%_final_from_rarity"
+          ExposureEffect = stat r "exposure_effect_on_self_+%_final_from_rarity"
+          Size = (if r = Unique then 10.0 else 4.0) * pct "base_actor_scale_+%" }
 
 module EnemyDef =
     /// A monster of the given level and rarity at a position.
