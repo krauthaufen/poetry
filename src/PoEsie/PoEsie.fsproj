@@ -32,6 +32,7 @@
     <Compile Include="Api.fs" />
     <Compile Include="Behaviours.fs" />
     <Compile Include="Picture.fs" />
+    <Compile Include="Setup.fs" />
   </ItemGroup>
 
   <!-- Fable: ship sources in the package so it can be compiled to JS. -->
