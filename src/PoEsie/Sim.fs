@@ -62,6 +62,20 @@ type Step =
     { Use: string
       When: View -> bool }
 
+/// Something that happens on its own every few seconds.
+type PeriodicAction =
+    /// One stack of a random resource that isn't at its maximum (Thaumaturgical Dynamism,
+    /// Virtuous Barrier's motes).
+    | GainRandom of resources: string list
+    /// One stack of each resource that has any (Charge Regulation). Charge-removal
+    /// skip chances apply.
+    | ConsumeEach of resources: string list
+
+type Periodic =
+    { Name: string
+      Every: float
+      Action: PeriodicAction }
+
 /// A buff that switches between variants at random every period
 /// (Elemental Conflux: more damage of one random element).
 type Cycle =
@@ -87,7 +101,13 @@ type Actor =
       Cycles: Cycle list
       /// The player's pools and defences. None: the actor can't be hurt and pays no costs.
       Vitals: PlayerStats option
-      ManaFlask: ManaFlask option }
+      /// Mitigation from the current buffs and charges (evasion, armour, deflection, resists
+      /// can depend on them). None: use Vitals.
+      VitalsAt: (Map<string, int> -> PlayerStats) option
+      ManaFlask: ManaFlask option
+      Periodics: Periodic list
+      /// Maximum stacks per resource (charges, rage, motes).
+      MaxResources: Map<string, int> }
 
 module Actor =
     let make name mods skills =
@@ -101,7 +121,10 @@ module Actor =
           Resources = []
           Cycles = []
           Vitals = None
-          ManaFlask = None }
+          VitalsAt = None
+          ManaFlask = None
+          Periodics = []
+          MaxResources = Map.empty }
 
     let always skill = { Use = skill; When = fun _ -> true }
 
@@ -173,6 +196,7 @@ module Sim =
         | CycleTick of actor: string * cycle: string
         /// A monster hits at the player.
         | EnemyAttack of enemy: string
+        | PeriodicTick of actor: string * periodic: string
         | Expire
 
     type private ActorState =
@@ -279,6 +303,21 @@ module Sim =
         else env.Fight.Minions |> List.find (fun m -> m.Name = name)
 
     let private buffStacks (st: ActorState) = st.Buffs |> Map.map (fun _ e -> e.Stacks)
+
+    /// Buff stacks as a skill sees them: a skill that consumes charges counts as consuming
+    /// "N additional" ones too ("50% more damage per Power Charge Consumed").
+    let private skillStacks (actor: Actor) (skill: Skill) (st: ActorState) =
+        let stacks = buffStacks st
+        // parts (Falling Thunder's projectiles) count like the skill they belong to
+        let consumes =
+            skill.Consumes
+            |> Option.orElse (actor.Skills |> List.tryPick (fun s -> if s.Parts |> List.exists (fun p -> p.Name = skill.Name) then s.Consumes else None))
+        match consumes with
+        | Some charge when Map.tryFind charge stacks |> Option.exists (fun n -> n > 0) ->
+            let ctx = { Ctx.empty with SkillName = skill.Name; SkillTags = skill.Tags }
+            let extra = int (Mods.sumBase ctx [ Named("Extra" + charge + "sConsumed") ] (ModDb.ofList (actor.Mods @ skill.Mods)))
+            if extra > 0 then Map.add charge (stacks.[charge] + extra) stacks else stacks
+        | _ -> stacks
 
     /// The actor's mods while using a skill: sheet + skill mods + active buffs.
     let private skillDb env (actor: Actor) (skill: Skill) (st: ActorState) =
@@ -547,7 +586,7 @@ module Sim =
         | None -> w
         | Some target ->
             let st = Map.find actor.Name w.Actors
-            let ctx = Skill.ctx skill false (buffStacks st) (status target)
+            let ctx = Skill.ctx skill false (skillStacks actor skill st) (status target)
             let mods = skillDb env actor skill st
             let w =
                 match skill.Cooldown with
@@ -662,7 +701,7 @@ module Sim =
         else
             let st = Map.find actor.Name w.Actors
             let mods = skillDb env actor skill st
-            let ctx = Skill.ctx skill false (buffStacks st) (status e)
+            let ctx = Skill.ctx skill false (skillStacks actor skill st) (status e)
             let hitChance = Mods.override' ctx HitChance mods |> Option.defaultValue 100.0
             if not (rng.Chance hitChance) then
                 { w with Counts = bump ("miss:" + skill.Name) w.Counts }
@@ -728,7 +767,7 @@ module Sim =
         | None -> w
         | Some primary ->
             let st = Map.find name w.Actors
-            let ctx = Skill.ctx skill false (buffStacks st) Map.empty
+            let ctx = Skill.ctx skill false (skillStacks actor skill st) Map.empty
             let mods = skillDb env actor skill st
             let areaMult = Mods.mult ctx [ AreaOfEffect ] mods
             let delivery =
@@ -736,7 +775,7 @@ module Sim =
                 | Projectiles p ->
                     let fromCharges =
                         match p.PerCharge with
-                        | Some (charge, per) -> per * (Map.tryFind charge st.Buffs |> Option.map (fun e -> e.Stacks) |> Option.defaultValue 0)
+                        | Some (charge, per) -> per * (Map.tryFind charge (skillStacks actor skill st) |> Option.defaultValue 0)
                         | None -> 0
                     Projectiles
                         { p with
@@ -755,7 +794,12 @@ module Sim =
     let private enemyAttack env (rng: Rng) name (w: World) =
         let e = w.Enemies.[name]
         match e.Def.Attack, env.Fight.Player.Vitals, w.Player with
-        | Some atk, Some v, Some p when e.Life > 0.0 && p.Died.IsNone ->
+        | Some atk, Some pools, Some p when e.Life > 0.0 && p.Died.IsNone ->
+            // mitigation from the player's current buffs and charges
+            let v =
+                match env.Fight.Player.VitalsAt with
+                | Some at -> at (buffStacks (Map.find env.Fight.Player.Name w.Actors))
+                | None -> pools
             let st = status e
             let stopped = [ "Frozen"; "HeavilyStunned"; "Electrocuted" ] |> List.exists st.ContainsKey
             let chill = e.Debuffs |> Map.tryFind "Chilled" |> Option.map (fun x -> x.Mods |> List.sumBy (fun m -> m.Value)) |> Option.defaultValue 0.0
@@ -791,12 +835,58 @@ module Sim =
                             Life = life
                             LastHit = w.Time
                             Taken = p.Taken + dmg
-                            MinLife = min p.MinLife (life / v.Life)
+                            MinLife = min p.MinLife (life / pools.Life)
                             Died = if life <= 0.0 then Some w.Time else None }
                     { w with
                         Player = Some p
                         Counts = w.Counts |> bump "enemy:hit" |> (if deflected then bump "enemy:deflected" else id) }
         | _ -> w
+
+    /// Mark "<what>Recently" for 4 s (gained / consumed charges...).
+    let private markStatus actorName (name: string) (w: World) =
+        updateActor actorName (fun st -> { st with Buffs = Map.add name { Name = name; Mods = []; Stacks = 1; Expires = w.Time + 4.0 } st.Buffs }) w
+        |> schedule (w.Time + 4.0) Expire
+
+    let private stacksOf (st: ActorState) r = Map.tryFind r st.Buffs |> Option.map (fun e -> e.Stacks) |> Option.defaultValue 0
+
+    let private setStacks actorName r n (w: World) =
+        updateActor actorName (fun st ->
+            if n <= 0 then { st with Buffs = Map.remove r st.Buffs }
+            else { st with Buffs = Map.add r { Name = r; Mods = []; Stacks = n; Expires = infinity } st.Buffs }) w
+
+    let private onPeriodic env (rng: Rng) actorName periodicName (w: World) =
+        let actor = actorDef env actorName
+        match actor.Periodics |> List.tryFind (fun p -> p.Name = periodicName) with
+        | None -> w
+        | Some p ->
+            let w = schedule (w.Time + p.Every) (PeriodicTick(actorName, periodicName)) w
+            let st = Map.find actorName w.Actors
+            match p.Action with
+            | GainRandom resources ->
+                let open' = resources |> List.filter (fun r -> stacksOf st r < (Map.tryFind r actor.MaxResources |> Option.defaultValue 0))
+                if open'.IsEmpty then w
+                else
+                    let r = open'.[min (open'.Length - 1) (int (rng.Float() * float open'.Length))]
+                    setStacks actorName r (stacksOf st r + 1) w
+                    |> markStatus actorName ("Gained" + r + "Recently")
+                    |> fun w -> { w with Counts = bump ("gained:" + r) w.Counts }
+            | ConsumeEach resources ->
+                let skip = Mods.sumBase Ctx.empty [ Named "ChargeSkipConsume" ] (ModDb.ofList actor.Mods)
+                resources
+                |> List.fold
+                    (fun w r ->
+                        let st = Map.find actorName w.Actors
+                        if stacksOf st r = 0 then w
+                        else
+                            let w = markStatus actorName ("Consumed" + r + "Recently") w
+                            let w =
+                                match actor.Vitals with
+                                | Some v when r = "PowerCharge" ->
+                                    gainMana v "consume" (v.Mana * Mods.sumBase Ctx.empty [ Named "ManaPercentOnConsumePower" ] (ModDb.ofList actor.Mods) / 100.0) w
+                                | _ -> w
+                            if rng.Chance skip then { w with Counts = bump ("kept:" + r) w.Counts }
+                            else setStacks actorName r (stacksOf st r - 1) w |> fun w -> { w with Counts = bump ("lost:" + r) w.Counts })
+                    w
 
     let private step env rng (w: World) =
         let (KeyValue ((t, sq), ev)) = Seq.head w.Queue
@@ -810,6 +900,7 @@ module Sim =
             | Ready name -> onReady env rng name w
             | Strike (name, skill, mult, aimedAt) -> onStrike env rng name skill mult aimedAt w
             | EnemyAttack name -> enemyAttack env rng name w
+            | PeriodicTick (name, periodic) -> onPeriodic env rng name periodic w
             | CycleTick (name, cycleName) ->
                 let actor = actorDef env name
                 match actor.Cycles |> List.tryFind (fun c -> c.Name = cycleName) with
@@ -902,6 +993,9 @@ module Sim =
               Kills = [] }
             |> fun w -> actors |> List.fold (fun w a -> schedule 0.0 (Ready a.Name) w) w
             |> fun w -> actors |> List.fold (fun w a -> a.Cycles |> List.fold (fun w c -> schedule 0.0 (CycleTick(a.Name, c.Name)) w) w) w
+            |> fun w ->
+                // periodic actions start at a random point of their first period
+                actors |> List.fold (fun w a -> a.Periodics |> List.fold (fun w p -> schedule (rng.Float() * p.Every) (PeriodicTick(a.Name, p.Name)) w) w) w
             |> fun w ->
                 if fight.Player.Vitals.IsNone then w
                 else

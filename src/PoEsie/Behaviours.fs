@@ -29,3 +29,41 @@ module Behaviours =
     /// All cycles granted by the build's persistent buffs.
     let cycles (db: GameDb) (characterMods: ModDb) (setups: GemSetup list) =
         setups |> List.choose (fun s -> elementalConflux (Gems.rawStats db characterMods s))
+
+    /// Timed resource effects from the character's stats, and resource maxima.
+    /// - `consume_frenzy_power_and_endurance_charge_every_x_ms` (Charge Regulation): one of each charge.
+    /// - Thaumaturgical Dynamism: a random charge every `chargeGenSeconds` (the game derives the
+    ///   interval from socketed gem attribute requirements; that formula isn't in the data).
+    /// - `base_active_skill_buff_stack_gain_frequency_ms` (Virtuous Barrier): a random mote. Maximum
+    ///   motes per attribute = the description's base (`skill_specific_stat_description_mode`) +
+    ///   active skills requiring that attribute, single-attribute skills counting twice.
+    let charges = [ "PowerCharge"; "FrenzyCharge"; "EnduranceCharge" ]
+
+    let periodics (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) (chargeGenSeconds: float) =
+        let mods = ModDb.ofList sheet.Mods
+        let sum stat = Mods.sumBase Ctx.empty [ Named stat ] mods
+        [ let consume = sum "ConsumeEachChargeEveryMs"
+          if consume > 0.0 then
+              yield { Name = "consume charges"; Every = consume / 1000.0; Action = ConsumeEach charges }
+          if Mods.flag Ctx.empty (Named "GeneratesRandomCharges") mods then
+              yield { Name = "generate charges"; Every = chargeGenSeconds; Action = GainRandom charges }
+          let motes = sum "MoteGainEveryMs"
+          if motes > 0.0 then
+              yield { Name = "motes"; Every = motes / 1000.0; Action = GainRandom [ "Mote:red"; "Mote:green"; "Mote:blue" ] } ]
+
+    /// Maximum motes per colour from the active skill gems' attribute requirements.
+    let moteMaxima (db: GameDb) (build: PobBuild) (baseMax: int) =
+        let actives =
+            build.Groups
+            |> List.filter (fun g -> g.Enabled)
+            |> List.collect (fun g -> g.Gems |> List.filter (fun gem -> gem.Enabled && not gem.IsSupport))
+            |> List.choose (fun gem -> Map.tryFind gem.Name db.Gems)
+        let count pick =
+            actives
+            |> List.sumBy (fun g ->
+                let s, d, i = g.Requirements
+                let n = [ s; d; i ] |> List.filter (fun x -> x > 0.0) |> List.length
+                if pick (s, d, i) > 0.0 then (if n = 1 then 2 else 1) else 0)
+        [ "Mote:red", baseMax + count (fun (s, _, _) -> s)
+          "Mote:green", baseMax + count (fun (_, d, _) -> d)
+          "Mote:blue", baseMax + count (fun (_, _, i) -> i) ]

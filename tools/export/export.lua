@@ -127,7 +127,7 @@ end
 write("bases.json", bases)
 
 -- ---- stat descriptions (text <-> stat id) ----
-for _, f in ipairs({ "stat_descriptions", "passive_skill_stat_descriptions" }) do
+for _, f in ipairs({ "stat_descriptions", "passive_skill_stat_descriptions", "gem_stat_descriptions", "skill_stat_descriptions", "active_skill_gem_stat_descriptions", "meta_gem_stat_descriptions" }) do
   write("statdesc_" .. f .. ".json", load("Data/StatDescriptions/" .. f .. ".lua"))
 end
 
@@ -160,3 +160,16 @@ for id, n in pairs(tree.nodes or {}) do
   }
 end
 write("tree.json", { version = treeVersion, nodes = nodes, classes = tree.classes })
+
+-- ---- per-skill stat descriptions (Specific_Skill_Stat_Descriptions/*.lua), keyed by file name ----
+local specific = {}
+local p = io.popen('ls "' .. src .. '/Data/StatDescriptions/Specific_Skill_Stat_Descriptions"')
+for f in p:lines() do
+  local name = f:match("^(.*)%.lua$")
+  if name then
+    local ok, t = pcall(load, "Data/StatDescriptions/Specific_Skill_Stat_Descriptions/" .. f)
+    if ok then specific[name] = t end
+  end
+end
+p:close()
+write("statdesc_specific.json", specific)

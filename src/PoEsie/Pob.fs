@@ -239,10 +239,13 @@ module Pob =
             (fun (sheet: CharacterSheet) r ->
                 match r with
                 | Ok (skill, cov) ->
-                    // Only the buff's character-wide effects: stats named after the skill itself
-                    // ("herald_of_ash_fire_damage_+%") describe that skill, not the character.
+                    // Skill-named stats apply to the character only if the game describes them as
+                    // granted ("Buff grants 46% increased Fire damage"); otherwise they belong to
+                    // the skill itself (a herald's explosion, ...).
+                    let characterWide (m: Mod) =
+                        not (m.Source.StartsWith "skill-specific:") || Gems.grantsToCharacter db (m.Source.Substring 15)
                     { sheet with
-                        Mods = sheet.Mods @ (skill.Mods |> List.filter (fun m -> m.Source <> "skill-specific") |> List.map (Mod.from ("buff:" + skill.Name)))
+                        Mods = sheet.Mods @ (skill.Mods |> List.filter characterWide |> List.map (Mod.from ("buff:" + skill.Name)))
                         Coverage = Coverage.merge sheet.Coverage { cov with Unmapped = cov.Unmapped |> List.map (fun (s, v) -> skill.Name + ": " + s, v) } }
                 | Error _ -> sheet)
             sheet

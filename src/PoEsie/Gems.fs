@@ -7,7 +7,9 @@ type GameDb =
       Weapons: Map<string, WeaponBase>
       /// Every item base name (weapons, armour, jewellery...).
       BaseNames: Set<string>
-      Text: StatText.Index }
+      Text: StatText.Index
+      /// Stat id -> how the game describes it (first variant), for classifying gem stats.
+      Descriptions: Map<string, string> }
 
 /// A weapon as equipped: base plus its local modifiers.
 type Weapon =
@@ -54,7 +56,25 @@ module GameDb =
             match Json.parse (read "bases.json") with
             | JObj m -> m |> Map.toList |> List.map fst |> Set.ofList
             | _ -> Set.empty
-          Text = StatText.build [ read "statdesc_stat_descriptions.json"; read "statdesc_passive_skill_stat_descriptions.json" ] }
+          Text = StatText.build [ read "statdesc_stat_descriptions.json"; read "statdesc_passive_skill_stat_descriptions.json" ]
+          Descriptions =
+            let rec walk (acc: Map<string, string>) (j: Json) =
+                match j with
+                | JObj m ->
+                    let acc =
+                        match Map.tryFind "stats" m, Map.tryFind "1" m with
+                        | Some stats, Some variants ->
+                            let text = Json.list (Some variants) |> List.tryHead |> Option.bind (Json.strField "text")
+                            match text with
+                            | Some t -> Json.list (Some stats) |> List.choose Json.str |> List.fold (fun a st -> if Map.containsKey st a then a else Map.add st t a) acc
+                            | None -> acc
+                        | _ -> acc
+                    m |> Map.fold (fun a k v -> if k = "stats" then a else walk a v) acc
+                | JArr xs -> xs |> List.fold walk acc
+                | _ -> acc
+            [ "statdesc_skill_stat_descriptions.json"; "statdesc_specific.json"; "statdesc_gem_stat_descriptions.json"
+              "statdesc_active_skill_gem_stat_descriptions.json"; "statdesc_stat_descriptions.json" ]
+            |> List.fold (fun acc f -> walk acc (Json.parse (read f))) Map.empty }
 
 module Gems =
     /// Gem stats at a level, as the game computes them. Interpolation 1 = value as
@@ -138,7 +158,7 @@ module Gems =
                 if words.Length > k + 2 then
                     match StatMap.meaning (String.concat "_" (Array.skip k words)) v with
                     // marked: it came from a skill-specific stat, so it describes that skill only
-                    | Mods ms -> Some(Mods(ms |> List.map (Mod.from "skill-specific")))
+                    | Mods ms -> Some(Mods(ms |> List.map (Mod.from ("skill-specific:" + id))))
                     | _ -> None
                 else None)
             |> Option.defaultValue original
@@ -168,6 +188,15 @@ module Gems =
         | None -> Map.tryFind name db.Skills
 
     /// Persistent buffs (Berserk, Eternal Rage, heralds...): always on while reserved.
+    /// Does a buff gem's stat affect the character (true) or only the skill itself?
+    /// The game's own description says so: "Buff grants ...", "Grants ...", "... you ...".
+    let grantsToCharacter (db: GameDb) (statId: string) =
+        match Map.tryFind statId db.Descriptions with
+        | Some t ->
+            let t = t.ToLowerInvariant()
+            t.StartsWith "buff grants" || t.StartsWith "grants" || t.Contains " you " || t.Contains "your " || t.StartsWith "you "
+        | None -> false
+
     let isPersistentBuff (db: GameDb) name =
         skillOfGem db name |> Option.exists (fun d -> d.Types.Contains "Persistent" && d.Types.Contains "Buff")
 
@@ -265,9 +294,18 @@ module Gems =
             match List.tryItem (setup.StatSet - 1) data.StatSets with
             | None -> Error(sprintf "%s has no stat set %d" setup.Gem setup.StatSet)
             | Some set ->
+                let requirementTags =
+                    match Map.tryFind setup.Gem db.Gems with
+                    | Some g ->
+                        let s, d, i = g.Requirements
+                        [ if s > 0.0 then Tag "StrRequirement"
+                          if d > 0.0 then Tag "DexRequirement"
+                          if i > 0.0 then Tag "IntRequirement" ]
+                    | None -> []
                 let tags =
                     (data.Types |> Set.toList |> List.choose tagOfType)
                     @ (if data.Types.Contains "Attack" then weapon |> Option.map (fun w -> w.Tags) |> Option.defaultValue [] else [])
+                    @ requirementTags
                     |> Set.ofList
                 let ctx = { Ctx.empty with SkillName = data.Name; SkillTags = tags }
                 let level = setup.Level + int (Mods.sumBase ctx [ Named "GemLevel" ] characterMods)

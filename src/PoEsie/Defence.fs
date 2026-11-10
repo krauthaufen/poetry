@@ -26,14 +26,15 @@ module Defence =
     let playerMaxResist = 75.0
     let playerResistCap = 90.0
 
-    let compute (bases: Map<string, float * float * float>) (sheet: CharacterSheet) : PlayerStats =
+    /// `resources`: current charges, motes, rage... (conditional defences read them).
+    let computeWith (resources: Map<string, int>) (bases: Map<string, float * float * float>) (sheet: CharacterSheet) : PlayerStats =
         let db = ModDb.ofList sheet.Mods
         // "while wielding a Quarterstaff" and similar read the main hand
         let wielding =
             sheet.MainHand |> Option.map (fun w -> w.Tags |> List.choose (function Tag _ -> None | t -> Some(sprintf "Wielding%A" t))) |> Option.defaultValue []
-        let c = { Ctx.empty with Buffs = wielding |> List.map (fun b -> b, 1) |> Map.ofList }
+        let c = { Ctx.empty with Buffs = wielding |> List.fold (fun m b -> Map.add b 1 m) resources }
         let bStr, bDex, bInt = Map.tryFind (baseClass sheet.ClassName) bases |> Option.defaultValue (0.0, 0.0, 0.0)
-        let attr k b = b + Mods.sumBase c [ Attribute k ] db
+        let attr k b = (b + Mods.sumBase c [ Attribute k ] db) * Mods.mult c [ Attribute k ] db |> floor
         let str, dex, int' = attr "Str" bStr, attr "Dex" bDex, attr "Int" bInt
         let level = float sheet.Level
         // item values; the body armour's own values can have their own increases
@@ -79,3 +80,5 @@ module Defence =
           LifeRegen = if ci then 0.0 else (Mods.sumBase c [ LifeRegen ] db + life * Mods.sumBase c [ LifeRegenPercent ] db / 100.0) * Mods.mult c [ LifeRegen ] db
           ManaRegen = mana * manaRegenPercent / 100.0 * Mods.mult c [ ManaRegen ] db
           EnergyShieldRecharge = es * esRechargePercent / 100.0 }
+
+    let compute bases sheet = computeWith Map.empty bases sheet

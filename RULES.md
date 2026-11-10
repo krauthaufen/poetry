@@ -112,7 +112,7 @@ Confidence levels:
 | Projectiles of `ProjectilesNotFromUser` skills (Falling Thunder) | start at the impact point on the aimed enemy; a projectile starting inside an enemy hits it at once; "forwards" = away from the player; Nova = full circle | skill text, skill type | guess (geometry) |
 | Increased area of effect | `<scope> area of effect +% [final]` scales radii by the square root, PoB's calcRadius | — | pob |
 | Default gem quality | 20% unless the import states one; supports have none | user convention | — |
-| Persistent buffs | their gem stats apply to the character, except skill-specific ones (ids named after the skill, e.g. `herald_of_ash_fire_damage_+%`), which describe the skill itself; explicitly known character-wide ones (Berserk's `berserk_maximum_rage_granted_+` → max rage) do apply | — | guess per stat |
+| Persistent buffs | their gem stats apply to the character. Stats named after the skill apply only if the game's description presents them as granted ("Buff grants 46% increased Fire damage", "Grants ...", "... you ...", from the stat description files); otherwise they belong to the skill itself | stat descriptions | data |
 | Slam impact point | `Reach` units in front of the player towards the aimed enemy, at most its centre | setting (default 15) | guess |
 | Walls and terrain chain | projectiles stop at walls; with "chance to chain 1 extra time from terrain" (Ricochet) they chain once from the wall: towards the nearest enemy within chain range that this projectile hasn't hit, with the remaining range. No target in range: mirror bounce | game text ("chain" = targeted) | guess (no-target fallback, chain range 3 m) |
 | Arenas | open field, round room or corridor; random layouts in `--layouts` always enclose player and monsters | modelling choice | — |
@@ -145,3 +145,17 @@ Confidence levels:
 | Body armour scoped | "increased Evasion / Energy Shield from Equipped Body Armour" scale that item's values; "+1 ES per X Item Evasion on Equipped Body Armour" reads the scaled body evasion | game text | guess (order) |
 | Keystones | handled by name: Chaos Inoculation = maximum life 1, chaos immunity, no life regeneration | game text | data |
 | Not modelled | life flasks and charms, life leech, block, evade-based crit, monster skills and phases, ranged monsters, other keystones | — | missing |
+
+## Resources over time
+
+| Mechanic | Rule | Source | Confidence |
+|---|---|---|---|
+| Charges, rage, motes | stacks on the player with a maximum each (charges: 3 + max charge stats; rage 30 + max rage; motes below); they don't expire | data | guess (no charge duration) |
+| Start of a fight | everything at its maximum (steady state mid-map); `--start empty` starts frenzy / endurance / motes at 0 | modelling choice | — |
+| "Consumes one of each Charge every X s" | `consume_frenzy_power_and_endurance_charge_every_x_ms` (with quality): removes one of each charge the player has; each removal rolls the character's "chance to not remove charges" and counts as consuming either way | skill text | data + guess (skip chance applies) |
+| Thaumaturgical Dynamism | a random charge that isn't at maximum, every 5 s | node text; the game derives the interval from socketed gem attribute requirements (formula unknown), 5 s from the user | user |
+| "Gained / Consumed a <charge> Recently" | 4 s after each gain or consume | PoE convention | pob |
+| Count as consuming N additional | a skill that consumes charges sees N extra stacks for "per charge consumed" effects (damage, projectile count) | game text | data |
+| Charge-conditional defences | "more Armour, Evasion and Energy Shield while you have an Endurance Charge" etc. are evaluated from the current charges at every monster hit (pools: at the start) | game text | data |
+| Virtuous Barrier motes | a random colour not at maximum every `base_active_skill_buff_stack_gain_frequency_ms`; maximum per colour = the description's base (`skill_specific_stat_description_mode`, 3) + active skills requiring that attribute, single-attribute skills counting twice; `gem_barrier_<colour>_grants_<stat>` is per mote | skill text and data; supports not counted as skills | data + guess |
+| Gem levels by attribute | `<attribute>_skill_gem_level_+` applies to gems with that attribute requirement | gem data | data |

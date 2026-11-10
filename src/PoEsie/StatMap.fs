@@ -76,6 +76,9 @@ module StatMap =
         | "one" -> Some(Cond(SkillIs(Tag "OneHanded")))
         | "handed" | "weapon" | "weapons" -> Some Filler
         | "herald" -> Some(Cond(SkillIs Herald))
+        | "strength" -> Some(Cond(SkillIs(Tag "StrRequirement")))
+        | "dexterity" -> Some(Cond(SkillIs(Tag "DexRequirement")))
+        | "intelligence" -> Some(Cond(SkillIs(Tag "IntRequirement")))
         | "channelled" | "channelling" -> Some(Cond(SkillIs Channelling))
         | "triggered" -> Some(Cond(SkillIs Triggered))
         | "grenade" -> Some(Cond(SkillIs(Tag "Grenade")))
@@ -293,6 +296,22 @@ module StatMap =
             Some(Mods [ for into in DamageType.elemental do for from in DamageType.all do if from <> into then yield Mod.base' (GainAs(from, into)) v ])
         | "attack_additional_critical_strike_chance_permyriad" -> one (Mod.base' CritChance (v / 100.0) |> Mod.whenever (SkillIs Attack))
         | "additional_critical_strike_chance_permyriad" -> one (Mod.base' CritChance (v / 100.0))
+        | "all_attributes_+%" -> Some(Mods([ "Str"; "Dex"; "Int" ] |> List.map (fun a -> Mod.inc (Attribute a) v)))
+        | "strength_+%" -> one (Mod.inc (Attribute "Str") v)
+        | "dexterity_+%" -> one (Mod.inc (Attribute "Dex") v)
+        | "intelligence_+%" -> one (Mod.inc (Attribute "Int") v)
+        // "Buff grants X% increased damage per Charge": every charge of every kind counts
+        | "charge_regulation_damage_per_charge_granted_+%" ->
+            Some(Mods([ "PowerCharge"; "FrenzyCharge"; "EnduranceCharge" ] |> List.map (fun c -> Mod.inc (Damage AllDamage) v |> Mod.whenever (PerStack(c, 1.0)))))
+        | "quarterstaff_skills_that_consume_power_charges_count_as_consuming_x_additional_power_charges" ->
+            one (Mod.base' (Named "ExtraPowerChargesConsumed") v |> Mod.whenever (SkillIs Quarterstaff))
+        | "skills_that_consume_power_charges_count_as_consuming_x_additional_power_charges" ->
+            one (Mod.base' (Named "ExtraPowerChargesConsumed") v)
+        | "consume_frenzy_power_and_endurance_charge_every_x_ms" -> one (Mod.base' (Named "ConsumeEachChargeEveryMs") v)
+        | "ascendancy_gemling_charge_generator_buff_display" | "gain_random_charge_every_X_ms_from_total_socketed_gem_attribute_requirements" ->
+            one (Mod.flag (Named "GeneratesRandomCharges"))
+        | "base_active_skill_buff_stack_gain_frequency_ms" -> one (Mod.base' (Named "MoteGainEveryMs") v)
+        | "skill_specific_stat_description_mode" -> Some Structural
         | "max_power_charges" -> one (Mod.base' (Named "MaxPowerCharge") v)
         | "max_frenzy_charges" -> one (Mod.base' (Named "MaxFrenzyCharge") v)
         | "max_endurance_charges" -> one (Mod.base' (Named "MaxEnduranceCharge") v)
@@ -478,7 +497,43 @@ module StatMap =
             |> Option.map (fun sc -> [ apply sc (Mod.make (if isFinal then More else Inc) AreaOfEffect v) ])
         | _ -> None
 
-    let private rules = [ areaOfEffect; buildup; scaledDamage; addedDamage; penetration; gainAs; convert; ailmentStat; crit; speed; gemLevel ]
+    /// "<defences> +% [final] [conditions]": armour / evasion / energy shield combinations.
+    let private defenceScaled rev v =
+        let words = List.rev rev
+        match List.tryFindIndex ((=) "+%") words with
+        | Some i when i > 0 ->
+            let isFinal, tail =
+                match List.skip (i + 1) words with
+                | "final" :: t -> true, t
+                | t -> false, t
+            let head = List.take i words |> List.filter (fun w -> w <> "and" && w <> "global" && w <> "base" && w <> "rating")
+            let stats =
+                head |> List.fold (fun acc w ->
+                    match acc, w with
+                    | Some xs, "armour" -> Some(Armour :: xs)
+                    | Some xs, "evasion" -> Some(Evasion :: xs)
+                    | Some xs, ("energy" | "shield") -> Some(if List.contains MaxEnergyShield xs then xs else MaxEnergyShield :: xs)
+                    | _ -> None) (Some [])
+            match stats, scopes tail with
+            | Some (_ :: _ as sts), Some sc -> Some(sts |> List.rev |> List.map (fun st -> apply sc (Mod.make (if isFinal then More else Inc) st v)))
+            | _ -> None
+        | _ -> None
+
+    /// "gem barrier <colour> grants <stat>": the stat per mote of that colour (Virtuous Barrier).
+    let rec private perMote rev v =
+        match List.rev rev with
+        | "gem" :: "barrier" :: colour :: "grants" :: rest when not rest.IsEmpty ->
+            let inner = List.rev rest
+            let direct =
+                match defensive (String.concat "_" rest) v with
+                | Some (Mods ms) -> Some ms
+                | _ -> None
+            direct
+            |> Option.orElse ([ defenceScaled; scaledDamage ] |> List.tryPick (fun r -> r inner v))
+            |> Option.map (List.map (Mod.whenever (PerStack("Mote:" + colour, 1.0))))
+        | _ -> None
+
+    let private rules = [ perMote; defenceScaled; areaOfEffect; buildup; scaledDamage; addedDamage; penetration; gainAs; convert; ailmentStat; crit; speed; gemLevel ]
 
     let private pattern (id: string) (v: float) : Meaning option =
         let rev = List.rev (split id)
@@ -573,10 +628,11 @@ module StatMap =
     let meaning (id: string) (value: float) : Meaning =
         match local id value with
         | Some m -> m
-        | None when structural id -> Structural
         | None ->
+            // explicit and pattern meanings first; the structural heuristic only filters the rest
             match direct id value with
             | Some m -> m
+            | None when structural id -> Structural
             | None ->
                 match withoutPrefix id value with
                 | Some m -> m

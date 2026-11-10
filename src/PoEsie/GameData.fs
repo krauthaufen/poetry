@@ -51,7 +51,9 @@ type GemData =
       GrantedEffectId: string
       AdditionalStatSets: string list
       Support: bool
-      Tags: Set<string> }
+      Tags: Set<string>
+      /// Attribute requirement shares (percent of the gem's requirement): Str, Dex, Int.
+      Requirements: float * float * float }
 
 type WeaponBase =
     { Name: string
@@ -130,7 +132,11 @@ module GameData =
                   AdditionalStatSets =
                     [ 1..4 ] |> List.choose (fun k -> Json.strField (sprintf "additionalStatSet%d" k) j)
                   Support = Json.strField "gemType" j = Some "Support"
-                  Tags = Json.keys (Json.field "tags" j) |> Set.ofList })
+                  Tags = Json.keys (Json.field "tags" j) |> Set.ofList
+                  Requirements =
+                    (Json.numField "reqStr" j |> Option.defaultValue 0.0),
+                    (Json.numField "reqDex" j |> Option.defaultValue 0.0),
+                    (Json.numField "reqInt" j |> Option.defaultValue 0.0) })
             |> Map.ofList
         | _ -> Map.empty
 

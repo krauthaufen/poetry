@@ -19,6 +19,8 @@
 ///                    write an HTML page with best / median / worst pictures to file F
 ///   --count N        number of layouts per scenario (default 40)
 ///   --immortal       ignore incoming damage and mana costs
+///   --start S        full (default: charges, rage, motes at maximum) | empty (only power charges and rage)
+///   --chargegen S    seconds between Thaumaturgical Dynamism charges (default 5)
 ///   --noflask        don't use the mana flask
 ///   --suite          run the standard scenarios (pack, pack + 2 rares, surrounded, boss) and print a table
 ///   --data DIR       exported game data (default: data/game next to the repo)
@@ -73,7 +75,32 @@ let main argv =
             else Pob.read (decodeBuildCode text), []
         let build = if Map.containsKey "bonded" o then { build with Config = Map.add "bonded" "1" build.Config } else build
         let sheet = Pob.character db tree build |> fun s -> Pob.withPersistentBuffs db s build
-        let vitals = Defence.compute (Defence.classBases (File.ReadAllText(Path.Combine(dataDir, "tree.json")))) sheet
+        let bases = Defence.classBases (File.ReadAllText(Path.Combine(dataDir, "tree.json")))
+        // motes: base maximum from the mote-granting gem's description stat
+        let moteBase =
+            build.Groups
+            |> List.tryPick (fun g ->
+                g.Gems
+                |> List.tryPick (fun gem ->
+                    if gem.IsSupport then None
+                    else
+                        let raw = Gems.rawStats db (ModDb.ofList sheet.Mods) { Gem = gem.Name; Level = gem.Level; Quality = gem.Quality; StatSet = 1; Supports = [] }
+                        if raw |> List.exists (fun (k, _) -> k = "base_active_skill_buff_stack_gain_frequency_ms") then
+                            raw |> List.tryPick (fun (k, v) -> if k = "skill_specific_stat_description_mode" then Some(int v) else None)
+                        else None))
+        let moteMax = match moteBase with Some b -> Behaviours.moteMaxima db build b | None -> []
+        let maxResources = (Pob.maxResources sheet @ moteMax) |> Map.ofList
+        let startResources =
+            maxResources
+            |> Map.map (fun k n ->
+                match k, Map.tryFind "charges" o, Map.tryFind "start" o with
+                | "PowerCharge", Some c, _ -> int c
+                | _, _, Some "empty" when k <> "PowerCharge" && k <> "Rage" -> 0
+                | _ -> n)
+        let vitals = Defence.computeWith startResources bases sheet
+        let periodics = Behaviours.periodics db sheet build (Map.tryFind "chargegen" o |> Option.map float |> Option.defaultValue 5.0)
+        for p in periodics do printfn "periodic: %s every %.1fs" p.Name p.Every
+        if not moteMax.IsEmpty then printfn "motes: %s" (moteMax |> List.map (fun (k, n) -> sprintf "%s max %d" k n) |> String.concat ", ")
         let sheet =
             match Map.tryFind "skip" o with
             | Some p ->
@@ -92,12 +119,7 @@ let main argv =
                 | None -> None)
             |> Behaviours.cycles db (ModDb.ofList sheet.Mods)
         for c in cycles do printfn "cycle: %s, %.1fs per element, %A" c.Name c.Period (c.Variants |> List.map (fun v -> v.Head.Stat, v.Head.Value))
-        let resources =
-            Pob.maxResources sheet
-            |> List.map (fun (k, n) ->
-                match k, Map.tryFind "charges" o with
-                | "PowerCharge", Some c -> k, int c
-                | _ -> k, n)
+        let resources = startResources |> Map.toList
 
         printfn "== %s %s, level %d: %d items, %d passives, %d socket groups" build.ClassName build.Ascendancy build.Level build.Items.Length build.TreeNodes.Length build.Groups.Length
         printfn "player: life %.0f, mana %.0f, ES %.0f | armour %.0f, evasion %.0f, deflection %.0f | res %s | regen life %.0f/s, mana %.0f/s"
@@ -181,6 +203,9 @@ let main argv =
                             Resources = resources
                             Cycles = cycles
                             Vitals = (if Map.containsKey "immortal" o then None else Some vitals)
+                            VitalsAt = Some(fun current -> Defence.computeWith current bases sheet)
+                            Periodics = periodics
+                            MaxResources = maxResources
                             ManaFlask =
                                 if Map.containsKey "immortal" o || Map.containsKey "noflask" o then None
                                 else
