@@ -139,6 +139,9 @@ module StatMap =
             | "for" :: "4" :: "seconds" :: "on" :: "crit" :: tail -> go (WhileBuff "CritRecently" :: acc) tail
             | ("while" | "if") :: "surrounded" :: tail -> go (WhileBuff "Surrounded" :: acc) tail
             | "per" :: "enemy" :: "elemental" :: "ailment" :: tail -> go (PerEnemyStack("ElementalAilments", 1.0) :: acc) tail
+            // "... if 10 red supports socketed", "... if majority blue supports socketed"
+            | "if" :: "10" :: colour :: "supports" :: "socketed" :: tail -> go (WhileBuff("Supports10:" + colour) :: acc) tail
+            | "if" :: "majority" :: colour :: "supports" :: "socketed" :: tail -> go (WhileBuff("SupportsMajority:" + colour) :: acc) tail
             | "if" :: "have" :: "consumed" :: "infusion" :: "recently" :: tail -> go (WhileBuff "ConsumedInfusionRecently" :: acc) tail
             | ("vs" | "against") :: "enemies" :: "on" :: "low" :: "life" :: tail -> go (EnemyHas "LowLife" :: acc) tail
             | ("vs" | "against") :: "enemies" :: "on" :: "full" :: "life" :: tail -> go (EnemyHas "FullLife" :: acc) tail
@@ -297,9 +300,7 @@ module StatMap =
         | "base_damage_removed_from_mana_before_life_%" -> one (Mod.base' (Named "DamageRemovedFromManaFirst") v)
         // ---- resistances ----
         | "additional_maximum_all_resistances_%" -> each (DamageType.all |> List.filter ((<>) Physical) |> List.map MaxResist)
-        | "fire_and_cold_damage_resistance_%" -> each [ Resist Fire; Resist Cold ]
-        | "fire_and_lightning_damage_resistance_%" -> each [ Resist Fire; Resist Lightning ]
-        | "cold_and_lightning_damage_resistance_%" -> each [ Resist Cold; Resist Lightning ]
+
         // ---- energy shield ----
         | "energy_shield_delay_-%" -> one (Mod.inc (Named "ESRechargeFaster") v)
         | "energy_shield_recharge_rate_+%" -> one (Mod.inc (Named "ESRechargeRate") v)
@@ -395,6 +396,9 @@ module StatMap =
             | [ from; "damage"; "taken"; "%"; "as"; into ] | [ "base"; from; "hit"; "damage"; "taken"; "%"; "as"; into ] when (typeWord from).IsSome && (typeWord into).IsSome ->
                 one (Mod.base' (Named(sprintf "TakenAs:%s:%s" (DamageType.name (typeWord from).Value) (DamageType.name (typeWord into).Value))) v)
             | [ t; "damage"; "taken"; "+%" ] when (typeWord t).IsSome -> one (Mod.inc (Named("Taken:" + DamageType.name (typeWord t).Value)) v)
+            // "fire_and_cold_damage_resistance_%", "lightning_and_chaos_damage_resistance_%"
+            | [ a; "and"; b; "damage"; "resistance"; "%" ] when (typeWord a).IsSome && (typeWord b).IsSome ->
+                each [ Resist (typeWord a).Value; Resist (typeWord b).Value ]
             | [ "base"; "armour"; "%"; "applies"; "to"; t; "damage" ] when (typeWord t).IsSome -> one (Mod.base' (Named("ArmourAppliesTo:" + DamageType.name (typeWord t).Value)) v)
             | [ "base"; "maximum"; t; "damage"; "resistance"; "%" ] when (typeWord t).IsSome -> one (Mod.base' (MaxResist (typeWord t).Value) v)
             | _ -> None
@@ -514,6 +518,25 @@ module StatMap =
         | id when id.StartsWith "ward_remnants_" || id.StartsWith "infusion_remnants_" || id.StartsWith "skill_elemental_conflux_"
                   || id = "base_remnant_duration_ms" || id = "verisium_infusion_skill_number_of_verisium_infusion_to_grant" -> Some Structural
         // ---- more offence ----
+        // projectile speed changes nothing here: projectiles land when the use hits
+        | id when id.EndsWith "projectile_speed_+%" || id.EndsWith "projectile_speed_+%_final" -> Some NotOffensive
+        | "base_cooldown_modifiable_repeat_interval_ms" | "cooldown_recovery_modifiers_also_apply_to_repeat_interval" -> Some Structural
+        | "base_chance_to_pierce_%" -> one (Mod.base' (Named "PierceChance") v)
+        | "always_pierce" -> one (Mod.base' Pierce 99.0)
+        // "X% chance to fire an additional Projectile" (above 100%: one for sure and a chance of another)
+        | "chance_to_fire_1_additional_projectile_%_with_rollover" -> one (Mod.base' (Named "ExtraProjectileChance1") v)
+        | "chance_to_fire_1_additional_projectile_%_with_rollover_with_bow_attacks" -> one (Mod.base' (Named "ExtraProjectileChance1") v |> Mod.whenever (SkillIs Bow))
+        | "aura_effect_+%" | "non_curse_aura_effect_+%" -> one (Mod.inc (Named "AuraEffect") v)
+        | "flask_recovery_amount_%_to_recover_instantly" -> one (Mod.base' (Named "FlaskInstant") v)
+        | "immune_to_chill_if_majority_blue_supports_socketed" -> one (Mod.base' (Named "Avoid:Chill") 100.0 |> Mod.whenever (WhileBuff "SupportsMajority:blue"))
+        | "immune_to_ignite_if_majority_red_supports_socketed" -> one (Mod.base' (Named "Avoid:Ignite") 100.0 |> Mod.whenever (WhileBuff "SupportsMajority:red"))
+        | "immune_to_shock_if_majority_green_supports_socketed" -> one (Mod.base' (Named "Avoid:Shock") 100.0 |> Mod.whenever (WhileBuff "SupportsMajority:green"))
+        | "physical_damage_from_hits_%_taken_as_random_element" ->
+            Some(Mods(DamageType.elemental |> List.map (fun t -> Mod.base' (Named("TakenAs:Physical:" + DamageType.name t)) (v / 3.0))))
+        | "energy_shield_from_focus_+%" -> one (Mod.inc (Named "SlotInc:ES:Weapon 2") v)
+        | "energy_shield_from_helmet_+%" -> one (Mod.inc (Named "SlotInc:ES:Helmet") v)
+        | "energy_shield_from_gloves_+%" -> one (Mod.inc (Named "SlotInc:ES:Gloves") v)
+        | "energy_shield_from_boots_+%" -> one (Mod.inc (Named "SlotInc:ES:Boots") v)
         | "maim_on_hit_%" -> one (Mod.base' (AilmentChance Maim) v)
         | "base_skill_cost_efficiency_+%" -> one (Mod.inc ManaCostEfficiency v)
         | "number_of_additional_projectiles" -> one (Mod.base' AdditionalProjectiles v)
@@ -919,6 +942,17 @@ module StatMap =
                 match pattern id value with
                 | Some m -> Some m
                 | None ->
+                    // "allies in your presence": your minions (other players aren't simulated)
+                    let wrapMinions (m: Meaning) =
+                        match m with
+                        | Mods ms -> Some(Mods(ms |> List.map (fun x -> match x.Stat with ForMinions _ -> x | st -> { x with Stat = ForMinions st })))
+                        | _ -> None
+                    if id.StartsWith "allies_in_presence_" then direct (id.Substring 19) value |> Option.bind wrapMinions
+                    elif id.StartsWith "you_and_allies_in_presence_" then
+                        match direct (id.Substring 27) value with
+                        | Some (Mods ms as own) -> (match wrapMinions own with Some (Mods ws) -> Some(Mods(ms @ ws)) | _ -> Some own)
+                        | other -> other
+                    else
                     // aura gems: "base_skill_buff_<stat>_to_apply" grants <stat> (Purity of Fire, Discipline)
                     let prefix = "base_skill_buff_"
                     if id.StartsWith prefix && (id.EndsWith "_to_apply" || id.EndsWith "_to_grant") then

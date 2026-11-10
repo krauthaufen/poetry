@@ -8,7 +8,9 @@ type ManaFlask =
       MaxCharges: float
       /// Charges gained per second (belt generation etc.), and the multiplier on charges gained.
       ChargesPerSecond: float
-      ChargeGainMult: float }
+      ChargeGainMult: float
+      /// Share (0..1) of the recovery applied at once ("X% of Flask Recovery applied Instantly").
+      Instant: float }
 
 /// The player's pools, defences and recovery, computed from the character sheet.
 type PlayerStats =

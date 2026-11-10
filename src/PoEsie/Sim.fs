@@ -609,7 +609,8 @@ module Sim =
                             { p with
                                 LifeFlaskCharges = p.LifeFlaskCharges - f.ChargesPerUse
                                 LifeFlaskUntil = w.Time + f.Duration
-                                LifeFlaskRate = f.Amount * pools.LifeRecoveryRate / f.Duration }
+                                LifeFlaskRate = f.Amount * (1.0 - f.Instant) * pools.LifeRecoveryRate / f.Duration
+                                Life = min (max p.Life pools.Life) (p.Life + f.Amount * f.Instant * pools.LifeRecoveryRate) }
                     Counts = bump "flask:life" w.Counts }
             | _ -> { w with Player = Some p }
         | _ -> w
@@ -981,7 +982,15 @@ module Sim =
                 match actor.ManaFlask, w.Player with
                 | Some f, Some p when p.Mana < 2.0 * cost && w.Time >= p.FlaskUntil && p.FlaskCharges >= f.ChargesPerUse ->
                     { w with
-                        Player = Some { p with FlaskCharges = p.FlaskCharges - f.ChargesPerUse; FlaskUntil = w.Time + f.Duration; FlaskRate = f.Amount / f.Duration }
+                        Player =
+                            // "X% of Flask Recovery applied Instantly"
+                            (let manaMax = actor.Vitals |> Option.map (fun pools -> pools.Mana) |> Option.defaultValue p.Mana
+                             Some
+                                 { p with
+                                     FlaskCharges = p.FlaskCharges - f.ChargesPerUse
+                                     FlaskUntil = w.Time + f.Duration
+                                     FlaskRate = f.Amount * (1.0 - f.Instant) / f.Duration
+                                     Mana = min (max p.Mana manaMax) (p.Mana + f.Amount * f.Instant) })
                         Counts = bump "flask:mana" w.Counts }
                 | _ -> w
             match actor.Vitals, w.Player with
@@ -1342,8 +1351,10 @@ module Sim =
                                     + (if p.Count + fromCharges > 0 then
                                            int (Mods.sumBase ctx [ AdditionalProjectiles ] mods)
                                            + (if rng.Chance(Mods.sumBase ctx [ Named "ExtraProjectileChance2" ] mods) then 2 else 0)
+                                           + (let c = Mods.sumBase ctx [ Named "ExtraProjectileChance1" ] mods
+                                              int (c / 100.0) + (if rng.Chance(c - 100.0 * floor (c / 100.0)) then 1 else 0))
                                        else 0)
-                                Pierce = p.Pierce + int (Mods.sumBase ctx [ Pierce ] mods)
+                                Pierce = p.Pierce + int (Mods.sumBase ctx [ Pierce ] mods) + (if rng.Chance(Mods.sumBase ctx [ Named "PierceChance" ] mods) then 1 else 0)
                                 Chains = p.Chains + int (Mods.sumBase ctx [ Chains ] mods)
                                 TerrainChain = p.TerrainChain + Mods.sumBase ctx [ Named "TerrainChain" ] mods }
                     | d -> d

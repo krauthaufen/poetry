@@ -41,7 +41,8 @@ module Defence =
               ChargesPerUse = perUse * Mods.mult c [ Named(pool + "FlaskChargesUsed") ] db
               MaxCharges = maxC
               ChargesPerSecond = Mods.sumBase c [ Named "FlaskChargesPerSecond"; Named(pool + "FlaskChargesPerSecond") ] db
-              ChargeGainMult = 1.0 + (ownGain + Mods.sumInc c [ Named(pool + "FlaskChargesGained") ] db) / 100.0 })
+              ChargeGainMult = 1.0 + (ownGain + Mods.sumInc c [ Named(pool + "FlaskChargesGained") ] db) / 100.0
+              Instant = min 100.0 (Mods.sumBase c [ Named "FlaskInstant" ] db) / 100.0 })
 
     /// `resources`: current charges, motes, rage... (conditional defences read them).
     let computeWith (resources: Map<string, int>) (bases: Map<string, float * float * float>) (sheet: CharacterSheet) : PlayerStats =
@@ -63,7 +64,12 @@ module Defence =
             | _ -> 1.0
         let itemValue stat slotFilter =
             sheet.ItemDefences
-            |> List.sumBy (fun (slot, s, v) -> if s = stat && slotFilter slot then (if slot = "Body Armour" then v * bodyInc stat else v) else 0.0)
+            |> List.sumBy (fun (slot, s, v) ->
+                if s = stat && slotFilter slot then
+                    // "increased Energy Shield from equipped Focus / Helmet ..."
+                    let slotInc = if stat = MaxEnergyShield then Mods.inc c [ Named("SlotInc:ES:" + slot) ] db else 1.0
+                    (if slot = "Body Armour" then v * bodyInc stat else v) * slotInc
+                else 0.0)
         let fromItems stat = itemValue stat (fun _ -> true)
         let bodyEvasion = itemValue Evasion ((=) "Body Armour")
         let esFromBodyEvasion =

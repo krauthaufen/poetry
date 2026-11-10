@@ -45,7 +45,9 @@ type SkillData =
       /// Alternate quality effects (granted by e.g. Gemling's Advanced Thaumaturgy).
       AltQualityStats: (string * float) list
       /// Minions the skill summons (ids in minions.json).
-      MinionList: string list }
+      MinionList: string list
+      /// Gem colour: 1 red (Strength), 2 green (Dexterity), 3 blue (Intelligence), 0 none.
+      Color: int }
 
 /// A monster a skill summons (PoB Data/Minions, Data/Spectres: from the game's monster tables).
 type MinionData =
@@ -128,7 +130,8 @@ module GameData =
           StatSets = Json.list (Json.field "statSets" j) |> List.map statSet
           QualityStats = statPairs (Json.field "qualityStats" j)
           AltQualityStats = statPairs (Json.field "altQualityStats" j)
-          MinionList = Json.list (Json.field "minionList" j) |> List.choose Json.str }
+          MinionList = Json.list (Json.field "minionList" j) |> List.choose Json.str
+          Color = Json.numField "color" j |> Option.map int |> Option.defaultValue 0 }
 
     /// minions.json
     let parseMinions (json: string) : Map<string, MinionData> =

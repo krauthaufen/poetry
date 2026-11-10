@@ -358,8 +358,11 @@ module Pob =
                     // the skill itself (a herald's explosion, ...).
                     let characterWide (m: Mod) =
                         not (m.Source.StartsWith "skill-specific:") || Gems.grantsToCharacter db (m.Source.Substring 15)
+                    // auras (Purity of Fire, Discipline) scale with "increased effect of Auras"
+                    let auraEffect =
+                        if skill.Tags.Contains(Tag "Type:Aura") then Mods.inc Ctx.empty [ Named "AuraEffect" ] (ModDb.ofList sheet.Mods) else 1.0
                     { sheet with
-                        Mods = sheet.Mods @ (skill.Mods |> List.filter characterWide |> List.map (Mod.from ("buff:" + skill.Name)))
+                        Mods = sheet.Mods @ (skill.Mods |> List.filter characterWide |> List.map (Mod.scaled auraEffect >> Mod.from ("buff:" + skill.Name)))
                         Coverage = Coverage.merge sheet.Coverage { cov with Unmapped = cov.Unmapped |> List.map (fun (s, v) -> skill.Name + ": " + s, v) } }
                 | Error _ -> sheet)
             sheet

@@ -146,7 +146,20 @@ module Setup =
             @ (if offhandWeapon then [ "DualWielding" ] else [])
             @ (if offhand.IsSome && not offhandWeapon then [ "WieldingShield" ] else [])
             @ (if not (build.Items |> List.exists (fun (slot, _) -> slot = "Weapon 1")) then [ "Unarmed" ] else [])
-        let maxResources = (Pob.maxResources sheet @ moteMax @ o.MaxOverrides @ (equipmentFlags |> List.map (fun f -> f, 1))) |> Map.ofList
+        // socketed support gems by colour ("if you have at least 10 Red Support Gems socketed")
+        let supportFlags =
+            let colours =
+                build.Groups |> List.filter (fun g -> g.Enabled)
+                |> List.collect (fun g -> g.Gems |> List.filter (fun x -> x.IsSupport && x.Enabled))
+                |> List.choose (fun x -> Gems.data db x.Name |> Option.map (fun d -> d.Color))
+                |> List.countBy id
+            let count c = colours |> List.tryPick (fun (k, n) -> if k = c then Some n else None) |> Option.defaultValue 0
+            let named = [ 1, "red"; 2, "green"; 3, "blue" ]
+            let most = named |> List.map (fun (c, _) -> count c) |> List.max
+            [ for c, name in named do
+                if count c >= 10 then yield "Supports10:" + name
+                if most > 0 && count c = most then yield "SupportsMajority:" + name ]
+        let maxResources = (Pob.maxResources sheet @ moteMax @ o.MaxOverrides @ ((equipmentFlags @ supportFlags) |> List.map (fun f -> f, 1))) |> Map.ofList
         let startResources =
             maxResources
             |> Map.map (fun k n ->
