@@ -208,7 +208,7 @@ let main argv =
                 // default: the simulated group's skill); --auto: from skill types
                 let mainGem = group.Gems |> List.tryFind (fun x -> not x.IsSupport && x.Enabled) |> Option.map (fun x -> x.Name) |> Option.defaultValue skill.Name
                 let play, main =
-                    if Map.containsKey "auto" o then Setup.auto c mainGem, Some(mainGem, skill)
+                    if Map.containsKey "auto" o then Setup.auto c options mainGem, Some(mainGem, skill)
                     else
                         let rot, main =
                             match names "rotation" with

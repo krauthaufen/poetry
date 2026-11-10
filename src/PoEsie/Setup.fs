@@ -107,9 +107,11 @@ module Setup =
         { build with Groups = build.Groups |> List.mapi (fun gi g -> { g with Gems = g.Gems |> List.filter (fun x -> not (drops gi x.Name)) }) }
 
     /// Build the character. `read` reads a game data file by name ("tree.json").
-    let load (read: string -> string) (build: PobBuild) (o: Options) : Loaded =
-        let db = GameDb.load read
-        let treeJson = read "tree.json"
+    let rec load (read: string -> string) (build: PobBuild) (o: Options) : Loaded =
+        loadWith (GameDb.load read) (read "tree.json") build o
+
+    /// The same with game data already loaded (many builds, one database).
+    and loadWith (db: GameDb) (treeJson: string) (build: PobBuild) (o: Options) : Loaded =
         let tree = Tree.parseNodes treeJson
         let build = if o.Bonded then { build with Config = Map.add "bonded" "1" build.Config } else build
         let build = dropGems o.Without build
@@ -190,7 +192,7 @@ module Setup =
                     let copy =
                         if o.Infused then None
                         else Behaviours.infusedCopy db charMods sheet.MainHand setup |> Option.map (fun (el, cp) -> s.Name, el, { (Behaviours.applyObserved cp) with Name = s.Name + " infused" })
-                    let rules = Behaviours.useRules db charMods setup s.Name o.Pickup @ Behaviours.chargeBuffRules db charMods setup s
+                    let rules = Behaviours.useRules db charMods setup s.Name o.Pickup @ Behaviours.buffRules db charMods setup s
                     let grants = Behaviours.verisiumGrant db charMods setup
                     let s = Behaviours.applyObserved s
                     // skills that deal no damage (buffs, infusion grants) don't hit
@@ -203,20 +205,28 @@ module Setup =
         | Spam g | OnCooldown g | KeepBuff g | WhileBelow (_, _, g) | When (_, g) -> [ g ]
         | Cycle gs -> gs
 
-    /// A play style from skill types, for builds without one: the main skill is spammed; other
-    /// cooldown skills are used on cooldown and non-persistent buffs kept up.
-    let auto (c: Loaded) (mainGem: string) : Play list =
+    /// A play style from skill types, for builds without one. Only what the simulator models is
+    /// played: buffs it can grant are kept up, cooldown skills that hit or leave something
+    /// (remnants, exposure, infusions) are used on cooldown, the main skill is spammed.
+    /// Marks, warcries, travel skills and anything else stay unpressed.
+    let auto (c: Loaded) (o: Options) (mainGem: string) : Play list =
         let others =
             c.Build.Groups
             |> List.filter (fun g -> g.Enabled)
             |> List.collect (fun g -> g.Gems |> List.filter (fun x -> x.Enabled && not x.IsSupport))
             |> List.filter (fun x -> x.Name <> mainGem && not (Gems.isMeta c.Db x.Name) && not (Gems.isPersistentBuff c.Db x.Name))
+            |> List.distinctBy (fun x -> x.Name)
             |> List.choose (fun x ->
-                match Gems.data c.Db x.Name with
-                | Some d when d.Types.Contains "Cooldown" -> Some(OnCooldown x.Name)
-                | Some d when d.Types.Contains "Buff" -> Some(KeepBuff x.Name)
+                match Gems.data c.Db x.Name, pressed c o x.Name with
+                | Some d, Some p ->
+                    let skip = [ "Mark"; "Warcry"; "Travel"; "Minion"; "ModifiesNextSkill"; "Persistent"; "SummonsTotem"; "AppliesCurse" ] |> List.exists d.Types.Contains
+                    let grantsBuff = p.Rules |> List.exists (fun r -> match r.Reaction with ChargeBuff _ | GrantBuff _ -> true | _ -> false)
+                    let cooldown = p.Skill.Cooldown |> Option.defaultValue 0.0
+                    if skip then None
+                    elif grantsBuff then Some(KeepBuff x.Name)
+                    elif cooldown >= 1.0 && (not p.Skill.Hits.IsEmpty || not p.Rules.IsEmpty || p.GrantsVerisium > 0) then Some(OnCooldown x.Name)
+                    else None
                 | _ -> None)
-            |> List.distinctBy (function OnCooldown g | KeepBuff g -> g | _ -> "")
         others @ [ Spam mainGem ]
 
     /// The player actor: the play style's skills, meta gems and their triggered spells,

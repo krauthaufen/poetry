@@ -939,7 +939,8 @@ module Sim =
         match choice with
         | Some step ->
             let skill = skillOf actor step.Use
-            let t = useTime env actor skill w
+            // nothing is faster than a server tick (instant skills)
+            let t = max Constants.serverTick (useTime env actor skill w)
             // mana cost: base x increased cost / (1 + cost efficiency)
             let db = skillDb env actor skill st
             let cost = skill.Cost * Mods.mult Ctx.empty [ ManaCost ] db / Mods.inc Ctx.empty [ ManaCostEfficiency ] db
@@ -1713,11 +1714,14 @@ module Sim =
                     fight.Enemies
                     |> List.fold (fun w e -> match e.Attack with Some a -> schedule (rng.Float() * a.Interval) (EnemyAttack e.Name) w | None -> w) w
             |> schedule fight.MaxTime Expire
-        let rec loop (w: World) =
+        // a fight that needs more events than this is a runaway (a zero-time loop): stop it
+        let maxEvents = 3000000
+        let rec loop n (w: World) =
             let died = w.Player |> Option.exists (fun p -> p.Died.IsSome)
             if died || allDead w || Map.isEmpty w.Queue || fst (Seq.head w.Queue).Key > fight.MaxTime then w
-            else loop (step env rng w)
-        let w = loop w0
+            elif n >= maxEvents then { w with Counts = bump "aborted: too many events" w.Counts }
+            else loop (n + 1) (step env rng w)
+        let w = loop 0 w0
         let cleared = if allDead w then w.Kills |> List.map (fun (_, _, t) -> t) |> List.fold max 0.0 |> Some else None
         { Ttk = cleared
           Duration = (match cleared with Some t -> t | None -> min w.Time fight.MaxTime)

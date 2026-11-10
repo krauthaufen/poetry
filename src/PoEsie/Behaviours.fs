@@ -288,36 +288,62 @@ module Behaviours =
         |> List.sumBy snd
         |> int
 
-    /// A buff from consuming charges (Charged Staff: "Consume all Power Charges ... adding
-    /// Lightning damage ... to your Quarterstaff Attacks"): "X_attack_minimum/maximum_added_T_damage_per_stack",
-    /// "X_buff_duration_per_stack_ms" x skill duration, "chance to double effect of removing
-    /// charges" doubles the stacks. Charged Staff's buff is for quarterstaff attacks.
-    let chargeBuffRules (db: GameDb) (charMods: ModDb) (setup: GemSetup) (skill: Skill) : Rule list =
-        let raw = Gems.rawStats db charMods setup
-        let sum id = raw |> List.filter (fun (k, _) -> k = id) |> List.sumBy snd
-        let perStackSeconds =
-            raw |> List.tryPick (fun (k, v) -> if k.EndsWith "_buff_duration_per_stack_ms" then Some(v / 1000.0) else None)
-        match skill.Consumes, perStackSeconds with
-        | Some charge, Some seconds ->
-            let quarterstaff = setup.Gem = "Charged Staff"
-            let added =
-                DamageType.all
-                |> List.collect (fun t ->
-                    let n = (DamageType.name t).ToLowerInvariant()
-                    let lo = raw |> List.filter (fun (k, _) -> k.EndsWith (sprintf "_attack_minimum_added_%s_damage_per_stack" n)) |> List.sumBy snd
-                    let hi = raw |> List.filter (fun (k, _) -> k.EndsWith (sprintf "_attack_maximum_added_%s_damage_per_stack" n)) |> List.sumBy snd
-                    if hi > 0.0 then
-                        [ Mod.base' (AddedMin t) lo; Mod.base' (AddedMax t) hi ]
-                        |> List.map (Mod.whenever (SkillIs Attack))
-                        |> List.map (fun m -> if quarterstaff then Mod.whenever (SkillIs Quarterstaff) m else m)
-                    else [])
-            if added.IsEmpty then []
-            else
-                let ctx = { Ctx.empty with SkillTags = skill.Tags; SkillName = skill.Name }
-                let duration = seconds * Mods.mult ctx [ SkillDuration ] (ModDb.ofList (ModDb.toList charMods @ skill.Mods))
+    /// Buffs a skill grants when used, from its gem data:
+    /// - a skill that consumes charges and has "..._buff_duration_per_stack_ms" /
+    ///   "..._per_<charge>_charge_ms" (Charged Staff, Pinnacle of Power): one stack per charge
+    ///   held, each lasting that long and carrying the gem's "..._per_stack" /
+    ///   "..._per_<charge>_charge" stats; "chance to double effect of removing charges"
+    ///   doubles the stacks;
+    /// - any other non-persistent Buff skill with a duration: its stats for that duration.
+    /// The buff is called "<skill> buff". Only the gem's own stats make the buff; supports
+    /// scale its duration.
+    let buffRules (db: GameDb) (charMods: ModDb) (setup: GemSetup) (skill: Skill) : Rule list =
+        let own = Gems.rawStats db charMods { setup with Supports = [] }
+        let withSupports = Gems.rawStats db charMods setup
+        let sum id = withSupports |> List.filter (fun (k, _) -> k = id) |> List.sumBy snd
+        let ctx = { Ctx.empty with SkillTags = skill.Tags; SkillName = skill.Name }
+        let durationMult = Mods.mult ctx [ SkillDuration ] (ModDb.ofList (ModDb.toList charMods @ skill.Mods))
+        // stats carry the gem's name ("charged_staff_..."): drop exactly that, so its words
+        // aren't read as scopes ("staff")
+        let namePrefix = (setup.Gem.ToLowerInvariant() |> String.map (fun ch -> if System.Char.IsLetterOrDigit ch then ch else '_')) + "_"
+        let modsOf (id: string) v =
+            let id = if id.StartsWith namePrefix then id.Substring namePrefix.Length else id
+            match Gems.gemMeaning id v with
+            | Mods ms -> ms |> List.map (Mod.from ("buff:" + skill.Name))
+            | _ -> []
+        let types = Gems.data db setup.Gem |> Option.map (fun d -> d.Types) |> Option.defaultValue Set.empty
+        match skill.Consumes with
+        | Some charge ->
+            let word = charge.Replace("Charge", "").ToLowerInvariant()
+            let stackSuffixes = [ "_per_stack"; "_per_" + word + "_charge" ]
+            let seconds =
+                own |> List.tryPick (fun (k, v) ->
+                    if k.EndsWith "_buff_duration_per_stack_ms" || k.EndsWith("_buff_duration_per_" + word + "_charge_ms") then Some(v / 1000.0) else None)
+            let perStack =
+                own
+                |> List.collect (fun (id, v) ->
+                    match stackSuffixes |> List.tryFind (fun (sfx: string) -> id.EndsWith sfx) with
+                    | Some sfx -> modsOf (id.Substring(0, id.Length - sfx.Length)) v
+                    | None -> [])
+                // Charged Staff's buff is for quarterstaff attacks
+                |> List.map (fun m -> if setup.Gem = "Charged Staff" then Mod.whenever (SkillIs Quarterstaff) m else m)
+            match seconds with
+            | Some sec when not perStack.IsEmpty ->
                 [ { Hook = OnUse; Filter = Called skill.Name; Chance = 100.0
-                    Reaction = ChargeBuff(skill.Name + " buff", charge, added, duration, sum "chance_%_to_double_effect_of_removing_charges") } ]
-        | _ -> []
+                    Reaction = ChargeBuff(skill.Name + " buff", charge, perStack, sec * durationMult, sum "chance_%_to_double_effect_of_removing_charges") } ]
+            | _ -> []
+        | None when types.Contains "Buff" && not (types.Contains "Persistent") && not (types.Contains "Mark") ->
+            let seconds = own |> List.tryPick (fun (k, v) -> if k = "base_skill_effect_duration" then Some(v / 1000.0) else None)
+            let noDamage = own |> List.exists (fun (k, v) -> k = "base_deal_no_damage" && v <> 0.0)
+            let mods =
+                own
+                |> List.filter (fun (id, _) -> not (id.Contains "duration") && (noDamage || Gems.grantsToCharacter db id))
+                |> List.collect (fun (id, v) -> modsOf id v)
+            match seconds with
+            | Some sec when not mods.IsEmpty ->
+                [ { Hook = OnUse; Filter = Called skill.Name; Chance = 100.0; Reaction = GrantBuff(skill.Name + " buff", sec * durationMult, 1, mods) } ]
+            | _ -> []
+        | None -> []
 
     /// What a used skill does besides hitting, from its gem data:
     /// - "all elemental exposure magnitude" (Frost Bomb): exposure to fire, cold and lightning
