@@ -65,5 +65,12 @@ module Constants =
     let ailmentThreshold level = byLevel Tables.monsterAilmentThreshold level
     let poiseThreshold level = byLevel Tables.monsterPoiseThreshold level
 
+    // ---- charges and rage ----
+    /// GameConstants BaseMaximumRage; Character.ot max_*_charges.
+    let baseMaxRage = gc "BaseMaximumRage"
+    let baseMaxCharges = 3.0
+    /// Character.ot attack_damage_final_permyriad_per_rage = 100: 1% more attack damage per Rage.
+    let moreAttackDamagePerRage = 1.0
+
     /// Server tick, PoB data.misc.ServerTickTime.
     let serverTick = 0.033

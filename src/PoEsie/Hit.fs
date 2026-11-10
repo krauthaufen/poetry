@@ -12,7 +12,9 @@ type ProjectileShape =
       /// Several projectiles of one use may hit the same enemy.
       CanShotgun: bool
       /// Radius of an explosion where a projectile hits, if any.
-      Explosion: float option }
+      Explosion: float option
+      /// Extra projectiles per stack of a charge: ("PowerCharge", 3).
+      PerCharge: (string * int) option }
 
 /// How a skill use finds its targets.
 type Delivery =
@@ -33,7 +35,8 @@ module ProjectileShape =
           ChainRange = 30.0
           Range = 100.0
           CanShotgun = false
-          Explosion = None }
+          Explosion = None
+          PerCharge = None }
 
 /// A skill as the engine sees it: where its damage comes from and how long it takes.
 type Skill =
@@ -55,7 +58,11 @@ type Skill =
       /// How a use finds its targets.
       Delivery: Delivery
       /// Mods that only exist while using this skill (gem stats, supports).
-      Mods: Mod list }
+      Mods: Mod list
+      /// Other parts of the same use (e.g. Falling Thunder's slam + its projectiles).
+      Parts: Skill list
+      /// Charge this skill consumes on use, e.g. "PowerCharge".
+      Consumes: string option }
 
 module Skill =
     let make name tags =
@@ -69,7 +76,9 @@ module Skill =
           Cooldown = None
           Hits = [ 1.0, 1.0 ]
           Delivery = Single
-          Mods = [] }
+          Mods = []
+          Parts = []
+          Consumes = None }
 
     let ctx (skill: Skill) crit buffs enemyStatus =
         { Crit = crit

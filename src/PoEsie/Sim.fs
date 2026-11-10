@@ -73,7 +73,10 @@ type Actor =
       /// Priority list: the first usable step is used.
       Rotation: Step list
       Rules: Rule list
-      Metas: Meta list }
+      Metas: Meta list
+      /// Charges, rage...: stacks the actor starts the fight with. They don't expire;
+      /// skills that consume them remove them.
+      Resources: (string * int) list }
 
 module Actor =
     let make name mods skills =
@@ -83,7 +86,8 @@ module Actor =
           HitPattern = Map.empty
           Rotation = skills |> List.map (fun s -> { Use = s.Name; When = fun _ -> true })
           Rules = []
-          Metas = [] }
+          Metas = []
+          Resources = [] }
 
     let always skill = { Use = skill; When = fun _ -> true }
 
@@ -134,6 +138,8 @@ module Sim =
     type private Event =
         | Ready of actor: string
         | Strike of actor: string * skill: string * mult: float * aimedAt: string
+        /// After a use's hits: the skill consumes its charges (unless the skip roll succeeds).
+        | ConsumeCharges of actor: string * charge: string
         | Expire
 
     type private ActorState =
@@ -221,7 +227,14 @@ module Sim =
     /// The actor's mods while using a skill: sheet + skill mods + active buffs.
     let private skillDb env (actor: Actor) (skill: Skill) (st: ActorState) =
         let buffMods = st.Buffs |> Map.toList |> List.collect (fun (_, e) -> e.Mods |> List.map (Mod.scaled (float e.Stacks)))
-        ModDb.addList buffMods (Map.find (actor.Name, skill.Name) env.SkillDbs)
+        let db = ModDb.addList buffMods (Map.find (actor.Name, skill.Name) env.SkillDbs)
+        // Rage: 1% more attack damage per Rage, times rage effect, rounded down.
+        match Map.tryFind "Rage" st.Buffs with
+        | Some r when r.Stacks > 0 ->
+            let effect = Mods.mult Ctx.empty [ Named "RageEffect" ] db
+            let more = floor (float r.Stacks * effect) * Constants.moreAttackDamagePerRage
+            ModDb.add db (Mod.more (Damage AllDamage) more |> Mod.whenever (SkillIs Attack) |> Mod.from "Rage")
+        | _ -> db
 
     let private aimed (env: Env) (w: World) =
         Geometry.aim env.Fight.Targeting (alive w |> List.map (fun e -> e.Def))
@@ -351,8 +364,10 @@ module Sim =
 
     // ---- using skills ----
 
+    let private allSkills (actor: Actor) = actor.Skills @ (actor.Skills |> List.collect (fun s -> s.Parts))
+
     let private skillOf (actor: Actor) name =
-        actor.Skills |> List.find (fun s -> s.Name = name)
+        allSkills actor |> List.find (fun s -> s.Name = name)
 
     let private ready (st: ActorState) now (skill: Skill) =
         Map.tryFind skill.Name st.Cooldowns |> Option.forall (fun t -> t <= now)
@@ -429,16 +444,25 @@ module Sim =
                 Map.tryFind skill.Name actor.HitPattern
                 |> Option.defaultValue (skill.Hits |> List.map (fun (f, m) -> DuringUse f, m))
             let w = { w with Counts = bump ("uses:" + skill.Name) w.Counts }
+            let times =
+                pattern |> List.map (fun (timing, mult) ->
+                    (match timing with
+                     | DuringUse f -> w.Time + f * useTime
+                     | After s -> w.Time + s), mult)
             let w =
-                pattern
+                times
                 |> List.fold
-                    (fun w (timing, mult) ->
-                        let at =
-                            match timing with
-                            | DuringUse f -> w.Time + f * useTime
-                            | After s -> w.Time + s
-                        schedule at (Strike(actor.Name, skill.Name, mult, target.Def.Name)) w)
+                    (fun w (at, mult) ->
+                        // every part of the skill strikes together
+                        (skill :: skill.Parts)
+                        |> List.fold (fun w part -> schedule at (Strike(actor.Name, part.Name, mult, target.Def.Name)) w) w)
                     w
+            let w =
+                match skill.Consumes with
+                | Some charge ->
+                    let last = times |> List.map fst |> List.fold max w.Time
+                    schedule (last + 1e-9) (ConsumeCharges(actor.Name, charge)) w
+                | None -> w
             react env rng actor OnUse skill (Some target.Def.Name) w
 
     and private trigger env rng (actor: Actor) name (w: World) =
@@ -555,9 +579,13 @@ module Sim =
             let delivery =
                 match skill.Delivery with
                 | Projectiles p ->
+                    let fromCharges =
+                        match p.PerCharge with
+                        | Some (charge, per) -> per * (Map.tryFind charge st.Buffs |> Option.map (fun e -> e.Stacks) |> Option.defaultValue 0)
+                        | None -> 0
                     Projectiles
                         { p with
-                            Count = p.Count + int (Mods.sumBase ctx [ AdditionalProjectiles ] mods)
+                            Count = p.Count + fromCharges + (if p.Count + fromCharges > 0 then int (Mods.sumBase ctx [ AdditionalProjectiles ] mods) else 0)
                             Pierce = p.Pierce + int (Mods.sumBase ctx [ Pierce ] mods)
                             Chains = p.Chains + int (Mods.sumBase ctx [ Chains ] mods) }
                 | d -> d
@@ -574,6 +602,21 @@ module Sim =
             match ev with
             | Ready name -> onReady env rng name w
             | Strike (name, skill, mult, aimedAt) -> onStrike env rng name skill mult aimedAt w
+            | ConsumeCharges (name, charge) ->
+                let actor = actorDef env name
+                let st = Map.find name w.Actors
+                let skip = Mods.sumBase Ctx.empty [ Named "ChargeSkipConsume" ] (ModDb.ofList actor.Mods)
+                if not (Map.containsKey charge st.Buffs) then w
+                else
+                    // "still count as consuming": the consumed-recently status starts either way
+                    let recent = "Consumed" + charge + "Recently"
+                    let w =
+                        updateActor name (fun st -> { st with Buffs = Map.add recent { Name = recent; Mods = []; Stacks = 1; Expires = w.Time + 4.0 } st.Buffs }) w
+                        |> schedule (w.Time + 4.0) Expire
+                    if rng.Chance skip then { w with Counts = bump ("kept:" + charge) w.Counts }
+                    else
+                        updateActor name (fun st -> { st with Buffs = Map.remove charge st.Buffs }) w
+                        |> fun w -> { w with Counts = bump ("consumed:" + charge) w.Counts }
             | Expire -> w
 
     let private envOf (fight: Fight) =
@@ -581,7 +624,7 @@ module Sim =
           SkillDbs =
             Map.ofList
                 [ for a in fight.Player :: fight.Minions do
-                      for s in a.Skills -> (a.Name, s.Name), ModDb.ofList (a.Mods @ s.Mods) ] }
+                      for s in allSkills a -> (a.Name, s.Name), ModDb.ofList (a.Mods @ s.Mods) ] }
 
     /// Simulate one fight with the given seed.
     let run (fight: Fight) (seed: uint32) : Outcome =
@@ -605,7 +648,16 @@ module Sim =
                       Buildup = Map.empty
                       Db = ModDb.ofList d.Mods })
                 |> Map.ofList
-              Actors = actors |> List.map (fun a -> a.Name, empty) |> Map.ofList
+              Actors =
+                actors
+                |> List.map (fun a ->
+                    let res =
+                        a.Resources
+                        |> List.filter (fun (_, n) -> n > 0)
+                        |> List.map (fun (k, n) -> k, { Name = k; Mods = []; Stacks = n; Expires = infinity })
+                        |> Map.ofList
+                    a.Name, { empty with Buffs = res })
+                |> Map.ofList
               Queue = Map.empty
               Seq = 0
               DamageBy = Map.empty

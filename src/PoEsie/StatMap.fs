@@ -121,8 +121,16 @@ module StatMap =
             | "if" :: ("crit" | "crits") :: "recently" :: tail | "if" :: "have" :: "crit" :: "recently" :: tail ->
                 go (WhileBuff "CritRecently" :: acc) tail
             | "if" :: ("hit" | "hits") :: "recently" :: tail -> go (WhileBuff "HitRecently" :: acc) tail
+            | "if" :: "consumed" :: c :: "charge" :: "recently" :: tail when c = "power" || c = "frenzy" || c = "endurance" ->
+                go (WhileBuff("Consumed" + titleCase [ c; "charge" ] + "Recently") :: acc) tail
             | "if" :: "enemy" :: "killed" :: "recently" :: tail
             | "if" :: "killed" :: "recently" :: tail -> go (WhileBuff "KilledRecently" :: acc) tail
+            | "per" :: c :: "charge" :: tail when c = "power" || c = "frenzy" || c = "endurance" ->
+                go (PerStack(titleCase [ c; "charge" ], 1.0) :: acc) tail
+            | "per" :: "rage" :: tail -> go (PerStack("Rage", 1.0) :: acc) tail
+            | "with" :: c :: "charges" :: tail when c = "power" || c = "frenzy" || c = "endurance" ->
+                go (WhileBuff(titleCase [ c; "charge" ]) :: acc) tail
+            | "when" :: "charged" :: tail -> go (WhileBuff "PowerCharge" :: acc) tail
             | "in" :: "weapon" :: "set" :: "one" :: tail -> go acc tail
             | "in" :: "weapon" :: "set" :: "two" :: tail -> go (WhileBuff "WeaponSetTwo" :: acc) tail
             | "while" :: state when not state.IsEmpty -> List.rev acc, [], Some(WhileBuff(titleCase state))
@@ -228,6 +236,13 @@ module StatMap =
             Some(Mods [ for into in DamageType.elemental do for from in DamageType.all do if from <> into then yield Mod.base' (GainAs(from, into)) v ])
         | "attack_additional_critical_strike_chance_permyriad" -> one (Mod.base' CritChance (v / 100.0) |> Mod.whenever (SkillIs Attack))
         | "additional_critical_strike_chance_permyriad" -> one (Mod.base' CritChance (v / 100.0))
+        | "max_power_charges" -> one (Mod.base' (Named "MaxPowerCharge") v)
+        | "max_frenzy_charges" -> one (Mod.base' (Named "MaxFrenzyCharge") v)
+        | "max_endurance_charges" -> one (Mod.base' (Named "MaxEnduranceCharge") v)
+        | "maximum_rage" -> one (Mod.base' (Named "MaxRage") v)
+        | "charge_skip_consume_chance_%" -> one (Mod.base' (Named "ChargeSkipConsume") v)
+        | "skill_base_rage_effect_+%_to_apply" | "rage_effect_+%" -> one (Mod.inc (Named "RageEffect") v)
+        | "chance_%_to_double_effect_of_removing_charges" -> Some(Unsimulated "double effect of removing charges")
         | "treat_enemy_resistances_as_negated_on_elemental_damage_hit_%_chance" ->
             one (Mod.base' (Named "NegateEnemyResistChance") v)
         | "projectiles_nova" -> Some Structural
@@ -308,24 +323,56 @@ module StatMap =
             | _ -> None
         | _ -> None
 
-    /// "<scope> critical strike chance +%", "<scope> critical strike multiplier +"
-    let private crit rev v =
-        let scoped stat kind rest = scopes (List.rev rest) |> Option.map (fun sc -> [ apply sc (Mod.make kind stat v) ])
-        match rev with
-        | "+%" :: "chance" :: "strike" :: "critical" :: rest -> scoped CritChance Inc rest
-        | "+" :: "multiplier" :: "strike" :: "critical" :: rest -> scoped CritBonus Base rest
-        | "+%" :: "multiplier" :: "strike" :: "critical" :: rest -> scoped CritBonus Inc rest
-        | _ -> None
+    /// "crit" is "critical strike" in newer ids.
+    let private normaliseCrit (words: string list) =
+        let rec go ws =
+            match ws with
+            | "critical" :: "hit" :: "damage" :: "bonus" :: rest -> "critical" :: "strike" :: "multiplier" :: go rest
+            | "crit" :: rest -> "critical" :: "strike" :: go rest
+            | w :: rest -> w :: go rest
+            | [] -> []
+        go words
 
-    /// "<scope> attack speed +%", "<scope> cast speed +%", "attack and cast speed +%"
+    /// "<scope> critical strike chance +% [final] [conditions]", "<scope> critical strike multiplier +".
+    let private crit rev v =
+        let words = normaliseCrit (List.rev rev)
+        match List.tryFindIndex (fun w -> w = "+%" || w = "+") words with
+        | None -> None
+        | Some i ->
+            let marker = words.[i]
+            let isFinal, tail =
+                match List.skip (i + 1) words with
+                | "final" :: t -> true, t
+                | t -> false, t
+            let make stat kind scope =
+                scopes (List.rev scope @ tail) |> Option.map (fun sc -> [ apply sc (Mod.make kind stat v) ])
+            match List.rev (List.take i words) with
+            | "chance" :: "strike" :: "critical" :: scope ->
+                make CritChance (if isFinal then More elif marker = "+%" then Inc else Base) scope
+            | "multiplier" :: "strike" :: "critical" :: scope ->
+                make CritBonus (if marker = "+" then Base elif isFinal then More else Inc) scope
+            | _ -> None
+
+    /// "<scope> attack speed +% [final] [conditions]", "cast speed", "attack and cast speed".
     let private speed rev v =
-        let scoped extra rest =
-            scopes (List.rev rest) |> Option.map (fun sc -> [ apply sc (Mod.inc Speed v |> fun m -> List.foldBack Mod.whenever extra m) ])
-        match rev with
-        | "+%" :: "speed" :: "cast" :: "and" :: "attack" :: rest -> scoped [] rest
-        | "+%" :: "speed" :: "attack" :: rest -> scoped [ SkillIs Attack ] rest
-        | "+%" :: "speed" :: "cast" :: rest -> scoped [ SkillIs Spell ] rest
-        | _ -> None
+        let words = List.rev rev
+        match List.tryFindIndex ((=) "+%") words with
+        | None -> None
+        | Some i ->
+            let isFinal, tail =
+                match List.skip (i + 1) words with
+                | "final" :: t -> true, t
+                | t -> false, t
+            let kind = if isFinal then More else Inc
+            let make extra scope =
+                scopes (List.rev scope @ tail)
+                |> Option.map (fun sc -> [ apply sc (Mod.make kind Speed v |> fun m -> List.foldBack Mod.whenever extra m) ])
+            match List.rev (List.take i words) with
+            | "speed" :: "cast" :: "and" :: "attack" :: rest -> make [] rest
+            | "speed" :: "attack" :: rest -> make [ SkillIs Attack ] rest
+            | "speed" :: "cast" :: rest -> make [ SkillIs Spell ] rest
+            | "speed" :: "skill" :: rest -> make [] rest
+            | _ -> None
 
     /// "<scope> skill gem level +": levels of matching skill gems.
     let private gemLevel rev v =
@@ -440,7 +487,7 @@ module StatMap =
     let private structural (id: string) =
         let words = split id
         let has w = List.contains w words
-        has "index" || has "visual" || has "show" || has "cursor" || has "pathing" || has "contact"
+        has "index" || has "visual" || has "show" || has "display" || has "cursor" || has "pathing" || has "contact"
         || has "collide" || has "targets" || id.StartsWith "can_perform_skill" || id.StartsWith "base_is_"
         || id.StartsWith "is_" || id.EndsWith "_step_distance"
 

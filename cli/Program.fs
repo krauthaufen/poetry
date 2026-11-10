@@ -9,6 +9,8 @@
 ///   --life X         override life of every enemy (e.g. 1e12 to measure sustained DPS)
 ///   --res X          override elemental resistance of every enemy
 ///   --target T       nearest | strongest (default strongest)
+///   --charges N      power charges at the start (default: your maximum)
+///   --skip P         override the chance (%) to not remove charges when consuming
 ///   --suite          run the standard scenarios (pack, pack + 2 rares, surrounded, boss) and print a table
 ///   --data DIR       exported game data (default: data/game next to the repo)
 module PoEsie.Cli
@@ -55,10 +57,22 @@ let main argv =
             if text.TrimStart().StartsWith "{" then Api.read text
             elif text.TrimStart().StartsWith "<" then Pob.read text, []
             else Pob.read (decodeBuildCode text), []
-        let sheet = Pob.character db tree build
+        let sheet = Pob.character db tree build |> fun s -> Pob.withPersistentBuffs db s build
+        let sheet =
+            match Map.tryFind "skip" o with
+            | Some p ->
+                { sheet with
+                    Mods = (sheet.Mods |> List.filter (fun m -> m.Stat <> Named "ChargeSkipConsume")) @ [ Mod.base' (Named "ChargeSkipConsume") (float p) ] }
+            | None -> sheet
+        let resources =
+            Pob.maxResources sheet
+            |> List.map (fun (k, n) ->
+                match k, Map.tryFind "charges" o with
+                | "PowerCharge", Some c -> k, int c
+                | _ -> k, n)
 
         printfn "== %s %s, level %d: %d items, %d passives, %d socket groups" build.ClassName build.Ascendancy build.Level build.Items.Length build.TreeNodes.Length build.Groups.Length
-        printfn "character: %d modifiers" sheet.Mods.Length
+        printfn "character: %d modifiers; starts with %s" sheet.Mods.Length (resources |> List.map (fun (k, n) -> sprintf "%d %s" n k) |> String.concat ", ")
         match sheet.MainHand with
         | Some w -> printfn "main hand: %A, %.1f%% crit, %.2f APS" (w.Damage |> Map.toList |> List.map (fun (t, r) -> sprintf "%s %.0f-%.0f" (DamageType.name t) r.Min r.Max)) w.CritChance w.AttacksPerSecond
         | None -> printfn "main hand: none"
@@ -117,7 +131,7 @@ let main argv =
                 printfn "  delivery: %A" skill.Delivery
                 let fight =
                     { Enemies = enemies
-                      Player = Actor.make "Player" sheet.Mods [ skill ]
+                      Player = { Actor.make "Player" sheet.Mods [ skill ] with Resources = resources }
                       Minions = []
                       Targeting = (if Map.tryFind "target" o = Some "nearest" then Nearest else Strongest)
                       MaxTime = get "time" 60.0 }

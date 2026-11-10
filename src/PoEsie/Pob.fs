@@ -186,3 +186,30 @@ module Pob =
                   Quality = active.Quality
                   StatSet = active.StatSet
                   Supports = supports })
+
+    /// Add the effects of persistent buff gems (Berserk, Eternal Rage, Charge Regulation...)
+    /// to the character. Their gem stats apply to everything the character does.
+    let withPersistentBuffs (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) =
+        build.Groups
+        |> List.filter (fun g -> g.Enabled)
+        |> List.choose (fun g -> g.Gems |> List.tryFind (fun gem -> gem.Enabled && not gem.IsSupport && Gems.isPersistentBuff db gem.Name) |> Option.map (fun _ -> g))
+        |> List.collect (groupSkill db sheet)
+        |> List.fold
+            (fun (sheet: CharacterSheet) r ->
+                match r with
+                | Ok (skill, cov) ->
+                    // only the buff's own effect, not the skill's damage-related base stats
+                    { sheet with
+                        Mods = sheet.Mods @ (skill.Mods |> List.map (Mod.from ("buff:" + skill.Name)))
+                        Coverage = Coverage.merge sheet.Coverage { cov with Unmapped = cov.Unmapped |> List.map (fun (s, v) -> skill.Name + ": " + s, v) } }
+                | Error _ -> sheet)
+            sheet
+
+    /// Charges and rage the character can hold.
+    let maxResources (sheet: CharacterSheet) =
+        let db = ModDb.ofList sheet.Mods
+        let get stat = Mods.sumBase Ctx.empty [ Named stat ] db
+        [ "PowerCharge", int (Constants.baseMaxCharges + get "MaxPowerCharge")
+          "FrenzyCharge", int (Constants.baseMaxCharges + get "MaxFrenzyCharge")
+          "EnduranceCharge", int (Constants.baseMaxCharges + get "MaxEnduranceCharge")
+          "Rage", int (Constants.baseMaxRage + get "MaxRage") ]

@@ -122,6 +122,24 @@ module Gems =
         set [ "base_number_of_projectiles"; "number_of_chains"; "projectile_base_number_of_targets_to_pierce"
               "active_skill_base_area_of_effect_radius"; "projectiles_can_shotgun"; "total_projectile_spread_angle_override" ]
 
+    /// Gem stats often carry the skill's internal name first
+    /// ("lightning_strike_damage_+%_final_per_power_charge"). If an id is Unmapped,
+    /// try it with 1..3 leading words removed; only a full Mods meaning is accepted.
+    let private gemMeaning (id: string) v =
+        match StatMap.meaning id v with
+        | Unmapped
+        | Unsimulated _ as original ->
+            let words = id.Split('_')
+            [ 1..3 ]
+            |> List.tryPick (fun k ->
+                if words.Length > k + 2 then
+                    match StatMap.meaning (String.concat "_" (Array.skip k words)) v with
+                    | Mods ms -> Some(Mods ms)
+                    | _ -> None
+                else None)
+            |> Option.defaultValue original
+        | m -> m
+
     /// Turn game stats into mods, sorting out what we couldn't use.
     let private interpret (stats: (string * float) list) =
         stats
@@ -129,9 +147,9 @@ module Gems =
             (fun (mods, cov: Coverage) (id, v) ->
                 match baseDamageStat id with
                 | Some _ -> mods, cov
-                | None when deliveryStats.Contains id -> mods, cov
+                | None when deliveryStats.Contains id || id.EndsWith "_number_of_projectiles_per_power_charge" -> mods, cov
                 | None ->
-                    match StatMap.meaning id v with
+                    match gemMeaning id v with
                     | Mods ms -> mods @ ms, cov
                     | Local _
                     | Structural
@@ -145,8 +163,95 @@ module Gems =
         | Some g -> Map.tryFind g.GrantedEffectId db.Skills
         | None -> Map.tryFind name db.Skills
 
+    /// Persistent buffs (Berserk, Eternal Rage, heralds...): always on while reserved.
+    let isPersistentBuff (db: GameDb) name =
+        skillOfGem db name |> Option.exists (fun d -> d.Types.Contains "Persistent" && d.Types.Contains "Buff")
+
+    /// A stat set flagged to be shown with the main set: it happens in the same use
+    /// (Falling Thunder's projectiles). Other sets are alternatives (Spark's Cold-Infused).
+    let private isPart (set: StatSetData) = set.Stats |> List.contains "display_statset_hide_usage_stats"
+
+    /// One stat set of a skill as a simulator Skill.
+    let private buildSet (data: SkillData) (set: StatSetData) name tags level quality (supportStats: (string * float) list) (weapon: Weapon option) =
+        let gemLevel = Map.tryFind level data.Levels
+        let ownStats = stats data set level quality
+        let mods, cov = interpret (ownStats @ supportStats)
+        let isAttack = data.Types.Contains "Attack"
+        let baseDamage =
+            if isAttack then
+                weapon |> Option.map (fun w -> w.Damage) |> Option.defaultValue Map.empty
+            else
+                ownStats
+                |> List.choose (fun (id, v) -> baseDamageStat id |> Option.map (fun (isMin, t) -> t, isMin, v))
+                |> List.groupBy (fun (t, _, _) -> t)
+                |> List.map (fun (t, xs) ->
+                    let pick m = xs |> List.tryFind (fun (_, isMin, _) -> isMin = m) |> Option.map (fun (_, _, v) -> v) |> Option.defaultValue 0.0
+                    t, { Min = pick true; Max = pick false })
+                |> Map.ofList
+        let setLevel = Map.tryFind level set.Levels
+        let baseMultiplier =
+            setLevel |> Option.bind (fun l -> l.BaseMultiplier)
+            |> Option.orElse (gemLevel |> Option.bind (fun l -> l.BaseMultiplier))
+            |> Option.defaultValue 1.0
+        let crit =
+            if isAttack then weapon |> Option.map (fun w -> w.CritChance) |> Option.defaultValue 5.0
+            else
+                setLevel |> Option.bind (fun l -> l.CritChance)
+                |> Option.orElse (gemLevel |> Option.bind (fun l -> l.CritChance))
+                |> Option.defaultValue 0.0
+        let time =
+            if isAttack then
+                let aps = weapon |> Option.map (fun w -> w.AttacksPerSecond) |> Option.defaultValue 1.0
+                let speedMult = 1.0 + (gemLevel |> Option.bind (fun l -> l.AttackSpeedMultiplier) |> Option.defaultValue 0.0) / 100.0
+                match gemLevel |> Option.bind (fun l -> l.AttackTime) with
+                | Some t -> t / 1000.0
+                | None -> 1.0 / (aps * speedMult)
+            else
+                data.CastTime
+        let statOf id = ownStats |> List.tryFind (fst >> (=) id) |> Option.map snd
+        let flagOf id = statOf id |> Option.exists (fun v -> v <> 0.0)
+        let allStats = ownStats @ supportStats
+        let flagAny id = allStats |> List.exists (fun (s, v) -> s = id && v <> 0.0)
+        let radius = statOf "active_skill_base_area_of_effect_radius"
+        let perCharge =
+            ownStats
+            |> List.tryPick (fun (id, v) -> if id.EndsWith "_number_of_projectiles_per_power_charge" then Some("PowerCharge", int v) else None)
+        let isProjectileSet = List.contains "base_is_projectile" set.Stats
+        let delivery =
+            if isProjectileSet then
+                let count = statOf "base_number_of_projectiles" |> Option.map int |> Option.defaultValue (if perCharge.IsSome then 0 else 1)
+                Projectiles
+                    { ProjectileShape.make count with
+                        // "projectiles_nova": fired in a full circle
+                        Spread = (if flagAny "projectiles_nova" then 360.0 else statOf "total_projectile_spread_angle_override" |> Option.defaultValue 30.0)
+                        Pierce = (if flagOf "always_pierce" then 100 else int (statOf "projectile_base_number_of_targets_to_pierce" |> Option.defaultValue 0.0))
+                        Chains = int (statOf "number_of_chains" |> Option.defaultValue 0.0)
+                        CanShotgun = flagAny "projectiles_can_shotgun"
+                        PerCharge = perCharge
+                        Explosion = if data.Types.Contains "Area" && not (List.contains "is_area_damage" set.Stats) then radius else None }
+            else
+                match radius with
+                | Some r when data.Types.Contains "Nova" -> AreaAroundSelf r
+                | Some r -> AreaAtTarget r
+                | _ -> Single
+        { Name = name
+          Tags = tags
+          BaseDamage = baseDamage
+          BaseMultiplier = baseMultiplier
+          AddedDamageEffectiveness = 1.0
+          BaseCrit = crit
+          BaseTime = time
+          Cooldown = gemLevel |> Option.bind (fun l -> l.Cooldown)
+          Hits = [ 1.0, 1.0 ]
+          Delivery = delivery
+          Mods = mods
+          Parts = []
+          Consumes = if data.Types.Contains "SkillConsumesPowerChargesOnUse" then Some "PowerCharge" else None },
+        cov
+
     /// Build a simulator Skill from a socketed gem. `characterMods` are needed for
-    /// "+N to level of ... gems". Attacks need a weapon.
+    /// "+N to level of ... gems". Attacks need a weapon. Stat sets that belong to the
+    /// same use become Parts of the skill.
     let skill (db: GameDb) (characterMods: ModDb) (weapon: Weapon option) (setup: GemSetup) : Result<Skill * Coverage, string> =
         match skillOfGem db setup.Gem with
         | None -> Error(sprintf "unknown gem %s" setup.Gem)
@@ -162,10 +267,7 @@ module Gems =
                 let level = setup.Level + int (Mods.sumBase ctx [ Named "GemLevel" ] characterMods)
                 let maxLevel = data.Levels |> Map.toList |> List.map fst |> List.fold max 1
                 let level = min level maxLevel
-                let gemLevel = Map.tryFind level data.Levels
                 let quality = setup.Quality + int (Mods.sumBase ctx [ Named "GemQuality" ] characterMods)
-                let ownStats = stats data set level quality
-
                 let supportStats, supportCov =
                     setup.Supports
                     |> List.map (fun (name, lvl) ->
@@ -174,73 +276,14 @@ module Gems =
                             s.StatSets |> List.tryHead |> Option.map (fun set -> stats s set lvl 0) |> Option.defaultValue [], Coverage.empty
                         | _ -> [], { Coverage.empty with UnknownText = [ "unknown support: " + name ] })
                     |> List.unzip
-                let mods, cov = interpret (ownStats @ List.concat supportStats)
-                let cov = List.fold Coverage.merge cov supportCov
-
-                let isAttack = data.Types.Contains "Attack"
-                let baseDamage =
-                    if isAttack then
-                        weapon |> Option.map (fun w -> w.Damage) |> Option.defaultValue Map.empty
-                    else
-                        ownStats
-                        |> List.choose (fun (id, v) -> baseDamageStat id |> Option.map (fun (isMin, t) -> t, isMin, v))
-                        |> List.groupBy (fun (t, _, _) -> t)
-                        |> List.map (fun (t, xs) ->
-                            let pick m = xs |> List.tryFind (fun (_, isMin, _) -> isMin = m) |> Option.map (fun (_, _, v) -> v) |> Option.defaultValue 0.0
-                            t, { Min = pick true; Max = pick false })
-                        |> Map.ofList
-                let setLevel = Map.tryFind level set.Levels
-                let baseMultiplier =
-                    setLevel |> Option.bind (fun l -> l.BaseMultiplier)
-                    |> Option.orElse (gemLevel |> Option.bind (fun l -> l.BaseMultiplier))
-                    |> Option.defaultValue 1.0
-                let crit =
-                    if isAttack then weapon |> Option.map (fun w -> w.CritChance) |> Option.defaultValue 5.0
-                    else
-                        setLevel |> Option.bind (fun l -> l.CritChance)
-                        |> Option.orElse (gemLevel |> Option.bind (fun l -> l.CritChance))
-                        |> Option.defaultValue 0.0
-                let time =
-                    if isAttack then
-                        let aps = weapon |> Option.map (fun w -> w.AttacksPerSecond) |> Option.defaultValue 1.0
-                        let speedMult = 1.0 + (gemLevel |> Option.bind (fun l -> l.AttackSpeedMultiplier) |> Option.defaultValue 0.0) / 100.0
-                        match gemLevel |> Option.bind (fun l -> l.AttackTime) with
-                        | Some t -> t / 1000.0
-                        | None -> 1.0 / (aps * speedMult)
-                    else
-                        data.CastTime
-                let statOf id = ownStats |> List.tryFind (fst >> (=) id) |> Option.map snd
-                let flagOf id = statOf id |> Option.exists (fun v -> v <> 0.0)
-                let radius = statOf "active_skill_base_area_of_effect_radius"
-                let delivery =
-                    match statOf "base_number_of_projectiles" with
-                    | Some n when data.Types.Contains "Projectile" ->
-                        Projectiles
-                            { ProjectileShape.make (int n) with
-                                // "projectiles_nova": fired in a full circle
-                                Spread = (if flagOf "projectiles_nova" then 360.0 else statOf "total_projectile_spread_angle_override" |> Option.defaultValue 30.0)
-                                Pierce = int (statOf "projectile_base_number_of_targets_to_pierce" |> Option.defaultValue 0.0)
-                                Chains = int (statOf "number_of_chains" |> Option.defaultValue 0.0)
-                                CanShotgun = flagOf "projectiles_can_shotgun"
-                                Explosion = if data.Types.Contains "Area" then radius else None }
-                    | _ when data.Types.Contains "Projectile" ->
-                        Projectiles { ProjectileShape.make 1 with Explosion = if data.Types.Contains "Area" then radius else None }
-                    | _ ->
-                        match radius with
-                        | Some r when data.Types.Contains "Nova" -> AreaAroundSelf r
-                        | Some r when data.Types.Contains "Area" -> AreaAtTarget r
-                        | _ -> Single
-                Ok(
-                    { Name = data.Name
-                      Tags = tags
-                      BaseDamage = baseDamage
-                      BaseMultiplier = baseMultiplier
-                      AddedDamageEffectiveness = 1.0
-                      BaseCrit = crit
-                      BaseTime = time
-                      Cooldown = gemLevel |> Option.bind (fun l -> l.Cooldown)
-                      Hits = [ 1.0, 1.0 ]
-                      Delivery = delivery
-                      Mods = mods },
-                    cov
-                )
+                let supportStats = List.concat supportStats
+                let main, cov = buildSet data set data.Name tags level quality supportStats weapon
+                let parts, partCov =
+                    data.StatSets
+                    |> List.filter (fun s -> s <> set && isPart s)
+                    |> List.map (fun s ->
+                        let p, c = buildSet data s (data.Name + ": " + s.Label) tags level quality supportStats weapon
+                        { p with Consumes = None }, c)
+                    |> List.unzip
+                let cov = List.fold Coverage.merge cov (supportCov @ partCov)
+                Ok({ main with Parts = parts }, cov)
