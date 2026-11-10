@@ -165,6 +165,8 @@ module Geometry =
     /// the enemy's circle, if it does within `range`.
     let private rayHit (origin: Vec) (dir: Vec) range (e: EnemyDef) =
         let toE = Vec.sub e.Position origin
+        // starting inside the enemy: hit immediately
+        if Vec.length toE <= e.Size then Some 0.0 else
         let t = toE.X * dir.X + toE.Y * dir.Y
         let closest2 = (Vec.length toE) ** 2.0 - t * t
         let r2 = e.Size * e.Size
@@ -189,6 +191,8 @@ module Geometry =
             let r = radius r areaMult
             alive |> List.filter (within Vec.zero r) |> List.map (fun e -> e.Name)
         | Projectiles p ->
+            let origin = if p.FromImpact then primary.Position else Vec.zero
+            // "forwards": away from the player
             let aimAngle = Vec.angle primary.Position
             let spread = p.Spread * System.Math.PI / 180.0
             let angles =
@@ -205,7 +209,7 @@ module Geometry =
                 // Along the ray, in order; enemies this use already hit are passed through.
                 let onPath =
                     alive
-                    |> List.choose (fun e -> rayHit Vec.zero dir p.Range e |> Option.map (fun t -> t, e))
+                    |> List.choose (fun e -> rayHit origin dir p.Range e |> Option.map (fun t -> t, e))
                     |> List.sortBy fst
                     |> List.map snd
                     |> List.filter (fun e -> p.CanShotgun || not (hitByUse.Contains e.Name))

@@ -14,7 +14,9 @@ type ProjectileShape =
       /// Radius of an explosion where a projectile hits, if any.
       Explosion: float option
       /// Extra projectiles per stack of a charge: ("PowerCharge", 3).
-      PerCharge: (string * int) option }
+      PerCharge: (string * int) option
+      /// Projectiles start where the skill lands (on the aimed enemy), not at the player.
+      FromImpact: bool }
 
 /// How a skill use finds its targets.
 type Delivery =
@@ -36,7 +38,8 @@ module ProjectileShape =
           Range = 100.0
           CanShotgun = false
           Explosion = None
-          PerCharge = None }
+          PerCharge = None
+          FromImpact = false }
 
 /// A skill as the engine sees it: where its damage comes from and how long it takes.
 type Skill =

@@ -405,7 +405,20 @@ module StatMap =
             | _ -> None
         | _ -> None
 
-    let private rules = [ buildup; scaledDamage; addedDamage; penetration; gainAs; convert; ailmentStat; crit; speed; gemLevel ]
+    /// "<scope> area of effect +% [final] [conditions]"
+    let private areaOfEffect rev v =
+        let words = List.rev rev
+        match List.tryFindIndex ((=) "+%") words with
+        | Some i when i >= 3 && words.[i - 3] = "area" && words.[i - 2] = "of" && words.[i - 1] = "effect" ->
+            let isFinal, tail =
+                match List.skip (i + 1) words with
+                | "final" :: t -> true, t
+                | t -> false, t
+            scopes (List.take (i - 3) words @ tail)
+            |> Option.map (fun sc -> [ apply sc (Mod.make (if isFinal then More else Inc) AreaOfEffect v) ])
+        | _ -> None
+
+    let private rules = [ areaOfEffect; buildup; scaledDamage; addedDamage; penetration; gainAs; convert; ailmentStat; crit; speed; gemLevel ]
 
     let private pattern (id: string) (v: float) : Meaning option =
         let rev = List.rev (split id)

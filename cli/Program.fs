@@ -12,6 +12,7 @@
 ///   --charges N      power charges at the start (default: your maximum)
 ///   --skip P         override the chance (%) to not remove charges when consuming
 ///   --bonded         apply "Bonded:" rune lines (normally Shaman only)
+///   --shotgun        let several projectiles of one use hit the same enemy
 ///   --suite          run the standard scenarios (pack, pack + 2 rares, surrounded, boss) and print a table
 ///   --data DIR       exported game data (default: data/game next to the repo)
 module PoEsie.Cli
@@ -33,6 +34,8 @@ let rec private opts (args: string list) =
     match args with
     | "--suite" :: rest -> Map.add "suite" "1" (opts rest)
     | "--bonded" :: rest -> Map.add "bonded" "1" (opts rest)
+    | "--all" :: rest -> Map.add "all" "1" (opts rest)
+    | "--shotgun" :: rest -> Map.add "shotgun" "1" (opts rest)
     | k :: v :: rest when k.StartsWith "--" -> Map.add (k.Substring 2) v (opts rest)
     | _ :: rest -> opts rest
     | [] -> Map.empty
@@ -86,8 +89,9 @@ let main argv =
                 printfn "  game shows: %s, %s crit, %s APS" (show d.Damage) (d.CritChance |> Option.map (sprintf "%.2f%%") |> Option.defaultValue "?") (d.AttacksPerSecond |> Option.map (sprintf "%.2f") |> Option.defaultValue "?")
         let cov = sheet.Coverage
         printfn "\n-- not understood on the character (%d unmapped stats, %d unsimulated, %d unknown lines)" cov.Unmapped.Length cov.Unsimulated.Length cov.UnknownText.Length
-        cov.Unmapped |> List.map fst |> top 15 |> List.iter (fun (s, n) -> printfn "  unmapped     %s%s" s (if n > 1 then sprintf " x%d" n else ""))
-        cov.Unsimulated |> List.map snd |> top 10 |> List.iter (fun (s, n) -> printfn "  unsimulated  %s x%d" s n)
+        let topN = if Map.containsKey "all" o then 1000 else 15
+        cov.Unmapped |> List.map fst |> top topN |> List.iter (fun (s, n) -> printfn "  unmapped     %s%s" s (if n > 1 then sprintf " x%d" n else ""))
+        cov.Unsimulated |> List.countBy id |> List.sortBy (fun ((_, m), _) -> m) |> List.truncate topN |> List.iter (fun ((s, m), n) -> printfn "  unsimulated  %-14s %s%s" m s (if n > 1 then sprintf " x%d" n else ""))
         cov.UnknownText |> List.truncate 15 |> List.iter (printfn "  unknown      %s")
 
         printfn "\n-- socket groups"
@@ -108,6 +112,12 @@ let main argv =
                 printfn "  base %s, x%.2f, crit %.1f%%, %.3fs per use%s" (skill.BaseDamage |> Map.toList |> List.map (fun (t, r) -> sprintf "%s %.0f-%.0f" (DamageType.name t) r.Min r.Max) |> String.concat " ") skill.BaseMultiplier skill.BaseCrit skill.BaseTime (match skill.Cooldown with Some c -> sprintf ", cooldown %.2fs" c | None -> "")
                 skillCov.Unmapped |> List.iter (fun (s, v) -> printfn "  unmapped skill stat     %s = %g" s v)
                 skillCov.Unsimulated |> List.distinctBy snd |> List.iter (fun (s, m) -> printfn "  unsimulated skill stat  %s (%s)" s m)
+                // --shotgun: several projectiles of one use may hit the same enemy
+                let rec shotgun (s: Skill) =
+                    { s with
+                        Delivery = (match s.Delivery with Projectiles p -> Projectiles { p with CanShotgun = true } | d -> d)
+                        Parts = s.Parts |> List.map shotgun }
+                let skill = if Map.containsKey "shotgun" o then shotgun skill else skill
                 let level = int (get "level" 83.0)
                 let profile r =
                     let p = Rarity.defaults r

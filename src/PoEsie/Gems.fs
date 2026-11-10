@@ -231,6 +231,7 @@ module Gems =
                         Chains = int (statOf "number_of_chains" |> Option.defaultValue 0.0)
                         CanShotgun = flagAny "projectiles_can_shotgun"
                         PerCharge = perCharge
+                        FromImpact = data.Types.Contains "ProjectilesNotFromUser"
                         Explosion = if data.Types.Contains "Area" && not (List.contains "is_area_damage" set.Stats) then radius else None }
             else
                 match radius with
