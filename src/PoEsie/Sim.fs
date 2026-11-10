@@ -909,7 +909,9 @@ module Sim =
                             gainMana v "kill" kill w
                         else w
                     | _ -> w
-                let inflicted = if dead then [] else Ailments.fromHit rng ctx mods def hit
+                // a killing hit still inflicts its ailments (they count for meta energy and Archon);
+                // only their damage over time on the dead monster is dropped
+                let inflicted = Ailments.fromHit rng ctx mods def hit
                 let w =
                     if dead then
                         react env rng actor OnKill skill None w
@@ -934,7 +936,15 @@ module Sim =
                         let ratio types = Dmg.sumOf types hit.Unmitigated / threshold
                         let before = status e
                         let after = if dead then Map.empty else status w.Enemies.[target]
-                        let newly a = after.ContainsKey (Ailment.status a) && not (before.ContainsKey (Ailment.status a))
+                        let newly a =
+                            if dead then
+                                // on a killing hit: what this hit inflicted, and buildup that would complete
+                                inflicted
+                                |> List.exists (fun i ->
+                                    match i with
+                                    | Dot (x, _, _, _, _) | Status (x, _, _) -> x = a
+                                    | AddBuildup (x, pct) -> x = a && (Map.tryFind x e.Buildup |> Option.defaultValue 0.0) + pct >= 100.0)
+                            else after.ContainsKey (Ailment.status a) && not (before.ContainsKey (Ailment.status a))
                         actor.Metas
                         |> List.fold
                             (fun w meta ->
@@ -951,7 +961,7 @@ module Sim =
                 // during the recovery period after one ends
                 let w =
                     // every ignite applied by this hit counts, not only a first one
-                    let ignited = (not dead) && (inflicted |> List.exists (function Dot (Ignite, _, _, _, _) -> true | _ -> false))
+                    let ignited = inflicted |> List.exists (function Dot (Ignite, _, _, _, _) -> true | _ -> false)
                     if not ignited || actor.Archons.IsEmpty then w
                     else
                         let st = Map.find actor.Name w.Actors

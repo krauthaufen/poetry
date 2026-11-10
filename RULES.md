@@ -194,3 +194,4 @@ Confidence levels:
 | Damage taken as | `<type>_hit_and_dot_damage_%_taken_as_<type>` moves part of each incoming type before mitigation | game text | data |
 | All damage ignites / chills / shocks | ignite (chill, shock) scales from all damage types, also for chance and meta energy | game text | data |
 | Infusions | not simulated; `--infused` assumes they are always available (skills use their "-Infused" stat sets) | user (always keeps them up) | user |
+| Killing hits and ailments | a hit that kills still inflicts its ailments for "on freeze / shock / ignite" effects (meta energy, Archon); their damage over time on the dead monster is dropped | user (Cast on Elemental Ailment triggers much more in packs) | user |
