@@ -140,12 +140,14 @@ module Pob =
     /// "Idols socketed in this item gain the benefits of their Bonded modifiers"
     /// (Darkness Enthroned). The values the game reports already include the item's
     /// increased effect of socketed items.
-    let private resolveBonded (build: PobBuild) (text: string) =
+    let private resolveBonded (build: PobBuild) (slot: string) (text: string) =
+        let slotIsBody = slot = "Body Armour"
         let lines = text.Split('\n')
         let enabled =
             (build.ClassName + build.Ascendancy).Contains "Shaman"
             || Map.containsKey "bonded" build.Config
-            || lines |> Array.exists (fun l -> l.Contains "gain the benefits of their Bonded modifiers")
+            || (lines |> Array.exists (fun l -> l.Contains "gain the benefits of their Bonded modifiers")
+                && (slotIsBody || lines |> Array.exists (fun l -> l.Contains "as though it was a Body Armour")))
         lines
         |> Array.choose (fun l ->
             let t = l.Trim()
@@ -167,7 +169,7 @@ module Pob =
 
     /// Character mods from equipped items and allocated passives.
     let character (db: GameDb) (tree: Map<int, TreeNode>) (build: PobBuild) : CharacterSheet =
-        let items = build.Items |> List.filter (fst >> alwaysOn) |> List.map (fun (slot, text) -> slot, resolveBonded build text)
+        let items = build.Items |> List.filter (fst >> alwaysOn) |> List.map (fun (slot, text) -> slot, resolveBonded build slot text)
         let extraNodes = allocatedByItems tree (List.map snd items)
         let build = { build with TreeNodes = build.TreeNodes @ extraNodes }
         let parsed = items |> List.map (fun (slot, text) -> slot, Items.parse db text)

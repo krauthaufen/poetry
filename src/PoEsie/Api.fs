@@ -45,7 +45,13 @@ module Api =
     let private resolveBonded (item: Json) (lines: string list) =
         let socketed = Json.list (Json.field "socketedItems" item)
         let isIdol (s: Json) = (Json.strField "typeLine" s |> Option.defaultValue "").Contains "Idol"
-        let enabled = lines |> List.exists (fun l -> l.Contains "gain the benefits of their Bonded modifiers")
+        // The enabling line is a "Body Armours:" idol line: it needs a body armour, or an
+        // item that gains bonuses from socketed items as though it were one.
+        let countsAsBodyArmour =
+            Json.strField "inventoryId" item = Some "BodyArmour"
+            || lines |> List.exists (fun l -> l.Contains "as though it was a Body Armour")
+        let enabled =
+            countsAsBodyArmour && lines |> List.exists (fun l -> l.Contains "gain the benefits of their Bonded modifiers")
         let idolBonded = socketed |> List.filter isIdol |> List.collect bondedShapes |> Set.ofList
         lines
         |> List.choose (fun l ->
