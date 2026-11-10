@@ -804,7 +804,9 @@ module Sim =
                 let flame = p.InfernalFlame + cost
                 let w =
                     if flame >= 2.0 * v.Mana then
-                        let burn = (v.Life + v.EnergyShield) * Mods.sumBase Ctx.empty [ Named "InfernalFlameBurn" ] (ModDb.ofList actor.Mods) / 100.0
+                        // a fire hit on yourself: fire resistance applies
+                        let fireRes = Map.tryFind Fire v.Resist |> Option.defaultValue 0.0
+                        let burn = (v.Life + v.EnergyShield) * Mods.sumBase Ctx.empty [ Named "InfernalFlameBurn" ] (ModDb.ofList actor.Mods) / 100.0 * (1.0 - fireRes / 100.0)
                         { w with Player = Some { p with InfernalFlame = 0.0 }; Counts = bump "infernal flame burn" w.Counts }
                         |> takeDamage v (Map.ofList [ Fire, burn ])
                     else { w with Player = Some { p with InfernalFlame = flame } }
