@@ -88,6 +88,16 @@ let main argv =
             elif text.TrimStart().StartsWith "<" then Pob.read text, []
             else Pob.read (decodeBuildCode text), []
         let build = if Map.containsKey "bonded" o then { build with Config = Map.add "bonded" "1" build.Config } else build
+        // --without "A,10:B": drop gem A from every group, B only from group 10 (before the
+        // character is built, so persistent buffs and supports elsewhere go too)
+        let build =
+            let dropped = (Map.tryFind "without" o |> Option.defaultValue "").Split(',') |> Array.map (fun x -> x.Trim()) |> Array.filter ((<>) "") |> List.ofArray
+            let drops gi (name: string) =
+                dropped |> List.exists (fun d ->
+                    match d.IndexOf ':' with
+                    | k when k > 0 && fst (System.Int32.TryParse(d.Substring(0, k))) -> int (d.Substring(0, k)) = gi + 1 && d.Substring(k + 1) = name
+                    | _ -> d = name)
+            { build with Groups = build.Groups |> List.mapi (fun gi g -> { g with Gems = g.Gems |> List.filter (fun x -> not (drops gi x.Name)) }) }
         let sheet = Pob.character db tree build |> fun s -> Pob.withPersistentBuffs db s build
         let bases = Defence.classBases (File.ReadAllText(Path.Combine(dataDir, "tree.json")))
         // motes: base maximum from the mote-granting gem's description stat
@@ -177,8 +187,6 @@ let main argv =
         match List.tryItem (groupIdx - 1) build.Groups with
         | None -> printfn "no socket group %d" groupIdx; 1
         | Some group ->
-            let dropped = (Map.tryFind "without" o |> Option.defaultValue "").Split(',') |> Array.map (fun x -> x.Trim()) |> Array.filter ((<>) "") |> Set.ofArray
-            let group = { group with Gems = group.Gems |> List.filter (fun g -> not (dropped.Contains g.Name)) }
             match Pob.groupSkill db sheet group |> List.tryHead with
             | None -> printfn "group %d has no active gem" groupIdx; 1
             | Some (Error e) -> printfn "group %d: %s" groupIdx e; 1
@@ -248,7 +256,8 @@ let main argv =
                                 let copy =
                                     if infused then None
                                     else Behaviours.infusedCopy db charMods sheet.MainHand setup |> Option.map (fun (el, c) -> s.Name, el, { (Behaviours.applyObserved c) with Name = s.Name + " infused" })
-                                Some(Behaviours.applyObserved s, copy, Behaviours.verisiumGrant db charMods setup, Behaviours.useRules db charMods setup s.Name (get "pickup" 1.0))
+                                let rules = Behaviours.useRules db charMods setup s.Name (get "pickup" 1.0) @ Behaviours.chargeBuffRules db charMods setup s
+                                Some(Behaviours.applyObserved s, copy, Behaviours.verisiumGrant db charMods setup, rules)
                             | _ -> None)
                 let names key = (Map.tryFind key o |> Option.defaultValue "").Split(',') |> Array.map (fun x -> x.Trim()) |> Array.filter ((<>) "") |> List.ofArray
                 // --rotation "A,B": skills you press, cycled in this order (default: the simulated group)
@@ -257,10 +266,22 @@ let main argv =
                     | Some _ -> names "rotation" |> List.choose pressedSkill
                     | None -> [ skill, None, 0, [] ]
                 let onCooldown = names "on-cooldown" |> List.choose pressedSkill
+                // --buff A,B: cast when its buff is down (charge buffs: and the charges are full)
+                let buffs = names "buff" |> List.choose pressedSkill
                 // skills that only grant infusions don't hit
                 let onCooldown = onCooldown |> List.map (fun (s, c, g, r) -> (if g > 0 then { s with Hits = [] } else s), c, g, r)
                 let pressed = pressedAll |> List.map (fun (s, _, _, _) -> s)
-                let useRules = pressedAll @ onCooldown |> List.collect (fun (_, _, _, r) -> r)
+                let buffs = buffs |> List.map (fun (s, c, g, r) -> (if s.BaseDamage.IsEmpty then { s with Hits = [] } else s), c, g, r)
+                let useRules = pressedAll @ onCooldown @ buffs |> List.collect (fun (_, _, _, r) -> r)
+                let buffSteps =
+                    buffs
+                    |> List.map (fun (s, _, _, rules) ->
+                        let full =
+                            rules |> List.tryPick (fun r -> match r.Reaction with ChargeBuff (_, ch, _, _, _) -> Some ch | _ -> None)
+                            |> Option.map (fun ch -> fun (v: View) -> (Map.tryFind ch v.Buffs |> Option.defaultValue 0) >= (Map.tryFind ch maxResources |> Option.defaultValue 0))
+                            |> Option.defaultValue (fun _ -> true)
+                        { Use = s.Name; When = fun v -> not (v.Buffs.ContainsKey(s.Name + " buff")) && full v })
+                let buffSkills = buffs |> List.map (fun (s, _, _, _) -> s)
                 let onCooldown = onCooldown |> List.map (fun (s, c, g, _) -> s, c, g)
                 let consumers =
                     (pressedAll |> List.choose (fun (_, c, _, _) -> c)) @ (onCooldown |> List.choose (fun (_, c, _) -> c))
@@ -290,10 +311,11 @@ let main argv =
                              { Use = s.Name; When = fun v -> (Map.tryFind "VerisiumInfusion" v.Buffs |> Option.defaultValue 0) < cap }
                          else Actor.always s.Name))
                     @ rotation
+                let rotation = buffSteps @ rotation
                 let fight =
                     { Enemies = enemies
                       Player =
-                        { Actor.make "Player" sheet.Mods (pressed @ (onCooldown |> List.map (fun (s, _, _) -> s)) @ (metas |> List.collect (fun (_, s, _) -> s)) @ (consumers |> List.map (fun (_, _, c) -> c))) with
+                        { Actor.make "Player" sheet.Mods (pressed @ buffSkills @ (onCooldown |> List.map (fun (s, _, _) -> s)) @ (metas |> List.collect (fun (_, s, _) -> s)) @ (consumers |> List.map (fun (_, _, c) -> c))) with
                             Rotation = rotation
                             Rules = grantRules @ useRules
                             Metas = metas |> List.map (fun (m, _, _) -> m)

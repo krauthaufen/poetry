@@ -288,6 +288,37 @@ module Behaviours =
         |> List.sumBy snd
         |> int
 
+    /// A buff from consuming charges (Charged Staff: "Consume all Power Charges ... adding
+    /// Lightning damage ... to your Quarterstaff Attacks"): "X_attack_minimum/maximum_added_T_damage_per_stack",
+    /// "X_buff_duration_per_stack_ms" x skill duration, "chance to double effect of removing
+    /// charges" doubles the stacks. Charged Staff's buff is for quarterstaff attacks.
+    let chargeBuffRules (db: GameDb) (charMods: ModDb) (setup: GemSetup) (skill: Skill) : Rule list =
+        let raw = Gems.rawStats db charMods setup
+        let sum id = raw |> List.filter (fun (k, _) -> k = id) |> List.sumBy snd
+        let perStackSeconds =
+            raw |> List.tryPick (fun (k, v) -> if k.EndsWith "_buff_duration_per_stack_ms" then Some(v / 1000.0) else None)
+        match skill.Consumes, perStackSeconds with
+        | Some charge, Some seconds ->
+            let quarterstaff = setup.Gem = "Charged Staff"
+            let added =
+                DamageType.all
+                |> List.collect (fun t ->
+                    let n = (DamageType.name t).ToLowerInvariant()
+                    let lo = raw |> List.filter (fun (k, _) -> k.EndsWith (sprintf "_attack_minimum_added_%s_damage_per_stack" n)) |> List.sumBy snd
+                    let hi = raw |> List.filter (fun (k, _) -> k.EndsWith (sprintf "_attack_maximum_added_%s_damage_per_stack" n)) |> List.sumBy snd
+                    if hi > 0.0 then
+                        [ Mod.base' (AddedMin t) lo; Mod.base' (AddedMax t) hi ]
+                        |> List.map (Mod.whenever (SkillIs Attack))
+                        |> List.map (fun m -> if quarterstaff then Mod.whenever (SkillIs Quarterstaff) m else m)
+                    else [])
+            if added.IsEmpty then []
+            else
+                let ctx = { Ctx.empty with SkillTags = skill.Tags; SkillName = skill.Name }
+                let duration = seconds * Mods.mult ctx [ SkillDuration ] (ModDb.ofList (ModDb.toList charMods @ skill.Mods))
+                [ { Hook = OnUse; Filter = Called skill.Name; Chance = 100.0
+                    Reaction = ChargeBuff(skill.Name + " buff", charge, added, duration, sum "chance_%_to_double_effect_of_removing_charges") } ]
+        | _ -> []
+
     /// What a used skill does besides hitting, from its gem data:
     /// - "all elemental exposure magnitude" (Frost Bomb): exposure to fire, cold and lightning
     ///   for its secondary duration, x (1 + exposure effect);

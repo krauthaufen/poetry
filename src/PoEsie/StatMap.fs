@@ -306,6 +306,8 @@ module StatMap =
         | "lose_%_of_life_es_and_mana_when_skill_is_used" -> one (Mod.base' (Named "LosePoolsOnUse") v)
         | "support_cooldown_reduction_cooldown_recovery_+%" -> one (Mod.inc CooldownRecovery v)
         | "skill_effect_duration_+%" -> one (Mod.inc SkillDuration v)
+        | "support_more_duration_skill_effect_duration_+%_final"
+        | "support_reduced_duration_skill_effect_duration_+%_final" -> one (Mod.more SkillDuration v)
         | "ailment_chance_+%" -> Some(Mods(allAilments |> List.map (fun a -> Mod.inc (AilmentChance a) v)))
         | "ailment_effect_+%" | "base_ailment_effect_+%" -> one (Mod.inc (AilmentMagnitude None) v)
         | "base_damaging_ailment_effect_+%" ->

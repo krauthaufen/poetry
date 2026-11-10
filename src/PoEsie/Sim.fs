@@ -52,6 +52,10 @@ type Reaction =
     /// A remnant of the resource that arrives after `delay` (detonation + pickup);
     /// `extraChance` % for two.
     | DropRemnant of resource: string * delay: float * extraChance: float
+    /// A buff scaled by the charges held when used (Charged Staff): one stack per charge
+    /// (`doubleChance` % for twice as many), `perStack` mods and seconds per stack. A new
+    /// one replaces the old.
+    | ChargeBuff of name: string * charge: string * perStack: Mod list * secondsPerStack: float * doubleChance: float
 
 type Rule =
     { Hook: Hook
@@ -726,6 +730,15 @@ module Sim =
                     | TriggerSkill name -> trigger env rng actor name w
                     | GainEnergy (meta, amount) -> gainEnergy env rng actor meta amount w
                     | GainResource (r, n) -> schedule w.Time (GainStacks(actor.Name, r, n)) w
+                    | ChargeBuff (name, charge, perStack, seconds, doubleChance) ->
+                        let held = Map.tryFind charge (Map.find actor.Name w.Actors).Buffs |> Option.map (fun e -> e.Stacks) |> Option.defaultValue 0
+                        if held = 0 then w
+                        else
+                            let stacks = if rng.Chance doubleChance then 2 * held else held
+                            let e = { Name = name; Mods = perStack |> List.map (Mod.scaled (float stacks)); Stacks = stacks; Expires = w.Time + seconds * float stacks }
+                            updateActor actor.Name (fun st -> { st with Buffs = Map.add name e st.Buffs }) w
+                            |> schedule e.Expires Expire
+                            |> fun w -> { w with Counts = bump ("buff:" + name) w.Counts }
                     | DropRemnant (r, delay, extra) ->
                         let n = if rng.Chance extra then 2 else 1
                         { w with Counts = bump ("remnant:" + r) w.Counts } |> schedule (w.Time + delay) (GainStacks(actor.Name, r, n)))
@@ -1468,6 +1481,24 @@ module Sim =
                             | Invocation _ -> Some(m.Name, m.MaxEnergy * fight.BankedInvocations)
                             | AtMaximum -> None)
                         |> Map.ofList
+                    // charge buffs (Charged Staff) are up when the fight starts, if fights start prepared
+                    let res =
+                        if fight.BankedInvocations <= 0.0 then res
+                        else
+                            a.Rules
+                            |> List.fold
+                                (fun (res: Map<string, Effect>) r ->
+                                    match r.Reaction with
+                                    | ChargeBuff (name, charge, perStack, seconds, doubleChance) ->
+                                        match Map.tryFind charge res with
+                                        | Some c when c.Stacks > 0 ->
+                                            let stacks = if rng.Chance doubleChance then 2 * c.Stacks else c.Stacks
+                                            // a random part of the duration has already passed
+                                            let left = seconds * float stacks * (0.5 + 0.5 * rng.Float())
+                                            Map.add name { Name = name; Mods = perStack |> List.map (Mod.scaled (float stacks)); Stacks = stacks; Expires = left } res
+                                        | _ -> res
+                                    | _ -> res)
+                                res
                     a.Name, { empty with Buffs = res; Energy = banked })
                 |> Map.ofList
               Queue = Map.empty

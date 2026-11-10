@@ -187,6 +187,7 @@ Confidence levels:
 | Atziri's Impatience | "Lose 25% of maximum Life, Mana and Energy Shield when you use Supported Skills": applied on use, life floors at 1 | stat description | data |
 | Stored cooldown uses | gem level `storedUses`, doubled by Second Wind; each use recharges independently ("just two cooldowns"); `--sequential-uses` for one after another | user (poedb describes sequential) | user |
 | Verisium in the rotation | cast when ready, but only while Verisium infusions are below maximum | player behaviour | guess |
+| Charge buffs (Charged Staff) | on use: one stack per charge held (Heightened Charges: chance for twice as many), each adding the gem's per-stack added damage to quarterstaff attacks and per-stack duration x skill duration; a new cast replaces the buff; charges consumed as usual (skip chance applies). `--buff` casts it when the buff is down and charges are full; fights that start prepared start with it up | gem data, user (replaces, duration per charge, 100% not consumed) | data + user |
 | Second Wind | `base_cooldown_speed_+%_final` = less cooldown recovery; Verisium 4.9 s -> 5.4 s, as the game shows | gem data, in-game value | data |
 | Banked invocations | fights start with invocations at maximum energy (banked while clearing); `--banked 0` starts empty | user (presses both invocations when ready) | user |
 | Stat text with only a literal | a template with no placeholder but one number ("down to a minimum of -50%") gives that number as the stat value | game text | data |
