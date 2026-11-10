@@ -280,6 +280,7 @@ let main argv =
                       // "Cast on Self": the slam lands on the player
                       Reach = (if Map.containsKey "cast-on-self" o then 0.0 else get "reach" 15.0)
                       CascadeSpacing = get "cascade-spacing" 1.5
+                      BankedInvocations = get "banked" 1.0
                       Walls = []
                       MaxTime = get "time" 60.0 }
                 printfn ""

@@ -119,6 +119,9 @@ module StatMap =
             match rest with
             | ("vs" | "against") :: st :: "enemies" :: tail when (statusWord st).IsSome ->
                 go (EnemyHas (statusWord st).Value :: acc) tail
+            | "to" :: "rare" :: "and" :: "unique" :: "enemies" :: tail
+            | ("vs" | "against") :: "rare" :: "and" :: "unique" :: "enemies" :: tail ->
+                go (EnemyHas "RareOrUnique" :: acc) tail
             | ("vs" | "against") :: "enemies" :: "affected" :: "by" :: "status" :: "ailments" :: tail ->
                 go (EnemyHas "AnyAilment" :: acc) tail
             | "if" :: ("crit" | "crits") :: "recently" :: tail | "if" :: "have" :: "crit" :: "recently" :: tail ->
@@ -346,6 +349,14 @@ module StatMap =
         | "frenzy_charge_duration_+%" | "base_frenzy_charge_duration_+%" -> one (Mod.inc (Named "FrenzyChargeDuration") v)
         | "endurance_charge_duration_+%" | "base_endurance_charge_duration_+%" -> one (Mod.inc (Named "EnduranceChargeDuration") v)
         | "energy_generated_+%" -> one (Mod.inc (Named "EnergyGenerated") v)
+        | "elemental_penetration_can_go_down_to_override" -> one (Mod.base' (Named "PenetrationFloor") v)
+        | "pain_attunement_keystone_critical_strike_multiplier_+%_final" -> one (Mod.more CritBonus v)
+        | "critical_strike_chance_+%_if_triggered_skill_recently" -> one (Mod.inc CritChance v |> Mod.whenever (WhileBuff "TriggeredRecently"))
+        | "critical_strike_multiplier_+_if_have_not_dealt_critical_strike_recently" -> one (Mod.inc CritBonus v |> Mod.whenever (Not(WhileBuff "CritRecently")))
+        | "ailment_chance_+%_vs_exposed" ->
+            Some(Mods(allAilments |> List.map (fun a -> Mod.inc (AilmentChance a) v |> Mod.whenever (EnemyHas "Exposed"))))
+        | id when id.StartsWith "specific_skill_level:" ->
+            one (Mod.base' (Named "GemLevel") v |> Mod.whenever (SkillIs(Tag("Gem:" + id.Substring 21))))
         | "triggered_skill_damage_+%" -> one (Mod.inc (Damage AllDamage) v |> Mod.whenever (SkillIs Triggered))
         | "cast_on_crit_global_critical_hit_chance_granted_+%" -> one (Mod.inc CritChance v)
         | "support_spell_cascade_number_of_cascades_per_side" -> one (Mod.base' (Named "CascadesPerSide") v)

@@ -230,7 +230,14 @@ module Hit =
             |> min maxRes
             |> max Constants.resistFloor
         let pen = Mods.sumBase attackerCtx [ Penetration t ] attackerMods
-        if res > 0.0 then max 0.0 (res - pen) else res
+        // penetration stops at 0, or lower with "can penetrate down to a minimum of X"
+        let floor =
+            if DamageType.isElemental t then
+                match Mods.override' attackerCtx (Named "PenetrationFloorOverride") attackerMods with
+                | Some f -> f
+                | None -> min 0.0 (Mods.sumBase attackerCtx [ Named "PenetrationFloor" ] attackerMods)
+            else 0.0
+        if res > floor then max floor (res - pen) else res
 
     /// Armour: reduction = A / (A + 10 * damage), plus flat reduction, capped at 75% for monsters.
     let physicalReduction (defender: Defender) damage =

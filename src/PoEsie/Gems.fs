@@ -324,6 +324,7 @@ module Gems =
                     (data.Types |> Set.toList |> List.choose tagOfType)
                     @ (if data.Types.Contains "Attack" then weapon |> Option.map (fun w -> w.Tags) |> Option.defaultValue [] else [])
                     @ requirementTags
+                    @ [ Tag("Gem:" + data.Name) ]
                     |> Set.ofList
                 let ctx = { Ctx.empty with SkillName = data.Name; SkillTags = tags }
                 let level = setup.Level + int (Mods.sumBase ctx [ Named "GemLevel" ] characterMods)

@@ -218,6 +218,9 @@ type Fight =
       /// Spell Cascade: distance between impacts, as a multiple of the impact radius.
       CascadeSpacing: float
       Walls: Geometry.Wall list
+      /// Invocations start with this fraction of their maximum energy (banked while
+      /// clearing before the fight; 0 = empty).
+      BankedInvocations: float
       MaxTime: float }
 
 module Fight =
@@ -230,6 +233,7 @@ module Fight =
           // Spell Cascade impacts land about 1.5 radii apart (user observation)
           CascadeSpacing = 1.5
           Walls = []
+          BankedInvocations = 1.0
           MaxTime = maxTime }
 
 /// A timed effect with stacks.
@@ -381,6 +385,8 @@ module Sim =
         |> fun m -> if e.Def.Moving then Map.add "Moving" 1 m else m
         |> fun m -> if ailing then Map.add "AnyAilment" 1 m else m
         |> fun m -> if e.Debuffs |> Map.exists (fun k _ -> k.StartsWith "Curse:") then Map.add "Cursed" 1 m else m
+        |> fun m -> if e.Debuffs |> Map.exists (fun k _ -> k.StartsWith "Exposure:") then Map.add "Exposed" 1 m else m
+        |> fun m -> if e.Def.Rarity = Rare || e.Def.Rarity = Unique then Map.add "RareOrUnique" 1 m else m
 
     let private defender (e: EnemyState) : Defender =
         let debuffMods =
@@ -781,7 +787,10 @@ module Sim =
         let skill = skillOf actor name
         let st = Map.find actor.Name w.Actors
         if ready st w.Time skill then
-            { w with Counts = bump ("trigger:" + name) w.Counts } |> startUse env rng actor skill 0.0
+            { w with Counts = bump ("trigger:" + name) w.Counts }
+            |> updateActor actor.Name (fun st -> { st with Buffs = Map.add "TriggeredRecently" { Name = "TriggeredRecently"; Mods = []; Stacks = 1; Expires = w.Time + 4.0 } st.Buffs })
+            |> schedule (w.Time + 4.0) Expire
+            |> startUse env rng actor skill 0.0
         else
             w
 
@@ -1341,7 +1350,14 @@ module Sim =
                             let expires = match Map.tryFind k a.ResourceDurations with Some d -> rng.Float() * d | None -> infinity
                             k, { Name = k; Mods = []; Stacks = n; Expires = expires })
                         |> Map.ofList
-                    a.Name, { empty with Buffs = res })
+                    let banked =
+                        a.Metas
+                        |> List.choose (fun m ->
+                            match m.Release with
+                            | Invocation _ -> Some(m.Name, m.MaxEnergy * fight.BankedInvocations)
+                            | AtMaximum -> None)
+                        |> Map.ofList
+                    a.Name, { empty with Buffs = res; Energy = banked })
                 |> Map.ofList
               Queue = Map.empty
               Seq = 0

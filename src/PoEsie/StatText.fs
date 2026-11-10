@@ -110,15 +110,19 @@ module StatText =
                 sb.Append('#') |> ignore
                 slots.Add(Shows idx)
                 i <- close + 1
-            elif (c = '+' || c = '-') && i + 1 < n && (text.[i + 1] = '{' || isDigit text.[i + 1]) then
+            elif (c = '+' || c = '-') && i + 1 < n && text.[i + 1] = '{' then
                 // A literal sign right before a placeholder is part of the number.
                 i <- i + 1
-            elif isDigit c then
+            elif isDigit c || ((c = '+' || c = '-') && i + 1 < n && isDigit text.[i + 1]) then
+                // a literal number, its sign included ("down to a minimum of -50%")
+                let negative = c = '-'
+                if c = '+' || c = '-' then i <- i + 1
                 let start = i
                 while i < n && (isDigit text.[i] || (text.[i] = '.' && i + 1 < n && isDigit text.[i + 1])) do
                     i <- i + 1
                 sb.Append('#') |> ignore
-                slots.Add(Literal(float (text.Substring(start, i - start))))
+                let v = float (text.Substring(start, i - start))
+                slots.Add(Literal(if negative then -v else v))
             else
                 sb.Append(System.Char.ToLowerInvariant c) |> ignore
                 i <- i + 1
@@ -237,6 +241,12 @@ module StatText =
                         // flag-like lines with no number ("Gem Quality grants ... an additional effect"):
                         // the stat is at least its lower limit
                         | lo, _ when variant.Slots.IsEmpty -> Some(Some(stat, lo |> Option.defaultValue 1.0))
+                        // no placeholder, one literal number: that number is the value
+                        // ("down to a minimum of -50%")
+                        | _ when variant.Slots |> List.forall (function Literal _ -> true | _ -> false) ->
+                            match variant.Slots with
+                            | [ Literal v ] -> Some(Some(stat, v))
+                            | _ -> Some None
                         | _ -> Some None)
             if literalsOk && List.forall Option.isSome values then
                 Some(values |> List.choose id |> List.choose id)
@@ -269,8 +279,23 @@ module StatText =
                 | Global -> readings |> List.tryFind (isLocal >> not)
             preferred |> Option.orElse (List.tryHead readings)
 
+    /// Lines with a skill name in them ("+1 to Level of all Comet Skills"): the stat
+    /// description has a name placeholder our number templates can't hold.
+    let private named (line: string) =
+        let l = line.Trim()
+        let prefix, suffix = "to Level of all ", " Skills"
+        let i = l.IndexOf prefix
+        if (l.StartsWith "+" || l.StartsWith "-") && i > 0 && l.EndsWith suffix then
+            match System.Double.TryParse(l.Substring(0, i).Trim()) with
+            | true, v -> Some [ "specific_skill_level:" + l.Substring(i + prefix.Length, l.Length - i - prefix.Length - suffix.Length), v ]
+            | _ -> None
+        else None
+
+    let private parseInWithNamed context index line =
+        parseIn context index line |> Option.orElse (named line)
+
     /// Parse one line of item / passive text into (stat id, value) pairs (global context).
-    let parse (index: Index) (line: string) = parseIn Global index line
+    let parse (index: Index) (line: string) = parseInWithNamed Global index line
 
     /// Parse a block of lines. Lines that only make sense together (the game wraps
     /// some descriptions) are joined, up to three at a time.
@@ -284,7 +309,7 @@ module StatText =
                 let attempt =
                     [ 1; 2; 3 ]
                     |> List.filter (fun k -> k <= List.length rest)
-                    |> List.tryPick (fun k -> parseIn context index (joined k) |> Option.map (fun s -> k, s))
+                    |> List.tryPick (fun k -> parseInWithNamed context index (joined k) |> Option.map (fun s -> k, s))
                 match attempt with
                 | Some (k, stats) -> go (List.rev stats @ acc) unknown (List.skip k rest)
                 | None -> go acc (l :: unknown) tail

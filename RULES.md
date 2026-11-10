@@ -32,7 +32,7 @@ Confidence levels:
 |---|---|---|---|
 | Resist layers | Σ resist mods (base, exposure, curses all as flat resist on the enemy), capped at max resist (75 + mods, ≤90), floor −200 | CalcOffence.lua `calcResistForType` | pob |
 | **Order of exposure / curses / penetration** | exposure and curses lower resist first, then penetration applies | PoB does the same | guess, **needs an in-game test** |
-| Penetration | lowers resist, but never below 0; does nothing to negative resist | CalcOffence.lua `calcPenResist` (minPen = 0) | pob |
+| Penetration | lowers resist, but never below 0 (or below the "can penetrate down to a minimum of X" floor); does nothing to resist already at or below the floor | CalcOffence.lua `calcPenResist` (minPen = 0); floor: game text | pob + data |
 | Armour | reduction = A / (A + 10 × damage), using that hit's physical damage, plus flat physical reduction, capped at 75% for monsters | CalcDefence.lua `armourReductionF`; Monster.ot cap | pob + data |
 | Damage taken | (1 + Σinc taken) × Π more taken; scopes as for damage | CalcOffence.lua ~4060 | pob |
 | Hit chance | 100% unless a `HitChance` override is given. Accuracy vs evasion is not modelled yet. | — | guess |
@@ -176,6 +176,8 @@ Confidence levels:
 | Monster power | normal 1, magic 2, rare 5, unique / boss 20 | Mobalytics; boss 20 agreed, magic / rare disputed | community |
 | Energy per trigger | 100 per second of base cast time of the socketed spells (cast time + `total_cast_time_+_ms`); Comet: 1 + 1 s = 200 | "10 per 0.1 s" (community); a guide quotes 300 for Comet (older version?) | community |
 | Release | "Cast on ...": trigger all socketed spells on reaching maximum (= the cost), energy spent. Invocations (Elemental Invocation, Spellslinger): bank up to `generic_ongoing_trigger_maximum_energy`; used as soon as a trigger is covered and its cooldown (0.2 s) is ready, triggering as many times as the energy covers | gem descriptions | data |
+| Banked invocations | fights start with invocations at maximum energy (banked while clearing); `--banked 0` starts empty | user (presses both invocations when ready) | user |
+| Stat text with only a literal | a template with no placeholder but one number ("down to a minimum of -50%") gives that number as the stat value | game text | data |
 | Energy Retention | chance to get half the spent energy back | gem text | data |
 | Triggered spells | no mana cost, no time spent; hits after `*_fall_time_ms` (Comet 0.55 s) | data | data |
 | Spell Cascade | `number_of_cascades_per_side` extra impacts on either side of the target along a randomly chosen axis; side impacts have their own less area (`support_spell_cascade_area_of_effect_+%_for_cascade`); spacing between impacts = 1.5 × the centre radius (`--cascade-spacing`) | data; random axis: gem descriptions (outof.games, Game8); spacing: user observation | data + user |
@@ -196,3 +198,5 @@ Confidence levels:
 | All damage ignites / chills / shocks | ignite (chill, shock) scales from all damage types, also for chance and meta energy | game text | data |
 | Infusions | not simulated; `--infused` assumes they are always available (skills use their "-Infused" stat sets) | user (always keeps them up) | user |
 | Killing hits and ailments | a hit that kills still inflicts its ailments for "on freeze / shock / ignite" effects (meta energy, Archon); their damage over time on the dead monster is dropped | user (Cast on Elemental Ailment triggers much more in packs) | user |
+| Named-skill lines | "+N to Level of all <Skill> Skills" (the description has a skill-name placeholder): gem level for that gem | game text | data |
+| Triggered a skill recently | 4 s after any trigger | PoE convention | pob |
