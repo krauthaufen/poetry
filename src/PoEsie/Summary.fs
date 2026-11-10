@@ -19,7 +19,9 @@ type Summary =
       /// Mean uptime fraction per enemy status.
       Uptime: (string * float) list
       /// Mean count per run.
-      Counts: (string * float) list }
+      Counts: (string * float) list
+      /// Per rarity: time until the last enemy of that rarity died (runs where all did).
+      KillTimes: (Rarity * Stats) list }
 
 module Summary =
     let stats (xs: float list) =
@@ -49,7 +51,16 @@ module Summary =
             outcomes
             |> meanOf (fun o -> let t = max 1e-9 (total o) in o.DamageBy |> Map.map (fun _ v -> v / t))
           Uptime = outcomes |> meanOf (fun o -> o.Uptime |> Map.map (fun _ v -> v / max 1e-9 o.Duration))
-          Counts = outcomes |> meanOf (fun o -> o.Counts |> Map.map (fun _ v -> float v)) }
+          Counts = outcomes |> meanOf (fun o -> o.Counts |> Map.map (fun _ v -> float v))
+          KillTimes =
+            [ Normal; Magic; Rare; Unique ]
+            |> List.choose (fun r ->
+                let times =
+                    outcomes
+                    |> List.choose (fun o ->
+                        let ks = o.Kills |> List.filter (fun (_, rr, _) -> rr = r)
+                        if ks.IsEmpty then None else Some(ks |> List.map (fun (_, _, t) -> t) |> List.max))
+                if times.IsEmpty then None else Some(r, stats times)) }
 
     /// Run the fight `runs` times with consecutive seeds.
     let simulate runs (fight: Fight) =
@@ -61,12 +72,12 @@ module Summary =
     let format (s: Summary) =
         let st (x: Stats) = sprintf "mean %.2f  p10 %.2f  p50 %.2f  p90 %.2f" x.Mean x.P10 x.P50 x.P90
         let lines =
-            [ sprintf "runs %d, killed %.0f%%" s.Runs (s.KillRate * 100.0)
-              match s.Ttk with
-              | Some t -> "TTK (s)  " + st t
-              | None -> "TTK      never"
-              "DPS      " + st s.Dps
-              "damage share:" ]
+            [ sprintf "runs %d, cleared %.0f%%" s.Runs (s.KillRate * 100.0)
+              (match s.Ttk with
+               | Some t -> "clear (s) " + st t
+               | None -> "clear     never") ]
+            @ (s.KillTimes |> List.map (fun (r, t) -> sprintf "  last %-7s dead at %s" (Rarity.name r) (st t)))
+            @ [ "DPS      " + st s.Dps; "damage share:" ]
             @ (s.DamageShare |> List.map (fun (k, v) -> sprintf "  %-28s %5.1f%%" k (v * 100.0)))
             @ [ "uptime:" ]
             @ (s.Uptime |> List.map (fun (k, v) -> sprintf "  %-28s %5.1f%%" k (v * 100.0)))

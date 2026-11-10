@@ -117,10 +117,7 @@ let main _ =
 
     let boss life = { EnemyDef.atLevel 83 life with Mods = [] }
     let fight skill life =
-        { Enemy = boss life
-          Player = Actor.make "Player" [ noIgnite ] [ skill ]
-          Minions = []
-          MaxTime = 60.0 }
+        Fight.single (boss life) (Actor.make "Player" [ noIgnite ] [ skill ]) 60.0
 
     test "sim: fixed hits on a cadence kill at the exact hit" (fun () ->
         let o = Sim.run (fight (fireSpell 100.0) 1000.0) 1u
@@ -171,6 +168,52 @@ let main _ =
         let skill = { fireSpell 100.0 with BaseDamage = Map.ofList [ Fire, { Min = 50.0; Max = 150.0 } ]; BaseCrit = 30.0 }
         let f = { fight skill 5000.0 with Player = Actor.make "Player" [] [ skill ] }
         equal (Sim.run f 7u) (Sim.run f 7u))
+
+    let dummy name x y = { EnemyDef.atLevel 83 1e9 with Name = name; Position = Vec.make x y; Size = 4.0; Mods = [] }
+
+    test "geometry: area at target hits everything within radius + body size" (fun () ->
+        let a, b, c = dummy "a" 30.0 0.0, dummy "b" 40.0 0.0, dummy "c" 60.0 0.0
+        equal [ "a"; "b" ] (Geometry.targets (AreaAtTarget 10.0) 1.0 a [ a; b; c ]))
+
+    test "geometry: increased area grows the radius by the square root" (fun () ->
+        // 10 * sqrt(4) = 20 radius reaches c at distance 30 - 4 size = 26? no: 20 + 4 = 24 < 30
+        let a, c = dummy "a" 30.0 0.0, dummy "c" 55.0 0.0
+        equal [ "a" ] (Geometry.targets (AreaAtTarget 10.0) 4.0 a [ a; c ])
+        equal [ "a"; "c" ] (Geometry.targets (AreaAtTarget 10.0) 9.0 a [ a; c ]))
+
+    test "geometry: projectiles stop at the first enemy unless they pierce" (fun () ->
+        let a, b = dummy "a" 30.0 0.0, dummy "b" 60.0 0.0
+        let p = ProjectileShape.make 1
+        equal [ "a" ] (Geometry.targets (Projectiles p) 1.0 a [ a; b ])
+        equal [ "a"; "b" ] (Geometry.targets (Projectiles { p with Pierce = 1 }) 1.0 a [ a; b ]))
+
+    test "geometry: without shotgun, a use hits each enemy once" (fun () ->
+        let a = dummy "a" 30.0 0.0
+        let p = { ProjectileShape.make 3 with Spread = 5.0 }
+        equal [ "a" ] (Geometry.targets (Projectiles p) 1.0 a [ a ])
+        equal [ "a"; "a"; "a" ] (Geometry.targets (Projectiles { p with CanShotgun = true }) 1.0 a [ a ]))
+
+    test "geometry: chains jump to the nearest unhit enemy in range" (fun () ->
+        let a, b, c = dummy "a" 30.0 0.0, dummy "b" 30.0 20.0, dummy "c" 30.0 -60.0
+        let p = { ProjectileShape.make 1 with Chains = 2; ChainRange = 30.0 }
+        equal [ "a"; "b" ] (Geometry.targets (Projectiles p) 1.0 a [ a; b; c ]))
+
+    test "sim: a pack is cleared, kills are recorded per enemy" (fun () ->
+        let nova = { fireSpell 100.0 with Name = "Nova"; Delivery = AreaAroundSelf 50.0 }
+        let enemies = [ for i in 1..5 -> { dummy (sprintf "m%d" i) (float (10 * i)) 0.0 with Life = 250.0 } ]
+        let f = { Fight.single enemies.Head (Actor.make "Player" [ noIgnite ] [ nova ]) 60.0 with Enemies = enemies }
+        let o = Sim.run f 1u
+        equal (Some 3.0) o.Ttk
+        equal 5 o.Kills.Length)
+
+    test "sim: bosses take half curse effect" (fun () ->
+        let bolt = fireSpell 100.0
+        let boss = { EnemyDef.make Rarity.defaults 83 Unique "Boss" (Vec.make 30.0 0.0) with Life = 1e9; Mods = [ Mod.more (Named "CurseEffectOnSelf") -50.0 ] }
+        let player =
+            { Actor.make "Player" [ noIgnite ] [ bolt ] with
+                Rules = [ { Hook = OnUse; Filter = AnySkill; Chance = 100.0; Reaction = ApplyCurse("Flammability", 10.0, [ Mod.base' (Resist Fire) -40.0 ]) } ] }
+        let o = Sim.run (Fight.single boss player 1.5) 1u
+        near 120.0 o.DamageBy.["Bolt (hit)"])
 
     DataTests.run test near (fun a b -> equal a b)
 

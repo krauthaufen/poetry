@@ -87,3 +87,16 @@ Confidence levels:
 | Weapon local damage | (base + local added) × (1 + (local increased physical + quality) / 100) for physical; other types just added | — | guess (rounding not applied) |
 | Weapon local crit | base + local flat (stored in hundredths), × local increased | — | guess |
 | Hits per use | 1 unless configured (`--hits`); how many projectiles hit one target is per-skill behaviour, not modelled yet | — | missing |
+
+## Encounters and geometry
+
+| Mechanic | Rule | Source | Confidence |
+|---|---|---|---|
+| Positions | 2D, game units (10 = 1 m), player at origin, enemies static | modelling choice | — |
+| Rarity profiles | life ×1 / ×2 / ×5 / ×20, ele resist 0 / 0 / 20 / 30, thresholds and poise scaled | unique resist 30 / pinnacle 50 and boss mods (50% less curse/exposure effect, 500% more poise) from PoB's boss config; **all life multipliers and non-boss resists are guesses**; the real values are the game's rarity monster mods (`monster_life_+%_final_from_rarity`), not exported by PoB | guess |
+| Area radius | floor(base × floor(100 × sqrt(area multiplier)) / 100); hits enemies whose body overlaps | PoB calcRadius | pob |
+| Projectiles | fanned evenly over the spread angle towards the aimed enemy; first enemy along the path is hit; pierce continues, chains jump to the nearest unhit enemy in chain range | — | guess (geometry), data (counts) |
+| Default spread | 30° unless the skill sets `total_projectile_spread_angle_override` | — | guess |
+| Shotgun | one use's projectiles hit each enemy once unless the skill has `projectiles_can_shotgun` | inferred from the flag existing on only a few skills | guess |
+| Damage per target | rolled independently for every enemy hit | — | guess |
+| Per-skill motion (Spark wandering, Ice Shot shards from the impact point, Frost Bomb pulses) | not modelled yet: needs per-skill behaviours | — | missing |

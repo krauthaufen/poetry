@@ -37,12 +37,12 @@ let player =
             Mod.inc (ForMinions(Damage AllDamage)) 80.0 ]
           [ bolt; flare; curse ] with
         Rotation =
-            [ { Use = "Ember Curse"; When = fun v -> not (v.EnemyStatus.ContainsKey "Ember Curse") }
+            [ { Use = "Ember Curse"; When = fun v -> not (v.EnemyStatus.ContainsKey "Curse:Ember Curse") }
               Actor.always "Arc Bolt" ]
         Rules =
             [ { Hook = OnCrit; Filter = Called "Arc Bolt"; Chance = 100.0; Reaction = GainEnergy("Cast on Crit", 40.0) }
               { Hook = OnUse; Filter = Called "Ember Curse"; Chance = 100.0
-                Reaction = ApplyDebuff("Ember Curse", 6.0, 1, [ Mod.base' (Resist Fire) -25.0 ]) } ]
+                Reaction = ApplyCurse("Ember Curse", 6.0, [ Mod.base' (Resist Fire) -25.0 ]) } ]
         Metas = [ { Name = "Cast on Crit"; MaxEnergy = 100.0; Triggers = "Flare" } ] }
 
 let hound =
@@ -55,11 +55,10 @@ let hound =
         HitPattern = Map.ofList [ "Bite", [ DuringUse 0.5, 1.0 ] ] }
 
 let fight =
-    { Enemy =
-        { EnemyDef.atLevel 83 100_000.0 with
-            Mods = Mod.resistAllElemental 30.0 @ [ Mod.base' Armour 20_000.0; Mod.inc AilmentThreshold 100.0 ] }
+    { Enemies = Encounter.boss 83 Rarity.defaults 30.0 |> List.map (fun b -> { b with Life = 100_000.0 })
       Player = player
       Minions = [ hound ]
+      Targeting = Strongest
       MaxTime = 120.0 }
 
 [<EntryPoint>]

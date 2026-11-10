@@ -1,5 +1,40 @@
 namespace PoEsie
 
+/// Projectile behaviour of a skill. Distances in game units (10 = 1 metre).
+type ProjectileShape =
+    { Count: int
+      /// Total fan angle in degrees across all projectiles.
+      Spread: float
+      Pierce: int
+      Chains: int
+      ChainRange: float
+      Range: float
+      /// Several projectiles of one use may hit the same enemy.
+      CanShotgun: bool
+      /// Radius of an explosion where a projectile hits, if any.
+      Explosion: float option }
+
+/// How a skill use finds its targets.
+type Delivery =
+    /// The aimed-at enemy only (melee strikes, single-target hits).
+    | Single
+    /// Everything within the radius of the aimed-at enemy.
+    | AreaAtTarget of radius: float
+    /// Everything within the radius of the player.
+    | AreaAroundSelf of radius: float
+    | Projectiles of ProjectileShape
+
+module ProjectileShape =
+    let make count =
+        { Count = count
+          Spread = 30.0
+          Pierce = 0
+          Chains = 0
+          ChainRange = 30.0
+          Range = 100.0
+          CanShotgun = false
+          Explosion = None }
+
 /// A skill as the engine sees it: where its damage comes from and how long it takes.
 type Skill =
     { Name: string
@@ -17,6 +52,8 @@ type Skill =
       Cooldown: float option
       /// Hits produced by one use: (fraction of the use time, damage multiplier). Default: one hit at the end.
       Hits: (float * float) list
+      /// How a use finds its targets.
+      Delivery: Delivery
       /// Mods that only exist while using this skill (gem stats, supports).
       Mods: Mod list }
 
@@ -31,6 +68,7 @@ module Skill =
           BaseTime = 1.0
           Cooldown = None
           Hits = [ 1.0, 1.0 ]
+          Delivery = Single
           Mods = [] }
 
     let ctx (skill: Skill) crit buffs enemyStatus =

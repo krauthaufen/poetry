@@ -2,10 +2,13 @@
 ///   --group N        socket group to simulate (default: the build's main group)
 ///   --runs N         Monte Carlo runs (default 500)
 ///   --time S         fight length in seconds (default 60)
-///   --life X         enemy life (default: effectively infinite, measures DPS)
-///   --level L        enemy level (default 83)
-///   --res X          enemy elemental resistance (default 0; chaos = 0)
-///   --hits N         hits on the target per use (projectiles, multi-hit skills; default 1)
+///   --scenario S     boss | pinnacle | pack | surrounded (default boss)
+///   --pack N,M,R     pack of N normal, M magic, R rare monsters (default 8,3,1)
+///   --distance D     how far in front the enemies stand, game units (default 30; 10 = 1 m)
+///   --level L        monster level (default 83)
+///   --life X         override life of every enemy (e.g. 1e12 to measure sustained DPS)
+///   --res X          override elemental resistance of every enemy
+///   --target T       nearest | strongest (default strongest)
 ///   --data DIR       exported game data (default: data/game next to the repo)
 module PoEsie.Cli
 
@@ -78,15 +81,35 @@ let main argv =
                 printfn "  base %s, x%.2f, crit %.1f%%, %.3fs per use%s" (skill.BaseDamage |> Map.toList |> List.map (fun (t, r) -> sprintf "%s %.0f-%.0f" (DamageType.name t) r.Min r.Max) |> String.concat " ") skill.BaseMultiplier skill.BaseCrit skill.BaseTime (match skill.Cooldown with Some c -> sprintf ", cooldown %.2fs" c | None -> "")
                 skillCov.Unmapped |> List.iter (fun (s, v) -> printfn "  unmapped skill stat     %s = %g" s v)
                 skillCov.Unsimulated |> List.distinctBy snd |> List.iter (fun (s, m) -> printfn "  unsimulated skill stat  %s (%s)" s m)
-                let res = get "res" 0.0
-                let hits = int (get "hits" 1.0)
-                let skill = { skill with Hits = List.replicate hits (1.0, 1.0) }
+                let level = int (get "level" 83.0)
+                let profile r =
+                    let p = Rarity.defaults r
+                    let p = match Map.tryFind "scenario" o, r with
+                            | Some "pinnacle", Unique -> { p with ElementalResist = 50.0 } // PoB pinnacle default
+                            | _ -> p
+                    match Map.tryFind "res" o with
+                    | Some v -> { p with ElementalResist = float v }
+                    | None -> p
+                let distance = get "distance" 30.0
+                let enemies =
+                    match Map.tryFind "scenario" o |> Option.defaultValue "boss" with
+                    | "pack" | "surrounded" as sc ->
+                        let counts =
+                            (Map.tryFind "pack" o |> Option.defaultValue "8,3,1").Split(',') |> Array.map int |> List.ofArray
+                        let n, m, r = match counts with [ a; b; c ] -> a, b, c | _ -> 8, 3, 1
+                        Encounter.pack level profile [ Normal, n; Magic, m; Rare, r ] distance 25.0 (sc = "surrounded") 1u
+                    | _ -> Encounter.boss level profile distance
+                let enemies =
+                    match Map.tryFind "life" o with
+                    | Some l -> enemies |> List.map (fun e -> { e with Life = float l })
+                    | None -> enemies
+                printfn "  enemies: %s" (enemies |> List.countBy (fun e -> Rarity.name e.Rarity) |> List.map (fun (r, n) -> sprintf "%d %s" n r) |> String.concat ", ")
+                printfn "  delivery: %A" skill.Delivery
                 let fight =
-                    { Enemy =
-                        { EnemyDef.atLevel (int (get "level" 83.0)) (get "life" 1e15) with
-                            Mods = EnemyDef.atLevel (int (get "level" 83.0)) 0.0 |> fun e -> e.Mods @ Mod.resistAllElemental res }
+                    { Enemies = enemies
                       Player = Actor.make "Player" sheet.Mods [ skill ]
                       Minions = []
+                      Targeting = (if Map.tryFind "target" o = Some "nearest" then Nearest else Strongest)
                       MaxTime = get "time" 60.0 }
                 printfn ""
                 fight |> Summary.simulate (int (get "runs" 500.0)) |> Summary.format |> printfn "%s"

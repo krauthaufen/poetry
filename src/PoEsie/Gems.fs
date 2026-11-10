@@ -117,6 +117,11 @@ module Gems =
             |> Option.map (fun d -> bound = "minimum", d)
         | _ -> None
 
+    /// Stats read directly into the skill's Delivery.
+    let private deliveryStats =
+        set [ "base_number_of_projectiles"; "number_of_chains"; "projectile_base_number_of_targets_to_pierce"
+              "active_skill_base_area_of_effect_radius"; "projectiles_can_shotgun"; "total_projectile_spread_angle_override" ]
+
     /// Turn game stats into mods, sorting out what we couldn't use.
     let private interpret (stats: (string * float) list) =
         stats
@@ -124,6 +129,7 @@ module Gems =
             (fun (mods, cov: Coverage) (id, v) ->
                 match baseDamageStat id with
                 | Some _ -> mods, cov
+                | None when deliveryStats.Contains id -> mods, cov
                 | None ->
                     match StatMap.meaning id v with
                     | Mods ms -> mods @ ms, cov
@@ -202,6 +208,26 @@ module Gems =
                         | None -> 1.0 / (aps * speedMult)
                     else
                         data.CastTime
+                let statOf id = ownStats |> List.tryFind (fst >> (=) id) |> Option.map snd
+                let flagOf id = statOf id |> Option.exists (fun v -> v <> 0.0)
+                let radius = statOf "active_skill_base_area_of_effect_radius"
+                let delivery =
+                    match statOf "base_number_of_projectiles" with
+                    | Some n when data.Types.Contains "Projectile" ->
+                        Projectiles
+                            { ProjectileShape.make (int n) with
+                                Pierce = int (statOf "projectile_base_number_of_targets_to_pierce" |> Option.defaultValue 0.0)
+                                Chains = int (statOf "number_of_chains" |> Option.defaultValue 0.0)
+                                CanShotgun = flagOf "projectiles_can_shotgun"
+                                Spread = statOf "total_projectile_spread_angle_override" |> Option.defaultValue 30.0
+                                Explosion = if data.Types.Contains "Area" then radius else None }
+                    | _ when data.Types.Contains "Projectile" ->
+                        Projectiles { ProjectileShape.make 1 with Explosion = if data.Types.Contains "Area" then radius else None }
+                    | _ ->
+                        match radius with
+                        | Some r when data.Types.Contains "Nova" -> AreaAroundSelf r
+                        | Some r when data.Types.Contains "Area" -> AreaAtTarget r
+                        | _ -> Single
                 Ok(
                     { Name = data.Name
                       Tags = tags
@@ -212,6 +238,7 @@ module Gems =
                       BaseTime = time
                       Cooldown = gemLevel |> Option.bind (fun l -> l.Cooldown)
                       Hits = [ 1.0, 1.0 ]
+                      Delivery = delivery
                       Mods = mods },
                     cov
                 )

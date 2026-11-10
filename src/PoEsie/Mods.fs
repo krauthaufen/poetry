@@ -24,6 +24,11 @@ type Stat =
     | Penetration of DamageType
     | HitChance
     | DoubleDamageChance
+    // ---- delivery ----
+    | AreaOfEffect
+    | AdditionalProjectiles
+    | Pierce
+    | Chains
     // ---- speed / timing ----
     | Speed
     | CooldownRecovery
