@@ -285,7 +285,8 @@ module StatText =
         let l = line.Trim()
         let prefix, suffix = "to Level of all ", " Skills"
         let i = l.IndexOf prefix
-        if (l.StartsWith "+" || l.StartsWith "-") && i > 0 && l.EndsWith suffix then
+        // a name must sit between them ("+1 to Level of all Skills" has none)
+        if (l.StartsWith "+" || l.StartsWith "-") && i > 0 && l.EndsWith suffix && l.Length - i - prefix.Length - suffix.Length > 0 then
             match System.Double.TryParse(l.Substring(0, i).Trim()) with
             | true, v -> Some [ "specific_skill_level:" + l.Substring(i + prefix.Length, l.Length - i - prefix.Length - suffix.Length), v ]
             | _ -> None

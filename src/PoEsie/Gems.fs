@@ -148,7 +148,8 @@ module Gems =
     /// Gem stats often carry the skill's internal name first
     /// ("lightning_strike_damage_+%_final_per_power_charge"). If an id is Unmapped,
     /// try it with 1..3 leading words removed; only a full Mods meaning is accepted.
-    let private gemMeaning (id: string) v =
+    /// A gem stat's meaning: as on items, or with the skill-name prefix stripped (marked skill-specific).
+    let gemMeaning (id: string) v =
         match StatMap.meaning id v with
         | Unmapped
         | Unsimulated _ as original ->
