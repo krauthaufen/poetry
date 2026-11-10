@@ -270,10 +270,10 @@ details{margin-top:10px}summary{cursor:pointer;color:var(--muted)}
 table{border-collapse:collapse;width:100%%;font-size:14px;font-variant-numeric:tabular-nums}td{padding:3px 8px;border-bottom:1px solid var(--line)}td:last-child{text-align:right}
 </style></head><body><main>
 <h1>%s: random layouts</h1>
-<p>%d power charges: %d projectiles per slam, nova from the impact point (×), %.0f%% chance to chain once from a wall (towards the nearest enemy within chain range it has not hit; mirror bounce if none). Player in blue, monsters grey, walls dark. Orange flights hit something, dashed ones miss. Each layout is simulated %d times; pictures show one slam. Boss radii are assumptions (game units, 10 = 1 m).</p>
+<p>%d power charges: %d projectiles per slam, %s from the impact point (×), %.0f%% chance to chain once from a wall (towards the nearest enemy within chain range it has not hit; mirror bounce if none). Player in blue, monsters grey, walls dark. Orange flights hit something, dashed ones miss. Each layout is simulated %d times; pictures show one slam. Boss radii are assumptions (game units, 10 = 1 m).</p>
 %s%s
 </main></body></html>"""
-                                skill.Name skill.Name charges p.Count p.TerrainChain runs
+                                skill.Name skill.Name charges p.Count (if p.Spread >= 360.0 then "nova" else sprintf "%.0f° fan forwards" p.Spread) p.TerrainChain runs
                                 (section "Single boss (sustained DPS)" bossLayouts) (section "Packs (8 normal, 3 magic, 0–2 rares, real life)" packLayouts)
                         File.WriteAllText(o.["layouts"], html)
                         printfn "wrote %s" o.["layouts"]
