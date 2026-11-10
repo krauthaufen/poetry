@@ -210,8 +210,14 @@ module StatMap =
         | "evasion_and_physical_damage_reduction_rating_+%" -> Some(Mods [ Mod.inc Evasion v; Mod.inc Armour v ])
         | "armour_and_energy_shield_+%" -> Some(Mods [ Mod.inc Armour v; Mod.inc MaxEnergyShield v ])
         | "evasion_and_energy_shield_+%" -> Some(Mods [ Mod.inc Evasion v; Mod.inc MaxEnergyShield v ])
-        | "global_defences_+%" | "armour_evasion_energy_shield_+%" ->
+        | "global_defences_+%" | "armour_evasion_energy_shield_+%" | "global_armour_evasion_energy_shield_+%" ->
             Some(Mods [ Mod.inc Armour v; Mod.inc Evasion v; Mod.inc MaxEnergyShield v ])
+        | "armour_evasion_energy_shield_+%_while_wielding_quarterstaff" ->
+            Some(Mods([ Armour; Evasion; MaxEnergyShield ] |> List.map (fun st -> Mod.inc st v |> Mod.whenever (WhileBuff "WieldingQuarterstaff"))))
+        | "maximum_energy_shield_+1_per_x_body_armour_evasion_rating" -> one (Mod.base' (Named "EnergyShieldPerBodyEvasion") v)
+        | "body_armour_evasion_rating_+%" -> one (Mod.inc (Named "BodyArmourEvasion") v)
+        | "maximum_energy_shield_from_body_armour_+%" -> one (Mod.inc (Named "BodyArmourEnergyShield") v)
+        | "body_armour_armour_+%" -> one (Mod.inc (Named "BodyArmourArmour") v)
         | "base_deflection_rating_%_of_evasion_rating" -> one (Mod.base' (Named "DeflectionPercentOfEvasion") v)
         | "base_resist_all_elements_%" -> each (DamageType.elemental |> List.map Resist)
         | "additional_maximum_all_elemental_resistances_%" -> each (DamageType.elemental |> List.map MaxResist)
@@ -223,6 +229,7 @@ module StatMap =
         | "base_mana_cost_efficiency_+%" -> one (Mod.inc ManaCostEfficiency v)
         | "base_spell_mana_cost_efficiency_+%" -> one (Mod.inc ManaCostEfficiency v |> Mod.whenever (SkillIs Spell))
         | "base_mana_cost_-%" -> one (Mod.inc ManaCost -v)
+        | "generate_x_charges_for_any_flask_per_minute" -> one (Mod.base' (Named "FlaskChargesPerSecond") (v / 60.0))
         | "base_mana_gained_on_enemy_death" -> one (Mod.base' ManaOnKill v)
         | "recover_%_maximum_mana_on_kill" -> one (Mod.base' (Named "ManaPercentOnKill") v)
         | "recover_x%_of_maximum_mana_when_you_consume_a_power_charge" -> one (Mod.base' (Named "ManaPercentOnConsumePower") v)

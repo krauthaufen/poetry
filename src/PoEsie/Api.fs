@@ -113,7 +113,17 @@ module Api =
         let defences =
             [ "Armour", "Armour"; "Evasion Rating", "Evasion Rating"; "Energy Shield", "Energy Shield" ]
             |> List.choose (fun (prop, label) -> property prop item |> Option.map (fun v -> label + ": " + v))
-        [ "Rarity: " + get "rarity"; get "name"; get "typeLine"; "--------" ] @ quality @ defences @ [ "--------" ] @ modLines item
+        // flask properties with placeholders: "Recovers {0} Mana over {1} Seconds" [465; 3.50]
+        let templated =
+            Json.list (Json.field "properties" item)
+            |> List.choose (fun p ->
+                match Json.strField "name" p with
+                | Some name when name.Contains "{0}" ->
+                    let values = Json.list (Json.field "values" p) |> List.choose (fun v -> Json.list (Some v) |> List.tryHead |> Option.bind Json.str)
+                    let filled = values |> List.indexed |> List.fold (fun (t: string) (i, v) -> t.Replace(sprintf "{%d}" i, v)) (stripMarkup name)
+                    if filled.StartsWith "Recovers" || filled.StartsWith "Consumes" then Some("Flask: " + filled) else None
+                | _ -> None)
+        [ "Rarity: " + get "rarity"; get "name"; get "typeLine"; "--------" ] @ quality @ defences @ templated @ [ "--------" ] @ modLines item
         |> String.concat "\n"
 
     let private gemLevel (gem: Json) =

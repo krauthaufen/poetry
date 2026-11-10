@@ -110,7 +110,7 @@ module StatText =
                 sb.Append('#') |> ignore
                 slots.Add(Shows idx)
                 i <- close + 1
-            elif (c = '+' || c = '-') && i + 1 < n && text.[i + 1] = '{' then
+            elif (c = '+' || c = '-') && i + 1 < n && (text.[i + 1] = '{' || isDigit text.[i + 1]) then
                 // A literal sign right before a placeholder is part of the number.
                 i <- i + 1
             elif isDigit c then
@@ -243,21 +243,39 @@ module StatText =
             else
                 None
 
-    /// Parse one line of item / passive text into (stat id, value) pairs.
+    /// Where a line comes from. The same text can be a local item stat ("15% increased
+    /// Evasion Rating" on a helmet) or a global one (on the tree or a jewel).
+    type Context =
+        | ItemLocal
+        | Global
+
+    let private isLocal (stats: (string * float) list) = stats |> List.exists (fun (s, _) -> s.StartsWith "local_")
+
+    /// Parse one line, preferring local or global readings by context.
     /// A line may contain "\n" for descriptions that span several lines.
-    let parse (index: Index) (line: string) : (string * float) list option =
+    let parseIn (context: Context) (index: Index) (line: string) : (string * float) list option =
         let tokens = tokenize (line.Trim())
         let numbers =
             tokens |> List.choose (function
                 | Number v -> Some v
                 | _ -> None)
-        Map.tryFind (skeleton tokens) index.ByKey
-        |> Option.bind (List.tryPick (fun v -> read v numbers))
+        match Map.tryFind (skeleton tokens) index.ByKey with
+        | None -> None
+        | Some variants ->
+            let readings = variants |> List.choose (fun v -> read v numbers)
+            let preferred =
+                match context with
+                | ItemLocal -> readings |> List.tryFind isLocal
+                | Global -> readings |> List.tryFind (isLocal >> not)
+            preferred |> Option.orElse (List.tryHead readings)
+
+    /// Parse one line of item / passive text into (stat id, value) pairs (global context).
+    let parse (index: Index) (line: string) = parseIn Global index line
 
     /// Parse a block of lines. Lines that only make sense together (the game wraps
     /// some descriptions) are joined, up to three at a time.
     /// Returns parsed stats and the lines nobody understood.
-    let parseLines (index: Index) (lines: string list) =
+    let parseLinesIn (context: Context) (index: Index) (lines: string list) =
         let rec go acc unknown rest =
             match rest with
             | [] -> List.rev acc, List.rev unknown
@@ -266,8 +284,10 @@ module StatText =
                 let attempt =
                     [ 1; 2; 3 ]
                     |> List.filter (fun k -> k <= List.length rest)
-                    |> List.tryPick (fun k -> parse index (joined k) |> Option.map (fun s -> k, s))
+                    |> List.tryPick (fun k -> parseIn context index (joined k) |> Option.map (fun s -> k, s))
                 match attempt with
                 | Some (k, stats) -> go (List.rev stats @ acc) unknown (List.skip k rest)
                 | None -> go acc (l :: unknown) tail
         go [] [] lines
+
+    let parseLines (index: Index) (lines: string list) = parseLinesIn Global index lines

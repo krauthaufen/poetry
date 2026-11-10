@@ -17,6 +17,16 @@ type PlayerStats =
       ManaRegen: float
       EnergyShieldRecharge: float }
 
+/// A mana flask as equipped (values as the game shows them).
+type ManaFlask =
+    { Amount: float
+      Duration: float
+      ChargesPerUse: float
+      MaxCharges: float
+      /// Charges gained per second (belt generation etc.), and the multiplier on charges gained.
+      ChargesPerSecond: float
+      ChargeGainMult: float }
+
 /// Hit resolution against the player (formulas: PoB CalcDefence, constants: game data).
 module Vitals =
     /// Chance (%) a monster hit lands against this evasion (PoB calcs.monsterHitChance).

@@ -18,7 +18,7 @@ Confidence levels:
 | Conversion | per source type: skill conversion first (scaled to ≤100%), then global conversion on the unconverted rest (scaled to ≤100%) | CalcOffence.lua ~2256 | pob |
 | Conversion chains | damage that arrives at a type can convert again further down the order | PoB handles one extra step; we chain fully | guess |
 | Converted damage scaling | uses only the modifiers of its final type, none from the source type | CalcOffence.lua `calcDamage` sums converted base into the destination | pob |
-| Gain as extra | taken from post-conversion damage of the source type; gained damage doesn't convert | CalcOffence.lua `calcGainedDamage` | pob |
+| Gain as extra | taken from the **base** damage of the source type; conversion then applies to base and gained damage alike (so a fully converted skill stays fully converted) | user's in-game damage split (Falling Thunder is "almost only elemental" with 28% gain as extra physical); PoB does the opposite (gain after conversion) | user observation |
 | Damage roll | each type rolled independently and uniformly in [min, max] | — | guess |
 | Lucky damage | roll twice, take the higher (per type) | PoB uses an expected value of (min + 2·max)/3, the same distribution | pob |
 | Increased / more | (1 + Σinc/100) × Π(1 + more/100), scopes: all, elemental, the type itself | CalcOffence.lua `calcDamage` | pob |
@@ -131,7 +131,7 @@ Confidence levels:
 | Energy shield recharge | 12.5% per second after 4 s without being hit | Character.ot 750 per minute; PoB delay 4 s | data + pob |
 | Skill cost | gem level cost × support cost multipliers (`manaMultiplier`, percent more) × increased cost / (1 + cost efficiency) | skill data; PoB SupportManaMultiplier | data (efficiency formula: guess) |
 | Not enough mana | the use waits until regeneration and leech cover it | — | modelling choice |
-| Mana leech | % of physical attack damage dealt, recovered at most 20% of max mana per second | PoE convention | guess |
+| Mana leech | % of physical attack damage dealt, each hit counted as at most 40,000 damage, from **one enemy per hit event** (the largest instance), recovered at most 20% of max mana per second | GameConstants EffectiveMaxDamageForLeech; one enemy and rate cap: user | data + user |
 | Mana on kill | flat and % of max mana per kill, also for damage-over-time kills? no: hit kills only | game text | guess (DoT kills) |
 | Monster hits | 1.5 × level damage × (1/4.4 normal/magic/rare, 4/4.4 unique) × rarity damage modifier, every 1.5 s, 40% physical / 20% each element | PoB enemy presets; rarity mod from Mods.dat | pob heuristic + guess |
 | Monster movement | walk towards the player at 3.5 m/s until within 0.8 m; frozen / stunned / electrocuted / pinned don't move; maimed and hindered 30% slower; chilled slower by its magnitude | maim −30% from BuffTemplates; hinder, speed, range: guesses | guess |
@@ -140,4 +140,8 @@ Confidence levels:
 | Mitigation | armour A / (A + 10 D) capped 90% for physical, resistances for the rest; "damage removed from mana first", then energy shield, then life | PoB; game text | pob |
 | Frozen / stunned / electrocuted monsters | don't attack | buff data `stopped_by_*` | data |
 | Chill | monsters attack slower by the chill magnitude | buff data action_speed_+%_final_from_chill | data |
-| Not modelled | flasks and charms, life leech, block, evade-based crit, monster skills and phases, ranged monsters | — | missing |
+| Mana flask | values as the item shows them (amount over duration, charges per use / max); starts full; gains charges per second (`generate_x_charges_for_any_flask_per_minute`) and per kill (1 per normal monster × rarity `monster_base_flask_charges_percent_of_monster_power`), both × "increased charges gained"; drunk at no time cost when mana < 2 × the next cost and it isn't running | item / data; base charges per kill and drink policy: guesses | data + guess |
+| Item defences | armour pieces and weapons are read in local context (their "increased" lines are local and already in the shown values, runes included); jewellery, jewels, tree and quest rewards in global context | game text is identical for local and global variants | data |
+| Body armour scoped | "increased Evasion / Energy Shield from Equipped Body Armour" scale that item's values; "+1 ES per X Item Evasion on Equipped Body Armour" reads the scaled body evasion | game text | guess (order) |
+| Keystones | handled by name: Chaos Inoculation = maximum life 1, chaos immunity, no life regeneration | game text | data |
+| Not modelled | life flasks and charms, life leech, block, evade-based crit, monster skills and phases, ranged monsters, other keystones | — | missing |

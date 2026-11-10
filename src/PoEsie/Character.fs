@@ -9,6 +9,8 @@ type ParsedItem =
       Mods: Mod list
       /// Armour / evasion / energy shield as the item shows them (local mods and quality included).
       Defences: (Stat * float) list
+      /// Mana flask: (amount, duration, charges per use, max charges).
+      ManaFlask: (float * float * float * float) option
       Coverage: Coverage }
 
 type TreeNode =
@@ -36,7 +38,7 @@ module Items =
               "Unique ID:"; "League:"; "Rune:"; "LevelReq:"; "Implicits:"; "Prefix:"; "Suffix:"; "Variant:"
               "Selected Variant:"; "Has Alt Variant"; "Selected Alt Variant"; "Allow Duplicate Variants:"; "Crafted:"
               "Unreleased:"; "Catalyst:"; "CatalystQuality:"; "Talisman Tier:"; "Evasion:"; "Ward:"; "ArmourBasePercentile:"
-              "EvasionBasePercentile:"; "EnergyShieldBasePercentile:"; "Cluster Jewel" ]
+              "EvasionBasePercentile:"; "EnergyShieldBasePercentile:"; "Cluster Jewel"; "Flask: " ]
         prefixes |> List.exists (fun p -> line.StartsWith p)
 
     let private weaponTag (t: string) =
@@ -165,7 +167,11 @@ module Items =
                 && not (l.StartsWith "Allocates ")
                 // already reflected in the reported values of socketed runes / idols
                 && not (l.Contains "effect of Socketed") && not (l.StartsWith "This item gains bonuses from Socketed Items"))
-        let stats, unknown = StatText.parseLines db.Text candidates
+        // armour pieces and weapons carry local stats; jewellery, jewels and charms don't
+        let hasLocalDefences =
+            lines |> List.exists (fun l -> l.StartsWith "Armour:" || l.StartsWith "Evasion" || l.StartsWith "Energy Shield:")
+        let context = if baseName.IsSome || hasLocalDefences then StatText.ItemLocal else StatText.Global
+        let stats, unknown = StatText.parseLinesIn context db.Text candidates
         let mods, locals, cov = interpret stats
         // Lines before the first understood stat are usually the name block; don't report them.
         let unknown = unknown |> List.filter (fun l -> l.Contains " " && not (Some l = baseName))
@@ -178,11 +184,20 @@ module Items =
                 elif l.StartsWith "Evasion:" then value "Evasion:" |> Option.map (fun v -> Evasion, v)
                 elif l.StartsWith "Energy Shield:" then value "Energy Shield:" |> Option.map (fun v -> MaxEnergyShield, v)
                 else None)
+        let numbers (l: string) =
+            l.Split(' ') |> Array.choose (fun w -> match System.Double.TryParse(w.Trim(',')) with | true, v -> Some v | _ -> None) |> List.ofArray
+        let flask =
+            let recovers = lines |> List.tryFind (fun l -> l.StartsWith "Flask: Recovers" && l.Contains "Mana")
+            let consumes = lines |> List.tryFind (fun l -> l.StartsWith "Flask: Consumes")
+            match recovers |> Option.map numbers, consumes |> Option.map numbers with
+            | Some [ amount; duration ], Some [ use'; maxC ] -> Some(amount, duration, use', maxC)
+            | _ -> None
         { Name = name
           BaseName = baseName |> Option.defaultValue ""
           Weapon = baseName |> Option.map (fun b -> weapon db.Weapons.[b] (quality lines) locals)
           Mods = mods
           Defences = defences
+          ManaFlask = flask
           Coverage = { cov with UnknownText = unknown } }
 
 module Tree =
@@ -206,12 +221,18 @@ module Tree =
             |> Map.ofList
         | _ -> Map.empty
 
-    /// Mods from allocated passives. Keystones are reported by name until they get rules.
+    /// Keystones the engine handles by name (their text is a rule, not a stat).
+    let private ruledKeystones = set [ "Chaos Inoculation" ]
+
+    /// Mods from allocated passives. Handled keystones become a flag `Named "Keystone:<name>"`.
     let mods (db: GameDb) (nodes: Map<int, TreeNode>) (allocated: int list) =
         allocated
         |> List.choose (fun id -> Map.tryFind id nodes)
         |> List.fold
             (fun (mods, cov: Coverage) node ->
+                if node.IsKeystone && ruledKeystones.Contains node.Name then
+                    mods @ [ Mod.flag (Named("Keystone:" + node.Name)) |> Mod.from node.Name ], cov
+                else
                 let relevant =
                     node.Stats |> List.filter (fun l -> not (l.StartsWith "+5 to any Attribute") && not (l.StartsWith "Grants Skill:"))
                 let stats, unknown = StatText.parseLines db.Text relevant

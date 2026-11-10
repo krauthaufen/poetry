@@ -19,6 +19,7 @@
 ///                    write an HTML page with best / median / worst pictures to file F
 ///   --count N        number of layouts per scenario (default 40)
 ///   --immortal       ignore incoming damage and mana costs
+///   --noflask        don't use the mana flask
 ///   --suite          run the standard scenarios (pack, pack + 2 rares, surrounded, boss) and print a table
 ///   --data DIR       exported game data (default: data/game next to the repo)
 module PoEsie.Cli
@@ -43,6 +44,7 @@ let rec private opts (args: string list) =
     | "--all" :: rest -> Map.add "all" "1" (opts rest)
     | "--shotgun" :: rest -> Map.add "shotgun" "1" (opts rest)
     | "--immortal" :: rest -> Map.add "immortal" "1" (opts rest)
+    | "--noflask" :: rest -> Map.add "noflask" "1" (opts rest)
     | k :: v :: rest when k.StartsWith "--" -> Map.add (k.Substring 2) v (opts rest)
     | _ :: rest -> opts rest
     | [] -> Map.empty
@@ -178,7 +180,18 @@ let main argv =
                         { Actor.make "Player" sheet.Mods [ skill ] with
                             Resources = resources
                             Cycles = cycles
-                            Vitals = (if Map.containsKey "immortal" o then None else Some vitals) }
+                            Vitals = (if Map.containsKey "immortal" o then None else Some vitals)
+                            ManaFlask =
+                                if Map.containsKey "immortal" o || Map.containsKey "noflask" o then None
+                                else
+                                    sheet.ManaFlask
+                                    |> Option.map (fun ((amount, duration, perUse, maxC), inc) ->
+                                        { Amount = amount
+                                          Duration = duration
+                                          ChargesPerUse = perUse
+                                          MaxCharges = maxC
+                                          ChargesPerSecond = Mods.sumBase Ctx.empty [ Named "FlaskChargesPerSecond" ] (ModDb.ofList sheet.Mods)
+                                          ChargeGainMult = 1.0 + inc / 100.0 }) }
                       Minions = []
                       Targeting = (if Map.tryFind "target" o = Some "nearest" then Nearest else Strongest)
                       Reach = get "reach" 15.0

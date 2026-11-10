@@ -119,6 +119,15 @@ module DamageProfile =
     let mixed = [ Physical, 0.4; Fire, 0.2; Cold, 0.2; Lightning, 0.2 ]
     let physical = [ Physical, 1.0 ]
 
+module RarityCharges =
+    /// Flask charges per kill: 1 for a normal monster, scaled by the rarity's
+    /// monster_base_flask_charges_percent_of_monster_power (+50% / +150% / +150%, game data).
+    /// The base of 1 is a GUESS.
+    let flaskChargesPerKill (r: Rarity) =
+        let key = match r with Normal -> "" | Magic -> "Magic" | Rare -> "Rare" | Unique -> "Unique"
+        1.0 + (RarityData.stats |> List.tryPick (fun (rr, s, v) -> if rr = key && s = "monster_base_flask_charges_percent_of_monster_power" then Some v else None) |> Option.defaultValue 0.0) / 100.0
+
+
 module EnemyDef =
     /// Default attack: a hit of 1.5 x the level's monster damage, scaled like PoB's enemy
     /// presets (normal 1/4.4, standard boss 4/4.4), times the rarity's damage modifier (game

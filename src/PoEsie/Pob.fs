@@ -37,10 +37,12 @@ type PobBuild =
 type CharacterSheet =
     { Mods: Mod list
       MainHand: Weapon option
-      /// Armour / evasion / energy shield shown on the equipped items.
-      ItemDefences: (Stat * float) list
+      /// Armour / evasion / energy shield shown on the equipped items: (slot, stat, value).
+      ItemDefences: (string * Stat * float) list
       Level: int
       ClassName: string
+      /// Mana flask: (amount, duration, charges per use, max charges) and its "increased charges gained".
+      ManaFlask: ((float * float * float * float) * float) option
       Coverage: Coverage }
 
 module Pob =
@@ -196,7 +198,15 @@ module Pob =
         let extraMods, _, extraCov = Items.interpret extraStats
         { Mods = itemMods @ treeMods @ extraMods
           MainHand = mainHand
-          ItemDefences = parsed |> List.collect (fun (_, p) -> p.Defences)
+          ItemDefences = parsed |> List.collect (fun (slot, p) -> p.Defences |> List.map (fun (st, v) -> slot, st, v))
+          ManaFlask =
+            build.Items
+            |> List.filter (fun (slot, _) -> slot.StartsWith "Flask")
+            |> List.tryPick (fun (_, text) ->
+                let p = Items.parse db text
+                p.ManaFlask |> Option.map (fun f ->
+                    let inc = text.Split('\n') |> Array.tryPick (fun l -> if l.Contains "increased Charges gained" then (match System.Double.TryParse(l.Trim().Split('%').[0]) with | true, v -> Some v | _ -> None) else None)
+                    f, inc |> Option.defaultValue 0.0))
           Level = build.Level
           ClassName = build.ClassName
           Coverage = Coverage.merge (Coverage.merge itemCov treeCov) { extraCov with UnknownText = extraUnknown |> List.map (fun l -> "quest: " + l) } }

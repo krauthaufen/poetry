@@ -64,12 +64,21 @@ let main _ =
         near 150.0 (Dmg.get Fire d)
         near 0.0 (Dmg.get Physical d))
 
-    test "gain as extra uses post-conversion damage" (fun () ->
-        let mods = [ Mod.base' (Convert(Physical, Fire)) 50.0; Mod.base' (GainAs(Fire, Chaos)) 20.0 ]
+    test "gain as extra comes from base damage, then conversion applies to it too" (fun () ->
+        // 100 physical; gain 20% of physical as extra fire -> 100 phys + 20 fire;
+        // then 50% physical -> cold: 50 phys, 50 cold, 20 fire
+        let mods = [ Mod.base' (GainAs(Physical, Fire)) 20.0; Mod.base' (Convert(Physical, Cold)) 50.0 ]
         let r = Hit.ranges ctx (ModDb.ofList mods) { Skill.make "x" [] with BaseDamage = Map.ofList [ Physical, Range.fixedAt 100.0 ] }
         near 50.0 r.[Physical].Max
-        near 50.0 r.[Fire].Max
-        near 10.0 r.[Chaos].Max)
+        near 50.0 r.[Cold].Max
+        near 20.0 r.[Fire].Max)
+
+    test "gained physical damage is converted like any other physical" (fun () ->
+        let mods = [ Mod.base' (GainAs(Fire, Physical)) 50.0; Mod.base' (SkillConvert(Physical, Lightning)) 100.0 ]
+        let r = Hit.ranges ctx (ModDb.ofList mods) { Skill.make "x" [] with BaseDamage = Map.ofList [ Fire, Range.fixedAt 100.0 ] }
+        equal false (r.ContainsKey Physical)
+        near 50.0 r.[Lightning].Max
+        near 100.0 r.[Fire].Max)
 
     test "added damage effectiveness and base multiplier" (fun () ->
         let skill = { fireSpell 10.0 with AddedDamageEffectiveness = 0.5; BaseMultiplier = 2.0 }

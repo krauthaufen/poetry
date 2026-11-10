@@ -86,7 +86,8 @@ type Actor =
       Resources: (string * int) list
       Cycles: Cycle list
       /// The player's pools and defences. None: the actor can't be hurt and pays no costs.
-      Vitals: PlayerStats option }
+      Vitals: PlayerStats option
+      ManaFlask: ManaFlask option }
 
 module Actor =
     let make name mods skills =
@@ -99,7 +100,8 @@ module Actor =
           Metas = []
           Resources = []
           Cycles = []
-          Vitals = None }
+          Vitals = None
+          ManaFlask = None }
 
     let always skill = { Use = skill; When = fun _ -> true }
 
@@ -197,7 +199,13 @@ module Sim =
           Taken: float
           Starved: float
           MinLife: float
-          ManaGained: Map<string, float> }
+          ManaGained: Map<string, float>
+          FlaskCharges: float
+          /// Flask recovery: running until this time, at this rate.
+          FlaskUntil: float
+          FlaskRate: float
+          /// Largest leech instance of the current hit event (leech counts from one enemy).
+          StrikeLeech: float }
 
     type private World =
         { Player: PlayerState option
@@ -356,7 +364,12 @@ module Sim =
             { w with Time = t }
 
     /// Mana recovery while time passes: regeneration, leech (rate-capped), ES recharge, life regen.
-    let private recover (stats: PlayerStats option) dt (w: World) =
+    let private recover (stats: PlayerStats option) (flask: ManaFlask option) dt (w: World) =
+        let w =
+            match flask, w.Player with
+            | Some f, Some p when dt > 0.0 ->
+                { w with Player = Some { p with FlaskCharges = min f.MaxCharges (p.FlaskCharges + f.ChargesPerSecond * f.ChargeGainMult * dt) } }
+            | _ -> w
         match stats, w.Player with
         | Some v, Some p when dt > 0.0 && p.Died.IsNone ->
             let leech = min p.LeechPool (v.Mana * Constants.maxManaLeechRate / 100.0 * dt)
@@ -365,7 +378,10 @@ module Sim =
             let es =
                 if w.Time - p.LastHit >= Constants.energyShieldRechargeDelay then min v.EnergyShield (p.EnergyShield + v.EnergyShieldRecharge * dt)
                 else p.EnergyShield
-            let gained = p.ManaGained |> addf "regen" (min regen (v.Mana - p.Mana)) |> addf "leech" leech
+            let flaskT = max 0.0 (min w.Time p.FlaskUntil - (w.Time - dt))
+            let flask = p.FlaskRate * flaskT
+            let mana = min v.Mana (mana + flask)
+            let gained = p.ManaGained |> addf "regen" (min regen (v.Mana - p.Mana)) |> addf "leech" leech |> addf "flask" flask
             { w with
                 Player =
                     Some
@@ -592,10 +608,20 @@ module Sim =
             // mana cost: base x increased cost / (1 + cost efficiency)
             let db = skillDb env actor skill st
             let cost = skill.Cost * Mods.mult Ctx.empty [ ManaCost ] db / Mods.inc Ctx.empty [ ManaCostEfficiency ] db
+            // drink the mana flask when mana is getting low and it isn't already running
+            let w =
+                match actor.ManaFlask, w.Player with
+                | Some f, Some p when p.Mana < 2.0 * cost && w.Time >= p.FlaskUntil && p.FlaskCharges >= f.ChargesPerUse ->
+                    { w with
+                        Player = Some { p with FlaskCharges = p.FlaskCharges - f.ChargesPerUse; FlaskUntil = w.Time + f.Duration; FlaskRate = f.Amount / f.Duration }
+                        Counts = bump "flask:mana" w.Counts }
+                | _ -> w
             match actor.Vitals, w.Player with
             | Some v, Some p when p.Mana < cost ->
                 // not enough mana: wait until regeneration and leech have covered it
-                let rate = v.ManaRegen + (if p.LeechPool > 0.0 then v.Mana * Constants.maxManaLeechRate / 100.0 else 0.0)
+                let rate =
+                    v.ManaRegen + (if p.LeechPool > 0.0 then v.Mana * Constants.maxManaLeechRate / 100.0 else 0.0)
+                    + (if w.Time < p.FlaskUntil then p.FlaskRate else 0.0)
                 let wait = max Constants.serverTick (if rate > 0.0 then (cost - p.Mana) / rate else 1.0)
                 { w with Player = Some { p with Starved = p.Starved + wait } } |> schedule (w.Time + wait) (Ready name)
             | Some _, Some p ->
@@ -660,8 +686,14 @@ module Sim =
                 let w =
                     match actor.Vitals, w.Player with
                     | Some v, Some p ->
-                        let leech = Dmg.get Physical hit.Dealt * Mods.sumBase ctx [ ManaLeech ] mods / 100.0
-                        let w = { w with Player = Some { p with LeechPool = p.LeechPool + leech } }
+                        let leech = min (Dmg.get Physical hit.Dealt) Constants.effectiveMaxDamageForLeech * Mods.sumBase ctx [ ManaLeech ] mods / 100.0
+                        // leech counts from one enemy per hit event: only the largest instance
+                        let extra = max 0.0 (leech - p.StrikeLeech)
+                        let charges =
+                            match actor.ManaFlask with
+                            | Some f when dead -> min f.MaxCharges (p.FlaskCharges + RarityCharges.flaskChargesPerKill e.Def.Rarity * f.ChargeGainMult)
+                            | _ -> p.FlaskCharges
+                        let w = { w with Player = Some { p with LeechPool = p.LeechPool + extra; StrikeLeech = max leech p.StrikeLeech; FlaskCharges = charges } }
                         if dead then
                             let kill = Mods.sumBase Ctx.empty [ ManaOnKill ] mods + v.Mana * Mods.sumBase Ctx.empty [ Named "ManaPercentOnKill" ] mods / 100.0
                             gainMana v "kill" kill w
@@ -713,6 +745,7 @@ module Sim =
                             Chains = p.Chains + int (Mods.sumBase ctx [ Chains ] mods)
                             TerrainChain = p.TerrainChain + Mods.sumBase ctx [ Named "TerrainChain" ] mods }
                 | d -> d
+            let w = { w with Player = w.Player |> Option.map (fun p -> { p with StrikeLeech = 0.0 }) }
             Geometry.targetsFrom rng env.Fight.Walls env.Fight.Reach delivery areaMult primary living
             |> List.fold (fun w target -> hitEnemy env rng actor skill mult target w) w
 
@@ -768,7 +801,7 @@ module Sim =
     let private step env rng (w: World) =
         let (KeyValue ((t, sq), ev)) = Seq.head w.Queue
         let dt = t - w.Time
-        let w = { w with Queue = Map.remove (t, sq) w.Queue } |> advance t |> recover env.Fight.Player.Vitals dt
+        let w = { w with Queue = Map.remove (t, sq) w.Queue } |> advance t |> recover env.Fight.Player.Vitals env.Fight.Player.ManaFlask dt
         if allDead w || (w.Player |> Option.exists (fun p -> p.Died.IsSome)) then
             w
         else
@@ -834,7 +867,11 @@ module Sim =
                       Taken = 0.0
                       Starved = 0.0
                       MinLife = 1.0
-                      ManaGained = Map.empty })
+                      ManaGained = Map.empty
+                      FlaskCharges = fight.Player.ManaFlask |> Option.map (fun f -> f.MaxCharges) |> Option.defaultValue 0.0
+                      FlaskUntil = 0.0
+                      FlaskRate = 0.0
+                      StrikeLeech = 0.0 })
               Time = 0.0
               Enemies =
                 fight.Enemies

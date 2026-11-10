@@ -14,6 +14,9 @@ module Constants =
     let playerBaseCritBonus = 100.0
     let monsterBaseCritBonus = mc "base_critical_hit_damage_bonus"
 
+    /// Order of "gain as extra" and conversion: gain first, then convert everything.
+    let gainBeforeConversion = true
+
     // ---- mitigation ----
     /// PoB data.misc.ArmourRatio: reduction = A / (A + ratio * damage)
     let armourRatio = 10.0
@@ -76,6 +79,8 @@ module Constants =
     let moreAttackDamagePerRage = 1.0
 
     // ---- player recovery ----
+    /// GameConstants EffectiveMaxDamageForLeech: a hit leeches as if it dealt at most this much.
+    let effectiveMaxDamageForLeech = Map.find "EffectiveMaxDamageForLeech" Tables.gameConstants
     /// Leech recovers at most this % of maximum mana per second (PoE convention; guess for PoE2).
     let maxManaLeechRate = 20.0
     /// Seconds without being hit before energy shield recharges (PoB EnergyShieldRechargeDelay).

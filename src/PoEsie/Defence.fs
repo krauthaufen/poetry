@@ -28,22 +28,44 @@ module Defence =
 
     let compute (bases: Map<string, float * float * float>) (sheet: CharacterSheet) : PlayerStats =
         let db = ModDb.ofList sheet.Mods
-        let c = Ctx.empty
+        // "while wielding a Quarterstaff" and similar read the main hand
+        let wielding =
+            sheet.MainHand |> Option.map (fun w -> w.Tags |> List.choose (function Tag _ -> None | t -> Some(sprintf "Wielding%A" t))) |> Option.defaultValue []
+        let c = { Ctx.empty with Buffs = wielding |> List.map (fun b -> b, 1) |> Map.ofList }
         let bStr, bDex, bInt = Map.tryFind (baseClass sheet.ClassName) bases |> Option.defaultValue (0.0, 0.0, 0.0)
         let attr k b = b + Mods.sumBase c [ Attribute k ] db
         let str, dex, int' = attr "Str" bStr, attr "Dex" bDex, attr "Int" bInt
         let level = float sheet.Level
-        let fromItems stat = sheet.ItemDefences |> List.sumBy (fun (s, v) -> if s = stat then v else 0.0)
+        // item values; the body armour's own values can have their own increases
+        let bodyInc stat =
+            match stat with
+            | Evasion -> Mods.inc c [ Named "BodyArmourEvasion" ] db
+            | MaxEnergyShield -> Mods.inc c [ Named "BodyArmourEnergyShield" ] db
+            | Armour -> Mods.inc c [ Named "BodyArmourArmour" ] db
+            | _ -> 1.0
+        let itemValue stat slotFilter =
+            sheet.ItemDefences
+            |> List.sumBy (fun (slot, s, v) -> if s = stat && slotFilter slot then (if slot = "Body Armour" then v * bodyInc stat else v) else 0.0)
+        let fromItems stat = itemValue stat (fun _ -> true)
+        let bodyEvasion = itemValue Evasion ((=) "Body Armour")
+        let esFromBodyEvasion =
+            match Mods.sumBase c [ Named "EnergyShieldPerBodyEvasion" ] db with
+            | per when per > 0.0 -> floor (bodyEvasion / per)
+            | _ -> 0.0
         let pool stat baseValue = (baseValue + Mods.sumBase c [ stat ] db) * Mods.mult c [ stat ] db
-        let life = pool MaxLife (baseLife + lifePerLevel * level + 2.0 * str)
+        let ci = Mods.flag c (Named "Keystone:Chaos Inoculation") db
+        let life = if ci then 1.0 else pool MaxLife (baseLife + lifePerLevel * level + 2.0 * str)
         let mana = pool MaxMana (baseMana + manaPerLevel * level + 2.0 * int')
-        let es = pool MaxEnergyShield (fromItems MaxEnergyShield)
+        let es = pool MaxEnergyShield (fromItems MaxEnergyShield + esFromBodyEvasion)
         let armour = pool Armour (fromItems Armour)
         let evasion = pool Evasion (fromItems Evasion)
         let deflection = evasion * Mods.sumBase c [ Named "DeflectionPercentOfEvasion" ] db / 100.0 + Mods.sumBase c [ Deflection ] db
         let resist t =
-            let cap = min playerResistCap (playerMaxResist + Mods.sumBase c [ MaxResist t ] db)
-            t, min cap (Mods.sumBase c [ Resist t ] db)
+            // Chaos Inoculation: immune to chaos damage
+            if t = Chaos && ci then t, 100.0
+            else
+                let cap = min playerResistCap (playerMaxResist + Mods.sumBase c [ MaxResist t ] db)
+                t, min cap (Mods.sumBase c [ Resist t ] db)
         { Str = str
           Dex = dex
           Int = int'
@@ -54,6 +76,6 @@ module Defence =
           Evasion = evasion
           Deflection = deflection
           Resist = DamageType.all |> List.filter ((<>) Physical) |> List.map resist |> Map.ofList
-          LifeRegen = (Mods.sumBase c [ LifeRegen ] db + life * Mods.sumBase c [ LifeRegenPercent ] db / 100.0) * Mods.mult c [ LifeRegen ] db
+          LifeRegen = if ci then 0.0 else (Mods.sumBase c [ LifeRegen ] db + life * Mods.sumBase c [ LifeRegenPercent ] db / 100.0) * Mods.mult c [ LifeRegen ] db
           ManaRegen = mana * manaRegenPercent / 100.0 * Mods.mult c [ ManaRegen ] db
           EnergyShieldRecharge = es * esRechargePercent / 100.0 }

@@ -179,8 +179,12 @@ module Hit =
             if r.Max > 0.0 then Some(t, r) else None)
         |> Map.ofList
 
-    /// Damage ranges ready to roll: base, converted, gained.
-    let ranges ctx mods skill = baseDamage ctx mods skill |> convert ctx mods |> gain ctx mods
+    /// Damage ranges ready to roll. "Gain as extra" is taken from the base damage first, and
+    /// conversion then applies to base and gained damage alike (PoB does it the other way round;
+    /// the in-game damage split of a fully converted skill points to this order, see RULES.md).
+    let ranges ctx mods skill =
+        if Constants.gainBeforeConversion then baseDamage ctx mods skill |> gain ctx mods |> convert ctx mods
+        else baseDamage ctx mods skill |> convert ctx mods |> gain ctx mods
 
     let critChance ctx mods (skill: Skill) =
         match Mods.override' ctx CritChance mods with
