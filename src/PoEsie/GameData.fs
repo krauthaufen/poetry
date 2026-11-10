@@ -37,7 +37,9 @@ type SkillData =
       Hidden: bool
       Levels: Map<int, SkillLevel>
       StatSets: StatSetData list
-      QualityStats: (string * float) list }
+      QualityStats: (string * float) list
+      /// Alternate quality effects (granted by e.g. Gemling's Advanced Thaumaturgy).
+      AltQualityStats: (string * float) list }
 
 type GemData =
     { GameId: string
@@ -98,7 +100,8 @@ module GameData =
           Hidden = Json.field "hidden" j = Some(JBool true)
           Levels = Json.items (Json.field "levels" j) |> List.map (fun (i, l) -> i, skillLevel l) |> Map.ofList
           StatSets = Json.list (Json.field "statSets" j) |> List.map statSet
-          QualityStats = statPairs (Json.field "qualityStats" j) }
+          QualityStats = statPairs (Json.field "qualityStats" j)
+          AltQualityStats = statPairs (Json.field "altQualityStats" j) }
 
     /// skills.json: grantedEffectId -> skill.
     let parseSkills (json: string) : Map<string, SkillData> =

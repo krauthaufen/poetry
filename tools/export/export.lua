@@ -89,7 +89,7 @@ end
 -- keep only data fields
 local keep = {
   name = true, baseTypeName = true, description = true, skillTypes = true, minionSkillTypes = true,
-  castTime = true, support = true, hidden = true, levels = true, statSets = true, qualityStats = true,
+  castTime = true, support = true, hidden = true, levels = true, statSets = true, qualityStats = true, altQualityStats = true,
   requireSkillTypes = true, addSkillTypes = true, excludeSkillTypes = true, weaponTypes = true,
   isTrigger = true, color = true, minionList = true, gemFamily = true,
 }

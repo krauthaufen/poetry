@@ -139,7 +139,7 @@ module Sim =
         | Ready of actor: string
         | Strike of actor: string * skill: string * mult: float * aimedAt: string
         /// After a use's hits: the skill consumes its charges (unless the skip roll succeeds).
-        | ConsumeCharges of actor: string * charge: string
+        | ConsumeCharges of actor: string * charge: string * skill: string
         | Expire
 
     type private ActorState =
@@ -461,7 +461,7 @@ module Sim =
                 match skill.Consumes with
                 | Some charge ->
                     let last = times |> List.map fst |> List.fold max w.Time
-                    schedule (last + 1e-9) (ConsumeCharges(actor.Name, charge)) w
+                    schedule (last + 1e-9) (ConsumeCharges(actor.Name, charge, skill.Name)) w
                 | None -> w
             react env rng actor OnUse skill (Some target.Def.Name) w
 
@@ -602,10 +602,11 @@ module Sim =
             match ev with
             | Ready name -> onReady env rng name w
             | Strike (name, skill, mult, aimedAt) -> onStrike env rng name skill mult aimedAt w
-            | ConsumeCharges (name, charge) ->
+            | ConsumeCharges (name, charge, skillName) ->
                 let actor = actorDef env name
                 let st = Map.find name w.Actors
-                let skip = Mods.sumBase Ctx.empty [ Named "ChargeSkipConsume" ] (ModDb.ofList actor.Mods)
+                // character + skill (gem quality, supports): the skill's own db
+                let skip = Mods.sumBase Ctx.empty [ Named "ChargeSkipConsume" ] (skillDb env actor (skillOf actor skillName) st)
                 if not (Map.containsKey charge st.Buffs) then w
                 else
                     // "still count as consuming": the consumed-recently status starts either way

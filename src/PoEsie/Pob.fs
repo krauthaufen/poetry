@@ -138,7 +138,8 @@ module Pob =
 
     /// Rune lines prefixed "Bonded:" only work for Shamans.
     let private dropBonded (build: PobBuild) (text: string) =
-        if (build.ClassName + build.Ascendancy).Contains "Shaman" then text
+        if (build.ClassName + build.Ascendancy).Contains "Shaman" || Map.containsKey "bonded" build.Config then
+            text.Split('\n') |> Array.map (fun l -> let t = l.Trim() in if t.StartsWith "Bonded: " then t.Substring 8 else l) |> String.concat "\n"
         else text.Split('\n') |> Array.filter (fun l -> not (l.Trim().StartsWith "Bonded:")) |> String.concat "\n"
 
     /// "Allocates <notable>" on an item (anoints, jewels) allocates that passive.

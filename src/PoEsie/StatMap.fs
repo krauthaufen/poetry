@@ -246,6 +246,7 @@ module StatMap =
         | "treat_enemy_resistances_as_negated_on_elemental_damage_hit_%_chance" ->
             one (Mod.base' (Named "NegateEnemyResistChance") v)
         | "projectiles_nova" -> Some Structural
+        | "ascendancy_gemling_enable_thaumaturgy_quality_stats" -> one (Mod.flag (Named "AltQuality"))
         | "all_skill_gem_quality_+" -> one (Mod.base' (Named "GemQuality") v)
         | "damage_+%_if_have_crit_in_past_8_seconds" -> one (Mod.inc (Damage AllDamage) v |> Mod.whenever (WhileBuff "CritInPast8Seconds"))
         | "base_resist_all_elements_%" -> Some NotOffensive

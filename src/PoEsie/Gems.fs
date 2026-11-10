@@ -60,7 +60,7 @@ module Gems =
     /// Gem stats at a level, as the game computes them. Interpolation 1 = value as
     /// listed; 3 = scaled by skill damage effectiveness at the stat set's actor level.
     /// Source: PoB CalcTools.buildSkillInstanceStats (formula), GameConstants (base effectiveness).
-    let stats (skill: SkillData) (set: StatSetData) level quality : (string * float) list =
+    let statsWith (altQuality: bool) (skill: SkillData) (set: StatSetData) level quality : (string * float) list =
         let levelData =
             Map.tryFind level set.Levels
             |> Option.orElse (Map.tryFind 1 set.Levels)
@@ -82,8 +82,11 @@ module Gems =
                         | _ -> raw
                     stat, value)
         let qualityStats =
-            skill.QualityStats |> List.map (fun (s, per) -> s, System.Math.Truncate(per * float quality))
+            (skill.QualityStats @ (if altQuality then skill.AltQualityStats else []))
+            |> List.map (fun (s, per) -> s, System.Math.Truncate(per * float quality))
         levelStats @ set.ConstantStats @ qualityStats |> List.filter (fun (_, v) -> v <> 0.0)
+
+    let stats skill set level quality = statsWith false skill set level quality
 
     let private tagOfType t =
         match t with
@@ -172,9 +175,9 @@ module Gems =
     let private isPart (set: StatSetData) = set.Stats |> List.contains "display_statset_hide_usage_stats"
 
     /// One stat set of a skill as a simulator Skill.
-    let private buildSet (data: SkillData) (set: StatSetData) name tags level quality (supportStats: (string * float) list) (weapon: Weapon option) =
+    let private buildSet altQuality (data: SkillData) (set: StatSetData) name tags level quality (supportStats: (string * float) list) (weapon: Weapon option) =
         let gemLevel = Map.tryFind level data.Levels
-        let ownStats = stats data set level quality
+        let ownStats = statsWith altQuality data set level quality
         let mods, cov = interpret (ownStats @ supportStats)
         let isAttack = data.Types.Contains "Attack"
         let baseDamage =
@@ -277,12 +280,13 @@ module Gems =
                         | _ -> [], { Coverage.empty with UnknownText = [ "unknown support: " + name ] })
                     |> List.unzip
                 let supportStats = List.concat supportStats
-                let main, cov = buildSet data set data.Name tags level quality supportStats weapon
+                let alt = Mods.flag ctx (Named "AltQuality") characterMods
+                let main, cov = buildSet alt data set data.Name tags level quality supportStats weapon
                 let parts, partCov =
                     data.StatSets
                     |> List.filter (fun s -> s <> set && isPart s)
                     |> List.map (fun s ->
-                        let p, c = buildSet data s (data.Name + ": " + s.Label) tags level quality supportStats weapon
+                        let p, c = buildSet alt data s (data.Name + ": " + s.Label) tags level quality supportStats weapon
                         { p with Consumes = None }, c)
                     |> List.unzip
                 let cov = List.fold Coverage.merge cov (supportCov @ partCov)

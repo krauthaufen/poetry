@@ -11,6 +11,7 @@
 ///   --target T       nearest | strongest (default strongest)
 ///   --charges N      power charges at the start (default: your maximum)
 ///   --skip P         override the chance (%) to not remove charges when consuming
+///   --bonded         apply "Bonded:" rune lines (normally Shaman only)
 ///   --suite          run the standard scenarios (pack, pack + 2 rares, surrounded, boss) and print a table
 ///   --data DIR       exported game data (default: data/game next to the repo)
 module PoEsie.Cli
@@ -31,6 +32,7 @@ let decodeBuildCode (code: string) =
 let rec private opts (args: string list) =
     match args with
     | "--suite" :: rest -> Map.add "suite" "1" (opts rest)
+    | "--bonded" :: rest -> Map.add "bonded" "1" (opts rest)
     | k :: v :: rest when k.StartsWith "--" -> Map.add (k.Substring 2) v (opts rest)
     | _ :: rest -> opts rest
     | [] -> Map.empty
@@ -57,6 +59,7 @@ let main argv =
             if text.TrimStart().StartsWith "{" then Api.read text
             elif text.TrimStart().StartsWith "<" then Pob.read text, []
             else Pob.read (decodeBuildCode text), []
+        let build = if Map.containsKey "bonded" o then { build with Config = Map.add "bonded" "1" build.Config } else build
         let sheet = Pob.character db tree build |> fun s -> Pob.withPersistentBuffs db s build
         let sheet =
             match Map.tryFind "skip" o with

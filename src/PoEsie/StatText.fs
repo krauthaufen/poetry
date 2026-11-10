@@ -234,6 +234,9 @@ module StatText =
                         // Not displayed: only known if the limit pins it to one value.
                         match limit with
                         | Some lo, Some hi when lo = hi -> Some(Some(stat, lo))
+                        // flag-like lines with no number ("Gem Quality grants ... an additional effect"):
+                        // the stat is at least its lower limit
+                        | lo, _ when variant.Slots.IsEmpty -> Some(Some(stat, lo |> Option.defaultValue 1.0))
                         | _ -> Some None)
             if literalsOk && List.forall Option.isSome values then
                 Some(values |> List.choose id |> List.choose id)
