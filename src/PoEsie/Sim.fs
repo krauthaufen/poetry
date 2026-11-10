@@ -115,7 +115,9 @@ type Actor =
       MaxResources: Map<string, int>
       /// Duration per resource (charges): all stacks of a kind share it, gaining refreshes it,
       /// and they all expire together. Missing: no duration.
-      ResourceDurations: Map<string, float> }
+      ResourceDurations: Map<string, float>
+      /// Hypothesis: consuming charges that are kept ("chance to not remove") restarts their timer.
+      KeptChargesRefresh: bool }
 
 module Actor =
     let make name mods skills =
@@ -133,7 +135,8 @@ module Actor =
           ManaFlask = None
           Periodics = []
           MaxResources = Map.empty
-          ResourceDurations = Map.empty }
+          ResourceDurations = Map.empty
+          KeptChargesRefresh = false }
 
     let always skill = { Use = skill; When = fun _ -> true }
 
@@ -967,7 +970,12 @@ module Sim =
                     let w =
                         updateActor name (fun st -> { st with Buffs = Map.add recent { Name = recent; Mods = []; Stacks = 1; Expires = w.Time + 4.0 } st.Buffs }) w
                         |> schedule (w.Time + 4.0) Expire
-                    if rng.Chance skip then { w with Counts = bump ("kept:" + charge) w.Counts }
+                    if rng.Chance skip then
+                        let w = { w with Counts = bump ("kept:" + charge) w.Counts }
+                        if actor.KeptChargesRefresh then
+                            let st = Map.find name w.Actors
+                            setStacksWith env name true charge (stacksOf st charge) w
+                        else w
                     else
                         updateActor name (fun st -> { st with Buffs = Map.remove charge st.Buffs }) w
                         |> fun w -> { w with Counts = bump ("consumed:" + charge) w.Counts }

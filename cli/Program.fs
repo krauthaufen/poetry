@@ -21,6 +21,7 @@
 ///   --immortal       ignore incoming damage and mana costs
 ///   --start S        full (default: charges, rage, motes at maximum) | empty (only power charges and rage)
 ///   --chargegen S    seconds between Thaumaturgical Dynamism charges (default 5)
+///   --kept-refresh   hypothesis: charges kept by "chance to not remove" restart their timer
 ///   --max K=N,...    override resource maxima with observed ones, e.g. "Mote:blue=0"
 ///   --noflask        don't use the mana flask
 ///   --suite          run the standard scenarios (pack, pack + 2 rares, surrounded, boss) and print a table
@@ -48,6 +49,7 @@ let rec private opts (args: string list) =
     | "--shotgun" :: rest -> Map.add "shotgun" "1" (opts rest)
     | "--immortal" :: rest -> Map.add "immortal" "1" (opts rest)
     | "--noflask" :: rest -> Map.add "noflask" "1" (opts rest)
+    | "--kept-refresh" :: rest -> Map.add "kept-refresh" "1" (opts rest)
     | k :: v :: rest when k.StartsWith "--" -> Map.add (k.Substring 2) v (opts rest)
     | _ :: rest -> opts rest
     | [] -> Map.empty
@@ -218,6 +220,7 @@ let main argv =
                             Periodics = periodics
                             MaxResources = maxResources
                             ResourceDurations = Behaviours.chargeDurations sheet
+                            KeptChargesRefresh = Map.containsKey "kept-refresh" o
                             ManaFlask =
                                 if Map.containsKey "immortal" o || Map.containsKey "noflask" o then None
                                 else
