@@ -896,7 +896,7 @@ module Sim =
                     match newShock with
                     | Some m ->
                         let withoutOld = def.Mods |> ModDb.toList |> List.filter (fun x -> x.Source <> "Shock")
-                        let def' = { def with Mods = ModDb.ofList (Mod.inc (DamageTaken AllDamage) m |> Mod.from "Shock" :: withoutOld) }
+                        let def' = { def with Mods = ModDb.ofList ((Mod.inc (DamageTaken AllDamage) m |> Mod.from "Shock") :: withoutOld) }
                         { hit with Dealt = Hit.mitigate ctx mods def' hit.Unmitigated }
                     | None -> hit
                 let dealt = Dmg.total hit.Dealt
