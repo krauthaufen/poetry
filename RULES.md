@@ -150,13 +150,14 @@ Confidence levels:
 
 | Mechanic | Rule | Source | Confidence |
 |---|---|---|---|
-| Charges, rage, motes | stacks on the player with a maximum each (charges: 3 + max charge stats; rage 30 + max rage; motes below); they don't expire | data | guess (no charge duration) |
+| Charges, rage, motes | stacks on the player with a maximum each (charges: 3 + max charge stats; rage 30 + max rage; motes below) | data | data |
+| Charge duration | 15 s × (1 + increased charge duration); all charges of a kind share one timer, gaining one (also at maximum) refreshes it, and they expire together. Removing a charge doesn't refresh. The user's power charges: 15 × 2.2 = 33 s, matching the game | PoB CalcSetup base 15 s; user (33 s, expiry behaviour) | pob + user |
 | Start of a fight | everything at its maximum (steady state mid-map); `--start empty` starts frenzy / endurance / motes at 0 | modelling choice | — |
 | "Consumes one of each Charge every X s" | `consume_frenzy_power_and_endurance_charge_every_x_ms` (with quality): removes one of each charge the player has; each removal rolls the character's "chance to not remove charges" and counts as consuming either way | skill text | data + guess (skip chance applies) |
-| Thaumaturgical Dynamism | a random charge that isn't at maximum, every 5 s | node text; the game derives the interval from socketed gem attribute requirements (formula unknown), 5 s from the user | user |
+| Thaumaturgical Dynamism | a uniformly random charge type every 5 s (at maximum it only refreshes the duration) | node text; the game derives the interval from socketed gem attribute requirements (formula unknown), 5 s from the user | user |
 | "Gained / Consumed a <charge> Recently" | 4 s after each gain or consume | PoE convention | pob |
 | Count as consuming N additional | a skill that consumes charges sees N extra stacks for "per charge consumed" effects (damage, projectile count) | game text | data |
 | Charge-conditional defences | "more Armour, Evasion and Energy Shield while you have an Endurance Charge" etc. are evaluated from the current charges at every monster hit (pools: at the start) | game text | data |
-| Virtuous Barrier motes (observed) | user's character: Strength 9 and Dexterity 8 match the formula; **no Intelligence motes appear in game** although the formula gives 12. The maxima are virtual stats computed in game code; why blue motes are missing is unknown. `--max Mote:blue=0` applies the observation | user | **open question** |
+| Virtuous Barrier motes (observed) | user's character: Strength 9, Dexterity 8, Intelligence 12, as the formula gives (in-game advanced info) | user | confirmed |
 | Virtuous Barrier motes | a random colour not at maximum every `base_active_skill_buff_stack_gain_frequency_ms`; maximum per colour = the description's base (`skill_specific_stat_description_mode`, 3) + active skills requiring that attribute, single-attribute skills counting twice; `gem_barrier_<colour>_grants_<stat>` is per mote | skill text and data; supports not counted as skills | data + guess |
 | Gem levels by attribute | `<attribute>_skill_gem_level_+` applies to gems with that attribute requirement | gem data | data |

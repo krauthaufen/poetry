@@ -312,6 +312,11 @@ module StatMap =
             one (Mod.flag (Named "GeneratesRandomCharges"))
         | "base_active_skill_buff_stack_gain_frequency_ms" -> one (Mod.base' (Named "MoteGainEveryMs") v)
         | "skill_specific_stat_description_mode" -> Some Structural
+        | "charge_duration_+%" ->
+            Some(Mods([ "PowerCharge"; "FrenzyCharge"; "EnduranceCharge" ] |> List.map (fun c -> Mod.inc (Named(c + "Duration")) v)))
+        | "power_charge_duration_+%" -> one (Mod.inc (Named "PowerChargeDuration") v)
+        | "frenzy_charge_duration_+%" | "base_frenzy_charge_duration_+%" -> one (Mod.inc (Named "FrenzyChargeDuration") v)
+        | "endurance_charge_duration_+%" | "base_endurance_charge_duration_+%" -> one (Mod.inc (Named "EnduranceChargeDuration") v)
         | "max_power_charges" -> one (Mod.base' (Named "MaxPowerCharge") v)
         | "max_frenzy_charges" -> one (Mod.base' (Named "MaxFrenzyCharge") v)
         | "max_endurance_charges" -> one (Mod.base' (Named "MaxEnduranceCharge") v)

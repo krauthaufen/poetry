@@ -106,6 +106,7 @@ let main argv =
         let vitals = Defence.computeWith startResources bases sheet
         let periodics = Behaviours.periodics db sheet build (Map.tryFind "chargegen" o |> Option.map float |> Option.defaultValue 5.0)
         for p in periodics do printfn "periodic: %s every %.1fs" p.Name p.Every
+        printfn "charge durations: %s" (Behaviours.chargeDurations sheet |> Map.toList |> List.map (fun (k, d) -> sprintf "%s %.0fs" k d) |> String.concat ", ")
         if not moteMax.IsEmpty then printfn "motes: %s" (moteMax |> List.map (fun (k, n) -> sprintf "%s max %d" k n) |> String.concat ", ")
         let sheet =
             match Map.tryFind "skip" o with
@@ -212,6 +213,7 @@ let main argv =
                             VitalsAt = Some(fun current -> Defence.computeWith current bases sheet)
                             Periodics = periodics
                             MaxResources = maxResources
+                            ResourceDurations = Behaviours.chargeDurations sheet
                             ManaFlask =
                                 if Map.containsKey "immortal" o || Map.containsKey "noflask" o then None
                                 else

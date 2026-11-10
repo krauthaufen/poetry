@@ -46,7 +46,7 @@ module Behaviours =
           if consume > 0.0 then
               yield { Name = "consume charges"; Every = consume / 1000.0; Action = ConsumeEach charges }
           if Mods.flag Ctx.empty (Named "GeneratesRandomCharges") mods then
-              yield { Name = "generate charges"; Every = chargeGenSeconds; Action = GainRandom charges }
+              yield { Name = "generate charges"; Every = chargeGenSeconds; Action = GainAnyRandom charges }
           let motes = sum "MoteGainEveryMs"
           if motes > 0.0 then
               yield { Name = "motes"; Every = motes / 1000.0; Action = GainRandom [ "Mote:red"; "Mote:green"; "Mote:blue" ] } ]
@@ -67,3 +67,8 @@ module Behaviours =
         [ "Mote:red", baseMax + count (fun (s, _, _) -> s)
           "Mote:green", baseMax + count (fun (_, d, _) -> d)
           "Mote:blue", baseMax + count (fun (_, _, i) -> i) ]
+
+    /// Charge durations: 15 s base (PoB CalcSetup) x increased charge duration.
+    let chargeDurations (sheet: CharacterSheet) =
+        let mods = ModDb.ofList sheet.Mods
+        charges |> List.map (fun c -> c, floor (15.0 * Mods.inc Ctx.empty [ Named(c + "Duration") ] mods)) |> Map.ofList

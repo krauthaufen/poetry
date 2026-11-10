@@ -67,6 +67,9 @@ type PeriodicAction =
     /// One stack of a random resource that isn't at its maximum (Thaumaturgical Dynamism,
     /// Virtuous Barrier's motes).
     | GainRandom of resources: string list
+    /// One stack of a uniformly random resource from the list; at its maximum it only
+    /// refreshes the duration (charges).
+    | GainAnyRandom of resources: string list
     /// One stack of each resource that has any (Charge Regulation). Charge-removal
     /// skip chances apply.
     | ConsumeEach of resources: string list
@@ -107,7 +110,10 @@ type Actor =
       ManaFlask: ManaFlask option
       Periodics: Periodic list
       /// Maximum stacks per resource (charges, rage, motes).
-      MaxResources: Map<string, int> }
+      MaxResources: Map<string, int>
+      /// Duration per resource (charges): all stacks of a kind share it, gaining refreshes it,
+      /// and they all expire together. Missing: no duration.
+      ResourceDurations: Map<string, float> }
 
 module Actor =
     let make name mods skills =
@@ -124,7 +130,8 @@ module Actor =
           VitalsAt = None
           ManaFlask = None
           Periodics = []
-          MaxResources = Map.empty }
+          MaxResources = Map.empty
+          ResourceDurations = Map.empty }
 
     let always skill = { Use = skill; When = fun _ -> true }
 
@@ -448,7 +455,10 @@ module Sim =
                     { e with
                         Debuffs = e.Debuffs |> Map.filter (fun _ x -> live x)
                         Dots = e.Dots |> List.filter (fun d -> d.Expires > w.Time) })
-            Actors = w.Actors |> Map.map (fun _ st -> { st with Buffs = st.Buffs |> Map.filter (fun _ x -> live x) }) }
+            Actors = w.Actors |> Map.map (fun _ st -> { st with Buffs = st.Buffs |> Map.filter (fun _ x -> live x) })
+            Counts =
+                w.Actors
+                |> Map.fold (fun c _ st -> st.Buffs |> Map.fold (fun c k x -> if not (live x) && x.Expires < infinity && k.EndsWith "Charge" then bump ("expired:" + k) c else c) c) w.Counts }
 
     // ---- effects ----
 
@@ -849,10 +859,24 @@ module Sim =
 
     let private stacksOf (st: ActorState) r = Map.tryFind r st.Buffs |> Option.map (fun e -> e.Stacks) |> Option.defaultValue 0
 
-    let private setStacks actorName r n (w: World) =
-        updateActor actorName (fun st ->
-            if n <= 0 then { st with Buffs = Map.remove r st.Buffs }
-            else { st with Buffs = Map.add r { Name = r; Mods = []; Stacks = n; Expires = infinity } st.Buffs }) w
+    /// Set a resource's stacks. `refresh`: a gain restarts its duration; a loss keeps it.
+    let private setStacksWith (env: Env) actorName refresh r n (w: World) =
+        let actor = actorDef env actorName
+        let duration = Map.tryFind r actor.ResourceDurations
+        let w =
+            updateActor actorName (fun st ->
+                if n <= 0 then { st with Buffs = Map.remove r st.Buffs }
+                else
+                    let expires =
+                        match duration, Map.tryFind r st.Buffs with
+                        | Some d, _ when refresh -> w.Time + d
+                        | _, Some old -> old.Expires
+                        | Some d, None -> w.Time + d
+                        | None, None -> infinity
+                    { st with Buffs = Map.add r { Name = r; Mods = []; Stacks = n; Expires = expires } st.Buffs }) w
+        match duration with
+        | Some d when refresh && n > 0 -> schedule (w.Time + d) Expire w
+        | _ -> w
 
     let private onPeriodic env (rng: Rng) actorName periodicName (w: World) =
         let actor = actorDef env actorName
@@ -867,9 +891,15 @@ module Sim =
                 if open'.IsEmpty then w
                 else
                     let r = open'.[min (open'.Length - 1) (int (rng.Float() * float open'.Length))]
-                    setStacks actorName r (stacksOf st r + 1) w
+                    setStacksWith env actorName true r (stacksOf st r + 1) w
                     |> markStatus actorName ("Gained" + r + "Recently")
                     |> fun w -> { w with Counts = bump ("gained:" + r) w.Counts }
+            | GainAnyRandom resources ->
+                let r = resources.[min (resources.Length - 1) (int (rng.Float() * float resources.Length))]
+                let maxR = Map.tryFind r actor.MaxResources |> Option.defaultValue 0
+                setStacksWith env actorName true r (min maxR (stacksOf st r + 1)) w
+                |> markStatus actorName ("Gained" + r + "Recently")
+                |> fun w -> { w with Counts = bump ("gained:" + r) w.Counts }
             | ConsumeEach resources ->
                 let skip = Mods.sumBase Ctx.empty [ Named "ChargeSkipConsume" ] (ModDb.ofList actor.Mods)
                 resources
@@ -885,7 +915,7 @@ module Sim =
                                     gainMana v "consume" (v.Mana * Mods.sumBase Ctx.empty [ Named "ManaPercentOnConsumePower" ] (ModDb.ofList actor.Mods) / 100.0) w
                                 | _ -> w
                             if rng.Chance skip then { w with Counts = bump ("kept:" + r) w.Counts }
-                            else setStacks actorName r (stacksOf st r - 1) w |> fun w -> { w with Counts = bump ("lost:" + r) w.Counts })
+                            else setStacksWith env actorName false r (stacksOf st r - 1) w |> fun w -> { w with Counts = bump ("lost:" + r) w.Counts })
                     w
 
     let private step env rng (w: World) =
@@ -940,6 +970,15 @@ module Sim =
     let run (fight: Fight) (seed: uint32) : Outcome =
         let env = envOf fight
         let rng = Rng(seed)
+        /// Expiry events for the resources an actor starts with.
+        let scheduleResourceTimers (w: World) (a: Actor) =
+            a.ResourceDurations
+            |> Map.fold
+                (fun w k _ ->
+                    match Map.tryFind k (Map.find a.Name w.Actors).Buffs with
+                    | Some e when e.Expires < infinity -> schedule e.Expires Expire w
+                    | _ -> w)
+                w
         let actors = fight.Player :: fight.Minions
         let empty =
             { Buffs = Map.empty
@@ -981,7 +1020,10 @@ module Sim =
                     let res =
                         a.Resources
                         |> List.filter (fun (_, n) -> n > 0)
-                        |> List.map (fun (k, n) -> k, { Name = k; Mods = []; Stacks = n; Expires = infinity })
+                        |> List.map (fun (k, n) ->
+                            // steady state: a random part of the duration has already passed
+                            let expires = match Map.tryFind k a.ResourceDurations with Some d -> rng.Float() * d | None -> infinity
+                            k, { Name = k; Mods = []; Stacks = n; Expires = expires })
                         |> Map.ofList
                     a.Name, { empty with Buffs = res })
                 |> Map.ofList
@@ -993,6 +1035,7 @@ module Sim =
               Kills = [] }
             |> fun w -> actors |> List.fold (fun w a -> schedule 0.0 (Ready a.Name) w) w
             |> fun w -> actors |> List.fold (fun w a -> a.Cycles |> List.fold (fun w c -> schedule 0.0 (CycleTick(a.Name, c.Name)) w) w) w
+            |> fun w -> actors |> List.fold scheduleResourceTimers w
             |> fun w ->
                 // periodic actions start at a random point of their first period
                 actors |> List.fold (fun w a -> a.Periodics |> List.fold (fun w p -> schedule (rng.Float() * p.Every) (PeriodicTick(a.Name, p.Name)) w) w) w
