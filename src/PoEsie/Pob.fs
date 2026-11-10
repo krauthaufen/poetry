@@ -181,6 +181,44 @@ module Pob =
             else Some l)
         |> String.concat "\n"
 
+    /// Mage's Legacies (Mageblood): "Legacy of X" lines. Each kind applies once; every
+    /// duplicate raises the effect of all of them by the belt's "increased effect per
+    /// duplicate". Values: PoB CalcPerform `legacies` (Topaz taken like Ruby / Sapphire).
+    let private legacyMods (lines: string list) : Mod list * string list =
+        let prefix = "Legacy of "
+        let names = lines |> List.map (fun l -> l.Trim()) |> List.filter (fun l -> l.StartsWith prefix) |> List.map (fun l -> l.Substring prefix.Length)
+        if names.IsEmpty then [], lines
+        else
+            let perDuplicate =
+                lines |> List.tryPick (fun l ->
+                    if l.Contains "increased effect per duplicate Mage's Legacy" then
+                        (match System.Double.TryParse(l.Trim().Split('%').[0].Replace("All Mage's Legacies have ", "")) with | true, v -> Some v | _ -> None)
+                    else None)
+                |> Option.defaultValue 0.0
+            let duplicates = names |> List.countBy id |> List.sumBy (fun (_, n) -> n - 1)
+            let effect = 1.0 + float duplicates * perDuplicate / 100.0
+            let value (v: float) = floor (effect * v)
+            let resist t = [ Mod.base' (Resist t) (value 60.0); Mod.base' (MaxResist t) (value 5.0) ]
+            let mods =
+                names |> List.distinct |> List.collect (fun n ->
+                    match n with
+                    | "Amethyst" -> [ Mod.base' (Resist Chaos) (value 45.0) ]
+                    | "Basalt" -> [ Mod.inc Armour (value 150.0) ]
+                    | "Bismuth" -> DamageType.elemental |> List.map (fun t -> Mod.base' (Resist t) (value 45.0))
+                    | "Diamond" -> [ Mod.inc CritChance (value 75.0) ]
+                    | "Granite" -> [ Mod.base' Armour (value 2000.0) ]
+                    | "Jade" -> [ Mod.base' Evasion (value 2000.0) ]
+                    | "Ruby" -> resist Fire
+                    | "Sapphire" -> resist Cold
+                    | "Topaz" -> resist Lightning
+                    | "Silver" -> [ Mod.inc Speed (value 30.0) ]
+                    | "Stibnite" -> [ Mod.inc Evasion (value 150.0) ]
+                    | "Sulphur" -> [ Mod.inc (Damage AllDamage) (value 60.0) ]
+                    // Gold (rarity), Quicksilver (movement speed): nothing in a fight
+                    | _ -> [])
+                |> List.map (Mod.from "Mage's Legacy")
+            mods, lines |> List.filter (fun l -> not (l.Trim().StartsWith prefix) && not (l.Contains "increased effect per duplicate Mage's Legacy"))
+
     /// "Allocates <notable>" on an item (anoints, jewels) allocates that passive.
     let private allocatedByItems (tree: Map<int, TreeNode>) (texts: string list) =
         texts
@@ -275,6 +313,13 @@ module Pob =
                             // a bare category header ("Body Armours:")
                             if t.EndsWith ":" && (fits (t.TrimEnd(':'))).IsSome then None else Some l)
                 slot, String.concat "\n" lines)
+        let legacies, items =
+            items
+            |> List.map (fun (slot, text) ->
+                let mods, rest = legacyMods (text.Split('\n') |> List.ofArray)
+                mods, (slot, String.concat "\n" rest))
+            |> List.unzip
+            |> fun (ms, its) -> List.concat ms, its
         let parsed = items |> List.map (fun (slot, text) -> slot, Items.parse db text)
         let mainHand = parsed |> List.tryFind (fun (slot, _) -> slot = "Weapon 1") |> Option.bind (fun (_, p) -> p.Weapon)
         let swapHand =
@@ -298,7 +343,7 @@ module Pob =
                 pick p |> Option.map (fun f ->
                     let inc = text.Split('\n') |> Array.tryPick (fun l -> if l.Contains "increased Charges gained" then (match System.Double.TryParse(l.Trim().Split('%').[0]) with | true, v -> Some v | _ -> None) else None)
                     f, inc |> Option.defaultValue 0.0))
-        { Mods = itemMods @ radiusMods @ treeMods @ extraMods
+        { Mods = itemMods @ legacies @ radiusMods @ treeMods @ extraMods
           MainHand = mainHand
           Weapons = Option.toList mainHand @ Option.toList swapHand
           ItemDefences = parsed |> List.filter (fun (slot, _) -> not (slot.Contains "Swap")) |> List.collect (fun (slot, p) -> p.Defences |> List.map (fun (st, v) -> slot, st, v))
