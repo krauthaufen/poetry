@@ -1031,7 +1031,19 @@ module Sim =
             let st = Map.find actor.Name w.Actors
             let mods = skillDb env actor skill st
             let ctx = Skill.ctx skill false (skillStacks actor skill st) (status e)
-            let hitChance = Mods.override' ctx HitChance mods |> Option.defaultValue 100.0
+            let hitChance =
+                match Mods.override' ctx HitChance mods with
+                | Some v -> v
+                | None when skill.Tags.Contains Attack ->
+                    // attacks roll accuracy against the monster's evasion; spells always hit.
+                    // Actors without any accuracy (hand-built) always hit.
+                    let accuracy = Mods.total ctx [ Named "Accuracy" ] mods
+                    if accuracy <= 0.0 then 100.0
+                    else
+                        let evasion = Constants.monsterEvasion e.Def.Level * Mods.mult Ctx.empty [ Evasion ] e.Db
+                        let distance = max 0.0 (Vec.length e.Def.Position - e.Def.Size)
+                        Hit.accuracyHitChance evasion (Hit.accuracyAtDistance distance accuracy)
+                | None -> 100.0
             if not (rng.Chance hitChance) then
                 { w with Counts = bump ("miss:" + skill.Name) w.Counts }
             else

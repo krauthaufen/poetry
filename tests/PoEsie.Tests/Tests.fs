@@ -336,6 +336,18 @@ let main _ =
         // 5000 / (5000 + 10 * 500) = 50% less
         near 0.5 (taken armoured / taken plain))
 
+    test "accuracy: attacks can miss, spells can't" (fun () ->
+        near 100.0 (Hit.accuracyHitChance 1000.0 2000.0)
+        near 63.0 (Hit.accuracyHitChance 1000.0 300.0)
+        // at 9 m accuracy is 90% lower
+        near 30.0 (Hit.accuracyAtDistance 90.0 300.0)
+        let swing = { Skill.make "Swing" [ Attack; Melee ] with BaseDamage = Map.ofList [ Physical, Range.fixedAt 10.0 ] }
+        let run mods skill = Sim.run (Fight.single (boss 1e9) (Actor.make "Player" (noIgnite :: mods) [ skill ]) 200.5) 1u
+        let poor = run [ Mod.base' (Named "Accuracy") 50.0 ] swing
+        if not (poor.Counts.ContainsKey "miss:Swing") then failwith "an inaccurate attack never missed"
+        let spell = run [ Mod.base' (Named "Accuracy") 50.0 ] (fireSpell 10.0)
+        equal false (spell.Counts.ContainsKey "miss:Bolt"))
+
     DataTests.run test near (fun a b -> equal a b)
 
     printfn "%d passed, %d failed" passed failures

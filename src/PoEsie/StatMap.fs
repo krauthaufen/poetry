@@ -483,6 +483,7 @@ module StatMap =
         // "Convert 100% of maximum Energy Shield to maximum Mana; Mana Costs are Doubled"
         | "keystone_eldritch_battery" -> Some(Mods [ Mod.base' (Named "ESConvertedToMana") v; Mod.more ManaCost 100.0 ])
         | "keystone_chaos_inoculation" -> one (Mod.flag (Named "Keystone:Chaos Inoculation"))
+        | "global_always_hit" | "always_hit" -> one (Mod.override' HitChance 100.0)
         | "cannot_be_light_stunned" -> one (Mod.base' (Named "AvoidStun") 100.0)
         | "accuracy_rating_is_doubled" -> one (Mod.more (Named "Accuracy") 100.0)
         // "25% more Skill Speed while Off Hand is empty and you have a One-Handed Martial Weapon"
@@ -722,6 +723,19 @@ module StatMap =
             | _ -> None
         | _ -> None
 
+    /// "<scope> accuracy rating [+%] [conditions]"
+    let private accuracy rev v =
+        let words = List.rev rev
+        let kind, words =
+            match List.tryFindIndex ((=) "+%") words with
+            | Some i -> Inc, List.take i words @ List.skip (i + 1) words
+            | None -> Base, words
+        match List.tryFindIndex ((=) "accuracy") words with
+        | Some i when i + 1 < words.Length && words.[i + 1] = "rating" ->
+            scopes (List.take i words @ List.skip (i + 2) words)
+            |> Option.map (fun sc -> [ apply sc (Mod.make kind (Named "Accuracy") v) ])
+        | _ -> None
+
     /// "gem barrier <colour> grants <stat>": the stat per mote of that colour (Virtuous Barrier).
     let rec private perMote rev v =
         match List.rev rev with
@@ -736,7 +750,7 @@ module StatMap =
             |> Option.map (List.map (Mod.whenever (PerStack("Mote:" + colour, 1.0))))
         | _ -> None
 
-    let private rules = [ perMote; defenceScaled; areaOfEffect; buildup; scaledDamage; addedDamage; penetration; gainAs; convert; ailmentStat; crit; speed; gemLevel ]
+    let private rules = [ perMote; accuracy; defenceScaled; areaOfEffect; buildup; scaledDamage; addedDamage; penetration; gainAs; convert; ailmentStat; crit; speed; gemLevel ]
 
     let private pattern (id: string) (v: float) : Meaning option =
         let rev = List.rev (split id)
@@ -770,7 +784,6 @@ module StatMap =
           "projectile", "projectile count / speed / chaining"
           "pierce", "projectile count / speed / chaining"
           "chain", "projectile count / speed / chaining"
-          "accuracy", "accuracy vs evasion"
           "curse", "curse effect"
           "aura", "aura effect"
           "mark", "mark effect"

@@ -198,6 +198,17 @@ module Hit =
         // Avatar of Fire: "Deal no Non-Fire Damage"
         if Mods.flag ctx (Named "DealNoNonFire") mods then r |> Map.filter (fun t _ -> t = Fire) else r
 
+    /// Chance (%) an attack hits: 1.25 A / (A + 0.3 E), between 5 and 100 (PoB calcs.hitChance).
+    let accuracyHitChance (evasion: float) (accuracy: float) =
+        if accuracy <= 0.0 then 5.0
+        else max 5.0 (min 100.0 (floor (1.25 * accuracy / (accuracy + 0.3 * evasion) * 100.0 + 0.5)))
+
+    /// Accuracy falls off with distance: full up to 2 m, 90% less at 9 m and beyond
+    /// (Character.ot accuracy_rating_+%_final_at_max_distance_scaled, PoB falloff 20..90 units).
+    let accuracyAtDistance (distance: float) (accuracy: float) =
+        let d = max 20.0 (min 90.0 distance)
+        accuracy * (1.0 - (d - 20.0) / 70.0 * 0.9)
+
     let critChance ctx mods (skill: Skill) =
         match Mods.override' ctx CritChance mods with
         | Some v -> v

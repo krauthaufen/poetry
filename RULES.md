@@ -26,6 +26,16 @@ Confidence levels:
 | Crit damage | × (1 + (100 + flat bonus) × inc × more / 100); player base bonus 100% | Character.ot `base_critical_hit_damage_bonus` | data |
 | Double damage | chance per hit to deal ×2 | — | guess |
 
+### Accuracy
+
+| Mechanic | Rule | Source | Confidence |
+|---|---|---|---|
+| Who rolls | attacks roll accuracy against the monster's evasion; spells always hit; "always hit" overrides | game rule | data |
+| Player accuracy | 6 per level above 1 + 6 per Dexterity + flat, x increased / more | Character.ot, PoB AccuracyPerDexBase | pob |
+| Hit chance | round(1.25 A / (A + 0.3 E)), between 5% and 100% | PoB calcs.hitChance | pob |
+| Distance | accuracy is full up to 2 m and falls linearly to 90% less at 9 m | Character.ot accuracy_rating_+%_final_at_max_distance_scaled, PoB falloff | pob |
+| Monster evasion | DefaultMonsterStats evasion for its level | game data | data |
+
 ## Mitigation
 
 | Mechanic | Rule | Source | Confidence |
