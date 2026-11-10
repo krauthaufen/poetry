@@ -157,5 +157,6 @@ Confidence levels:
 | "Gained / Consumed a <charge> Recently" | 4 s after each gain or consume | PoE convention | pob |
 | Count as consuming N additional | a skill that consumes charges sees N extra stacks for "per charge consumed" effects (damage, projectile count) | game text | data |
 | Charge-conditional defences | "more Armour, Evasion and Energy Shield while you have an Endurance Charge" etc. are evaluated from the current charges at every monster hit (pools: at the start) | game text | data |
+| Virtuous Barrier motes (observed) | user's character: Strength 9 and Dexterity 8 match the formula; **no Intelligence motes appear in game** although the formula gives 12. The maxima are virtual stats computed in game code; why blue motes are missing is unknown. `--max Mote:blue=0` applies the observation | user | **open question** |
 | Virtuous Barrier motes | a random colour not at maximum every `base_active_skill_buff_stack_gain_frequency_ms`; maximum per colour = the description's base (`skill_specific_stat_description_mode`, 3) + active skills requiring that attribute, single-attribute skills counting twice; `gem_barrier_<colour>_grants_<stat>` is per mote | skill text and data; supports not counted as skills | data + guess |
 | Gem levels by attribute | `<attribute>_skill_gem_level_+` applies to gems with that attribute requirement | gem data | data |

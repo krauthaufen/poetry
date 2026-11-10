@@ -21,6 +21,7 @@
 ///   --immortal       ignore incoming damage and mana costs
 ///   --start S        full (default: charges, rage, motes at maximum) | empty (only power charges and rage)
 ///   --chargegen S    seconds between Thaumaturgical Dynamism charges (default 5)
+///   --max K=N,...    override resource maxima with observed ones, e.g. "Mote:blue=0"
 ///   --noflask        don't use the mana flask
 ///   --suite          run the standard scenarios (pack, pack + 2 rares, surrounded, boss) and print a table
 ///   --data DIR       exported game data (default: data/game next to the repo)
@@ -89,7 +90,12 @@ let main argv =
                             raw |> List.tryPick (fun (k, v) -> if k = "skill_specific_stat_description_mode" then Some(int v) else None)
                         else None))
         let moteMax = match moteBase with Some b -> Behaviours.moteMaxima db build b | None -> []
-        let maxResources = (Pob.maxResources sheet @ moteMax) |> Map.ofList
+        // observed maxima override the computed ones: --max "Mote:blue=0,Mote:red=9"
+        let overrides =
+            (Map.tryFind "max" o |> Option.defaultValue "").Split(',')
+            |> Array.choose (fun kv -> match kv.Split('=') with | [| k; v |] -> Some(k.Trim(), int v) | _ -> None)
+            |> List.ofArray
+        let maxResources = (Pob.maxResources sheet @ moteMax @ overrides) |> Map.ofList
         let startResources =
             maxResources
             |> Map.map (fun k n ->
