@@ -1,0 +1,140 @@
+namespace PoEsie
+
+/// What the game itself shows for a weapon (API "properties"), for checking our maths.
+type DisplayedWeapon =
+    { Damage: Map<DamageType, Range>
+      CritChance: float option
+      AttacksPerSecond: float option }
+
+/// Import from the official character API (GET /character/poe2/<name>).
+module Api =
+    /// "[ElementalDamage|Elemental] Damage" -> "Elemental Damage"; "[Attack] Speed" -> "Attack Speed".
+    let stripMarkup (s: string) =
+        let sb = System.Text.StringBuilder()
+        let mutable i = 0
+        while i < s.Length do
+            if s.[i] = '[' && s.IndexOf(']', i) > i then
+                let close = s.IndexOf(']', i)
+                let inner = s.Substring(i + 1, close - i - 1)
+                let shown = match inner.IndexOf('|') with | -1 -> inner | k -> inner.Substring(k + 1)
+                sb.Append(shown) |> ignore
+                i <- close + 1
+            else
+                sb.Append(s.[i]) |> ignore
+                i <- i + 1
+        sb.ToString()
+
+    let private modLines (item: Json) =
+        [ "enchantMods"; "implicitMods"; "runeMods"; "explicitMods"; "craftedMods"; "fracturedMods"; "desecratedMods" ]
+        |> List.collect (fun key ->
+            Json.list (Json.field key item)
+            |> List.choose (fun m ->
+                match m with
+                | JStr s -> Some s
+                | JObj _ -> Json.strField "description" m
+                | _ -> None))
+        |> List.collect (fun l -> (stripMarkup l).Split('\n') |> List.ofArray)
+
+    let private property name (item: Json) =
+        Json.list (Json.field "properties" item)
+        |> List.tryFind (fun p -> Json.strField "name" p |> Option.map stripMarkup = Some name)
+        |> Option.bind (fun p -> Json.list (Json.field "values" p) |> List.tryHead)
+        |> Option.bind (fun v -> Json.list (Some v) |> List.tryHead |> Option.bind Json.str)
+
+    let private parseRange (s: string) =
+        match s.Split('-') with
+        | [| lo; hi |] -> Some { Min = float lo; Max = float hi }
+        | _ -> None
+
+    /// The weapon numbers the game displays.
+    let displayedWeapon (item: Json) : DisplayedWeapon =
+        let damage =
+            DamageType.all
+            |> List.choose (fun t -> property (DamageType.name t + " Damage") item |> Option.bind parseRange |> Option.map (fun r -> t, r))
+            |> Map.ofList
+        { Damage = damage
+          CritChance = property "Critical Hit Chance" item |> Option.map (fun s -> float (s.TrimEnd('%')))
+          AttacksPerSecond = property "Attacks per Second" item |> Option.map float }
+
+    let private slotName (inventoryId: string) =
+        match inventoryId with
+        | "Weapon" -> "Weapon 1"
+        | "Offhand" -> "Weapon 2"
+        | "Weapon2" -> "Weapon 1 Swap"
+        | "Offhand2" -> "Weapon 2 Swap"
+        | "Ring" -> "Ring 1"
+        | "Ring2" -> "Ring 2"
+        | "BodyArmour" -> "Body Armour"
+        | "Helm" -> "Helmet"
+        | other -> other
+
+    /// The item in the game's text layout, so Items.parse handles it.
+    let itemText (item: Json) =
+        let get k = Json.strField k item |> Option.defaultValue ""
+        let quality = property "Quality" item |> Option.map (fun q -> "Quality: " + q) |> Option.toList
+        [ "Rarity: " + get "rarity"; get "name"; get "typeLine"; "--------" ] @ quality @ [ "--------" ] @ modLines item
+        |> String.concat "\n"
+
+    let private gemLevel (gem: Json) =
+        property "Level" gem
+        |> Option.map (fun s -> s.Split(' ').[0])
+        |> Option.bind (fun s -> match System.Int32.TryParse s with | true, v -> Some v | _ -> None)
+        |> Option.defaultValue 1
+
+    let private gemQuality (gem: Json) =
+        property "Quality" gem
+        |> Option.map (fun s -> s.TrimStart('+').TrimEnd('%'))
+        |> Option.bind (fun s -> match System.Int32.TryParse s with | true, v -> Some v | _ -> None)
+        |> Option.defaultValue 0
+
+    /// Convert an API character into the same shape a PoB build is read into.
+    let read (json: string) : PobBuild * (string * DisplayedWeapon) list =
+        let root = Json.parse json
+        let c = Json.field "character" root |> Option.defaultValue root
+        let equipment = Json.list (Json.field "equipment" c)
+        let items =
+            equipment
+            |> List.map (fun it -> slotName (Json.strField "inventoryId" it |> Option.defaultValue ""), itemText it)
+        let jewels =
+            Json.list (Json.field "jewels" c) |> List.mapi (fun i j -> sprintf "Jewel %d" (i + 1), itemText j)
+        let displayed =
+            equipment
+            |> List.filter (fun it -> Json.field "properties" it |> Option.isSome && (property "Attacks per Second" it).IsSome)
+            |> List.map (fun it -> slotName (Json.strField "inventoryId" it |> Option.defaultValue ""), displayedWeapon it)
+        let groups =
+            Json.list (Json.field "skills" c)
+            |> List.map (fun g ->
+                let active =
+                    { Name = Json.strField "typeLine" g |> Option.defaultValue ""
+                      Level = gemLevel g
+                      Quality = gemQuality g
+                      Enabled = true
+                      IsSupport = false
+                      StatSet = 1 }
+                let supports =
+                    Json.list (Json.field "socketedItems" g)
+                    |> List.filter (fun s -> Json.field "support" s = Some(JBool true))
+                    |> List.map (fun s ->
+                        { Name = Json.strField "typeLine" s |> Option.defaultValue ""
+                          Level = gemLevel s
+                          Quality = 0
+                          Enabled = true
+                          IsSupport = true
+                          StatSet = 1 })
+                { Label = active.Name
+                  Slot = ""
+                  Enabled = true
+                  Gems = active :: supports })
+        let hashes =
+            Json.list (Json.field "passives" c |> Option.bind (Json.field "hashes"))
+            |> List.choose Json.num
+            |> List.map int
+        { Level = Json.numField "level" c |> Option.map int |> Option.defaultValue 1
+          ClassName = Json.strField "class" c |> Option.defaultValue ""
+          Ascendancy = ""
+          Items = items @ jewels
+          TreeNodes = hashes
+          Groups = groups
+          MainGroup = 1
+          Config = Map.empty },
+        displayed

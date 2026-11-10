@@ -157,7 +157,10 @@ module Items =
         // Mod lines: everything that isn't a header, the name or the base.
         let candidates =
             lines
-            |> List.filter (fun l -> not (isHeader l) && Some l <> baseName && l <> name && not (db.BaseNames.Contains l))
+            |> List.filter (fun l ->
+                not (isHeader l) && Some l <> baseName && l <> name && not (db.BaseNames.Contains l)
+                // handled by the build: allocated passives
+                && not (l.StartsWith "Allocates "))
         let stats, unknown = StatText.parseLines db.Text candidates
         let mods, locals, cov = interpret stats
         // Lines before the first understood stat are usually the name block; don't report them.
@@ -195,7 +198,9 @@ module Tree =
         |> List.choose (fun id -> Map.tryFind id nodes)
         |> List.fold
             (fun (mods, cov: Coverage) node ->
-                let stats, unknown = StatText.parseLines db.Text node.Stats
+                let relevant =
+                    node.Stats |> List.filter (fun l -> not (l.StartsWith "+5 to any Attribute") && not (l.StartsWith "Grants Skill:"))
+                let stats, unknown = StatText.parseLines db.Text relevant
                 let ms, _, c = Items.interpret stats
                 let unknown = unknown |> List.map (fun l -> sprintf "%s: %s" node.Name l)
                 mods @ ms, Coverage.merge cov { c with UnknownText = c.UnknownText @ unknown })

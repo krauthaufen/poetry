@@ -118,6 +118,13 @@ module StatMap =
                 go (EnemyHas (statusWord st).Value :: acc) tail
             | ("vs" | "against") :: "enemies" :: "affected" :: "by" :: "status" :: "ailments" :: tail ->
                 go (EnemyHas "AnyAilment" :: acc) tail
+            | "if" :: ("crit" | "crits") :: "recently" :: tail | "if" :: "have" :: "crit" :: "recently" :: tail ->
+                go (WhileBuff "CritRecently" :: acc) tail
+            | "if" :: ("hit" | "hits") :: "recently" :: tail -> go (WhileBuff "HitRecently" :: acc) tail
+            | "if" :: "enemy" :: "killed" :: "recently" :: tail
+            | "if" :: "killed" :: "recently" :: tail -> go (WhileBuff "KilledRecently" :: acc) tail
+            | "in" :: "weapon" :: "set" :: "one" :: tail -> go acc tail
+            | "in" :: "weapon" :: "set" :: "two" :: tail -> go (WhileBuff "WeaponSetTwo" :: acc) tail
             | "while" :: state when not state.IsEmpty -> List.rev acc, [], Some(WhileBuff(titleCase state))
             | w :: tail ->
                 let a, ws, extra = go acc tail
@@ -217,6 +224,15 @@ module StatMap =
         | "critical_hit_damaging_ailment_effect_+%" ->
             Some(Mods(Ailment.damaging |> List.map (fun a -> Mod.inc (AilmentMagnitude(Some a)) v |> Mod.whenever IsCrit)))
         | "damaging_ailments_deal_damage_+%_faster" | "faster_burn_%" -> Some(Unsimulated "faster ailments")
+        | "non_skill_base_all_damage_%_to_gain_as_cold_fire_lightning" ->
+            Some(Mods [ for into in DamageType.elemental do for from in DamageType.all do if from <> into then yield Mod.base' (GainAs(from, into)) v ])
+        | "attack_additional_critical_strike_chance_permyriad" -> one (Mod.base' CritChance (v / 100.0) |> Mod.whenever (SkillIs Attack))
+        | "additional_critical_strike_chance_permyriad" -> one (Mod.base' CritChance (v / 100.0))
+        | "treat_enemy_resistances_as_negated_on_elemental_damage_hit_%_chance" ->
+            one (Mod.base' (Named "NegateEnemyResistChance") v)
+        | "projectiles_nova" -> Some Structural
+        | "all_skill_gem_quality_+" -> one (Mod.base' (Named "GemQuality") v)
+        | "damage_+%_if_have_crit_in_past_8_seconds" -> one (Mod.inc (Damage AllDamage) v |> Mod.whenever (WhileBuff "CritInPast8Seconds"))
         | "base_resist_all_elements_%" -> Some NotOffensive
         | _ -> None
 
@@ -325,7 +341,23 @@ module StatMap =
                 |> Option.map (fun sc -> [ apply sc (Mod.base' (Named "GemLevel") v) |> fun m -> List.foldBack Mod.whenever elements m ])
         | _ -> None
 
-    let private rules = [ scaledDamage; addedDamage; penetration; gainAs; convert; ailmentStat; crit; speed; gemLevel ]
+    /// "<scope> hit damage <ailment> multiplier +%": buildup of freeze / stun / electrocute / pin.
+    let private buildup rev v =
+        match rev with
+        | "+%" :: "multiplier" :: a :: "damage" :: "hit" :: scope ->
+            let ailment =
+                match a with
+                | "freeze" -> Some Freeze
+                | "stun" -> Some HeavyStun
+                | "electrocute" -> Some Electrocute
+                | "pin" -> Some Pin
+                | _ -> None
+            match ailment, scopes (List.rev scope) with
+            | Some a, Some sc -> Some [ apply sc (Mod.inc (Buildup a) v) ]
+            | _ -> None
+        | _ -> None
+
+    let private rules = [ buildup; scaledDamage; addedDamage; penetration; gainAs; convert; ailmentStat; crit; speed; gemLevel ]
 
     let private pattern (id: string) (v: float) : Meaning option =
         let rev = List.rev (split id)

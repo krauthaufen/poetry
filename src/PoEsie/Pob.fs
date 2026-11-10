@@ -136,9 +136,28 @@ module Pob =
     let private alwaysOn (slot: string) =
         not (slot.StartsWith "Flask" || slot.StartsWith "Charm" || slot.Contains "Swap")
 
+    /// Rune lines prefixed "Bonded:" only work for Shamans.
+    let private dropBonded (build: PobBuild) (text: string) =
+        if (build.ClassName + build.Ascendancy).Contains "Shaman" then text
+        else text.Split('\n') |> Array.filter (fun l -> not (l.Trim().StartsWith "Bonded:")) |> String.concat "\n"
+
+    /// "Allocates <notable>" on an item (anoints, jewels) allocates that passive.
+    let private allocatedByItems (tree: Map<int, TreeNode>) (texts: string list) =
+        texts
+        |> List.collect (fun t -> t.Split('\n') |> List.ofArray)
+        |> List.choose (fun l ->
+            let l = l.Trim()
+            if l.StartsWith "Allocates " then
+                let name = l.Substring 10
+                tree |> Map.tryPick (fun id n -> if n.Name = name && (n.IsNotable || n.IsKeystone) then Some id else None)
+            else None)
+
     /// Character mods from equipped items and allocated passives.
     let character (db: GameDb) (tree: Map<int, TreeNode>) (build: PobBuild) : CharacterSheet =
-        let parsed = build.Items |> List.filter (fst >> alwaysOn) |> List.map (fun (slot, text) -> slot, Items.parse db text)
+        let items = build.Items |> List.filter (fst >> alwaysOn) |> List.map (fun (slot, text) -> slot, dropBonded build text)
+        let extraNodes = allocatedByItems tree (List.map snd items)
+        let build = { build with TreeNodes = build.TreeNodes @ extraNodes }
+        let parsed = items |> List.map (fun (slot, text) -> slot, Items.parse db text)
         let mainHand = parsed |> List.tryFind (fun (slot, _) -> slot = "Weapon 1") |> Option.bind (fun (_, p) -> p.Weapon)
         // A weapon's local mods are already in its Weapon; only its global mods go to the sheet.
         let itemMods = parsed |> List.collect (fun (_, p) -> p.Mods)

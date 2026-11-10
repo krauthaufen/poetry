@@ -476,6 +476,22 @@ module Sim =
                     | ts -> List.min ts
             schedule next (Ready name) w
 
+    /// Statuses the game tracks for "recently" conditions: (name, seconds).
+    let private recently hit crit killed =
+        [ if hit then yield "HitRecently", 4.0
+          if crit then
+              yield "CritRecently", 4.0
+              yield "CritInPast8Seconds", 8.0
+          if killed then yield "KilledRecently", 4.0 ]
+
+    let private markRecently (actor: string) hit crit killed (w: World) =
+        recently hit crit killed
+        |> List.fold
+            (fun w (name, secs) ->
+                updateActor actor (fun st -> { st with Buffs = Map.add name { Name = name; Mods = []; Stacks = 1; Expires = w.Time + secs } st.Buffs }) w
+                |> schedule (w.Time + secs) Expire)
+            w
+
     /// One hit on one enemy.
     let private hitEnemy env (rng: Rng) (actor: Actor) (skill: Skill) mult (target: string) (w: World) =
         let e = w.Enemies.[target]
@@ -517,6 +533,7 @@ module Sim =
                                     react env rng actor (OnInflict a) skill (Some target) { w with Counts = bump ("inflict:" + Ailment.name a) w.Counts }
                                 | AddBuildup _ -> w)
                             w
+                let w = markRecently actor.Name true hit.Crit dead w
                 let w = react env rng actor OnHit skill (Some target) w
                 if hit.Crit then react env rng actor OnCrit skill (Some target) w else w
 

@@ -163,7 +163,8 @@ module Gems =
                 let maxLevel = data.Levels |> Map.toList |> List.map fst |> List.fold max 1
                 let level = min level maxLevel
                 let gemLevel = Map.tryFind level data.Levels
-                let ownStats = stats data set level setup.Quality
+                let quality = setup.Quality + int (Mods.sumBase ctx [ Named "GemQuality" ] characterMods)
+                let ownStats = stats data set level quality
 
                 let supportStats, supportCov =
                     setup.Supports
@@ -216,10 +217,11 @@ module Gems =
                     | Some n when data.Types.Contains "Projectile" ->
                         Projectiles
                             { ProjectileShape.make (int n) with
+                                // "projectiles_nova": fired in a full circle
+                                Spread = (if flagOf "projectiles_nova" then 360.0 else statOf "total_projectile_spread_angle_override" |> Option.defaultValue 30.0)
                                 Pierce = int (statOf "projectile_base_number_of_targets_to_pierce" |> Option.defaultValue 0.0)
                                 Chains = int (statOf "number_of_chains" |> Option.defaultValue 0.0)
                                 CanShotgun = flagOf "projectiles_can_shotgun"
-                                Spread = statOf "total_projectile_spread_angle_override" |> Option.defaultValue 30.0
                                 Explosion = if data.Types.Contains "Area" then radius else None }
                     | _ when data.Types.Contains "Projectile" ->
                         Projectiles { ProjectileShape.make 1 with Explosion = if data.Types.Contains "Area" then radius else None }

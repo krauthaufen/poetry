@@ -213,14 +213,20 @@ module Hit =
     let damageTakenMult (defender: Defender) t =
         Mods.mult Ctx.empty (scopesFor t |> List.map (function Damage s -> DamageTaken s | s -> s)) defender.Mods
 
-    let mitigate ctx mods (defender: Defender) (unmitigated: Dmg) : Dmg =
+    /// "Treat enemy resistances as negated": positive elemental resistance counts as
+    /// its negative. Rolled per hit when it's a chance.
+    let mitigateWith (negate: bool) ctx mods (defender: Defender) (unmitigated: Dmg) : Dmg =
         unmitigated
         |> Map.map (fun t v ->
             let reduction =
                 match t with
                 | Physical -> physicalReduction defender v
-                | _ -> effectiveResist ctx mods defender t
+                | _ ->
+                    let r = effectiveResist ctx mods defender t
+                    if negate && DamageType.isElemental t && r > 0.0 then -r else r
             v * (1.0 - reduction / 100.0) * damageTakenMult defender t)
+
+    let mitigate ctx mods defender unmitigated = mitigateWith false ctx mods defender unmitigated
 
     /// Full hit: crit roll, damage roll, mitigation.
     let roll (rng: Rng) (ctx: Ctx) mods (skill: Skill) (defender: Defender) =
@@ -229,4 +235,4 @@ module Hit =
         let unmitigated = rollUnmitigated rng ctx mods skill crit
         { Crit = crit
           Unmitigated = unmitigated
-          Dealt = mitigate ctx mods defender unmitigated }
+          Dealt = mitigateWith (rng.Chance(Mods.sumBase ctx [ Named "NegateEnemyResistChance" ] mods)) ctx mods defender unmitigated }

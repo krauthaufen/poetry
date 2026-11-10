@@ -103,3 +103,6 @@ Confidence levels:
 | Shotgun | one use's projectiles hit each enemy once unless the skill has `projectiles_can_shotgun` | inferred from the flag existing on only a few skills | guess |
 | Damage per target | rolled independently for every enemy hit | — | guess |
 | Per-skill motion (Spark wandering, Ice Shot shards from the impact point, Frost Bomb pulses) | not modelled yet: needs per-skill behaviours | — | missing |
+| Resistances "treated as negated" | positive elemental resist counts as its negative, rolled per hit for a chance | game text | guess (interaction with penetration/exposure order) |
+| Weapon set | set one is assumed active ("in weapon set two" mods are off) | modelling choice | — |
+| "Recently" | hit / crit / kill recently = within 4 s, plus "crit in the past 8 s"; tracked by the engine from actual events | PoE convention (4 s) | pob |

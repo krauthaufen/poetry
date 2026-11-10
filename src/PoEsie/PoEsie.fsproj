@@ -27,6 +27,7 @@
     <Compile Include="Character.fs" />
     <Compile Include="Xml.fs" />
     <Compile Include="Pob.fs" />
+    <Compile Include="Api.fs" />
   </ItemGroup>
 
   <!-- Fable: ship sources in the package so it can be compiled to JS. -->

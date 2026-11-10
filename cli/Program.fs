@@ -48,10 +48,13 @@ let main argv =
             Map.tryFind "data" o
             |> Option.defaultValue (Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "data", "game"))
         let text = File.ReadAllText file
-        let xml = if text.TrimStart().StartsWith "<" then text else decodeBuildCode text
         let db = GameDb.load (fun f -> File.ReadAllText(Path.Combine(dataDir, f)))
         let tree = Tree.parseNodes (File.ReadAllText(Path.Combine(dataDir, "tree.json")))
-        let build = Pob.read xml
+        // A PoB build (XML or code), or a character from the official API (JSON).
+        let build, displayed =
+            if text.TrimStart().StartsWith "{" then Api.read text
+            elif text.TrimStart().StartsWith "<" then Pob.read text, []
+            else Pob.read (decodeBuildCode text), []
         let sheet = Pob.character db tree build
 
         printfn "== %s %s, level %d: %d items, %d passives, %d socket groups" build.ClassName build.Ascendancy build.Level build.Items.Length build.TreeNodes.Length build.Groups.Length
@@ -59,6 +62,11 @@ let main argv =
         match sheet.MainHand with
         | Some w -> printfn "main hand: %A, %.1f%% crit, %.2f APS" (w.Damage |> Map.toList |> List.map (fun (t, r) -> sprintf "%s %.0f-%.0f" (DamageType.name t) r.Min r.Max)) w.CritChance w.AttacksPerSecond
         | None -> printfn "main hand: none"
+        // Check our weapon maths against what the game displays.
+        for slot, d in displayed do
+            if slot = "Weapon 1" then
+                let show (m: Map<DamageType, Range>) = m |> Map.toList |> List.map (fun (t, r) -> sprintf "%s %.0f-%.0f" (DamageType.name t) r.Min r.Max) |> String.concat ", "
+                printfn "  game shows: %s, %s crit, %s APS" (show d.Damage) (d.CritChance |> Option.map (sprintf "%.2f%%") |> Option.defaultValue "?") (d.AttacksPerSecond |> Option.map (sprintf "%.2f") |> Option.defaultValue "?")
         let cov = sheet.Coverage
         printfn "\n-- not understood on the character (%d unmapped stats, %d unsimulated, %d unknown lines)" cov.Unmapped.Length cov.Unsimulated.Length cov.UnknownText.Length
         cov.Unmapped |> List.map fst |> top 15 |> List.iter (fun (s, n) -> printfn "  unmapped     %s%s" s (if n > 1 then sprintf " x%d" n else ""))
