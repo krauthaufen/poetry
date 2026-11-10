@@ -19,7 +19,11 @@ type TreeNode =
       Name: string
       Stats: string list
       IsKeystone: bool
-      IsNotable: bool }
+      IsNotable: bool
+      IsJewelSocket: bool
+      /// Position on the tree (tools/treegeo.py); 0, 0 if unknown.
+      X: float
+      Y: float }
 
 module Items =
     let private suffixes = [ " (implicit)"; " (rune)"; " (enchant)"; " (crafted)"; " (fractured)"; " (desecrated)"; " (augmented)" ]
@@ -230,11 +234,30 @@ module Tree =
                           Name = Json.strField "name" j |> Option.defaultValue ""
                           Stats = Json.list (Json.field "stats" j) |> List.choose Json.str
                           IsKeystone = Json.field "isKeystone" j = Some(JBool true)
-                          IsNotable = Json.field "isNotable" j = Some(JBool true) }
+                          IsNotable = Json.field "isNotable" j = Some(JBool true)
+                          IsJewelSocket = Json.field "isJewelSocket" j = Some(JBool true)
+                          X = Json.numField "x" j |> Option.defaultValue 0.0
+                          Y = Json.numField "y" j |> Option.defaultValue 0.0 }
                     )
                 | _ -> None)
             |> Map.ofList
         | _ -> Map.empty
+
+    /// Jewel socket node ids in the order the character API numbers them (jewel "x").
+    let jewelSlots (json: string) : int list =
+        Json.list (Json.field "jewelSlots" (Json.parse json)) |> List.choose Json.num |> List.map int
+
+    /// Radius of a jewel in tree units: its size x PassiveTreeJewelDistanceMultiplier
+    /// (sizes: PoB data.jewelRadii).
+    let jewelRadius (size: string) =
+        let outer =
+            match size.Trim() with
+            | "Small" -> Some 1000.0
+            | "Medium" -> Some 1150.0
+            | "Large" -> Some 1300.0
+            | "Very Large" -> Some 1500.0
+            | _ -> None
+        outer |> Option.map (fun o -> o * Map.find "PassiveTreeJewelDistanceMultiplier" Tables.gameConstants)
 
     /// Keystones the engine handles by name (their text is a rule, not a stat).
     let private ruledKeystones = set [ "Chaos Inoculation"; "Pyromantic Pact" ]

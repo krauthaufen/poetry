@@ -115,7 +115,7 @@ module Setup =
         let tree = Tree.parseNodes treeJson
         let build = if o.Bonded then { build with Config = Map.add "bonded" "1" build.Config } else build
         let build = dropGems o.Without build
-        let sheet = Pob.character db tree build |> fun s -> Pob.withPersistentBuffs db s build
+        let sheet = Pob.character db tree (Tree.jewelSlots treeJson) build |> fun s -> Pob.withPersistentBuffs db s build
         let bases = Defence.classBases treeJson
         // motes: base maximum from the mote-granting gem's description stat
         let moteBase =

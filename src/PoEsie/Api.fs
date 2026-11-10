@@ -123,7 +123,8 @@ module Api =
                     let filled = values |> List.indexed |> List.fold (fun (t: string) (i, v) -> t.Replace(sprintf "{%d}" i, v)) (stripMarkup name)
                     if filled.StartsWith "Recovers" || filled.StartsWith "Consumes" then Some("Flask: " + filled) else None
                 | _ -> None)
-        [ "Rarity: " + get "rarity"; get "name"; get "typeLine"; "--------" ] @ quality @ defences @ templated @ [ "--------" ] @ modLines item
+        let radius = property "Radius" item |> Option.map (fun r -> "Radius: " + r) |> Option.toList
+        [ "Rarity: " + get "rarity"; get "name"; get "typeLine"; "--------" ] @ quality @ defences @ templated @ radius @ [ "--------" ] @ modLines item
         |> String.concat "\n"
 
     let private gemLevel (gem: Json) =
@@ -148,7 +149,9 @@ module Api =
             equipment
             |> List.map (fun it -> slotName (Json.strField "inventoryId" it |> Option.defaultValue ""), itemText it)
         let jewels =
-            Json.list (Json.field "jewels" c) |> List.mapi (fun i j -> sprintf "Jewel %d" (i + 1), itemText j)
+            // "Jewel <x>": x is the socket's index in the tree's jewel slot order
+            Json.list (Json.field "jewels" c)
+            |> List.mapi (fun i j -> sprintf "Jewel %d" (Json.numField "x" j |> Option.map int |> Option.defaultValue i), itemText j)
         let displayed =
             equipment
             |> List.filter (fun it -> Json.field "properties" it |> Option.isSome && (property "Attacks per Second" it).IsSome)

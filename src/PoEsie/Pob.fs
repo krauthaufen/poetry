@@ -193,10 +193,54 @@ module Pob =
             else None)
 
     /// Character mods from equipped items and allocated passives.
-    let character (db: GameDb) (tree: Map<int, TreeNode>) (build: PobBuild) : CharacterSheet =
+    let character (db: GameDb) (tree: Map<int, TreeNode>) (jewelSlots: int list) (build: PobBuild) : CharacterSheet =
         let items = build.Items |> List.filter (fst >> alwaysOn) |> List.map (fun (slot, text) -> slot, resolveBonded build slot text)
         let extraNodes = allocatedByItems tree (List.map snd items)
         let build = { build with TreeNodes = build.TreeNodes @ extraNodes }
+        // Radius jewels: "Notable / Small Passive Skills in Radius also grant X" gives X once per
+        // allocated passive of that kind within the jewel's radius of its socket.
+        let radiusMods, items =
+            let allocated = build.TreeNodes |> List.distinct |> List.choose (fun id -> Map.tryFind id tree)
+            items
+            |> List.map (fun (slot, text) ->
+                let lines = text.Split('\n') |> List.ofArray
+                let socket =
+                    if slot.StartsWith "Jewel " then
+                        match System.Int32.TryParse(slot.Substring 6) with
+                        | true, n -> (if n < 1000 then List.tryItem n jewelSlots else Some n) |> Option.bind (fun id -> Map.tryFind id tree)
+                        | _ -> None
+                    else None
+                let radius = lines |> List.tryPick (fun l -> if l.StartsWith "Radius:" then Tree.jewelRadius (l.Substring 7) else None)
+                let grant (l: string) =
+                    let l = l.Trim()
+                    [ "Notable Passive Skills in Radius also grant ", true; "Small Passive Skills in Radius also grant ", false ]
+                    |> List.tryPick (fun (prefix, notable) -> if l.StartsWith prefix then Some(notable, l.Substring prefix.Length) else None)
+                // lines about the jewel itself, with no effect of their own
+                let inert (l: string) = l.Contains "Passives in Radius of" || l.Trim() = "without being connected to your tree"
+                let grants = lines |> List.choose grant
+                let rest = lines |> List.filter (fun l -> (grant l).IsNone && not (inert l))
+                let mods =
+                    match socket, radius with
+                    | Some s, Some r ->
+                        grants
+                        |> List.collect (fun (notable, line) ->
+                            let count =
+                                allocated
+                                |> List.filter (fun n ->
+                                    n.Id <> s.Id && not n.IsKeystone && not n.IsJewelSocket && n.IsNotable = notable
+                                    && (n.X <> 0.0 || n.Y <> 0.0)
+                                    && sqrt ((n.X - s.X) ** 2.0 + (n.Y - s.Y) ** 2.0) <= r)
+                                |> List.length
+                            if count = 0 then []
+                            else
+                                let stats, _ = StatText.parseLines db.Text [ line ]
+                                let ms, _, _ = Items.interpret stats
+                                // once per passive (so "more" mods multiply)
+                                List.replicate count (ms |> List.map (Mod.from (slot + " radius"))) |> List.concat)
+                    | _ -> []
+                mods, (slot, String.concat "\n" rest))
+            |> List.unzip
+            |> fun (ms, its) -> List.concat ms, its
         let parsed = items |> List.map (fun (slot, text) -> slot, Items.parse db text)
         let mainHand = parsed |> List.tryFind (fun (slot, _) -> slot = "Weapon 1") |> Option.bind (fun (_, p) -> p.Weapon)
         let swapHand =
@@ -220,7 +264,7 @@ module Pob =
                 pick p |> Option.map (fun f ->
                     let inc = text.Split('\n') |> Array.tryPick (fun l -> if l.Contains "increased Charges gained" then (match System.Double.TryParse(l.Trim().Split('%').[0]) with | true, v -> Some v | _ -> None) else None)
                     f, inc |> Option.defaultValue 0.0))
-        { Mods = itemMods @ treeMods @ extraMods
+        { Mods = itemMods @ radiusMods @ treeMods @ extraMods
           MainHand = mainHand
           Weapons = Option.toList mainHand @ Option.toList swapHand
           ItemDefences = parsed |> List.filter (fun (slot, _) -> not (slot.Contains "Swap")) |> List.collect (fun (slot, p) -> p.Defences |> List.map (fun (st, v) -> slot, st, v))
