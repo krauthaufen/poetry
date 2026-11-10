@@ -227,6 +227,9 @@ Confidence levels:
 | Auras | Purity, Discipline...: the gem's "..._to_apply" stat on you, x increased aura effect; presence range ignored | gem data | data |
 | Aftershock | a slam with aftershock chance hits its area once more | stat text | guess (same damage and area) |
 
+| Skills that keep hitting ("Sustained": Orb of Storms, Thunderstorm, Solar Orb...) | one use hits repeatedly: every "..._frequency_ms" / "..._pulse_delay_ms" / "..._every_x_ms", for "..._maximum_number_of_hits" / "..._number_of_pulses" hits or the skill's duration; recast when the effect ends. Extra bolts from other casts (Orb of Storms) and stages are NOT modelled | gem data | data; partial |
+| Shapeshift skills | using one means "while Shapeshifted" conditions hold for the whole fight | | guess |
+
 ## Resources over time
 
 | Mechanic | Rule | Source | Confidence |

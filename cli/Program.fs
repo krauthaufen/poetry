@@ -168,6 +168,9 @@ let main argv =
             | Some (Error e) -> printfn "group %d: %s" groupIdx e; 1
             | Some (Ok (skill, skillCov)) ->
                 printfn "\n-- simulating %s (group %d)" skill.Name groupIdx
+                match group.Gems |> List.tryFind (fun x -> not x.IsSupport && x.Enabled) |> Option.map (fun x -> Gems.unmodelledTypes db x.Name) with
+                | Some (_ :: _ as ts) -> printfn "  NOT MODELLED for this skill: %s" (String.concat ", " ts)
+                | _ -> ()
                 printfn "  base %s, x%.2f, crit %.1f%%, %.3fs per use%s" (skill.BaseDamage |> Map.toList |> List.map (fun (t, r) -> sprintf "%s %.0f-%.0f" (DamageType.name t) r.Min r.Max) |> String.concat " ") skill.BaseMultiplier skill.BaseCrit skill.BaseTime (match skill.Cooldown with Some c -> sprintf ", cooldown %.2fs" c | None -> "")
                 skillCov.Unmapped |> List.iter (fun (s, v) -> printfn "  unmapped skill stat     %s = %g" s v)
                 skillCov.Unsimulated |> List.distinctBy snd |> List.iter (fun (s, m) -> printfn "  unsimulated skill stat  %s (%s)" s m)

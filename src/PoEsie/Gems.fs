@@ -281,6 +281,38 @@ module Gems =
     /// Skill data for a gem name.
     let data (db: GameDb) name = skillOfGem db name
 
+    /// Skill types that only say which supports fit or how the skill is aimed and animated:
+    /// nothing to simulate.
+    let private descriptiveTypes =
+        set [ "Triggerable"; "Totemable"; "Trappable"; "Mineable"; "Multicastable"; "Unleashable"; "UsableWhileMoving"; "Cascadable"
+              "Barrageable"; "MirageArcherCanUse"; "AttackInPlace"; "AttackInPlaceIsDefault"; "Damage"; "UsableWhileShapeshifted"
+              "UsableWhileMounted"; "NoAttackOrCastTime"; "ProjectileSpeed"; "ProjectileNumber"; "ProjectilesFromUser"; "RangedAttack"
+              "MeleeSingleTarget"; "AreaSpell"; "CanCancelActions"; "UseGlobalStats"; "GamepadDeflectable"; "SingleLevelSkill"
+              "InstantNoRepeatWhenHeld"; "InstantShiftAttackForLeftMouse"; "GamepadDoNotForceSkillAtLocation"
+              "GamepadDoNotChannelSkillAtLocation"; "ToggleSpawnedObjectTargetable_DefaultOn"; "ToggleSpawnedObjectTargetable_DefaultOff"
+              "PersistentShowsCastTime"; "ReserveInAllSets"; "MultipleReservation"; "HasReservation"; "ReservesManually"; "OngoingSkill"
+              "SkillGrantedBySupport"; "NonWeaponAttack"; "Invokable"; "CannotSpiritStrike"; "CannotTerrainChain"; "CannotChain"
+              "ProjectileNoCollision"; "GroundTargetedProjectile"; "SingleMainProjectile"; "ProjectilesNumberModifiersNotApplied"
+              "CanHaveMultipleOngoingSkillInstances"; "AffectedByCooldownRate"; "TotemCastsAlone"; "UsedByTotem"; "UsedByProxy"
+              "UsedByClone"; "Bow"; "Spear"; "CrossbowSkill"; "Wind"; "Nature"; "Necrotic"; "Bear"; "Wolf"; "Wyvern"; "Palm" ]
+
+    /// Skill types the simulator acts on (see RULES.md for how far each goes).
+    let private modelledTypes =
+        set [ "Attack"; "Spell"; "Melee"; "Projectile"; "Area"; "Duration"; "Nova"; "Slam"; "Strike"; "Chains"; "Triggered"
+              "Fire"; "Cold"; "Lightning"; "Chaos"; "Physical"; "Cooldown"; "Instant"; "Buff"; "Persistent"; "Aura"; "Herald"
+              "Meta"; "Invocation"; "Triggers"; "InbuiltTrigger"; "GeneratesEnergy"; "ConsumesCharges"; "RequiresCharges"
+              "SkillConsumesPowerChargesOnUse"; "HasUsageCondition"; "AppliesCurse"; "Curse"; "Mark"; "Limit"
+              "CreatesMinion"; "Minion"; "Companion"; "CreatesCompanion"; "SummonsTotem"; "SummonsAttackTotem"; "Totem"
+              "GeneratesInfusion"; "GeneratesRemnants"; "DamageOverTime"; "Grenade"; "Plant"; "Storm"
+              "SkillConsumesFrenzyChargesOnUse"; "SkillConsumesEnduranceChargesOnUse"; "Sustained"; "Shapeshift"; "Channel"; "Rain" ]
+
+    /// What a gem's skill does that the simulator has no model for: its skill types that are
+    /// neither descriptive nor modelled ("Channel", "GainsStages", "Shapeshift", "Rain"...).
+    let unmodelledTypes (db: GameDb) name =
+        skillOfGem db name
+        |> Option.map (fun d -> d.Types |> Set.filter (fun t -> not (descriptiveTypes.Contains t) && not (modelledTypes.Contains t)) |> Set.toList)
+        |> Option.defaultValue []
+
     let isPersistentBuff (db: GameDb) name =
         skillOfGem db name |> Option.exists (fun d -> d.Types.Contains "Persistent" && d.Types.Contains "Buff")
 
@@ -379,7 +411,10 @@ module Gems =
           Delivery = delivery
           Mods = mods
           Parts = []
-          Consumes = if data.Types.Contains "SkillConsumesPowerChargesOnUse" then Some "PowerCharge" else None
+          Consumes =
+            [ "Power"; "Frenzy"; "Endurance" ]
+            |> List.tryFind (fun kind -> data.Types.Contains(sprintf "SkillConsumes%sChargesOnUse" kind))
+            |> Option.map (fun kind -> kind + "Charge")
           Cost = gemLevel |> Option.bind (fun l -> l.ManaCost) |> Option.defaultValue 0.0
           // "comet_fall_time_ms": hits land this long after the cast
           HitDelay = (ownStats |> List.filter (fun (id, _) -> id.EndsWith "_fall_time_ms") |> List.sumBy snd) / 1000.0

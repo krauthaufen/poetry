@@ -77,7 +77,7 @@ let runOne (path: string) : Result =
                     Unmapped = (cov.Unmapped |> List.map fst) @ (sk.Unmapped |> List.map (fun (s, _) -> "skill: " + s)) |> List.distinct
                     Unsimulated = (cov.Unsimulated |> List.map (fun (s, m) -> sprintf "%s [%s]" s m)) @ (sk.Unsimulated |> List.map (fun (s, m) -> sprintf "skill: %s [%s]" s m)) |> List.distinct
                     MissingGems = missing
-                    Notes = (failed |> List.map (fun g -> "cannot build skill: " + g)) @ (c.MinionNotes |> List.map (fun n -> "minion: " + (n.Substring(n.IndexOf(": ") + 2)))) }
+                    Notes = (failed |> List.map (fun g -> "cannot build skill: " + g)) @ (Gems.unmodelledTypes db mainGem |> List.map (fun t -> "main skill type not modelled: " + t)) @ (c.MinionNotes |> List.map (fun n -> "minion: " + (n.Substring(n.IndexOf(": ") + 2)))) }
     with e ->
         // the innermost exception and where it was thrown
         let rec inner (x: exn) = if isNull x.InnerException then x else inner x.InnerException

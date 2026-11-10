@@ -222,7 +222,9 @@ module Setup =
           /// against marked enemies).
           Grants: Mod list
           /// The debuff a curse or mark applies ("Curse:Despair").
-          Curse: string option }
+          Curse: string option
+          /// Timed hits of one use (skills that keep hitting), instead of the skill's own.
+          Pattern: (HitTiming * float) list option }
 
     let pressed (c: Loaded) (o: Options) (gemName: string) : Pressed option =
         let db, sheet = c.Db, c.Sheet
@@ -246,7 +248,8 @@ module Setup =
                         match curse with
                         | Some (name, duration, monster, _) -> [ { Hook = OnHit; Filter = Called s.Name; Chance = 100.0; Reaction = ApplyCurse(name, duration, monster) } ]
                         | None -> []
-                    let rules = Behaviours.useRules db charMods setup s.Name o.Pickup @ Behaviours.buffRules db charMods setup s @ Behaviours.totemPlacement db charMods setup s @ curseRules
+                    let lasting = Behaviours.sustained db charMods setup s
+                    let rules = (match lasting with Some (_, rs) -> rs | None -> []) @ Behaviours.useRules db charMods setup s.Name o.Pickup @ Behaviours.buffRules db charMods setup s @ Behaviours.totemPlacement db charMods setup s @ curseRules
                     let grants = Behaviours.verisiumGrant db charMods setup
                     let s = Behaviours.applyObserved s
                     // skills that deal no damage (buffs, infusion grants) don't hit
@@ -258,7 +261,8 @@ module Setup =
                           GrantsVerisium = grants
                           Rules = rules
                           Grants = (match curse with Some (_, _, _, player) -> player | None -> [])
-                          Curse = curse |> Option.map (fun (name, _, _, _) -> name) }
+                          Curse = curse |> Option.map (fun (name, _, _, _) -> name)
+                          Pattern = lasting |> Option.map fst }
                 | _ -> None)
 
     let private gemOf (p: Play) =
@@ -289,10 +293,27 @@ module Setup =
                     elif cooldown >= 1.0 && (not p.Skill.Hits.IsEmpty || not p.Rules.IsEmpty || p.GrantsVerisium > 0) then Some(OnCooldown x.Name)
                     else None
                 | _ -> None)
+        // only as many curses as can be on a monster at once (more would overwrite each other
+        // for ever), and one mark
+        let others =
+            let curseLimit = 1 + int (Mods.sumBase Ctx.empty [ Named "MaxCurses" ] (ModDb.ofList c.Sheet.Mods))
+            let kind g = pressed c o g |> Option.bind (fun p -> p.Curse) |> Option.map (fun (n: string) -> n.Substring(0, n.IndexOf ':'))
+            others
+            |> List.fold
+                (fun (kept, curses, marks) p ->
+                    match p with
+                    | KeepCurse g ->
+                        match kind g with
+                        | Some "Curse" when curses < curseLimit -> p :: kept, curses + 1, marks
+                        | Some "Mark" when marks < 1 -> p :: kept, curses, marks + 1
+                        | _ -> kept, curses, marks
+                    | _ -> p :: kept, curses, marks)
+                ([], 0, 0)
+            |> fun (kept, _, _) -> List.rev kept
         // a main "skill" that only places a totem or grants a buff is kept up, not spammed
         let main =
             match pressed c o mainGem with
-            | Some p when p.Skill.Hits.IsEmpty && p.Rules |> List.exists (fun r -> match r.Reaction with ChargeBuff _ | GrantBuff _ -> true | _ -> false) -> KeepBuff mainGem
+            | Some p when (p.Skill.Hits.IsEmpty || p.Pattern.IsSome) && p.Rules |> List.exists (fun r -> match r.Reaction with ChargeBuff _ | GrantBuff _ -> true | _ -> false) -> KeepBuff mainGem
             | _ -> Spam mainGem
         others @ [ main ]
 
@@ -306,7 +327,7 @@ module Setup =
         let resolve g =
             match main with
             | Some (name, s) when name = g ->
-                Some { (pressed c o g |> Option.defaultValue { Skill = s; Infused = None; GrantsVerisium = 0; Rules = []; Grants = []; Curse = None }) with Skill = s }
+                Some { (pressed c o g |> Option.defaultValue { Skill = s; Infused = None; GrantsVerisium = 0; Rules = []; Grants = []; Curse = None; Pattern = None }) with Skill = s }
             | _ -> pressed c o g
         let used = play |> List.collect gemOf |> List.distinct |> List.choose (fun g -> resolve g |> Option.map (fun p -> g, p))
         let byGem g = used |> List.tryFind (fun (n, _) -> n = g) |> Option.map snd
@@ -360,12 +381,15 @@ module Setup =
             else Behaviours.infusions db sheet c.Build o.Pickup (consumers |> List.map (fun (n, el, cp) -> n, (el, cp.Name)) |> Map.ofList)
         { Actor.make "Player" (sheet.Mods @ (used |> List.collect (fun (_, p) -> p.Grants))) (pressedSkills @ (metas |> List.collect (fun (_, s, _) -> s)) @ (consumers |> List.map (fun (_, _, cp) -> cp))) with
             Rotation = steps
+            HitPattern = used |> List.choose (fun (_, p) -> p.Pattern |> Option.map (fun pat -> p.Skill.Name, pat)) |> Map.ofList
             Rules = grantRules @ (used |> List.collect (fun (_, p) -> p.Rules))
             Metas = metas |> List.map (fun (m, _, _) -> m)
             Infusions = infusionSetup
             // infusions start full (kept up while clearing), scaled like invocations
             Resources =
                 c.Resources
+                // shapeshift skills are used in animal form: "while Shapeshifted" holds
+                @ (if used |> List.exists (fun (g, _) -> Gems.data db g |> Option.exists (fun d -> d.Types.Contains "Shapeshift")) then [ "Shapeshifted", 1 ] else [])
                 @ (match infusionSetup with
                    | Some inf ->
                        let usedInf = (consumers |> List.map (fun (_, el, _) -> el)) @ Option.toList inf.Wildcard |> List.distinct
