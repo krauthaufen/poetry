@@ -111,7 +111,7 @@ module Api =
         let get k = Json.strField k item |> Option.defaultValue ""
         let quality = property "Quality" item |> Option.map (fun q -> "Quality: " + q) |> Option.toList
         let defences =
-            [ "Armour", "Armour"; "Evasion Rating", "Evasion Rating"; "Energy Shield", "Energy Shield"; "Block chance", "Block chance" ]
+            [ "Armour", "Armour"; "Evasion Rating", "Evasion Rating"; "Energy Shield", "Energy Shield"; "Block chance", "Block chance"; "Runic Ward", "Runic Ward" ]
             |> List.choose (fun (prop, label) -> property prop item |> Option.map (fun v -> label + ": " + v))
         // flask properties with placeholders: "Recovers {0} Mana over {1} Seconds" [465; 3.50]
         let templated =

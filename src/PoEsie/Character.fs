@@ -38,7 +38,7 @@ module Items =
               "Unique ID:"; "League:"; "Rune:"; "LevelReq:"; "Implicits:"; "Prefix:"; "Suffix:"; "Variant:"
               "Selected Variant:"; "Has Alt Variant"; "Selected Alt Variant"; "Allow Duplicate Variants:"; "Crafted:"
               "Unreleased:"; "Catalyst:"; "CatalystQuality:"; "Talisman Tier:"; "Evasion:"; "Ward:"; "ArmourBasePercentile:"
-              "EvasionBasePercentile:"; "EnergyShieldBasePercentile:"; "Cluster Jewel"; "Flask: " ]
+              "EvasionBasePercentile:"; "EnergyShieldBasePercentile:"; "Cluster Jewel"; "Flask: "; "Runic Ward:" ]
         prefixes |> List.exists (fun p -> line.StartsWith p)
 
     /// Weapon kind from the base: its type, refined by base tags (quarterstaves are type
@@ -192,6 +192,7 @@ module Items =
                 elif l.StartsWith "Evasion:" then value "Evasion:" |> Option.map (fun v -> Evasion, v)
                 elif l.StartsWith "Energy Shield:" then value "Energy Shield:" |> Option.map (fun v -> MaxEnergyShield, v)
                 elif l.StartsWith "Block chance:" then value "Block chance:" |> Option.map (fun v -> Named "ShieldBlock", v)
+                elif l.StartsWith "Runic Ward:" then value "Runic Ward:" |> Option.map (fun v -> Named "Ward", v)
                 else None)
         let numbers (l: string) =
             l.Split(' ') |> Array.choose (fun w -> match System.Double.TryParse(w.Trim(',')) with | true, v -> Some v | _ -> None) |> List.ofArray
@@ -231,7 +232,7 @@ module Tree =
         | _ -> Map.empty
 
     /// Keystones the engine handles by name (their text is a rule, not a stat).
-    let private ruledKeystones = set [ "Chaos Inoculation" ]
+    let private ruledKeystones = set [ "Chaos Inoculation"; "Pyromantic Pact" ]
 
     /// Mods from allocated passives. Handled keystones become a flag `Named "Keystone:<name>"`.
     let mods (db: GameDb) (nodes: Map<int, TreeNode>) (allocated: int list) =
@@ -239,11 +240,15 @@ module Tree =
         |> List.choose (fun id -> Map.tryFind id nodes)
         |> List.fold
             (fun (mods, cov: Coverage) node ->
-                if node.IsKeystone && ruledKeystones.Contains node.Name then
-                    mods @ [ Mod.flag (Named("Keystone:" + node.Name)) |> Mod.from node.Name ], cov
+                let ruled = if ruledKeystones.Contains node.Name then [ Mod.flag (Named("Keystone:" + node.Name)) |> Mod.from node.Name ] else []
+                let mods = mods @ ruled
+                if node.IsKeystone && not ruled.IsEmpty then mods, cov
                 else
                 let relevant =
-                    node.Stats |> List.filter (fun l -> not (l.StartsWith "+5 to any Attribute") && not (l.StartsWith "Grants Skill:"))
+                    node.Stats
+                    |> List.filter (fun l ->
+                        not (l.StartsWith "+5 to any Attribute") && not (l.StartsWith "Grants Skill:")
+                        && not (ruledKeystones.Contains node.Name && (l.Contains "Infernal Flame instead" || l.StartsWith "Maximum Mana is replaced")))
                 let stats, unknown = StatText.parseLines db.Text relevant
                 let ms, _, c = Items.interpret stats
                 let unknown = unknown |> List.map (fun l -> sprintf "%s: %s" node.Name l)

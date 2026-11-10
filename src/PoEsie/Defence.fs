@@ -23,6 +23,8 @@ module Defence =
     let private baseMana = 30.0
     let private manaRegenPercent = 4.0
     let private esRechargePercent = 12.5
+    /// Runic Ward regenerates 5% of its maximum per second (guides; user confirmed).
+    let private wardRegenPercent = 5.0
     let playerMaxResist = 75.0
     let playerResistCap = 90.0
 
@@ -86,6 +88,16 @@ module Defence =
             let cap = min 90.0 (50.0 + Mods.sumBase c [ Named "MaxBlock" ] db)
             min cap (baseBlock * Mods.inc c [ Named "Block" ] db)
           LuckyBlock = Mods.flag c (Named "LuckyBlock") db
-          BlockedDamageTaken = Mods.sumBase c [ Named "BlockedDamageTaken" ] db }
+          BlockedDamageTaken = Mods.sumBase c [ Named "BlockedDamageTaken" ] db
+          // ward: item values (shield) + flat, x increased; regenerates 5% per second x increased rate
+          Ward = pool (Named "Ward") (fromItems (Named "Ward"))
+          WardRegen = pool (Named "Ward") (fromItems (Named "Ward")) * wardRegenPercent / 100.0 * Mods.inc c [ Named "WardRegen" ] db
+          WardOnBlock = Mods.sumBase c [ Named "WardOnBlock" ] db
+          CostsInfernalFlame = Mods.flag c (Named "Keystone:Pyromantic Pact") db
+          TakenAs =
+            [ for from in DamageType.all do
+                for into in DamageType.all do
+                    let v = Mods.sumBase c [ Named(sprintf "TakenAs:%s:%s" (DamageType.name from) (DamageType.name into)) ] db
+                    if v > 0.0 then yield from, into, v ] }
 
     let compute bases sheet = computeWith Map.empty bases sheet

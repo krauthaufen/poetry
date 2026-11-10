@@ -381,3 +381,9 @@ module Gems =
         else
             let req = System.Math.Round((5.0 + float (level - 3) * 1.7) * ((share / 100.0) ** 0.9)) + 4.0
             if req < 8.0 then 0.0 else req
+
+    /// The index (1-based) of a skill's "-Infused" stat set, if it has one.
+    let infusedSet (db: GameDb) name =
+        skillOfGem db name
+        |> Option.bind (fun d -> d.StatSets |> List.tryFindIndex (fun s -> s.Label.EndsWith "-Infused"))
+        |> Option.map (fun i -> i + 1)

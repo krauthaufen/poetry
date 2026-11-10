@@ -73,11 +73,20 @@ module Ailments =
     let private chanceMods (ctx: Ctx) mods a =
         Mods.sumBase ctx [ AilmentChance a ] mods, Mods.mult ctx [ AilmentChance a ] mods
 
+    /// Damage types an ailment scales from for this attacker ("All damage can ignite" etc.).
+    let scalesFromWith (ctx: Ctx) mods a =
+        let all flag = Mods.flag ctx (Named flag) mods
+        match a with
+        | Ignite when all "AllDamageIgnites" -> DamageType.all
+        | Chill when all "AllDamageChills" -> DamageType.all
+        | Shock when all "AllDamageShocks" -> DamageType.all
+        | _ -> scalesFrom a
+
     /// Chance in percent that this hit inflicts the ailment.
     let chance (ctx: Ctx) mods defender (hit: HitResult) a =
         let baseChance, mult = chanceMods ctx mods a
         let fromDamage multiplier =
-            Dmg.sumOf (scalesFrom a) hit.Unmitigated / threshold defender * multiplier
+            Dmg.sumOf (scalesFromWith ctx mods a) hit.Unmitigated / threshold defender * multiplier
         let c =
             match a with
             | Ignite -> (fromDamage Constants.igniteChanceMultiplier + baseChance) * mult
@@ -88,7 +97,7 @@ module Ailments =
     /// Everything this hit inflicts, rolling chances with the given Rng.
     let fromHit (rng: Rng) (ctx: Ctx) mods (defender: Defender) (hit: HitResult) : Inflict list =
         let ctx = { ctx with Crit = hit.Crit }
-        let source a = Dmg.sumOf (scalesFrom a) hit.Unmitigated
+        let source a = Dmg.sumOf (scalesFromWith ctx mods a) hit.Unmitigated
         let rolled a = source a > 0.0 && rng.Chance(chance ctx mods defender hit a)
 
         let damaging =

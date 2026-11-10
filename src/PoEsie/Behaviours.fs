@@ -104,7 +104,7 @@ module Behaviours =
     /// release (Invocation or at maximum) and maximum energy from its stats; the group's other
     /// skill gems become triggered copies with the group's supports. Energy per trigger = 100 per
     /// second of base cast time of the socketed spells ("10 per 0.1 s", community source).
-    let metas (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) =
+    let metas (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) (infused: bool) =
         let charMods = ModDb.ofList sheet.Mods
         build.Groups
         |> List.filter (fun g -> g.Enabled)
@@ -132,7 +132,8 @@ module Behaviours =
                 let triggered =
                     spells
                     |> List.choose (fun sp ->
-                        match Gems.skill db charMods sheet.MainHand { Gem = sp.Name; Level = sp.Level; Quality = sp.Quality; StatSet = 1; Supports = supports } with
+                        let set = if infused then Gems.infusedSet db sp.Name |> Option.defaultValue 1 else 1
+                        match Gems.skill db charMods sheet.MainHand { Gem = sp.Name; Level = sp.Level; Quality = sp.Quality; StatSet = set; Supports = supports } with
                         | Ok (skill, _) ->
                             let copyName = sprintf "%s (%s)" skill.Name name
                             let rec rename (s: Skill) = { s with Name = copyName; Tags = s.Tags.Add Triggered; Parts = s.Parts |> List.map (fun p -> { p with Name = copyName + ": " + p.Name; Tags = p.Tags.Add Triggered }) }
@@ -162,3 +163,30 @@ module Behaviours =
                       EnergyMult = 1.0 + sum ((=) "energy_generated_+%") / 100.0
                       RefundChance = sum ((=) "trigger_skills_refund_half_energy_spent_chance_%") }
                 Some(meta, triggered |> List.map fst))
+
+    /// Runic Ward Remnants from a persistent gem with `ward_remnants_gain_per_globe`, with its
+    /// group's supports (Remnant Potency, Harmonic Remnants). Collecting takes `pickupSeconds`
+    /// (guess); "remnant_delay_X_ms" adds to it. Ward overflows to 1.5x (user).
+    let wardRemnants (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) (pickupSeconds: float) =
+        let charMods = ModDb.ofList sheet.Mods
+        build.Groups
+        |> List.filter (fun g -> g.Enabled)
+        |> List.tryPick (fun g ->
+            let enabled = g.Gems |> List.filter (fun x -> x.Enabled)
+            enabled
+            |> List.tryPick (fun gem ->
+                if gem.IsSupport then None
+                else
+                    let supports = enabled |> List.filter (fun x -> x.IsSupport) |> List.map (fun x -> x.Name, x.Level)
+                    let raw = Gems.rawStats db charMods { Gem = gem.Name; Level = gem.Level; Quality = gem.Quality; StatSet = 1; Supports = supports }
+                    let sum id = raw |> List.filter (fun (k, _) -> k = id) |> List.sumBy snd
+                    if sum "ward_remnants_gain_per_globe" <= 0.0 then None
+                    else
+                        Some
+                            { OnKillChance = sum "ward_remnants_chance_to_spawn_orb_on_killing_enemy_%"
+                              OnStunChance = sum "ward_remnants_chance_to_spawn_remnant_on_stun_%"
+                              StunCooldown = sum "ward_remnants_spawn_remnant_on_stun_cooldown_ms" / 1000.0
+                              WardPerRemnant = sum "ward_remnants_gain_per_globe" * (1.0 + sum "remnant_effect_+%" / 100.0)
+                              ExtraChance = sum "chance_%_to_create_additional_remnant"
+                              Delay = pickupSeconds + sum "remnant_delay_X_ms" / 1000.0
+                              Overflow = 1.5 }))

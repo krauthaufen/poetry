@@ -200,6 +200,18 @@ module StatMap =
         | "additional_strength_and_dexterity" -> each [ Attribute "Str"; Attribute "Dex" ]
         | "additional_strength_and_intelligence" -> each [ Attribute "Str"; Attribute "Int" ]
         | "additional_dexterity_and_intelligence" -> each [ Attribute "Dex"; Attribute "Int" ]
+        | "you_and_allies_in_presence_all_damage_can_ignite" | "all_damage_can_ignite" -> one (Mod.flag (Named "AllDamageIgnites"))
+        | "all_damage_can_chill" -> one (Mod.flag (Named "AllDamageChills"))
+        | "all_damage_can_shock" -> one (Mod.flag (Named "AllDamageShocks"))
+        | "base_maximum_ward" -> one (Mod.base' (Named "Ward") v)
+        | "maximum_ward_+%" -> one (Mod.inc (Named "Ward") v)
+        | "ward_regeneration_rate_+%" -> one (Mod.inc (Named "WardRegen") v)
+        | "recover_X_ward_on_block" -> one (Mod.base' (Named "WardOnBlock") v)
+        | "remnant_effect_+%" -> one (Mod.inc (Named "RemnantEffect") v)
+        | "chance_%_to_create_additional_remnant" -> one (Mod.base' (Named "ExtraRemnantChance") v)
+        | "remnant_delay_X_ms" -> one (Mod.base' (Named "RemnantDelayMs") v)
+        | "hit_for_%_max_life_es_on_max_infernal_flame" -> one (Mod.base' (Named "InfernalFlameBurn") v)
+        | "lose_%_of_infernal_flame_on_reaching_max" | "lose_%_of_max_infernal_flame_per_minute" -> Some NotOffensive
         | "base_block_chance_luck" -> one (Mod.flag (Named "LuckyBlock"))
         | "base_block_%_damage_taken" -> one (Mod.base' (Named "BlockedDamageTaken") v)
         | "block_chance_+%" -> one (Mod.inc (Named "Block") v)
@@ -244,8 +256,11 @@ module StatMap =
         | "base_mana_leech_from_physical_attack_damage_permyriad" -> one (Mod.base' ManaLeech (v / 100.0) |> Mod.whenever (SkillIs Attack))
         | "base_damage_removed_from_mana_before_life_%" -> one (Mod.base' (Named "DamageRemovedFromManaFirst") v)
         | _ ->
-            // "base_<type>_damage_resistance_%", "base_maximum_<type>_damage_resistance_%"
+            // "base_<type>_damage_resistance_%", "base_maximum_<type>_damage_resistance_%",
+            // "<type>_hit_and_dot_damage_%_taken_as_<type>"
             match split id with
+            | [ from; "hit"; "and"; "dot"; "damage"; "%"; "taken"; "as"; into ] when (typeWord from).IsSome && (typeWord into).IsSome ->
+                one (Mod.base' (Named(sprintf "TakenAs:%s:%s" (DamageType.name (typeWord from).Value) (DamageType.name (typeWord into).Value))) v)
             | [ "base"; t; "damage"; "resistance"; "%" ] when (typeWord t).IsSome -> one (Mod.base' (Resist (typeWord t).Value) v)
             | [ "base"; "maximum"; t; "damage"; "resistance"; "%" ] when (typeWord t).IsSome -> one (Mod.base' (MaxResist (typeWord t).Value) v)
             | _ -> None

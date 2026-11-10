@@ -25,6 +25,8 @@
 ///   --kept-pause S   charges kept by "chance to not remove" freeze their timer for S seconds (default 1)
 ///   --max K=N,...    override resource maxima with observed ones, e.g. "Mote:blue=0"
 ///   --noflask        don't use the mana flask
+///   --infused        always have infusions: skills use their "-Infused" stat sets
+///   --pickup S       seconds to collect a remnant (default 1)
 ///   --rotation A,B   skills you press, cycled in this order (meta gems trigger the rest)
 ///   --suite          run the standard scenarios (pack, pack + 2 rares, surrounded, boss) and print a table
 ///   --data DIR       exported game data (default: data/game next to the repo)
@@ -52,6 +54,7 @@ let rec private opts (args: string list) =
     | "--immortal" :: rest -> Map.add "immortal" "1" (opts rest)
     | "--noflask" :: rest -> Map.add "noflask" "1" (opts rest)
     | "--cast-on-self" :: rest -> Map.add "cast-on-self" "1" (opts rest)
+    | "--infused" :: rest -> Map.add "infused" "1" (opts rest)
     | k :: v :: rest when k.StartsWith "--" -> Map.add (k.Substring 2) v (opts rest)
     | _ :: rest -> opts rest
     | [] -> Map.empty
@@ -137,8 +140,8 @@ let main argv =
         let resources = startResources |> Map.toList
 
         printfn "== %s %s, level %d: %d items, %d passives, %d socket groups" build.ClassName build.Ascendancy build.Level build.Items.Length build.TreeNodes.Length build.Groups.Length
-        printfn "player: life %.0f, mana %.0f, ES %.0f | armour %.0f, evasion %.0f, deflection %.0f | res %s | regen life %.0f/s, mana %.0f/s"
-            vitals.Life vitals.Mana vitals.EnergyShield vitals.Armour vitals.Evasion vitals.Deflection
+        printfn "player: life %.0f, mana %.0f, ES %.0f, ward %.0f (+%.0f/s), block %.0f%%%s | armour %.0f, evasion %.0f, deflection %.0f | res %s | regen life %.0f/s, mana %.0f/s"
+            vitals.Life vitals.Mana vitals.EnergyShield vitals.Ward vitals.WardRegen vitals.Block (if vitals.LuckyBlock then " lucky" else "") vitals.Armour vitals.Evasion vitals.Deflection
             (vitals.Resist |> Map.toList |> List.map (fun (t, r) -> sprintf "%s %.0f" (DamageType.name t) r) |> String.concat " / ") vitals.LifeRegen vitals.ManaRegen
         printfn "character: %d modifiers; starts with %s" sheet.Mods.Length (resources |> List.map (fun (k, n) -> sprintf "%d %s" n k) |> String.concat ", ")
         match sheet.MainHand with
@@ -213,7 +216,8 @@ let main argv =
                 printfn "  enemies: %s" (enemies |> List.countBy (fun e -> Rarity.name e.Rarity) |> List.map (fun (r, n) -> sprintf "%d %s" n r) |> String.concat ", ")
                 printfn "  delivery: %A" skill.Delivery
                 // meta gems and the spells they trigger
-                let metas = Behaviours.metas db sheet build
+                let infused = Map.containsKey "infused" o
+                let metas = Behaviours.metas db sheet build infused
                 for (m, spells) in metas do
                     printfn "  meta %-28s %-14s energy x%.2f, %s per trigger (max %.0f), sources %A -> %s"
                         m.Name (match m.Release with Invocation cd -> sprintf "invoke /%.1fs" cd | AtMaximum -> "at maximum") m.EnergyMult
@@ -226,7 +230,9 @@ let main argv =
                         |> List.choose (fun n ->
                             build.Groups |> List.tryPick (fun g ->
                                 if g.Gems |> List.exists (fun x -> x.Name = n && not x.IsSupport) then
-                                    Pob.groupSkill db sheet { g with Gems = g.Gems |> List.filter (fun x -> x.IsSupport || x.Name = n) }
+                                    let pick (x: PobGem) =
+                                        if infused && x.Name = n then { x with StatSet = Gems.infusedSet db n |> Option.defaultValue x.StatSet } else x
+                                    Pob.groupSkill db sheet { g with Gems = g.Gems |> List.filter (fun x -> x.IsSupport || x.Name = n) |> List.map pick }
                                     |> List.tryHead |> Option.bind (function Ok (s, _) -> Some(Behaviours.applyObserved s) | _ -> None)
                                 else None))
                     | None -> [ skill ]
@@ -252,6 +258,7 @@ let main argv =
                             MaxResources = maxResources
                             ResourceDurations = Behaviours.chargeDurations sheet
                             KeptChargesPause = get "kept-pause" 1.0
+                            WardRemnants = Behaviours.wardRemnants db sheet build (get "pickup" 1.0)
                             ManaFlask =
                                 if Map.containsKey "immortal" o || Map.containsKey "noflask" o then None
                                 else

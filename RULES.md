@@ -180,3 +180,15 @@ Confidence levels:
 | Spell Cascade | `number_of_cascades_per_side` extra impacts per side along the line from the player through the target, one radius apart; side impacts don't get their extra −20% area | data; spacing guess | guess |
 | Infused stat sets | "X-Infused" sets are alternatives used when an infusion is consumed, never parts of a normal use (infusions not modelled yet) | data | data |
 | Block | shield block (shown on the item) + flat, × increased block, capped at 50 + max block; lucky block rolls twice; blocked hits deal `base_block_%_damage_taken` | data / game text | data + guess (cap) |
+
+## Runic Ward, remnants, Infernal Flame
+
+| Mechanic | Rule | Source | Confidence |
+|---|---|---|---|
+| Runic Ward | a pool after life: damage goes to mana-first share, energy shield, life down to 1, then ward; death when ward can't absorb the rest. Maximum = item values (shield) + flat, × increased; regenerates 5% of maximum per second always, × increased ward regeneration (runes) | guides (Mobalytics, Fextralife); user | community + user |
+| Ward on block | `recover_X_ward_on_block` | game text | data |
+| Ward remnants | Remnants of Kalguur: chance per kill and per new stun (stun cooldown) to create a remnant granting `ward_remnants_gain_per_globe` × (1 + remnant effect); Harmonic Remnants: chance for a second; collected after 1 s (guess) + `remnant_delay_X_ms`; ward overflows to 1.5 × maximum | data; overflow: user | data + user + guess |
+| Pyromantic Pact | skill costs build Infernal Flame (maximum: 2 × max mana) instead of spending mana; reaching the maximum empties it and deals `hit_for_%_max_life_es_on_max_infernal_flame` % of max life + ES as fire damage; the 25%/s decay when no flame was gained for 2 s is not modelled | node text | data |
+| Damage taken as | `<type>_hit_and_dot_damage_%_taken_as_<type>` moves part of each incoming type before mitigation | game text | data |
+| All damage ignites / chills / shocks | ignite (chill, shock) scales from all damage types, also for chance and meta energy | game text | data |
+| Infusions | not simulated; `--infused` assumes they are always available (skills use their "-Infused" stat sets) | user (always keeps them up) | user |

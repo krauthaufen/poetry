@@ -102,6 +102,19 @@ type Step =
     { Use: string
       When: View -> bool }
 
+/// Runic Ward Remnants (Remnants of Kalguur): kills and stuns can create remnants that grant
+/// ward when collected, overflowing the maximum.
+type WardRemnants =
+    { OnKillChance: float
+      OnStunChance: float
+      StunCooldown: float
+      WardPerRemnant: float
+      ExtraChance: float
+      /// Seconds from creation until the ward arrives (collecting + effect delay).
+      Delay: float
+      /// Ward can overflow to this multiple of its maximum.
+      Overflow: float }
+
 /// Something that happens on its own every few seconds.
 type PeriodicAction =
     /// One stack of a random resource that isn't at its maximum (Thaumaturgical Dynamism,
@@ -158,7 +171,8 @@ type Actor =
       ResourceDurations: Map<string, float>
       /// Consuming charges that are kept ("chance to not remove") pauses their timer for this
       /// many seconds (the timer keeps its current value). 0: no pause.
-      KeptChargesPause: float }
+      KeptChargesPause: float
+      WardRemnants: WardRemnants option }
 
 module Actor =
     let make name mods skills =
@@ -177,7 +191,8 @@ module Actor =
           Periodics = []
           MaxResources = Map.empty
           ResourceDurations = Map.empty
-          KeptChargesPause = 0.0 }
+          KeptChargesPause = 0.0
+          WardRemnants = None }
 
     let always skill = { Use = skill; When = fun _ -> true }
 
@@ -250,6 +265,8 @@ module Sim =
         /// A monster hits at the player.
         | EnemyAttack of enemy: string
         | PeriodicTick of actor: string * periodic: string
+        /// A ward remnant's ward arrives.
+        | WardArrives of amount: float
         | Expire
 
     type private ActorState =
@@ -285,7 +302,10 @@ module Sim =
           FlaskUntil: float
           FlaskRate: float
           /// Largest leech instance of the current hit event (leech counts from one enemy).
-          StrikeLeech: float }
+          StrikeLeech: float
+          Ward: float
+          InfernalFlame: float
+          LastStunRemnant: float }
 
     type private World =
         { Player: PlayerState option
@@ -486,7 +506,35 @@ module Sim =
                             LeechPool = p.LeechPool - leech
                             EnergyShield = es
                             Life = min v.Life (p.Life + v.LifeRegen * dt)
+                            Ward = (if p.Ward >= v.Ward then p.Ward else min v.Ward (p.Ward + v.WardRegen * dt))
                             ManaGained = gained } }
+        | _ -> w
+
+    /// Mitigated damage onto the player: "damage removed from mana first", energy shield, life
+    /// down to 1, then Runic Ward; death when nothing is left.
+    let private takeDamage (pools: PlayerStats) (damage: Map<DamageType, float>) (w: World) =
+        match w.Player with
+        | Some p when p.Died.IsNone ->
+            let dmg = damage |> Map.toList |> List.sumBy snd
+            let fromMana = min p.Mana (dmg * Mods.sumBase Ctx.empty [ Named "DamageRemovedFromManaFirst" ] (ModDb.ofList []) / 100.0)
+            let rest = dmg - fromMana
+            let toEs = min p.EnergyShield rest
+            let rest = rest - toEs
+            let toLife = min (max 0.0 (p.Life - 1.0)) rest
+            let rest = rest - toLife
+            let toWard = min p.Ward rest
+            let rest = rest - toWard
+            let life = p.Life - toLife - rest
+            let p =
+                { p with
+                    Mana = p.Mana - fromMana
+                    EnergyShield = p.EnergyShield - toEs
+                    Ward = p.Ward - toWard
+                    Life = life
+                    Taken = p.Taken + dmg
+                    MinLife = min p.MinLife ((max 0.0 life + p.Ward) / max 1.0 (pools.Life + pools.Ward))
+                    Died = if life <= 0.0 && rest > 0.0 then Some w.Time else None }
+            { w with Player = Some p }
         | _ -> w
 
     let private gainMana (v: PlayerStats) source amount (w: World) =
@@ -750,6 +798,17 @@ module Sim =
                         Counts = bump "flask:mana" w.Counts }
                 | _ -> w
             match actor.Vitals, w.Player with
+            | Some v, Some p when v.CostsInfernalFlame ->
+                // Pyromantic Pact: the cost builds Infernal Flame (max: twice max mana); reaching the
+                // maximum empties it and burns maximum life + energy shield as fire damage
+                let flame = p.InfernalFlame + cost
+                let w =
+                    if flame >= 2.0 * v.Mana then
+                        let burn = (v.Life + v.EnergyShield) * Mods.sumBase Ctx.empty [ Named "InfernalFlameBurn" ] (ModDb.ofList actor.Mods) / 100.0
+                        { w with Player = Some { p with InfernalFlame = 0.0 }; Counts = bump "infernal flame burn" w.Counts }
+                        |> takeDamage v (Map.ofList [ Fire, burn ])
+                    else { w with Player = Some { p with InfernalFlame = flame } }
+                startUse env rng actor skill t w |> schedule (w.Time + t) (Ready name)
             | Some v, Some p when p.Mana < cost ->
                 // not enough mana: wait until regeneration and leech have covered it
                 let rate =
@@ -864,10 +923,23 @@ module Sim =
                                     |> List.sumBy (fun src ->
                                         match src with
                                         | CritHits per when hit.Crit -> per * power * ratio DamageType.all
-                                        | InflictsAilment (a, per) when newly a -> per * power * ratio (Ailments.scalesFrom a)
+                                        | InflictsAilment (a, per) when newly a -> per * power * ratio (Ailments.scalesFromWith ctx mods a)
                                         | _ -> 0.0)
                                 if amount > 0.0 then gainEnergy env rng actor meta.Name (amount * meta.EnergyMult) w else w)
                             w
+                // Runic Ward remnants from kills and stuns
+                let w =
+                    match actor.WardRemnants, w.Player with
+                    | Some r, Some p ->
+                        let stunnedNow = not dead && (status w.Enemies.[target]).ContainsKey "HeavilyStunned" && not ((status e).ContainsKey "HeavilyStunned")
+                        let fromKill = dead && rng.Chance r.OnKillChance
+                        let fromStun = stunnedNow && w.Time - p.LastStunRemnant >= r.StunCooldown && rng.Chance r.OnStunChance
+                        if fromKill || fromStun then
+                            let count = if rng.Chance r.ExtraChance then 2.0 else 1.0
+                            let w = if fromStun then { w with Player = Some { p with LastStunRemnant = w.Time } } else w
+                            { w with Counts = bump "ward remnant" w.Counts } |> schedule (w.Time + r.Delay) (WardArrives(r.WardPerRemnant * count))
+                        else w
+                    | _ -> w
                 let w = markRecently actor.Name true hit.Crit dead w
                 let w = react env rng actor OnHit skill (Some target) w
                 if hit.Crit then react env rng actor OnCrit skill (Some target) w else w
@@ -952,8 +1024,17 @@ module Sim =
                     let blockRoll () = rng.Chance v.Block
                     let blocked = blockRoll () || (v.LuckyBlock && blockRoll ())
                     let deflected = not blocked && rng.Chance(Vitals.deflectChance v.Deflection accuracy)
+                    // "<from> damage taken as <to>" moves part of each type before mitigation
+                    let incoming =
+                        v.TakenAs
+                        |> List.fold
+                            (fun (m: Map<DamageType, float>) (from, into, pct) ->
+                                let moved = (Map.tryFind from atk.Damage |> Option.defaultValue 0.0) * pct / 100.0
+                                m |> Map.add from ((Map.tryFind from m |> Option.defaultValue 0.0) - moved)
+                                  |> Map.add into ((Map.tryFind into m |> Option.defaultValue 0.0) + moved))
+                            atk.Damage
                     let dmg =
-                        atk.Damage
+                        incoming
                         |> Map.toList
                         |> List.sumBy (fun (t, d) ->
                             let d = if deflected then d * (1.0 - Vitals.deflectEffect / 100.0) else d
@@ -961,23 +1042,14 @@ module Sim =
                             | Physical -> d * (1.0 - Vitals.armourReduction v.Armour d / 100.0)
                             | t -> d * (1.0 - (Map.tryFind t v.Resist |> Option.defaultValue 0.0) / 100.0))
                     let dmg = if blocked then dmg * v.BlockedDamageTaken / 100.0 else dmg
-                    let fromMana = min p.Mana (dmg * Mods.sumBase Ctx.empty [ Named "DamageRemovedFromManaFirst" ] (ModDb.ofList env.Fight.Player.Mods) / 100.0)
-                    let rest = dmg - fromMana
-                    let toEs = min p.EnergyShield rest
-                    let life = p.Life - (rest - toEs)
-                    let p =
-                        { p with
-                            Mana = p.Mana - fromMana
-                            EnergyShield = p.EnergyShield - toEs
-                            Life = life
-                            LastHit = w.Time
-                            Taken = p.Taken + dmg
-                            MinLife = min p.MinLife (life / pools.Life)
-                            Died = if life <= 0.0 then Some w.Time else None }
+                    let w = takeDamage pools (Map.ofList [ Physical, dmg ]) { w with Player = Some p } |> fun w -> { w with Player = w.Player |> Option.map (fun p -> { p with LastHit = w.Time }) }
                     let w =
                         { w with
-                            Player = Some p
                             Counts = w.Counts |> bump "enemy:hit" |> (if deflected then bump "enemy:deflected" else id) |> (if blocked then bump "enemy:blocked" else id) }
+                    let w =
+                        match w.Player with
+                        | Some p when blocked && v.WardOnBlock > 0.0 -> { w with Player = Some { p with Ward = min (max p.Ward pools.Ward) (p.Ward + v.WardOnBlock) } }
+                        | _ -> w
                     if blocked then
                         // blocks feed meta gems (Cast on Block) and OnBlock rules
                         let player = env.Fight.Player
@@ -1085,6 +1157,10 @@ module Sim =
             | Strike (name, skill, mult, aimedAt) -> onStrike env rng name skill mult aimedAt w
             | EnemyAttack name -> enemyAttack env rng name w
             | PeriodicTick (name, periodic) -> onPeriodic env rng name periodic w
+            | WardArrives amount ->
+                match env.Fight.Player.Vitals, env.Fight.Player.WardRemnants, w.Player with
+                | Some v, Some r, Some p -> { w with Player = Some { p with Ward = min (v.Ward * r.Overflow) (p.Ward + amount) } }
+                | _ -> w
             | CycleTick (name, cycleName) ->
                 let actor = actorDef env name
                 match actor.Cycles |> List.tryFind (fun c -> c.Name = cycleName) with
@@ -1172,7 +1248,10 @@ module Sim =
                       FlaskCharges = fight.Player.ManaFlask |> Option.map (fun f -> f.MaxCharges) |> Option.defaultValue 0.0
                       FlaskUntil = 0.0
                       FlaskRate = 0.0
-                      StrikeLeech = 0.0 })
+                      StrikeLeech = 0.0
+                      Ward = v.Ward
+                      InfernalFlame = 0.0
+                      LastStunRemnant = -1e9 })
               Time = 0.0
               Enemies =
                 fight.Enemies

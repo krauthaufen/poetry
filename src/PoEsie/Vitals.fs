@@ -19,7 +19,15 @@ type PlayerStats =
       /// Chance (%) to block a hit, whether it rolls twice (lucky), % of a blocked hit still taken.
       Block: float
       LuckyBlock: bool
-      BlockedDamageTaken: float }
+      BlockedDamageTaken: float
+      /// Runic Ward: takes damage once life is down to 1; regenerates all the time.
+      Ward: float
+      WardRegen: float
+      WardOnBlock: float
+      /// Pyromantic Pact: skill costs build Infernal Flame instead of spending mana.
+      CostsInfernalFlame: bool
+      /// "<from>" damage taken as "<to>": (from, to, percent).
+      TakenAs: (DamageType * DamageType * float) list }
 
 /// A mana flask as equipped (values as the game shows them).
 type ManaFlask =
