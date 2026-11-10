@@ -41,12 +41,20 @@ module Items =
               "EvasionBasePercentile:"; "EnergyShieldBasePercentile:"; "Cluster Jewel"; "Flask: " ]
         prefixes |> List.exists (fun p -> line.StartsWith p)
 
-    let private weaponTag (t: string) =
-        let t = t.ToLowerInvariant()
-        [ "mace", Mace; "sword", Sword; "axe", Axe; "dagger", Dagger; "claw", Claw; "spear", Spear
-          "quarterstaff", Quarterstaff; "crossbow", Crossbow; "bow", Bow; "flail", Flail; "wand", Wand; "staff", Staff ]
-        |> List.choose (fun (k, tag) -> if t.Contains k && not (k = "bow" && t.Contains "crossbow") then Some tag else None)
-        |> List.append (if t.StartsWith "two hand" || t = "bow" || t = "crossbow" || t = "quarterstaff" then [ Tag "TwoHanded" ] else [ Tag "OneHanded" ])
+    /// Weapon kind from the base: its type, refined by base tags (quarterstaves are type
+    /// "Staff" with the tag "warstaff").
+    let private weaponTags (b: WeaponBase) =
+        let t = b.Type.ToLowerInvariant()
+        let kind =
+            if b.BaseTags.Contains "warstaff" then [ Quarterstaff ]
+            else
+                [ "mace", Mace; "sword", Sword; "axe", Axe; "dagger", Dagger; "claw", Claw; "spear", Spear
+                  "crossbow", Crossbow; "bow", Bow; "flail", Flail; "wand", Wand; "staff", Staff ]
+                |> List.tryFind (fun (k, _) -> t.Contains k && not (k = "bow" && t.Contains "crossbow"))
+                |> Option.map snd
+                |> Option.toList
+        let hands = if b.BaseTags.Contains "twohand" || t.StartsWith "two hand" || t = "bow" || t = "crossbow" then Tag "TwoHanded" else Tag "OneHanded"
+        hands :: kind
 
     let private quality (lines: string list) =
         lines
@@ -79,7 +87,7 @@ module Items =
           // local crit is stored in hundredths of a percent
           CritChance = (b.CritChance + sum ((=) LocalCritChance) / 100.0) * (1.0 + sum ((=) LocalCritChanceInc) / 100.0)
           AttacksPerSecond = b.AttacksPerSecond * (1.0 + sum ((=) LocalAttackSpeedInc) / 100.0)
-          Tags = weaponTag b.Type }
+          Tags = weaponTags b }
 
     /// Turn parsed stats into mods + local stats + coverage.
     let interpret (stats: (string * float) list) =

@@ -60,7 +60,9 @@ type WeaponBase =
       Type: string
       Damage: Map<DamageType, Range>
       CritChance: float
-      AttacksPerSecond: float }
+      AttacksPerSecond: float
+      /// Base tags ("warstaff" marks a quarterstaff, "twohand", ...).
+      BaseTags: Set<string> }
 
 module GameData =
     let private statPairs j =
@@ -159,6 +161,7 @@ module GameData =
                       Type = Json.strField "type" j |> Option.defaultValue ""
                       Damage = DamageType.all |> List.choose range |> Map.ofList
                       CritChance = Json.numField "CritChanceBase" w |> Option.defaultValue 5.0
-                      AttacksPerSecond = Json.numField "AttackRateBase" w |> Option.defaultValue 1.0 }))
+                      AttacksPerSecond = Json.numField "AttackRateBase" w |> Option.defaultValue 1.0
+                      BaseTags = Json.keys (Json.field "tags" j) |> Set.ofList }))
             |> Map.ofList
         | _ -> Map.empty
