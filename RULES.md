@@ -108,4 +108,4 @@ Confidence levels:
 | "Recently" | hit / crit / kill recently = within 4 s, plus "crit in the past 8 s"; tracked by the engine from actual events | PoE convention (4 s) | pob |
 | Alternate quality | with `ascendancy_gemling_enable_thaumaturgy_quality_stats` (Gemling Advanced Thaumaturgy) a gem's `altQualityStats` apply too, per quality like normal quality; supports get no quality | PoB GemTooltip `GemlingQuality` flag; skill data | pob + data |
 | Chance to not remove charges | summed over character, skill and alternate quality; at ≥100% charges are never removed; "still count as consuming" starts the consumed-recently status either way | game text | guess (cap: Flicker Strike's equivalent is hard-capped at 75%) |
-| "Bonded:" rune lines | dropped unless Shaman, or `--bonded` | user notes say Shaman-only, but 46% quality only adds up with the belt's Bonded line | **open question** |
+| "Bonded:" rune / idol lines | apply for Shamans, or on an item with "Idols socketed in this item gain the benefits of their Bonded modifiers" (Darkness Enthroned); dropped otherwise | game text; confirmed by the 46% gem quality in game | data |

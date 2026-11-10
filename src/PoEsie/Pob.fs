@@ -136,11 +136,23 @@ module Pob =
     let private alwaysOn (slot: string) =
         not (slot.StartsWith "Flask" || slot.StartsWith "Charm" || slot.Contains "Swap")
 
-    /// Rune lines prefixed "Bonded:" only work for Shamans.
-    let private dropBonded (build: PobBuild) (text: string) =
-        if (build.ClassName + build.Ascendancy).Contains "Shaman" || Map.containsKey "bonded" build.Config then
-            text.Split('\n') |> Array.map (fun l -> let t = l.Trim() in if t.StartsWith "Bonded: " then t.Substring 8 else l) |> String.concat "\n"
-        else text.Split('\n') |> Array.filter (fun l -> not (l.Trim().StartsWith "Bonded:")) |> String.concat "\n"
+    /// Rune / idol lines prefixed "Bonded:" only work for Shamans, or on an item that says
+    /// "Idols socketed in this item gain the benefits of their Bonded modifiers"
+    /// (Darkness Enthroned). The values the game reports already include the item's
+    /// increased effect of socketed items.
+    let private resolveBonded (build: PobBuild) (text: string) =
+        let lines = text.Split('\n')
+        let enabled =
+            (build.ClassName + build.Ascendancy).Contains "Shaman"
+            || Map.containsKey "bonded" build.Config
+            || lines |> Array.exists (fun l -> l.Contains "gain the benefits of their Bonded modifiers")
+        lines
+        |> Array.choose (fun l ->
+            let t = l.Trim()
+            if t.StartsWith "Bonded: " then (if enabled then Some(t.Substring 8) else None)
+            elif t.Contains "gain the benefits of their Bonded modifiers" then None
+            else Some l)
+        |> String.concat "\n"
 
     /// "Allocates <notable>" on an item (anoints, jewels) allocates that passive.
     let private allocatedByItems (tree: Map<int, TreeNode>) (texts: string list) =
@@ -155,7 +167,7 @@ module Pob =
 
     /// Character mods from equipped items and allocated passives.
     let character (db: GameDb) (tree: Map<int, TreeNode>) (build: PobBuild) : CharacterSheet =
-        let items = build.Items |> List.filter (fst >> alwaysOn) |> List.map (fun (slot, text) -> slot, dropBonded build text)
+        let items = build.Items |> List.filter (fst >> alwaysOn) |> List.map (fun (slot, text) -> slot, resolveBonded build text)
         let extraNodes = allocatedByItems tree (List.map snd items)
         let build = { build with TreeNodes = build.TreeNodes @ extraNodes }
         let parsed = items |> List.map (fun (slot, text) -> slot, Items.parse db text)

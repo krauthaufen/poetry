@@ -160,7 +160,9 @@ module Items =
             |> List.filter (fun l ->
                 not (isHeader l) && Some l <> baseName && l <> name && not (db.BaseNames.Contains l)
                 // handled by the build: allocated passives
-                && not (l.StartsWith "Allocates "))
+                && not (l.StartsWith "Allocates ")
+                // already reflected in the reported values of socketed runes / idols
+                && not (l.Contains "effect of Socketed") && not (l.StartsWith "This item gains bonuses from Socketed Items"))
         let stats, unknown = StatText.parseLines db.Text candidates
         let mods, locals, cov = interpret stats
         // Lines before the first understood stat are usually the name block; don't report them.
