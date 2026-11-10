@@ -259,10 +259,7 @@ let main _ =
         let dmg = o.DamageBy.["Bolt (hit)"]
         if dmg < 900.0 || dmg > 1800.0 || dmg % 100.0 <> 0.0 then failwithf "unexpected damage %g" dmg)
 
-    let vitals =
-        { Str = 0.0; Dex = 0.0; Int = 0.0; Life = 100.0; Mana = 100.0; EnergyShield = 0.0; Armour = 0.0; Evasion = 0.0
-          Deflection = 0.0; Resist = Map.ofList [ Fire, 0.0; Cold, 0.0; Lightning, 0.0; Chaos, 0.0 ]
-          LifeRegen = 0.0; ManaRegen = 10.0; EnergyShieldRecharge = 0.0; Block = 0.0; LuckyBlock = false; BlockedDamageTaken = 0.0; Ward = 0.0; WardRegen = 0.0; WardOnBlock = 0.0; CostsInfernalFlame = false; TakenAs = [] }
+    let vitals = { PlayerStats.basic 100.0 100.0 with ManaRegen = 10.0 }
 
     test "vitals: a skill that costs more than regen waits for mana" (fun () ->
         // 50 mana per 1 s cast, 100 mana pool, 10 mana/s regen: 2 free casts, then one cast per 5 s
@@ -274,7 +271,7 @@ let main _ =
         if o.ManaStarved < 8.0 then failwithf "expected long mana waits, got %g" o.ManaStarved)
 
     test "vitals: monsters walk up, hit, and can kill the player" (fun () ->
-        let attack = { Interval = 1.0; Damage = Map.ofList [ Physical, 30.0 ]; Accuracy = 1e9; Range = 5.0 }
+        let attack = { Interval = 1.0; Damage = Map.ofList [ Physical, 30.0 ]; Accuracy = 1e9; Range = 5.0; CritChance = 0.0; Melee = true }
         let brute = { dummy "brute" 50.0 0.0 with Attack = Some attack; Speed = 10.0 }
         let player = { Actor.make "Player" [ noIgnite ] [ { fireSpell 0.0 with BaseDamage = Map.empty } ] with Vitals = Some vitals }
         let o = Sim.run (Fight.single brute player 30.0) 1u
@@ -292,6 +289,52 @@ let main _ =
         let o = Sim.run (Fight.single (boss 1e12) player 5.5) 1u
         // 5 bolts -> 5 crits -> 5 triggers; the novas' own crits add nothing
         equal 5 o.Counts.["trigger:Nova"])
+
+    // ---- defence: what monster hits do to the player ----
+    let idle = { fireSpell 0.0 with BaseDamage = Map.empty }
+    let attacker t dmg interval =
+        { dummy "brute" 8.0 0.0 with
+            Attack = Some { Interval = interval; Damage = Map.ofList [ t, dmg ]; Accuracy = 1e9; Range = 5.0; CritChance = 0.0; Melee = false } }
+    let against stats enemy time = Sim.run (Fight.single enemy { Actor.make "Player" [ noIgnite ] [ idle ] with Vitals = Some stats } time) 1u
+
+    test "defence: chaos damage removes twice as much energy shield" (fun () ->
+        let stats = { PlayerStats.basic 100.0 0.0 with EnergyShield = 100.0 }
+        let died t = (against stats (attacker t 30.0 1.0) 30.0).Died |> Option.defaultValue 99.0
+        // physical: 100 ES + 100 life last 7 hits; chaos: the ES only absorbs 50
+        if died Chaos > died Physical - 1.5 then failwithf "chaos %g, physical %g" (died Chaos) (died Physical))
+
+    test "defence: recoup gives back its share of damage taken over 4 seconds" (fun () ->
+        let plain = PlayerStats.basic 100.0 0.0
+        let recoup = { plain with Recoup = [ "Life", DamageType.all, 90.0 ] }
+        // 20 per second in, 18 per second back once the streams overlap
+        let died s = (against s (attacker Physical 20.0 1.0) 60.0).Died |> Option.defaultValue 99.0
+        if died recoup < died plain + 5.0 then failwithf "recoup %g, plain %g" (died recoup) (died plain))
+
+    test "defence: energy shield recharges after the delay" (fun () ->
+        // one hit of 80 into 100 ES, then nothing: back to full, so a second hit 10 s later is absorbed too
+        let stats = { PlayerStats.basic 100.0 0.0 with EnergyShield = 100.0; EnergyShieldRecharge = 50.0; ESRechargeDelay = 4.0 }
+        let o = against stats (attacker Physical 80.0 10.0) 25.0
+        equal None o.Died
+        near 1.0 o.MinLife)
+
+    test "defence: cold hits build up freeze on the player" (fun () ->
+        // threshold 500: each 60 cold hit builds 24%
+        let o = against (PlayerStats.basic 1000.0 0.0) (attacker Cold 60.0 1.0) 8.0
+        if not (o.Counts.ContainsKey "player:Frozen") then failwithf "never frozen: %A" o.Counts)
+
+    test "defence: a big fire hit ignites the player and burns" (fun () ->
+        let o = against { PlayerStats.basic 1e7 0.0 with AilmentThreshold = 1000.0 } (attacker Fire 2e5 8.0) 16.0
+        equal true (o.Counts.ContainsKey "player:Ignited")
+        // more than whole hits: the burn
+        let burn = o.DamageTaken - 2e5 * floor (o.DamageTaken / 2e5)
+        if burn < 1e4 then failwithf "no burn: took %g" o.DamageTaken)
+
+    test "defence: armour applying to elemental damage lowers it" (fun () ->
+        let plain = PlayerStats.basic 1e6 0.0
+        let armoured = { plain with Armour = 5000.0; ArmourAppliesTo = Map.ofList [ Fire, 100.0 ] }
+        let taken s = (against { s with Avoid = Map.ofList [ "Ignite", 100.0 ] } (attacker Fire 500.0 1.0) 5.5).DamageTaken
+        // 5000 / (5000 + 10 * 500) = 50% less
+        near 0.5 (taken armoured / taken plain))
 
     DataTests.run test near (fun a b -> equal a b)
 

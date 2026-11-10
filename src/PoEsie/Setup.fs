@@ -300,14 +300,7 @@ module Setup =
             ManaFlask =
                 if o.Immortal || o.NoFlask then None
                 else
-                    sheet.ManaFlask
-                    |> Option.map (fun ((amount, duration, perUse, maxC), inc) ->
-                        { Amount = amount
-                          Duration = duration
-                          ChargesPerUse = perUse
-                          MaxCharges = maxC
-                          ChargesPerSecond = Mods.sumBase Ctx.empty [ Named "FlaskChargesPerSecond" ] (ModDb.ofList sheet.Mods)
-                          ChargeGainMult = 1.0 + inc / 100.0 }) }
+                    Defence.flask "Mana" (ModDb.ofList sheet.Mods) sheet.ManaFlask }
 
     /// A fight against these enemies.
     let fight (o: Options) (player: Actor) (enemies: EnemyDef list) : Fight =

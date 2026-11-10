@@ -11,6 +11,7 @@ type ParsedItem =
       Defences: (Stat * float) list
       /// Mana flask: (amount, duration, charges per use, max charges).
       ManaFlask: (float * float * float * float) option
+      LifeFlask: (float * float * float * float) option
       Coverage: Coverage }
 
 type TreeNode =
@@ -196,18 +197,20 @@ module Items =
                 else None)
         let numbers (l: string) =
             l.Split(' ') |> Array.choose (fun w -> match System.Double.TryParse(w.Trim(',')) with | true, v -> Some v | _ -> None) |> List.ofArray
-        let flask =
-            let recovers = lines |> List.tryFind (fun l -> l.StartsWith "Flask: Recovers" && l.Contains "Mana")
+        let flaskOf (pool: string) =
+            let recovers = lines |> List.tryFind (fun l -> l.StartsWith "Flask: Recovers" && l.Contains pool)
             let consumes = lines |> List.tryFind (fun l -> l.StartsWith "Flask: Consumes")
             match recovers |> Option.map numbers, consumes |> Option.map numbers with
             | Some [ amount; duration ], Some [ use'; maxC ] -> Some(amount, duration, use', maxC)
             | _ -> None
+        let flask = flaskOf "Mana"
         { Name = name
           BaseName = baseName |> Option.defaultValue ""
           Weapon = baseName |> Option.map (fun b -> weapon db.Weapons.[b] (quality lines) locals)
           Mods = mods
           Defences = defences
           ManaFlask = flask
+          LifeFlask = flaskOf "Life"
           Coverage = { cov with UnknownText = unknown } }
 
 module Tree =

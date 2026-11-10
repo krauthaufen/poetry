@@ -146,6 +146,24 @@ Confidence levels:
 | Keystones | handled by name: Chaos Inoculation = maximum life 1, chaos immunity, no life regeneration | game text | data |
 | Not modelled | life flasks and charms, life leech, block, evade-based crit, monster skills and phases, ranged monsters, other keystones | — | missing |
 
+### Incoming damage in detail
+
+| Mechanic | Rule | Source | Confidence |
+|---|---|---|---|
+| Order | energy shield, then the "taken from mana before life" share of the rest, life down to 1, Runic Ward, death | game text, user (ward) | data + user |
+| Chaos vs energy shield | chaos damage removes twice as much energy shield | PoE2 rule (recollection) | guess, **check** |
+| Bypass | "X% of damage bypasses energy shield" skips it | stat text | data |
+| Armour vs elemental | "X% of armour applies to <type> damage": armour formula with that share, after resistance | stat text; order a guess | guess |
+| Damage taken | increased / reduced damage taken by type multiplies after mitigation; flat physical reduction applies to melee hits before armour | stat text | guess (order) |
+| Monster crits | 5% chance, +30% damage (monster base_critical_hit_damage_bonus), less with "enemies deal less extra crit damage" | game data; 5% PoB default | data |
+| Recoup | share of damage taken (by type) returns to the pool evenly over 4 s; "recoup speed" shortens it | stat text | data |
+| ES recharge | starts 4 s after the last damage taken (hits and damage over time), / (1 + faster start); 12.5% per second x recharge rate | PoB, Character.ot | pob |
+| Life flask | drunk when life falls below half, if charges allow; amount x life recovery rate over its duration | player behaviour | guess |
+| Leech (life) | % of physical attack damage, from one enemy per hit event, recovered at most 20% of maximum per second | as mana leech | guess |
+| Ailments on the player | threshold = half of maximum life (PlayerAilmentThresholdLifeFactor) + mods. Ignite: chance = fire / threshold x IgniteChanceMultiplier, burns 4 s, strongest only, lowered by fire resistance. Shock: chance likewise, +20% damage taken for 4 s. Chill: slow = ChillEffectMultiplier x cold / threshold for 2 s. Freeze: builds cold x FreezeDamageScalePlayer / freeze threshold, frozen 2 s at 100%. "Avoid", "effect on you" and duration stats apply. Unmitigated hit damage is used. Bleed / poison from monsters: not modelled | GameConstants "...Player" | data; using unmitigated damage is a guess |
+| Light stun on the player | chance = hit / stun threshold (maximum life before CI + mods); physical +100%, melee +33% (monster object stats); nothing below 15% (LightStunMinimumChancePlayer); interrupts for 0.35 s (GUESS); a stun only delays the next action, it does not cancel one under way. Heavy stun on the player: not modelled | game constants; formula a guess | guess |
+| Evasion | every monster hit can be evaded | PoE2 0.3 (recollection) | guess |
+
 ## Resources over time
 
 | Mechanic | Rule | Source | Confidence |

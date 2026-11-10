@@ -1,5 +1,15 @@
 namespace PoEsie
 
+/// A flask as equipped (values as the game shows them).
+type ManaFlask =
+    { Amount: float
+      Duration: float
+      ChargesPerUse: float
+      MaxCharges: float
+      /// Charges gained per second (belt generation etc.), and the multiplier on charges gained.
+      ChargesPerSecond: float
+      ChargeGainMult: float }
+
 /// The player's pools, defences and recovery, computed from the character sheet.
 type PlayerStats =
     { Str: float
@@ -27,17 +37,56 @@ type PlayerStats =
       /// Pyromantic Pact: skill costs build Infernal Flame instead of spending mana.
       CostsInfernalFlame: bool
       /// "<from>" damage taken as "<to>": (from, to, percent).
-      TakenAs: (DamageType * DamageType * float) list }
+      TakenAs: (DamageType * DamageType * float) list
+      /// Seconds without being hit before energy shield recharges; ES regenerated per second anyway.
+      ESRechargeDelay: float
+      ESRegen: float
+      /// % of damage (after energy shield) taken from mana before life.
+      ManaBeforeLife: float
+      /// % of damage that skips energy shield.
+      BypassES: float
+      /// % of armour that also applies to hits of this type.
+      ArmourAppliesTo: Map<DamageType, float>
+      /// Multiplier on damage taken, by type ("increased / reduced damage taken").
+      TakenMult: Map<DamageType, float>
+      /// Flat physical damage less from attack hits.
+      FlatPhysicalTaken: float
+      /// Enemy critical hits deal this % less extra damage.
+      LessCritDamageTaken: float
+      StunThreshold: float
+      AilmentThreshold: float
+      FreezeThreshold: float
+      AvoidStun: float
+      /// Chance (%) to avoid an ailment, multiplier on its effect and duration on you, by ailment name.
+      Avoid: Map<string, float>
+      SelfEffect: Map<string, float>
+      SelfDuration: Map<string, float>
+      LifeOnKill: float
+      ESOnKill: float
+      LifeOnBlock: float
+      ManaOnBlock: float
+      /// Recoup: (pool "Life" | "Mana" | "ES", damage types it counts, percent), recovered over RecoupSeconds.
+      Recoup: (string * DamageType list * float) list
+      RecoupSeconds: float
+      /// Multipliers on all recovery of the pool.
+      LifeRecoveryRate: float
+      ManaRecoveryRate: float
+      ESRecoveryRate: float
+      LifeFlask: ManaFlask option }
 
-/// A mana flask as equipped (values as the game shows them).
-type ManaFlask =
-    { Amount: float
-      Duration: float
-      ChargesPerUse: float
-      MaxCharges: float
-      /// Charges gained per second (belt generation etc.), and the multiplier on charges gained.
-      ChargesPerSecond: float
-      ChargeGainMult: float }
+module PlayerStats =
+    /// Bare pools with no defences or recovery: a starting point for hand-built players.
+    let basic life mana : PlayerStats =
+        { Str = 0.0; Dex = 0.0; Int = 0.0; Life = life; Mana = mana; EnergyShield = 0.0; Armour = 0.0; Evasion = 0.0
+          Deflection = 0.0; Resist = Map.ofList [ Fire, 0.0; Cold, 0.0; Lightning, 0.0; Chaos, 0.0 ]
+          LifeRegen = 0.0; ManaRegen = 0.0; EnergyShieldRecharge = 0.0; Block = 0.0; LuckyBlock = false
+          BlockedDamageTaken = 0.0; Ward = 0.0; WardRegen = 0.0; WardOnBlock = 0.0; CostsInfernalFlame = false; TakenAs = []
+          ESRechargeDelay = 4.0; ESRegen = 0.0; ManaBeforeLife = 0.0; BypassES = 0.0; ArmourAppliesTo = Map.empty
+          TakenMult = Map.empty; FlatPhysicalTaken = 0.0; LessCritDamageTaken = 0.0; StunThreshold = life
+          AilmentThreshold = life / 2.0; FreezeThreshold = life / 2.0; AvoidStun = 0.0; Avoid = Map.empty
+          SelfEffect = Map.empty; SelfDuration = Map.empty; LifeOnKill = 0.0; ESOnKill = 0.0; LifeOnBlock = 0.0
+          ManaOnBlock = 0.0; Recoup = []; RecoupSeconds = 4.0; LifeRecoveryRate = 1.0; ManaRecoveryRate = 1.0
+          ESRecoveryRate = 1.0; LifeFlask = None }
 
 /// Hit resolution against the player (formulas: PoB CalcDefence, constants: game data).
 module Vitals =

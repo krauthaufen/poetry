@@ -273,13 +273,107 @@ module StatMap =
         | "recover_x%_of_maximum_mana_when_you_consume_a_power_charge" -> one (Mod.base' (Named "ManaPercentOnConsumePower") v)
         | "base_mana_leech_from_physical_attack_damage_permyriad" -> one (Mod.base' ManaLeech (v / 100.0) |> Mod.whenever (SkillIs Attack))
         | "base_damage_removed_from_mana_before_life_%" -> one (Mod.base' (Named "DamageRemovedFromManaFirst") v)
+        // ---- resistances ----
+        | "additional_maximum_all_resistances_%" -> each (DamageType.all |> List.filter ((<>) Physical) |> List.map MaxResist)
+        | "fire_and_cold_damage_resistance_%" -> each [ Resist Fire; Resist Cold ]
+        | "fire_and_lightning_damage_resistance_%" -> each [ Resist Fire; Resist Lightning ]
+        | "cold_and_lightning_damage_resistance_%" -> each [ Resist Cold; Resist Lightning ]
+        // ---- energy shield ----
+        | "energy_shield_delay_-%" -> one (Mod.inc (Named "ESRechargeFaster") v)
+        | "energy_shield_recharge_rate_+%" -> one (Mod.inc (Named "ESRechargeRate") v)
+        | "base_energy_shield_regeneration_rate_per_minute_%" -> one (Mod.base' (Named "ESRegenPercent") (v / 60.0))
+        | "regenerate_energy_shield_instead_of_life" -> one (Mod.flag (Named "RegenESInsteadOfLife"))
+        | "maximum_life_%_to_convert_to_maximum_energy_shield" -> one (Mod.base' (Named "LifeConvertedToES") v)
+        | "maximum_life_%_to_gain_as_maximum_energy_shield" -> one (Mod.base' (Named "LifeGainedAsES") v)
+        | "base_all_damage_bypass_energy_shield_%" -> one (Mod.base' (Named "BypassES") v)
+        // ---- recovery rates ----
+        | "life_recovery_rate_+%" -> one (Mod.inc (Named "LifeRecoveryRate") v)
+        | "mana_recovery_rate_+%" -> one (Mod.inc (Named "ManaRecoveryRate") v)
+        | "energy_shield_recovery_rate_+%" -> one (Mod.inc (Named "ESRecoveryRate") v)
+        // ---- on kill / hit / block ----
+        | "recover_%_maximum_life_on_kill" -> one (Mod.base' (Named "LifePercentOnKill") v)
+        | "base_life_gained_on_enemy_death" -> one (Mod.base' (Named "LifeOnKill") v)
+        | "recover_energy_shield_%_on_kill" -> one (Mod.base' (Named "ESPercentOnKill") v)
+        | "base_life_gain_per_target" -> one (Mod.base' (Named "LifeOnHit") v |> Mod.whenever (SkillIs Attack))
+        | "mana_gain_per_target" -> one (Mod.base' (Named "ManaOnHit") v |> Mod.whenever (SkillIs Attack))
+        | "base_life_gained_on_spell_hit" -> one (Mod.base' (Named "LifeOnHit") v |> Mod.whenever (SkillIs Spell))
+        | "life_gained_on_block" | "recover_X_life_on_block" -> one (Mod.base' (Named "LifeOnBlock") v)
+        | "mana_gained_on_block" -> one (Mod.base' (Named "ManaOnBlock") v)
+        // ---- leech ----
+        | "base_life_leech_from_physical_attack_damage_permyriad" -> one (Mod.base' (Named "LifeLeech") (v / 100.0) |> Mod.whenever (SkillIs Attack))
+        | "base_life_leech_amount_+%" -> one (Mod.inc (Named "LifeLeechAmount") v)
+        | "base_mana_leech_amount_+%" -> one (Mod.inc (Named "ManaLeechAmount") v)
+        | "base_cannot_leech_mana" -> one (Mod.more (Named "ManaLeechAmount") -100.0)
+        // ---- recoup: part of damage taken comes back over 4 s ----
+        | "damage_taken_goes_to_life_over_4_seconds_%" -> one (Mod.base' (Named "RecoupLife") v)
+        | "damage_taken_goes_to_mana_%" -> one (Mod.base' (Named "RecoupMana") v)
+        | "physical_damage_taken_recouped_as_life_%" -> one (Mod.base' (Named "RecoupLife:Physical") v)
+        | "recoup_%_elemental_damage_as_energy_shield" -> one (Mod.base' (Named "RecoupES:Elemental") v)
+        | "recoup_speed_+%" -> one (Mod.inc (Named "RecoupSpeed") v)
+        // ---- flasks ----
+        | "flask_life_to_recover_+%" -> one (Mod.inc (Named "LifeFlaskAmount") v)
+        | "flask_mana_to_recover_+%" -> one (Mod.inc (Named "ManaFlaskAmount") v)
+        | "flask_life_and_mana_to_recover_+%" -> Some(Mods [ Mod.inc (Named "LifeFlaskAmount") v; Mod.inc (Named "ManaFlaskAmount") v ])
+        | "flask_life_recovery_rate_+%" -> one (Mod.inc (Named "LifeFlaskRate") v)
+        | "flask_mana_recovery_rate_+%" -> one (Mod.inc (Named "ManaFlaskRate") v)
+        | "flask_charges_gained_+%" -> Some(Mods [ Mod.inc (Named "LifeFlaskChargesGained") v; Mod.inc (Named "ManaFlaskChargesGained") v ])
+        | "life_flask_charges_gained_+%" -> one (Mod.inc (Named "LifeFlaskChargesGained") v)
+        | "mana_flask_charges_gained_+%" -> one (Mod.inc (Named "ManaFlaskChargesGained") v)
+        | "flask_charges_used_+%" -> Some(Mods [ Mod.inc (Named "LifeFlaskChargesUsed") v; Mod.inc (Named "ManaFlaskChargesUsed") v ])
+        | "flask_mana_charges_used_+%" -> one (Mod.inc (Named "ManaFlaskChargesUsed") v)
+        | "flask_life_charges_used_+%" -> one (Mod.inc (Named "LifeFlaskChargesUsed") v)
+        | "generate_x_charges_for_life_flasks_per_minute" -> one (Mod.base' (Named "LifeFlaskChargesPerSecond") (v / 60.0))
+        | "generate_x_charges_for_mana_flasks_per_minute" -> one (Mod.base' (Named "ManaFlaskChargesPerSecond") (v / 60.0))
+        // ---- mitigation ----
+        | "armour_%_applies_to_fire_cold_lightning_damage" -> Some(Mods(DamageType.elemental |> List.map (fun t -> Mod.base' (Named("ArmourAppliesTo:" + DamageType.name t)) v)))
+        | "base_damage_taken_+%" -> one (Mod.inc (Named "Taken:All") v)
+        | "physical_attack_damage_taken_+" -> one (Mod.base' (Named "FlatPhysicalAttackTaken") v)
+        | "deflection_rating_+%" -> one (Mod.inc Deflection v)
+        | "additional_block_chance_against_projectiles_%" -> one (Mod.base' (Named "BlockVsProjectiles") v)
+        | "base_self_critical_strike_multiplier_-%" -> one (Mod.base' (Named "LessCritDamageTaken") v)
+        // ---- thresholds, stuns and ailments on yourself ----
+        | "stun_threshold_+" -> one (Mod.base' (Named "StunThreshold") v)
+        | "stun_threshold_+%" -> one (Mod.inc (Named "StunThreshold") v)
+        | "stun_threshold_+_from_%_maximum_energy_shield" -> one (Mod.base' (Named "StunThresholdFromES") v)
+        | "ailment_threshold_+" -> one (Mod.base' (Named "PlayerAilmentThreshold") v)
+        | "ailment_threshold_+%" -> one (Mod.inc (Named "PlayerAilmentThreshold") v)
+        | "ailment_threshold_+_from_%_maximum_energy_shield" -> one (Mod.base' (Named "AilmentThresholdFromES") v)
+        | "freeze_threshold_+%" -> one (Mod.inc (Named "FreezeThreshold") v)
+        | "gain_%_maximum_energy_shield_as_freeze_threshold_+" -> one (Mod.base' (Named "FreezeThresholdFromES") v)
+        | "avoid_stun_%" -> one (Mod.base' (Named "AvoidStun") v)
+        | "avoid_all_elemental_status_%" -> Some(Mods([ "Ignite"; "Chill"; "Freeze"; "Shock" ] |> List.map (fun a -> Mod.base' (Named("Avoid:" + a)) v)))
+        | "base_avoid_ignite_%" -> one (Mod.base' (Named "Avoid:Ignite") v)
+        | "base_avoid_chill_%" -> one (Mod.base' (Named "Avoid:Chill") v)
+        | "base_avoid_freeze_%" -> one (Mod.base' (Named "Avoid:Freeze") v)
+        | "base_avoid_shock_%" -> one (Mod.base' (Named "Avoid:Shock") v)
+        | "base_cannot_be_ignited" -> one (Mod.base' (Named "Avoid:Ignite") 100.0)
+        | "base_cannot_be_chilled_or_frozen" -> Some(Mods [ Mod.base' (Named "Avoid:Chill") 100.0; Mod.base' (Named "Avoid:Freeze") 100.0 ])
+        | "cannot_be_poisoned" -> one (Mod.base' (Named "Avoid:Poison") 100.0)
+        | "shocked_effect_on_self_+%" -> one (Mod.inc (Named "SelfEffect:Shock") v)
+        | "chill_effectiveness_on_self_+%" -> one (Mod.inc (Named "SelfEffect:Chill") v)
+        | "ignite_effect_on_self_+%" -> one (Mod.inc (Named "SelfEffect:Ignite") v)
+        | "self_bleed_duration_+%" -> one (Mod.inc (Named "SelfDuration:Bleed") v)
+        | "self_poison_duration_+%" -> one (Mod.inc (Named "SelfDuration:Poison") v)
+        | "base_self_ignite_duration_-%" -> one (Mod.inc (Named "SelfDuration:Ignite") -v)
+        | "base_self_chill_duration_-%" -> one (Mod.inc (Named "SelfDuration:Chill") -v)
+        | "base_self_freeze_duration_-%" -> one (Mod.inc (Named "SelfDuration:Freeze") -v)
+        | "base_self_shock_duration_-%" -> one (Mod.inc (Named "SelfDuration:Shock") -v)
+        | "self_elemental_status_duration_-%" ->
+            Some(Mods([ "Ignite"; "Chill"; "Freeze"; "Shock" ] |> List.map (fun a -> Mod.inc (Named("SelfDuration:" + a)) -v)))
+        | "base_all_ailment_duration_on_self_+%" ->
+            Some(Mods([ "Ignite"; "Chill"; "Freeze"; "Shock"; "Bleed"; "Poison" ] |> List.map (fun a -> Mod.inc (Named("SelfDuration:" + a)) v)))
         | _ ->
             // "base_<type>_damage_resistance_%", "base_maximum_<type>_damage_resistance_%",
             // "<type>_hit_and_dot_damage_%_taken_as_<type>"
             match split id with
             | [ from; "hit"; "and"; "dot"; "damage"; "%"; "taken"; "as"; into ] when (typeWord from).IsSome && (typeWord into).IsSome ->
                 one (Mod.base' (Named(sprintf "TakenAs:%s:%s" (DamageType.name (typeWord from).Value) (DamageType.name (typeWord into).Value))) v)
-            | [ "base"; t; "damage"; "resistance"; "%" ] when (typeWord t).IsSome -> one (Mod.base' (Resist (typeWord t).Value) v)
+            | [ "base"; t; "damage"; "resistance"; "%" ] | [ t; "damage"; "resistance"; "%" ] when (typeWord t).IsSome -> one (Mod.base' (Resist (typeWord t).Value) v)
+            // "physical_damage_taken_%_as_fire", "base_fire_hit_damage_taken_%_as_physical"
+            | [ from; "damage"; "taken"; "%"; "as"; into ] | [ "base"; from; "hit"; "damage"; "taken"; "%"; "as"; into ] when (typeWord from).IsSome && (typeWord into).IsSome ->
+                one (Mod.base' (Named(sprintf "TakenAs:%s:%s" (DamageType.name (typeWord from).Value) (DamageType.name (typeWord into).Value))) v)
+            | [ t; "damage"; "taken"; "+%" ] when (typeWord t).IsSome -> one (Mod.inc (Named("Taken:" + DamageType.name (typeWord t).Value)) v)
+            | [ "base"; "armour"; "%"; "applies"; "to"; t; "damage" ] when (typeWord t).IsSome -> one (Mod.base' (Named("ArmourAppliesTo:" + DamageType.name (typeWord t).Value)) v)
             | [ "base"; "maximum"; t; "damage"; "resistance"; "%" ] when (typeWord t).IsSome -> one (Mod.base' (MaxResist (typeWord t).Value) v)
             | _ -> None
 
@@ -393,7 +487,6 @@ module StatMap =
         | "ascendancy_gemling_enable_thaumaturgy_quality_stats" -> one (Mod.flag (Named "AltQuality"))
         | "all_skill_gem_quality_+" -> one (Mod.base' (Named "GemQuality") v)
         | "damage_+%_if_have_crit_in_past_8_seconds" -> one (Mod.inc (Damage AllDamage) v |> Mod.whenever (WhileBuff "CritInPast8Seconds"))
-        | "base_resist_all_elements_%" -> Some NotOffensive
         | _ -> None
 
     // ---- patterns over the words of the id (reversed, so suffixes come first) ----
@@ -620,11 +713,11 @@ module StatMap =
             Some(Local(lv, v))
         | _ -> None
 
-    let private nonOffensiveWords =
-        set [ "life"; "mana"; "energy"; "evasion"; "armour"; "block"; "movement"; "velocity"; "flask"; "charm"
-              "rarity"; "quantity"; "light"; "radius"; "stun"; "threshold"; "regeneration"; "leech"; "recovery"
-              "recover"; "resistance"; "resist"; "strength"; "dexterity"; "intelligence"; "attributes"; "spirit"; "deflection"
-              "presence"; "reservation"; "cost"; "self"; "taken"; "dodge"; "experience"; "gold"; "item"; "currency" ]
+    /// Stats with no effect on a fight as we simulate it: loot, light, experience, what can be
+    /// equipped or reserved. (The variant is still called NotOffensive.)
+    let private noCombatWords =
+        set [ "rarity"; "quantity"; "light"; "gold"; "experience"; "fish"; "fishing"; "spirit"; "reservation"
+              "requirements"; "requirement"; "footprints"; "currency"; "slots" ]
 
     /// Offensive mechanics the engine doesn't model yet, by keyword.
     let private unsimulated =
@@ -651,12 +744,32 @@ module StatMap =
           "debuff", "debuffs"
           "duration", "durations"
           "cooldown", "cooldowns"
-          "empowered", "empowered attacks" ]
+          "empowered", "empowered attacks"
+          "movement", "movement"
+          "velocity", "movement"
+          "sprint", "movement"
+          "dodge", "movement"
+          "flask", "flasks"
+          "charm", "charms"
+          "life", "life / recovery"
+          "mana", "mana / recovery"
+          "energy", "energy shield / recovery"
+          "leech", "life / recovery"
+          "armour", "defences"
+          "evasion", "defences"
+          "block", "defences"
+          "resistance", "defences"
+          "taken", "damage taken"
+          "threshold", "stun / ailment threshold"
+          "stun", "stun / ailment threshold"
+          "self", "effects on self"
+          "presence", "presence / allies"
+          "allies", "presence / allies" ]
 
     let private isNonOffensive (id: string) =
         let words = split id
         // A penetration / enemy debuff line mentions resistance but is offensive.
-        not (List.contains "enemy" words) && words |> List.exists nonOffensiveWords.Contains
+        words |> List.exists noCombatWords.Contains
 
     let private direct id value =
         match explicit id value with

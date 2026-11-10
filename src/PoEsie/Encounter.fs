@@ -49,7 +49,11 @@ type EnemyAttack =
       Damage: Map<DamageType, float>
       Accuracy: float
       /// Distance (game units, edge to player) from which it can hit.
-      Range: float }
+      Range: float
+      /// Chance (%) of a critical hit (monsters: base bonus from game data).
+      CritChance: float
+      /// A melee attack (stuns more; flat physical attack damage reductions apply).
+      Melee: bool }
 
 type EnemyDef =
     { Name: string
@@ -152,7 +156,10 @@ module EnemyDef =
         { Interval = 1.5
           Damage = DamageProfile.mixed |> List.map (fun (t, k) -> t, hit * k) |> Map.ofList
           Accuracy = Constants.monsterAccuracy level
-          Range = 8.0 }
+          Range = 8.0
+          // Monster base critical hit chance 5% (PoB enemy default)
+          CritChance = 5.0
+          Melee = true }
 
     /// A monster of the given level and rarity at a position.
     let make (profile: Rarity -> RarityProfile) level rarity name position =

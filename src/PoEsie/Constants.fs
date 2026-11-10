@@ -86,6 +86,19 @@ module Constants =
     /// Seconds without being hit before energy shield recharges (PoB EnergyShieldRechargeDelay).
     let energyShieldRechargeDelay = 4.0
 
+    // ---- ailments and stuns on the player (GameConstants "...Player") ----
+    let playerChillDuration = gc "BaseChillDurationPlayer"
+    let playerShockDuration = gc "BaseShockDurationPlayer"
+    let playerFreezeScale = gc "FreezeDamageScalePlayer"
+    let playerFreezeDuration = gc "FreezeDurationPlayer"
+    /// A hit can light-stun only if its chance is at least this (LightStunMinimumChancePlayer).
+    let playerLightStunMinimum = gc "LightStunMinimumChancePlayer"
+    /// Monster hits: more stun from melee and from physical damage (monster object stats).
+    let monsterMeleeStunMore = mc "melee_hit_damage_stun_multiplier_+%_final_from_ot"
+    let monsterPhysicalStunMore = mc "physical_hit_damage_stun_multiplier_+%_final_from_ot"
+    /// Seconds a light stun interrupts the player. GUESS (no player constant in the data).
+    let playerLightStunDuration = 0.35
+
     /// Blinded monsters have this much less accuracy. The buff (BuffDefinitions "blinded":
     /// accuracy_rating_+%_final_from_blinded) carries no base value in the data; GUESS.
     let blindAccuracyLess = 20.0

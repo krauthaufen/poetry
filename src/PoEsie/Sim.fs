@@ -357,7 +357,20 @@ module Sim =
           StrikeLeech: float
           Ward: float
           InfernalFlame: float
-          LastStunRemnant: float }
+          LastStunRemnant: float
+          /// Life still to be recovered from leech.
+          LifeLeechPool: float
+          StrikeLifeLeech: float
+          LifeFlaskCharges: float
+          LifeFlaskUntil: float
+          LifeFlaskRate: float
+          /// Damage over time on the player (ignite): (until, damage per second, type).
+          Dots: (float * float * DamageType) list
+          /// Recovery streams (recoup): (until, per second, pool "Life" | "Mana" | "ES").
+          Recoups: (float * float * string) list
+          /// Stunned or frozen: no action before this time.
+          LockedUntil: float
+          FreezeBuildup: float }
 
     type private World =
         { Player: PlayerState option
@@ -534,6 +547,62 @@ module Sim =
             { w with Time = t }
 
     /// Mana recovery while time passes: regeneration, leech (rate-capped), ES recharge, life regen.
+    /// Mitigated damage onto the player, by type: energy shield first (chaos damage removes
+    /// twice as much of it), a share of the rest from mana ("damage taken from mana before
+    /// life"), life down to 1, then Runic Ward; death when nothing is left. Starts recoup,
+    /// and drinks the life flask when life drops below half.
+    let private takeDamage (pools: PlayerStats) (damage: Map<DamageType, float>) (w: World) =
+        match w.Player with
+        | Some p when p.Died.IsNone ->
+            let dmg = damage |> Map.toList |> List.sumBy snd
+            if dmg <= 0.0 then w
+            else
+            let bypass = pools.BypassES / 100.0
+            let es, rest =
+                damage
+                |> Map.fold
+                    (fun (es, rest) t d ->
+                        let k = if t = Chaos then 2.0 else 1.0
+                        let absorbed = min (d * (1.0 - bypass)) (es / k)
+                        es - absorbed * k, rest + d - absorbed)
+                    (p.EnergyShield, 0.0)
+            let fromMana = min p.Mana (rest * pools.ManaBeforeLife / 100.0)
+            let rest = rest - fromMana
+            let toLife = min (max 0.0 (p.Life - 1.0)) rest
+            let rest = rest - toLife
+            let toWard = min p.Ward rest
+            let rest = rest - toWard
+            let life = p.Life - toLife - rest
+            let recoups =
+                pools.Recoup
+                |> List.choose (fun (pool, types, pct) ->
+                    let rate = match pool with "Life" -> pools.LifeRecoveryRate | "Mana" -> pools.ManaRecoveryRate | _ -> pools.ESRecoveryRate
+                    let amount = (types |> List.sumBy (fun t -> Map.tryFind t damage |> Option.defaultValue 0.0)) * pct / 100.0 * rate
+                    if amount > 0.0 then Some(w.Time + pools.RecoupSeconds, amount / pools.RecoupSeconds, pool) else None)
+            let p =
+                { p with
+                    Mana = p.Mana - fromMana
+                    EnergyShield = es
+                    Ward = p.Ward - toWard
+                    Life = life
+                    Taken = p.Taken + dmg
+                    Recoups = recoups @ p.Recoups
+                    MinLife = min p.MinLife ((max 0.0 life + p.Ward) / max 1.0 (pools.Life + pools.Ward))
+                    Died = if life <= 0.0 && rest > 0.0 then Some w.Time else None }
+            match pools.LifeFlask with
+            | Some f when p.Died.IsNone && pools.Life > 1.0 && life < 0.5 * pools.Life && w.Time >= p.LifeFlaskUntil && p.LifeFlaskCharges >= f.ChargesPerUse ->
+                { w with
+                    Player =
+                        Some
+                            { p with
+                                LifeFlaskCharges = p.LifeFlaskCharges - f.ChargesPerUse
+                                LifeFlaskUntil = w.Time + f.Duration
+                                LifeFlaskRate = f.Amount * pools.LifeRecoveryRate / f.Duration }
+                    Counts = bump "flask:life" w.Counts }
+            | _ -> { w with Player = Some p }
+        | _ -> w
+
+    /// Recovery and damage over time on the player during dt (ending now).
     let private recover (stats: PlayerStats option) (flask: ManaFlask option) dt (w: World) =
         let w =
             match flask, w.Player with
@@ -542,53 +611,50 @@ module Sim =
             | _ -> w
         match stats, w.Player with
         | Some v, Some p when dt > 0.0 && p.Died.IsNone ->
+            let t0 = w.Time - dt
+            let overlap until = max 0.0 (min w.Time until - t0)
+            let stream pool = p.Recoups |> List.sumBy (fun (until, rate, pl) -> if pl = pool then rate * overlap until else 0.0)
             let leech = min p.LeechPool (v.Mana * Constants.maxManaLeechRate / 100.0 * dt)
             let regen = v.ManaRegen * dt
             let mana = min v.Mana (p.Mana + regen + leech)
             let es =
-                if w.Time - p.LastHit >= Constants.energyShieldRechargeDelay then min v.EnergyShield (p.EnergyShield + v.EnergyShieldRecharge * dt)
-                else p.EnergyShield
-            let flaskT = max 0.0 (min w.Time p.FlaskUntil - (w.Time - dt))
-            let flask = p.FlaskRate * flaskT
-            let mana = min v.Mana (mana + flask)
-            let gained = p.ManaGained |> addf "regen" (min regen (v.Mana - p.Mana)) |> addf "leech" leech |> addf "flask" flask
-            { w with
-                Player =
-                    Some
-                        { p with
-                            Mana = mana
-                            LeechPool = p.LeechPool - leech
-                            EnergyShield = es
-                            Life = min v.Life (p.Life + v.LifeRegen * dt)
-                            Ward = (if p.Ward >= v.Ward then p.Ward else min v.Ward (p.Ward + v.WardRegen * dt))
-                            ManaGained = gained } }
-        | _ -> w
-
-    /// Mitigated damage onto the player: "damage removed from mana first", energy shield, life
-    /// down to 1, then Runic Ward; death when nothing is left.
-    let private takeDamage (pools: PlayerStats) (damage: Map<DamageType, float>) (w: World) =
-        match w.Player with
-        | Some p when p.Died.IsNone ->
-            let dmg = damage |> Map.toList |> List.sumBy snd
-            let fromMana = min p.Mana (dmg * Mods.sumBase Ctx.empty [ Named "DamageRemovedFromManaFirst" ] (ModDb.ofList []) / 100.0)
-            let rest = dmg - fromMana
-            let toEs = min p.EnergyShield rest
-            let rest = rest - toEs
-            let toLife = min (max 0.0 (p.Life - 1.0)) rest
-            let rest = rest - toLife
-            let toWard = min p.Ward rest
-            let rest = rest - toWard
-            let life = p.Life - toLife - rest
-            let p =
-                { p with
-                    Mana = p.Mana - fromMana
-                    EnergyShield = p.EnergyShield - toEs
-                    Ward = p.Ward - toWard
-                    Life = life
-                    Taken = p.Taken + dmg
-                    MinLife = min p.MinLife ((max 0.0 life + p.Ward) / max 1.0 (pools.Life + pools.Ward))
-                    Died = if life <= 0.0 && rest > 0.0 then Some w.Time else None }
-            { w with Player = Some p }
+                (if w.Time - p.LastHit >= v.ESRechargeDelay then p.EnergyShield + v.EnergyShieldRecharge * dt else p.EnergyShield)
+                + v.ESRegen * dt + stream "ES"
+                |> min (max p.EnergyShield v.EnergyShield)
+            let flask = p.FlaskRate * overlap p.FlaskUntil
+            let recouped = stream "Mana"
+            let mana = min v.Mana (mana + flask + recouped)
+            let gained =
+                p.ManaGained |> addf "regen" (min regen (v.Mana - p.Mana)) |> addf "leech" leech |> addf "flask" flask
+                |> (if recouped > 0.0 then addf "recoup" recouped else id)
+            let lifeLeech = min p.LifeLeechPool (v.Life * Constants.maxManaLeechRate / 100.0 * dt)
+            let lifeGain = v.LifeRegen * dt + lifeLeech + p.LifeFlaskRate * overlap p.LifeFlaskUntil + stream "Life"
+            let lifeCharges =
+                match v.LifeFlask with
+                | Some f -> min f.MaxCharges (p.LifeFlaskCharges + f.ChargesPerSecond * f.ChargeGainMult * dt)
+                | None -> p.LifeFlaskCharges
+            let dots =
+                p.Dots
+                |> List.fold (fun (m: Map<DamageType, float>) (until, dps, t) -> Map.add t ((Map.tryFind t m |> Option.defaultValue 0.0) + dps * overlap until) m) Map.empty
+            let burning = dots |> Map.exists (fun _ d -> d > 0.0)
+            let w =
+                { w with
+                    Player =
+                        Some
+                            { p with
+                                Mana = mana
+                                LeechPool = p.LeechPool - leech
+                                LifeLeechPool = p.LifeLeechPool - lifeLeech
+                                EnergyShield = es
+                                Life = min (max p.Life v.Life) (p.Life + lifeGain)
+                                LifeFlaskCharges = lifeCharges
+                                Ward = (if p.Ward >= v.Ward then p.Ward else min v.Ward (p.Ward + v.WardRegen * dt))
+                                Recoups = p.Recoups |> List.filter (fun (until, _, _) -> until > w.Time)
+                                Dots = p.Dots |> List.filter (fun (until, _, _) -> until > w.Time)
+                                // damage over time keeps energy shield from recharging
+                                LastHit = (if burning then w.Time else p.LastHit)
+                                ManaGained = gained } }
+            if burning then takeDamage v dots w else w
         | _ -> w
 
     let private gainMana (v: PlayerStats) source amount (w: World) =
@@ -863,7 +929,7 @@ module Sim =
         let ctx = Skill.ctx skill false (buffStacks st) target
         skill.BaseTime / Mods.mult ctx [ Speed ] (skillDb env actor skill st)
 
-    let private onReady env rng name (w: World) =
+    let private onReadyUnlocked env rng name (w: World) =
         let actor = actorDef env name
         let st = Map.find name w.Actors
         let v = view env w st
@@ -919,6 +985,12 @@ module Sim =
                     | [] -> w.Time + Constants.serverTick
                     | ts -> List.min ts
             schedule next (Ready name) w
+
+    /// The actor is free to act; a stunned or frozen player waits.
+    let private onReady env rng name (w: World) =
+        match w.Player with
+        | Some p when name = env.Fight.Player.Name && p.LockedUntil > w.Time -> schedule p.LockedUntil (Ready name) w
+        | _ -> onReadyUnlocked env rng name w
 
     /// Statuses the game tracks for "recently" conditions: (name, seconds).
     let private recently hit crit killed =
@@ -991,9 +1063,35 @@ module Sim =
                             match actor.ManaFlask with
                             | Some f when dead -> min f.MaxCharges (p.FlaskCharges + RarityCharges.flaskChargesPerKill e.Def.Rarity * f.ChargeGainMult)
                             | _ -> p.FlaskCharges
-                        let w = { w with Player = Some { p with LeechPool = p.LeechPool + extra; StrikeLeech = max leech p.StrikeLeech; FlaskCharges = charges } }
+                        let leechMult = Mods.mult ctx [ Named "ManaLeechAmount" ] mods
+                        let extra = extra * leechMult
+                        // life: leech from physical attack damage (same one-enemy rule), gain per hit
+                        let lifeLeechFull =
+                            min (Dmg.get Physical hit.Dealt) Constants.effectiveMaxDamageForLeech * Mods.sumBase ctx [ Named "LifeLeech" ] mods / 100.0
+                            * Mods.mult ctx [ Named "LifeLeechAmount" ] mods * v.LifeRecoveryRate
+                        let lifeLeech = max 0.0 (lifeLeechFull - p.StrikeLifeLeech)
+                        let onHit = Mods.sumBase ctx [ Named "LifeOnHit" ] mods * v.LifeRecoveryRate
+                        let manaOnHit = Mods.sumBase ctx [ Named "ManaOnHit" ] mods * v.ManaRecoveryRate
+                        let lifeCharges =
+                            match v.LifeFlask with
+                            | Some f when dead -> min f.MaxCharges (p.LifeFlaskCharges + RarityCharges.flaskChargesPerKill e.Def.Rarity * f.ChargeGainMult)
+                            | _ -> p.LifeFlaskCharges
+                        let w =
+                            { w with
+                                Player =
+                                    Some
+                                        { p with
+                                            LeechPool = p.LeechPool + extra
+                                            StrikeLeech = max leech p.StrikeLeech
+                                            StrikeLifeLeech = max lifeLeechFull p.StrikeLifeLeech
+                                            FlaskCharges = charges
+                                            LifeFlaskCharges = lifeCharges
+                                            LifeLeechPool = (if v.Life > 1.0 then p.LifeLeechPool + lifeLeech else 0.0)
+                                            Life = min (max p.Life v.Life) (p.Life + (if v.Life > 1.0 then onHit else 0.0) + (if dead then v.LifeOnKill else 0.0))
+                                            EnergyShield = min (max p.EnergyShield v.EnergyShield) (p.EnergyShield + (if dead then v.ESOnKill else 0.0)) } }
+                        let w = if manaOnHit > 0.0 then gainMana v "hit" manaOnHit w else w
                         if dead then
-                            let kill = Mods.sumBase Ctx.empty [ ManaOnKill ] mods + v.Mana * Mods.sumBase Ctx.empty [ Named "ManaPercentOnKill" ] mods / 100.0
+                            let kill = (Mods.sumBase Ctx.empty [ ManaOnKill ] mods + v.Mana * Mods.sumBase Ctx.empty [ Named "ManaPercentOnKill" ] mods / 100.0) * v.ManaRecoveryRate
                             gainMana v "kill" kill w
                         else w
                     | _ -> w
@@ -1179,7 +1277,7 @@ module Sim =
                         let w = markStatus name "ConsumedInfusionRecently" w
                         if rng.Chance keep then infused, w
                         else infused, setStacksWith env name false r (stacksOf st r - 1) w
-            let w = { w with Player = w.Player |> Option.map (fun p -> { p with StrikeLeech = 0.0 }) }
+            let w = { w with Player = w.Player |> Option.map (fun p -> { p with StrikeLeech = 0.0; StrikeLifeLeech = 0.0 }) }
             // Spell Cascade: extra impacts on either side of the target "along a randomly chosen
             // axis"; side impacts have their own less area; spacing: user observation
             let ctx0, mods0, _, _ = shape skill
@@ -1251,22 +1349,107 @@ module Sim =
                                 m |> Map.add from ((Map.tryFind from m |> Option.defaultValue 0.0) - moved)
                                   |> Map.add into ((Map.tryFind into m |> Option.defaultValue 0.0) + moved))
                             atk.Damage
-                    let dmg =
-                        incoming
-                        |> Map.toList
-                        |> List.sumBy (fun (t, d) ->
+                    let crit = rng.Chance atk.CritChance
+                    let critMult = if crit then 1.0 + Constants.monsterBaseCritBonus / 100.0 * (1.0 - v.LessCritDamageTaken / 100.0) else 1.0
+                    let playerSt = Map.find env.Fight.Player.Name w.Actors
+                    let shocked =
+                        Map.tryFind "Shocked" playerSt.Buffs |> Option.filter (fun x -> x.Expires > w.Time)
+                        |> Option.map (fun x -> x.Mods |> List.sumBy (fun m -> m.Value)) |> Option.defaultValue 0.0
+                    let unmitigated = incoming |> Map.map (fun _ d -> d * critMult)
+                    let taken =
+                        unmitigated
+                        |> Map.map (fun t d ->
                             let d = if deflected then d * (1.0 - Vitals.deflectEffect / 100.0) else d
-                            match t with
-                            | Physical -> d * (1.0 - Vitals.armourReduction v.Armour d / 100.0)
-                            | t -> d * (1.0 - (Map.tryFind t v.Resist |> Option.defaultValue 0.0) / 100.0))
-                    let dmg = if blocked then dmg * v.BlockedDamageTaken / 100.0 else dmg
-                    let w = takeDamage pools (Map.ofList [ Physical, dmg ]) { w with Player = Some p } |> fun w -> { w with Player = w.Player |> Option.map (fun p -> { p with LastHit = w.Time }) }
+                            let d =
+                                match t with
+                                | Physical ->
+                                    let d = if atk.Melee then max 0.0 (d - v.FlatPhysicalTaken) else d
+                                    d * (1.0 - Vitals.armourReduction v.Armour d / 100.0)
+                                | t ->
+                                    let d = d * (1.0 - (Map.tryFind t v.Resist |> Option.defaultValue 0.0) / 100.0)
+                                    // "X% of Armour also applies to <type> damage"
+                                    match Map.tryFind t v.ArmourAppliesTo with
+                                    | Some pct -> d * (1.0 - Vitals.armourReduction (v.Armour * pct / 100.0) d / 100.0)
+                                    | None -> d
+                            d * (Map.tryFind t v.TakenMult |> Option.defaultValue 1.0) * (1.0 + shocked / 100.0)
+                              * (if blocked then v.BlockedDamageTaken / 100.0 else 1.0))
+                    let w = takeDamage pools taken { w with Player = Some p } |> fun w -> { w with Player = w.Player |> Option.map (fun p -> { p with LastHit = w.Time }) }
+                    let w = if crit then { w with Counts = bump "enemy:crit" w.Counts } else w
+                    // ailments and stuns the hit inflicts on the player (not when blocked)
+                    let w =
+                        if blocked then w
+                        else
+                            let get t = Map.tryFind t unmitigated |> Option.defaultValue 0.0
+                            let avoided a = rng.Chance(Map.tryFind a v.Avoid |> Option.defaultValue 0.0)
+                            let effect a = Map.tryFind a v.SelfEffect |> Option.defaultValue 1.0
+                            let lasts a = Map.tryFind a v.SelfDuration |> Option.defaultValue 1.0
+                            let thr = max 1.0 v.AilmentThreshold
+                            let playerName = env.Fight.Player.Name
+                            let buff name mods duration (w: World) =
+                                updateActor playerName (fun st -> { st with Buffs = Map.add name { Name = name; Mods = mods; Stacks = 1; Expires = w.Time + duration } st.Buffs }) w
+                                |> schedule (w.Time + duration) Expire
+                                |> fun w -> { w with Counts = bump ("player:" + name) w.Counts }
+                            let lock seconds what (w: World) =
+                                { w with
+                                    Player = w.Player |> Option.map (fun p -> { p with LockedUntil = max p.LockedUntil (w.Time + seconds) })
+                                    Counts = bump ("player:" + what) w.Counts }
+                            // ignite: strongest only
+                            let w =
+                                let fire = get Fire
+                                if fire > 0.0 && rng.Chance(min 100.0 (fire / thr * Constants.igniteChanceMultiplier)) && not (avoided "Ignite") then
+                                    let dps =
+                                        fire * Constants.ignitePercentPerSecond / 100.0 * effect "Ignite"
+                                        * (1.0 - (Map.tryFind Fire v.Resist |> Option.defaultValue 0.0) / 100.0) * (Map.tryFind Fire v.TakenMult |> Option.defaultValue 1.0)
+                                    let until = w.Time + Constants.igniteDuration * lasts "Ignite"
+                                    { w with
+                                        Player =
+                                            w.Player |> Option.map (fun p ->
+                                                let stronger = p.Dots |> List.exists (fun (u, d, t) -> t = Fire && u > w.Time && d >= dps)
+                                                if stronger then p else { p with Dots = (until, dps, Fire) :: (p.Dots |> List.filter (fun (_, _, t) -> t <> Fire)) })
+                                        Counts = bump "player:Ignited" w.Counts }
+                                else w
+                            let w =
+                                let lightning = get Lightning
+                                if lightning > 0.0 && rng.Chance(min 100.0 (lightning / thr * Constants.shockChanceMultiplier)) && not (avoided "Shock") then
+                                    buff "Shocked" [ Mod.base' (Named "ShockTaken") (Constants.baseShockMagnitude * effect "Shock") ] (Constants.playerShockDuration * lasts "Shock") w
+                                else w
+                            let w =
+                                let cold = get Cold
+                                let chill = Constants.chillEffectMultiplier * cold / thr * effect "Chill"
+                                let w =
+                                    if chill >= 1.0 && not (avoided "Chill") then
+                                        buff "Chilled" [ Mod.more Speed (-(min Constants.chillMaxEffect chill)) ] (Constants.playerChillDuration * lasts "Chill") w
+                                    else w
+                                // freeze builds up with cold damage; full: frozen
+                                match w.Player with
+                                | Some p when cold > 0.0 && not (avoided "Freeze") ->
+                                    let buildup = p.FreezeBuildup + cold * Constants.playerFreezeScale / max 1.0 v.FreezeThreshold * 100.0
+                                    if buildup >= 100.0 then
+                                        { w with Player = Some { p with FreezeBuildup = 0.0 } } |> lock (Constants.playerFreezeDuration * lasts "Freeze") "Frozen"
+                                    else { w with Player = Some { p with FreezeBuildup = buildup } }
+                                | _ -> w
+                            // light stun: chance from the hit's size against the stun threshold
+                            let stunDamage =
+                                unmitigated |> Map.toList
+                                |> List.sumBy (fun (t, d) -> if t = Physical then d * (1.0 + Constants.monsterPhysicalStunMore / 100.0) else d)
+                                |> fun d -> if atk.Melee then d * (1.0 + Constants.monsterMeleeStunMore / 100.0) else d
+                            let stunChance = min 100.0 (stunDamage / max 1.0 v.StunThreshold * 100.0)
+                            if stunChance >= Constants.playerLightStunMinimum && rng.Chance stunChance && not (rng.Chance v.AvoidStun) then
+                                lock Constants.playerLightStunDuration "Stunned" w
+                            else w
                     let w =
                         { w with
                             Counts = w.Counts |> bump "enemy:hit" |> (if deflected then bump "enemy:deflected" else id) |> (if blocked then bump "enemy:blocked" else id) }
                     let w =
                         match w.Player with
-                        | Some p when blocked && v.WardOnBlock > 0.0 -> { w with Player = Some { p with Ward = min (max p.Ward pools.Ward) (p.Ward + v.WardOnBlock) } }
+                        | Some p when blocked ->
+                            { w with
+                                Player =
+                                    Some
+                                        { p with
+                                            Ward = (if v.WardOnBlock > 0.0 then min (max p.Ward pools.Ward) (p.Ward + v.WardOnBlock) else p.Ward)
+                                            Life = min (max p.Life pools.Life) (p.Life + v.LifeOnBlock)
+                                            Mana = min pools.Mana (p.Mana + v.ManaOnBlock) } }
                         | _ -> w
                     if blocked then
                         // blocks feed meta gems (Cast on Block) and OnBlock rules
@@ -1451,7 +1634,16 @@ module Sim =
                       StrikeLeech = 0.0
                       Ward = v.Ward
                       InfernalFlame = 0.0
-                      LastStunRemnant = -1e9 })
+                      LastStunRemnant = -1e9
+                      LifeLeechPool = 0.0
+                      StrikeLifeLeech = 0.0
+                      LifeFlaskCharges = v.LifeFlask |> Option.map (fun f -> f.MaxCharges) |> Option.defaultValue 0.0
+                      LifeFlaskUntil = 0.0
+                      LifeFlaskRate = 0.0
+                      Dots = []
+                      Recoups = []
+                      LockedUntil = 0.0
+                      FreezeBuildup = 0.0 })
               Time = 0.0
               Enemies =
                 fight.Enemies

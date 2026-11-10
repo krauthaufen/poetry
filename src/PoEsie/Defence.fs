@@ -27,6 +27,21 @@ module Defence =
     let private wardRegenPercent = 5.0
     let playerMaxResist = 75.0
     let playerResistCap = 90.0
+    /// Recoup returns its share of damage taken over 4 seconds (stat text).
+    let private recoupSeconds = 4.0
+
+    /// A flask with the character's flask modifiers: amount, recovery rate (same amount,
+    /// shorter time), charges used and gained.
+    let flask (pool: string) (db: ModDb) (spec: ((float * float * float * float) * float) option) : ManaFlask option =
+        let c = Ctx.empty
+        spec
+        |> Option.map (fun ((amount, duration, perUse, maxC), ownGain) ->
+            { Amount = amount * Mods.mult c [ Named(pool + "FlaskAmount") ] db
+              Duration = duration / max 0.1 (Mods.mult c [ Named(pool + "FlaskRate") ] db)
+              ChargesPerUse = perUse * Mods.mult c [ Named(pool + "FlaskChargesUsed") ] db
+              MaxCharges = maxC
+              ChargesPerSecond = Mods.sumBase c [ Named "FlaskChargesPerSecond"; Named(pool + "FlaskChargesPerSecond") ] db
+              ChargeGainMult = 1.0 + (ownGain + Mods.sumInc c [ Named(pool + "FlaskChargesGained") ] db) / 100.0 })
 
     /// `resources`: current charges, motes, rage... (conditional defences read them).
     let computeWith (resources: Map<string, int>) (bases: Map<string, float * float * float>) (sheet: CharacterSheet) : PlayerStats =
@@ -57,9 +72,25 @@ module Defence =
             | _ -> 0.0
         let pool stat baseValue = (baseValue + Mods.sumBase c [ stat ] db) * Mods.mult c [ stat ] db
         let ci = Mods.flag c (Named "Keystone:Chaos Inoculation") db
-        let life = if ci then 1.0 else pool MaxLife (baseLife + lifePerLevel * level + 2.0 * str)
+        let lifeFull = pool MaxLife (baseLife + lifePerLevel * level + 2.0 * str)
+        // "X% of maximum Life converted to / gained as Energy Shield"
+        let converted = lifeFull * min 100.0 (Mods.sumBase c [ Named "LifeConvertedToES" ] db) / 100.0
+        let gainedAsES = lifeFull * Mods.sumBase c [ Named "LifeGainedAsES" ] db / 100.0
+        let life = if ci then 1.0 else lifeFull - converted
         let mana = pool MaxMana (baseMana + manaPerLevel * level + 2.0 * int')
-        let es = pool MaxEnergyShield (fromItems MaxEnergyShield + esFromBodyEvasion)
+        let es = pool MaxEnergyShield (fromItems MaxEnergyShield + esFromBodyEvasion) + converted + gainedAsES
+        let named n = Mods.sumBase c [ Named n ] db
+        let ailments = [ "Ignite"; "Chill"; "Freeze"; "Shock"; "Bleed"; "Poison" ]
+        // stun threshold: maximum life (before Chaos Inoculation), ailment threshold: half of it
+        let stunThreshold = (lifeFull + named "StunThreshold" + es * named "StunThresholdFromES" / 100.0) * Mods.mult c [ Named "StunThreshold" ] db
+        let ailmentThreshold =
+            (lifeFull * Map.find "PlayerAilmentThresholdLifeFactor" Tables.gameConstants + named "PlayerAilmentThreshold" + es * named "AilmentThresholdFromES" / 100.0)
+            * Mods.mult c [ Named "PlayerAilmentThreshold" ] db
+        let lifeRecovery = Mods.mult c [ Named "LifeRecoveryRate" ] db
+        let manaRecovery = Mods.mult c [ Named "ManaRecoveryRate" ] db
+        let esRecovery = Mods.mult c [ Named "ESRecoveryRate" ] db
+        let regenToES = Mods.flag c (Named "RegenESInsteadOfLife") db
+        let lifeRegen = (Mods.sumBase c [ LifeRegen ] db + life * Mods.sumBase c [ LifeRegenPercent ] db / 100.0) * Mods.mult c [ LifeRegen ] db
         let armour = pool Armour (fromItems Armour)
         let evasion = pool Evasion (fromItems Evasion)
         let deflection = evasion * Mods.sumBase c [ Named "DeflectionPercentOfEvasion" ] db / 100.0 + Mods.sumBase c [ Deflection ] db
@@ -79,9 +110,9 @@ module Defence =
           Evasion = evasion
           Deflection = deflection
           Resist = DamageType.all |> List.filter ((<>) Physical) |> List.map resist |> Map.ofList
-          LifeRegen = if ci then 0.0 else (Mods.sumBase c [ LifeRegen ] db + life * Mods.sumBase c [ LifeRegenPercent ] db / 100.0) * Mods.mult c [ LifeRegen ] db
-          ManaRegen = mana * manaRegenPercent / 100.0 * Mods.mult c [ ManaRegen ] db
-          EnergyShieldRecharge = es * esRechargePercent / 100.0
+          LifeRegen = if ci || regenToES then 0.0 else lifeRegen * lifeRecovery
+          ManaRegen = mana * manaRegenPercent / 100.0 * Mods.mult c [ ManaRegen ] db * manaRecovery
+          EnergyShieldRecharge = es * esRechargePercent / 100.0 * Mods.mult c [ Named "ESRechargeRate" ] db * esRecovery
           // shield block (shown on the item) + flat block, x increased block, capped at 50 + max block
           Block =
             let baseBlock = fromItems (Named "ShieldBlock") + Mods.sumBase c [ Named "Block" ] db
@@ -98,6 +129,37 @@ module Defence =
             [ for from in DamageType.all do
                 for into in DamageType.all do
                     let v = Mods.sumBase c [ Named(sprintf "TakenAs:%s:%s" (DamageType.name from) (DamageType.name into)) ] db
-                    if v > 0.0 then yield from, into, v ] }
+                    if v > 0.0 then yield from, into, v ]
+          // "X% faster start of Energy Shield Recharge"
+          ESRechargeDelay = Constants.energyShieldRechargeDelay / max 0.1 (Mods.inc c [ Named "ESRechargeFaster" ] db)
+          ESRegen = (es * named "ESRegenPercent" / 100.0 + (if regenToES then lifeRegen else 0.0)) * esRecovery
+          ManaBeforeLife = named "DamageRemovedFromManaFirst"
+          BypassES = named "BypassES"
+          ArmourAppliesTo = DamageType.all |> List.map (fun t -> t, named ("ArmourAppliesTo:" + DamageType.name t)) |> List.filter (fun (_, v) -> v > 0.0) |> Map.ofList
+          TakenMult = DamageType.all |> List.map (fun t -> t, max 0.0 (Mods.mult c [ Named "Taken:All"; Named("Taken:" + DamageType.name t) ] db)) |> Map.ofList
+          FlatPhysicalTaken = named "FlatPhysicalAttackTaken"
+          LessCritDamageTaken = named "LessCritDamageTaken"
+          StunThreshold = stunThreshold
+          AilmentThreshold = ailmentThreshold
+          FreezeThreshold = (ailmentThreshold + es * named "FreezeThresholdFromES" / 100.0) * Mods.mult c [ Named "FreezeThreshold" ] db
+          AvoidStun = named "AvoidStun"
+          Avoid = ailments |> List.map (fun a -> a, named ("Avoid:" + a)) |> Map.ofList
+          SelfEffect = ailments |> List.map (fun a -> a, max 0.0 (Mods.mult c [ Named("SelfEffect:" + a) ] db)) |> Map.ofList
+          SelfDuration = ailments |> List.map (fun a -> a, max 0.0 (Mods.mult c [ Named("SelfDuration:" + a) ] db)) |> Map.ofList
+          LifeOnKill = if ci then 0.0 else (named "LifeOnKill" + life * named "LifePercentOnKill" / 100.0) * lifeRecovery
+          ESOnKill = es * named "ESPercentOnKill" / 100.0 * esRecovery
+          LifeOnBlock = if ci then 0.0 else named "LifeOnBlock" * lifeRecovery
+          ManaOnBlock = named "ManaOnBlock" * manaRecovery
+          Recoup =
+            [ "Life", DamageType.all, named "RecoupLife"
+              "Life", [ Physical ], named "RecoupLife:Physical"
+              "Mana", DamageType.all, named "RecoupMana"
+              "ES", DamageType.elemental, named "RecoupES:Elemental" ]
+            |> List.filter (fun (pool, _, v) -> v > 0.0 && not (ci && pool = "Life"))
+          RecoupSeconds = recoupSeconds / max 0.1 (Mods.inc c [ Named "RecoupSpeed" ] db)
+          LifeRecoveryRate = lifeRecovery
+          ManaRecoveryRate = manaRecovery
+          ESRecoveryRate = esRecovery
+          LifeFlask = if ci then None else flask "Life" db sheet.LifeFlask }
 
     let compute bases sheet = computeWith Map.empty bases sheet
