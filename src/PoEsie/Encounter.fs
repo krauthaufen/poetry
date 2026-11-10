@@ -378,6 +378,12 @@ module Arena =
             let a k = 2.0 * System.Math.PI * float k / float n
             Vec.add center (Vec.scale radius (Vec.ofAngle (a k))), Vec.add center (Vec.scale radius (Vec.ofAngle (a (k + 1)))) ]
 
+    /// A long straight wall through `point`, perpendicular to `normal`.
+    let straight (point: Vec) (normal: Vec) length : Geometry.Wall list =
+        let n = Vec.scale (1.0 / max 1e-9 (Vec.length normal)) normal
+        let along = Vec.make -n.Y n.X
+        [ Vec.add point (Vec.scale -length along), Vec.add point (Vec.scale length along) ]
+
     /// A corridor of `width` along the line from the player through `towards`.
     let corridor (towards: Vec) width length : Geometry.Wall list =
         let d = Vec.scale (1.0 / max 1e-9 (Vec.length towards)) towards

@@ -115,7 +115,7 @@ Confidence levels:
 | Persistent buffs | their gem stats apply to the character. Stats named after the skill apply only if the game's description presents them as granted ("Buff grants 46% increased Fire damage", "Grants ...", "... you ...", from the stat description files); otherwise they belong to the skill itself | stat descriptions | data |
 | Slam impact point | `Reach` units in front of the player towards the aimed enemy, at most its centre | setting (default 15) | guess |
 | Walls and terrain chain | projectiles stop at walls; with "chance to chain 1 extra time from terrain" (Ricochet) they chain once from the wall: towards the nearest enemy within chain range that this projectile hasn't hit, with the remaining range. No target in range: mirror bounce | game text ("chain" = targeted) | guess (no-target fallback, chain range 3 m) |
-| Arenas | open field, round room or corridor; random layouts in `--layouts` always enclose player and monsters | modelling choice | — |
+| Arenas | straight walls only: none, one wall, or two parallel walls (a bridge), at a random angle, with player and monsters on the walkable side | user ("never that many walls around") | user |
 
 ## The player: pools, costs, incoming damage
 

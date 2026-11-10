@@ -249,21 +249,24 @@ let main argv =
                     let count = int (get "count" 40.0)
                     let runs = int (get "runs" 20.0)
                     let rotate (a: float) (v: Vec) = Vec.make (v.X * cos a - v.Y * sin a) (v.X * sin a + v.Y * cos a)
-                    /// A random arena around `center` that encloses the player and every monster.
+                    /// Random straight walls with the player and every monster on the walkable side:
+                    /// none, one wall, or two parallel walls (a bridge), at a random angle.
                     let arena (rng: Rng) (center: Vec) (enemies: EnemyDef list) =
-                        let reachOut = (Vec.length center :: (enemies |> List.map (fun e -> Vec.dist center e.Position + e.Size))) |> List.max
+                        let points = (Vec.zero, 2.0) :: (enemies |> List.map (fun e -> e.Position, e.Size))
+                        let angle = rng.Float() * 2.0 * System.Math.PI
+                        let n = Vec.ofAngle angle
+                        // extent of everyone along the wall normal
+                        let lo = points |> List.map (fun (p, r) -> p.X * n.X + p.Y * n.Y - r) |> List.min
+                        let hi = points |> List.map (fun (p, r) -> p.X * n.X + p.Y * n.Y + r) |> List.max
+                        let margin () = 5.0 + rng.Float() * 40.0
                         match int (rng.Float() * 3.0) with
                         | 0 -> "open", Arena.openField
                         | 1 ->
-                            let r = reachOut + 10.0 + rng.Float() * 60.0
-                            sprintf "round room r%.0f" r, Arena.round center r
+                            let d = hi + margin ()
+                            sprintf "one wall %.0f away" (d - (hi + lo) / 2.0), Arena.straight (Vec.scale d n) n 400.0
                         | _ ->
-                            // corridor along player -> center; wide enough for everyone
-                            let d = Vec.scale (1.0 / max 1e-9 (Vec.length center)) center
-                            let n = Vec.make -d.Y d.X
-                            let lateral = enemies |> List.map (fun e -> abs (e.Position.X * n.X + e.Position.Y * n.Y) + e.Size) |> List.fold max 5.0
-                            let w = 2.0 * lateral + 10.0 + rng.Float() * 50.0
-                            sprintf "corridor w%.0f" w, Arena.corridor center w 400.0
+                            let a, b = hi + margin (), lo - margin ()
+                            sprintf "bridge %.0f wide" (a - b), Arena.straight (Vec.scale a n) n 400.0 @ Arena.straight (Vec.scale b n) n 400.0
                     let simulate (enemies: EnemyDef list) walls reach maxTime =
                         Summary.simulate runs { fight with Enemies = enemies; Walls = walls; Reach = reach; MaxTime = maxTime }
                     let bossLayouts =
