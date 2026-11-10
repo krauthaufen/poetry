@@ -204,10 +204,11 @@ let main _ =
         equal 36 (Geometry.targetsFrom (Rng 1u) [] 35.0 (Projectiles p) 1.0 boss [ boss ] |> List.length))
 
     test "geometry: a projectile bounces off a wall once with terrain chain" (fun () ->
-        // flying +x from the origin, wall at x = 20, enemy behind the player at x = -20
-        let behind = dummy "behind" -20.0 0.0
+        // flying +x from the origin, wall at x = 20; the enemy sits off-axis, within chain
+        // range of the wall, so the chain has to target it (a mirror bounce would miss)
+        let behind = dummy "behind" 0.0 15.0
         let wall = Vec.make 20.0 -50.0, Vec.make 20.0 50.0
-        let p chance = { ProjectileShape.make 1 with Range = 100.0; TerrainChain = chance }
+        let p chance = { ProjectileShape.make 1 with Range = 100.0; TerrainChain = chance; ChainRange = 30.0 }
         let fly chance = Geometry.trace (Rng 1u) [ wall ] (p chance) Vec.zero (Vec.make 1.0 0.0) [ behind ]
         equal [ "behind" ] (fly 100.0).Hit
         equal ([]: string list) (fly 0.0).Hit

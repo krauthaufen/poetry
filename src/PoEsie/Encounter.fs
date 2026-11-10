@@ -242,7 +242,20 @@ module Geometry =
                 match wall with
                 | Some (t, reflected) when t <= remaining ->
                     let at = Vec.add pos (Vec.scale t dir)
-                    if not bounced && rng.Chance p.TerrainChain then go at reflected (remaining - t) hit true (at :: points)
+                    if not bounced && rng.Chance p.TerrainChain then
+                        // "Chain from terrain": like any chain, it seeks the nearest enemy in chain
+                        // range that this projectile hasn't hit. No target: mirror bounce (guess).
+                        let target =
+                            alive
+                            |> List.filter (fun e -> not (List.contains e.Name hit) && Vec.dist at e.Position - e.Size <= p.ChainRange)
+                            |> List.sortBy (fun e -> Vec.dist at e.Position)
+                            |> List.tryHead
+                        let next =
+                            match target with
+                            | Some e -> let d = Vec.sub e.Position at in Vec.scale (1.0 / Vec.length d) d
+                            | None -> reflected
+                        // step off the wall so the next segment doesn't hit it again
+                        go (Vec.add at (Vec.scale 1e-3 next)) next (remaining - t) hit true (at :: points)
                     else { Points = List.rev (at :: points); Hit = hit }
                 | _ -> { Points = List.rev (Vec.add pos (Vec.scale remaining dir) :: points); Hit = hit }
         go origin dir0 p.Range [] false [ origin ]

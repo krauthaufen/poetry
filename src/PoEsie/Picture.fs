@@ -33,5 +33,5 @@ module Picture =
               yield "<circle cx='0' cy='0' r='2.2' class='player'/>"
               yield sprintf "<path d='M %s %s l 3 3 m -6 0 l 3 -3 l 3 -3 m -6 0 l 3 3' class='impact'/>" (f impact.X) (f -impact.Y) ]
             |> String.concat ""
-        sprintf "<figure><svg viewBox='%s %s %s %s' role='img' aria-label='%s'><clipPath id='c%d'><rect x='%s' y='%s' width='%s' height='%s'/></clipPath><g clip-path='url(#c%d)'>%s</g></svg><figcaption>%s<br>%d projectiles, %d hits, %d bounced</figcaption></figure>"
+        sprintf "<figure><svg viewBox='%s %s %s %s' role='img' aria-label='%s'><clipPath id='c%d'><rect x='%s' y='%s' width='%s' height='%s'/></clipPath><g clip-path='url(#c%d)'>%s</g></svg><figcaption>%s<br>%d projectiles, %d hits, %d chained from a wall</figcaption></figure>"
             (f minX) (f -maxY) (f (2.0 * half)) (f (2.0 * half)) title clipId (f minX) (f -maxY) (f (2.0 * half)) (f (2.0 * half)) clipId body title paths.Length hits bounced

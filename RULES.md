@@ -114,5 +114,5 @@ Confidence levels:
 | Default gem quality | 20% unless the import states one; supports have none | user convention | — |
 | Persistent buffs | their gem stats apply to the character, except skill-specific ones (ids named after the skill, e.g. `herald_of_ash_fire_damage_+%`), which describe the skill itself; explicitly known character-wide ones (Berserk's `berserk_maximum_rage_granted_+` → max rage) do apply | — | guess per stat |
 | Slam impact point | `Reach` units in front of the player towards the aimed enemy, at most its centre | setting (default 15) | guess |
-| Walls and terrain chain | projectiles stop at walls; with "chance to chain 1 extra time from terrain" (Ricochet) they reflect once off a wall and fly on with the remaining range | game text | guess (reflection angle, range after bounce) |
+| Walls and terrain chain | projectiles stop at walls; with "chance to chain 1 extra time from terrain" (Ricochet) they chain once from the wall: towards the nearest enemy within chain range that this projectile hasn't hit, with the remaining range. No target in range: mirror bounce | game text ("chain" = targeted) | guess (no-target fallback, chain range 3 m) |
 | Arenas | open field, round room or corridor; random layouts in `--layouts` always enclose player and monsters | modelling choice | — |
