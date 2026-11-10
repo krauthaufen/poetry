@@ -248,6 +248,9 @@ module Pob =
             g.Gems
             |> List.tryFind (fun gem -> gem.Enabled && not gem.IsSupport && Gems.isPersistentBuff db gem.Name && not (Gems.isMeta db gem.Name))
             |> Option.map (fun _ -> g))
+        // only the buff gem's own stats reach the character: its group's supports modify the
+        // buff skill (a herald's explosion), not everything the character does
+        |> List.map (fun g -> { g with Gems = g.Gems |> List.filter (fun x -> not x.IsSupport) })
         |> List.collect (groupSkill db sheet)
         |> List.fold
             (fun (sheet: CharacterSheet) r ->
