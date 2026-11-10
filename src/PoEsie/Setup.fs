@@ -191,7 +191,7 @@ module Setup =
                     let setup = { Gem = gem.Name; Level = gem.Level; Quality = gem.Quality; StatSet = 1; Supports = supports }
                     let copy =
                         if o.Infused then None
-                        else Behaviours.infusedCopy db charMods sheet.MainHand setup |> Option.map (fun (el, cp) -> s.Name, el, { (Behaviours.applyObserved cp) with Name = s.Name + " infused" })
+                        else Behaviours.infusedCopy db charMods (Gems.chooseWeapon db setup.Gem sheet.Weapons) setup |> Option.map (fun (el, cp) -> s.Name, el, { (Behaviours.applyObserved cp) with Name = s.Name + " infused" })
                     let rules = Behaviours.useRules db charMods setup s.Name o.Pickup @ Behaviours.buffRules db charMods setup s
                     let grants = Behaviours.verisiumGrant db charMods setup
                     let s = Behaviours.applyObserved s

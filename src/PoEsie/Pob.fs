@@ -37,6 +37,9 @@ type PobBuild =
 type CharacterSheet =
     { Mods: Mod list
       MainHand: Weapon option
+      /// Main-hand weapons of weapon set one and two; a skill uses the first that fits it.
+      /// The second carries the tag "WeaponSet2".
+      Weapons: Weapon list
       /// Armour / evasion / energy shield shown on the equipped items: (slot, stat, value).
       ItemDefences: (string * Stat * float) list
       Level: int
@@ -148,7 +151,15 @@ module Pob =
 
     /// Slots whose items always apply. Flasks and charms only apply while active.
     let private alwaysOn (slot: string) =
-        not (slot.StartsWith "Flask" || slot.StartsWith "Charm" || slot.Contains "Swap")
+        not (slot.StartsWith "Flask" || slot.StartsWith "Charm")
+
+    /// Weapon-set items only count while a skill uses their set: set two's skills carry the
+    /// tag "WeaponSet2" (from their weapon); everything else runs on set one.
+    let private setTwo = SkillIs(Tag "WeaponSet2")
+    let private slotCondition (slot: string) (m: Mod) =
+        if slot.Contains "Swap" then Mod.whenever setTwo m
+        elif slot.StartsWith "Weapon" then Mod.whenever (Not setTwo) m
+        else m
 
     /// Rune / idol lines prefixed "Bonded:" only work for Shamans, or on an item that says
     /// "Idols socketed in this item gain the benefits of their Bonded modifiers"
@@ -188,8 +199,11 @@ module Pob =
         let build = { build with TreeNodes = build.TreeNodes @ extraNodes }
         let parsed = items |> List.map (fun (slot, text) -> slot, Items.parse db text)
         let mainHand = parsed |> List.tryFind (fun (slot, _) -> slot = "Weapon 1") |> Option.bind (fun (_, p) -> p.Weapon)
+        let swapHand =
+            parsed |> List.tryFind (fun (slot, _) -> slot = "Weapon 1 Swap") |> Option.bind (fun (_, p) -> p.Weapon)
+            |> Option.map (fun w -> { w with Tags = Tag "WeaponSet2" :: w.Tags })
         // A weapon's local mods are already in its Weapon; only its global mods go to the sheet.
-        let itemMods = parsed |> List.collect (fun (_, p) -> p.Mods)
+        let itemMods = parsed |> List.collect (fun (slot, p) -> p.Mods |> List.map (slotCondition slot))
         let itemCov =
             parsed
             |> List.map (fun (slot, p) -> { p.Coverage with UnknownText = p.Coverage.UnknownText |> List.map (fun l -> slot + ": " + l) })
@@ -208,7 +222,8 @@ module Pob =
                     f, inc |> Option.defaultValue 0.0))
         { Mods = itemMods @ treeMods @ extraMods
           MainHand = mainHand
-          ItemDefences = parsed |> List.collect (fun (slot, p) -> p.Defences |> List.map (fun (st, v) -> slot, st, v))
+          Weapons = Option.toList mainHand @ Option.toList swapHand
+          ItemDefences = parsed |> List.filter (fun (slot, _) -> not (slot.Contains "Swap")) |> List.collect (fun (slot, p) -> p.Defences |> List.map (fun (st, v) -> slot, st, v))
           ManaFlask = flaskOf (fun p -> p.ManaFlask)
           LifeFlask = flaskOf (fun p -> p.LifeFlask)
           Level = build.Level
@@ -225,7 +240,7 @@ module Pob =
             Gems.skill
                 db
                 (ModDb.ofList sheet.Mods)
-                sheet.MainHand
+                (Gems.chooseWeapon db active.Name sheet.Weapons)
                 { Gem = active.Name
                   Level = active.Level
                   Quality = active.Quality

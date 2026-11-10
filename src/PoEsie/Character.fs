@@ -55,7 +55,9 @@ module Items =
                 |> Option.map snd
                 |> Option.toList
         let hands = if b.BaseTags.Contains "twohand" || t.StartsWith "two hand" || t = "bow" || t = "crossbow" then Tag "TwoHanded" else Tag "OneHanded"
-        hands :: kind
+        // the base type, as gems name it in their weapon requirements
+        let baseType = Tag("Base:" + (if b.BaseTags.Contains "warstaff" then "Quarterstaff" else b.Type))
+        hands :: baseType :: kind
 
     let private quality (lines: string list) =
         lines

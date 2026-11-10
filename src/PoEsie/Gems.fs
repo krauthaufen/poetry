@@ -4,6 +4,8 @@ namespace PoEsie
 type GameDb =
     { Skills: Map<string, SkillData>
       Gems: Map<string, GemData>
+      /// Every entry of a gem name (Mace Strike: one per weapon type).
+      GemVariants: Map<string, GemData list>
       Weapons: Map<string, WeaponBase>
       /// Every item base name (weapons, armour, jewellery...).
       BaseNames: Set<string>
@@ -51,6 +53,7 @@ module GameDb =
     let load (read: string -> string) =
         { Skills = GameData.parseSkills (read "skills.json")
           Gems = GameData.parseGems (read "gems.json")
+          GemVariants = GameData.parseGemList (read "gems.json") |> List.groupBy (fun g -> g.Name) |> Map.ofList
           Weapons = GameData.parseWeapons (read "bases.json")
           BaseNames =
             match Json.parse (read "bases.json") with
@@ -183,10 +186,50 @@ module Gems =
                     | Unmapped -> mods, { cov with Unmapped = cov.Unmapped @ [ id, v ] })
             ([], Coverage.empty)
 
-    let private skillOfGem (db: GameDb) name =
-        match Map.tryFind name db.Gems with
-        | Some g -> Map.tryFind g.GrantedEffectId db.Skills
-        | None -> Map.tryFind name db.Skills
+    /// Accents in names differ between sources ("Oisín's Oath" / "Oisin's Oath").
+    let private plain (name: string) =
+        name.Normalize(System.Text.NormalizationForm.FormD)
+        |> String.filter (fun ch -> System.Globalization.CharUnicodeInfo.GetUnicodeCategory ch <> System.Globalization.UnicodeCategory.NonSpacingMark)
+
+    let private skillOfGem (db: GameDb) (name: string) =
+        let find n =
+            match Map.tryFind n db.Gems with
+            | Some g -> Map.tryFind g.GrantedEffectId db.Skills
+            | None -> Map.tryFind n db.Skills
+        find name |> Option.orElse (if plain name <> name then find (plain name) else None)
+
+    /// Does a weapon (None: unarmed) satisfy a gem's weapon requirements? Requirements name
+    /// base types; a weapon carries its own as the tag "Base:<type>".
+    let weaponMatches (reqs: string list) (weapon: Weapon option) =
+        let bases = weapon |> Option.map (fun w -> w.Tags |> List.choose (function Tag t when t.StartsWith "Base:" -> Some(t.Substring 5) | _ -> None)) |> Option.defaultValue []
+        let ranged = bases |> List.exists (fun b -> b = "Bow" || b = "Crossbow")
+        reqs.IsEmpty
+        || reqs |> List.exists (fun r ->
+            if r.Contains "Unarmed" && weapon.IsNone then true
+            elif r.StartsWith "Any" && r.Contains "Shield" then true
+            elif r.StartsWith "Any" then
+                weapon.IsSome && not (r.Contains "Melee" && ranged) && not (r.Contains "non-Talisman" && List.contains "Talisman" bases)
+            else List.contains r bases || r = "Armoured Shield")
+
+    /// The weapon a gem's skill uses: the first of the character's weapons (set one, then
+    /// set two) that satisfies one of the gem's variants; skills without a requirement
+    /// use the first weapon.
+    let chooseWeapon (db: GameDb) (name: string) (weapons: Weapon list) : Weapon option =
+        let variants = Map.tryFind name db.GemVariants |> Option.orElse (Map.tryFind (plain name) db.GemVariants) |> Option.defaultValue []
+        let reqs = variants |> List.collect (fun g -> g.WeaponRequirements)
+        if reqs.IsEmpty then List.tryHead weapons
+        else weapons |> List.tryFind (fun w -> weaponMatches reqs (Some w)) |> Option.orElse (if weaponMatches reqs None then None else List.tryHead weapons)
+
+    /// Skill data for a gem with this weapon: gems with one entry per weapon type
+    /// (Mace Strike) resolve to the matching one.
+    let private skillOfGemFor (db: GameDb) (name: string) (weapon: Weapon option) =
+        match Map.tryFind name db.GemVariants with
+        | Some (_ :: _ :: _ as variants) ->
+            variants
+            |> List.tryFind (fun g -> not g.WeaponRequirements.IsEmpty && weaponMatches g.WeaponRequirements weapon)
+            |> Option.bind (fun g -> Map.tryFind g.GrantedEffectId db.Skills)
+            |> Option.orElse (skillOfGem db name)
+        | _ -> skillOfGem db name
 
     /// Persistent buffs (Berserk, Eternal Rage, heralds...): always on while reserved.
     /// Does a buff gem's stat affect the character (true) or only the skill itself?
@@ -308,7 +351,7 @@ module Gems =
     /// "+N to level of ... gems". Attacks need a weapon. Stat sets that belong to the
     /// same use become Parts of the skill.
     let skill (db: GameDb) (characterMods: ModDb) (weapon: Weapon option) (setup: GemSetup) : Result<Skill * Coverage, string> =
-        match skillOfGem db setup.Gem with
+        match skillOfGemFor db setup.Gem weapon with
         | None -> Error(sprintf "unknown gem %s" setup.Gem)
         | Some data ->
             match List.tryItem (setup.StatSet - 1) data.StatSets with

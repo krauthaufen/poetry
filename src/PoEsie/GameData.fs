@@ -53,7 +53,9 @@ type GemData =
       Support: bool
       Tags: Set<string>
       /// Attribute requirement shares (percent of the gem's requirement): Str, Dex, Int.
-      Requirements: float * float * float }
+      Requirements: float * float * float
+      /// Weapon base types the skill needs ("Bow", "Two Hand Mace", "Quarterstaff", "Any Martial Weapon"...).
+      WeaponRequirements: string list }
 
 type WeaponBase =
     { Name: string
@@ -119,15 +121,14 @@ module GameData =
         | JObj m -> m |> Map.map skill
         | _ -> Map.empty
 
-    /// gems.json, keyed by gem name.
-    let parseGems (json: string) : Map<string, GemData> =
+    /// gems.json as a list (a few gem names have one entry per weapon type).
+    let parseGemList (json: string) : GemData list =
         match Json.parse json with
         | JObj m ->
             m
             |> Map.toList
             |> List.map (fun (id, j) ->
                 let name = Json.strField "name" j |> Option.defaultValue id
-                name,
                 { GameId = id
                   Name = name
                   GrantedEffectId = Json.strField "grantedEffectId" j |> Option.defaultValue ""
@@ -138,9 +139,15 @@ module GameData =
                   Requirements =
                     (Json.numField "reqStr" j |> Option.defaultValue 0.0),
                     (Json.numField "reqDex" j |> Option.defaultValue 0.0),
-                    (Json.numField "reqInt" j |> Option.defaultValue 0.0) })
-            |> Map.ofList
-        | _ -> Map.empty
+                    (Json.numField "reqInt" j |> Option.defaultValue 0.0)
+                  WeaponRequirements =
+                    (Json.strField "weaponRequirements" j |> Option.defaultValue "").Split(',')
+                    |> Array.map (fun x -> x.Trim()) |> Array.filter ((<>) "") |> List.ofArray })
+        | _ -> []
+
+    /// gems.json, keyed by gem name (the first entry of a name).
+    let parseGems (json: string) : Map<string, GemData> =
+        parseGemList json |> List.rev |> List.map (fun g -> g.Name, g) |> Map.ofList
 
     /// bases.json: weapon bases only.
     let parseWeapons (json: string) : Map<string, WeaponBase> =

@@ -152,7 +152,7 @@ module Behaviours =
                     spells
                     |> List.choose (fun sp ->
                         let set = if infused then Gems.infusedSet db sp.Name |> Option.defaultValue 1 else 1
-                        match Gems.skill db charMods sheet.MainHand { Gem = sp.Name; Level = sp.Level; Quality = sp.Quality; StatSet = set; Supports = supports } with
+                        match Gems.skill db charMods (Gems.chooseWeapon db sp.Name sheet.Weapons) { Gem = sp.Name; Level = sp.Level; Quality = sp.Quality; StatSet = set; Supports = supports } with
                         | Ok (skill, _) ->
                             let copyName = sprintf "%s (%s)" skill.Name name
                             let castTime =
@@ -169,7 +169,7 @@ module Behaviours =
                         spells
                         |> List.choose (fun sp ->
                             let setup = { Gem = sp.Name; Level = sp.Level; Quality = sp.Quality; StatSet = 1; Supports = supports }
-                            infusedCopy db charMods sheet.MainHand setup
+                            infusedCopy db charMods (Gems.chooseWeapon db setup.Gem sheet.Weapons) setup
                             |> Option.map (fun (element, copy) ->
                                 let copyName = sprintf "%s (%s)" copy.Name name
                                 copyName, element, rename (copyName + " infused") copy))

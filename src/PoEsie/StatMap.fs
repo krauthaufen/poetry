@@ -137,8 +137,8 @@ module StatMap =
             | "with" :: c :: "charges" :: tail when c = "power" || c = "frenzy" || c = "endurance" ->
                 go (WhileBuff(titleCase [ c; "charge" ]) :: acc) tail
             | "when" :: "charged" :: tail -> go (WhileBuff "PowerCharge" :: acc) tail
-            | "in" :: "weapon" :: "set" :: "one" :: tail -> go acc tail
-            | "in" :: "weapon" :: "set" :: "two" :: tail -> go (WhileBuff "WeaponSetTwo" :: acc) tail
+            | "in" :: "weapon" :: "set" :: "one" :: tail -> go (Not(SkillIs(Tag "WeaponSet2")) :: acc) tail
+            | "in" :: "weapon" :: "set" :: "two" :: tail -> go (SkillIs(Tag "WeaponSet2") :: acc) tail
             | "while" :: state when not state.IsEmpty -> List.rev acc, [], Some(WhileBuff(titleCase state))
             | w :: tail ->
                 let a, ws, extra = go acc tail
