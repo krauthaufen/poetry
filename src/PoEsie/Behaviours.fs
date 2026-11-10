@@ -480,6 +480,63 @@ module Behaviours =
         |> List.unzip
         |> fun (actors, notes) -> List.concat actors, List.concat notes
 
+    /// Totems of a build as actors. A totem gem ("SummonsTotem") grants a second skill, the
+    /// totem's own attack or spell (gems.json additionalGrantedEffectId); the totem uses it
+    /// with the owner's weapon and mods (it is the owner's skill, used by proxy) and the gem's
+    /// supports. It acts only while the buff "<gem> buff" is on the player: that is the totem
+    /// standing, placed by using the gem (see `totemPlacement`). Up to the gem's totem limit
+    /// stand together; placing each one separately is not simulated.
+    /// Meta totems (Spell Totem, Ancestral Warrior Totem, Mortar Cannon) use the group's
+    /// socketed skill instead.
+    let totems (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) : Actor list * string list =
+        let charMods = ModDb.ofList sheet.Mods
+        build.Groups
+        |> List.filter (fun g -> g.Enabled)
+        |> List.collect (fun g ->
+            let enabled = g.Gems |> List.filter (fun x -> x.Enabled)
+            let supports = enabled |> List.filter (fun x -> x.IsSupport) |> List.map (fun x -> x.Name, x.Level)
+            enabled
+            |> List.filter (fun x -> not x.IsSupport && (Gems.data db x.Name |> Option.exists (fun d -> d.Types.Contains "SummonsTotem")))
+            |> List.map (fun gem ->
+                let effect =
+                    Map.tryFind gem.Name db.Gems
+                    |> Option.bind (fun gd -> gd.AdditionalEffects |> List.tryFind (fun id -> Map.containsKey id db.Skills && not (id.StartsWith "Support")))
+                // meta totems use the group's socketed skill instead
+                let skillGem =
+                    match effect with
+                    | Some id -> Some id
+                    | None -> enabled |> List.tryFind (fun x -> not x.IsSupport && x.Name <> gem.Name) |> Option.map (fun x -> x.Name)
+                match skillGem with
+                | None -> [], [ sprintf "%s: no skill for the totem to use" gem.Name ]
+                | Some id ->
+                    let weapon = Gems.chooseWeapon db (if effect.IsSome then gem.Name else id) sheet.Weapons
+                    match Gems.skill db charMods weapon { Gem = id; Level = gem.Level; Quality = gem.Quality; StatSet = 1; Supports = supports } with
+                    | Ok (s, _) ->
+                        let rec asTotem (sk: Skill) =
+                            { sk with Name = gem.Name + ": " + sk.Name; Tags = sk.Tags.Add Totem; Cost = 0.0; Parts = sk.Parts |> List.map asTotem }
+                        let s = asTotem s
+                        let limit =
+                            Gems.rawStats db charMods { Gem = gem.Name; Level = gem.Level; Quality = gem.Quality; StatSet = 1; Supports = supports }
+                            |> List.filter (fun (k, _) -> k = "base_number_of_totems_allowed") |> List.sumBy snd |> int |> max 1
+                        [ for i in 1 .. limit ->
+                            { Actor.make (if limit > 1 then sprintf "%s %d" gem.Name i else gem.Name + " (totem)") sheet.Mods [ s ] with ActiveWhile = Some(gem.Name + " buff") } ],
+                        []
+                    | Error e -> [], [ sprintf "%s: %s" gem.Name e ]))
+        |> List.unzip
+        |> fun (actors, notes) -> List.concat actors, List.concat notes
+
+    /// Using a totem gem places the totem: the buff its actor waits for, lasting the totem's
+    /// duration ("base_totem_duration" x skill duration mods).
+    let totemPlacement (db: GameDb) (charMods: ModDb) (setup: GemSetup) (skill: Skill) : Rule list =
+        match Gems.data db setup.Gem with
+        | Some d when d.Types.Contains "SummonsTotem" ->
+            let raw = Gems.rawStats db charMods setup
+            let seconds = (raw |> List.filter (fun (k, _) -> k = "base_totem_duration") |> List.sumBy snd) / 1000.0
+            let ctx = { Ctx.empty with SkillTags = skill.Tags; SkillName = skill.Name }
+            let duration = (if seconds > 0.0 then seconds else 8.0) * Mods.mult ctx [ SkillDuration ] (ModDb.ofList (ModDb.toList charMods @ skill.Mods))
+            [ { Hook = OnUse; Filter = Called skill.Name; Chance = 100.0; Reaction = GrantBuff(skill.Name + " buff", duration, 1, []) } ]
+        | _ -> []
+
     /// Elemental Archon (BuffTemplates ArchonElemental: 25% more elemental damage with spells,
     /// 100% more ignite chance / freeze buildup / shock chance with spells), plus "Archon Buffs
     /// also grant ..." mods, all x increased Archon effect. Base duration 10 s, recovery 20 s

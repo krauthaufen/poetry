@@ -192,7 +192,10 @@ module Setup =
                           Supports = g.Gems |> List.filter (fun x -> x.IsSupport) |> List.map (fun x -> x.Name, x.Level) }
                 | None -> None)
             |> Behaviours.cycles db (ModDb.ofList sheet.Mods)
-        let minionActors = Behaviours.minions db sheet build
+        let minionActors =
+            let ms, mNotes = Behaviours.minions db sheet build
+            let ts, tNotes = Behaviours.totems db sheet build
+            ms @ ts, mNotes @ tNotes
         { Db = db
           Build = build
           Sheet = sheet
@@ -243,7 +246,7 @@ module Setup =
                         match curse with
                         | Some (name, duration, monster, _) -> [ { Hook = OnHit; Filter = Called s.Name; Chance = 100.0; Reaction = ApplyCurse(name, duration, monster) } ]
                         | None -> []
-                    let rules = Behaviours.useRules db charMods setup s.Name o.Pickup @ Behaviours.buffRules db charMods setup s @ curseRules
+                    let rules = Behaviours.useRules db charMods setup s.Name o.Pickup @ Behaviours.buffRules db charMods setup s @ Behaviours.totemPlacement db charMods setup s @ curseRules
                     let grants = Behaviours.verisiumGrant db charMods setup
                     let s = Behaviours.applyObserved s
                     // skills that deal no damage (buffs, infusion grants) don't hit
@@ -277,7 +280,7 @@ module Setup =
             |> List.choose (fun x ->
                 match Gems.data c.Db x.Name, pressed c o x.Name with
                 | Some d, Some p ->
-                    let skip = [ "Warcry"; "Travel"; "Minion"; "ModifiesNextSkill"; "Persistent"; "SummonsTotem" ] |> List.exists d.Types.Contains
+                    let skip = [ "Warcry"; "Travel"; "Minion"; "ModifiesNextSkill"; "Persistent" ] |> List.exists d.Types.Contains
                     let grantsBuff = p.Rules |> List.exists (fun r -> match r.Reaction with ChargeBuff _ | GrantBuff _ -> true | _ -> false)
                     let cooldown = p.Skill.Cooldown |> Option.defaultValue 0.0
                     if skip then None
@@ -286,7 +289,12 @@ module Setup =
                     elif cooldown >= 1.0 && (not p.Skill.Hits.IsEmpty || not p.Rules.IsEmpty || p.GrantsVerisium > 0) then Some(OnCooldown x.Name)
                     else None
                 | _ -> None)
-        others @ [ Spam mainGem ]
+        // a main "skill" that only places a totem or grants a buff is kept up, not spammed
+        let main =
+            match pressed c o mainGem with
+            | Some p when p.Skill.Hits.IsEmpty && p.Rules |> List.exists (fun r -> match r.Reaction with ChargeBuff _ | GrantBuff _ -> true | _ -> false) -> KeepBuff mainGem
+            | _ -> Spam mainGem
+        others @ [ main ]
 
     /// The player actor: the play style's skills, meta gems and their triggered spells,
     /// infusions, charges, defences. `main` replaces the play style's first skill (CLI

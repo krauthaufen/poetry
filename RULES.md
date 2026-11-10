@@ -213,6 +213,20 @@ Confidence levels:
 | Count | 1 per gem, or the gem's pack size; how many a build reserves spirit for is unknown from the API | | guess, usually too low |
 | Not modelled | temporary minions (zombies, raging spirits), minion life and death, command skills, minion accuracy (always hit), auras from minions | | todo |
 
+### Totems, curses, buffs, damage over time
+
+| Mechanic | Rule | Source | Confidence |
+|---|---|---|---|
+| Totems | the totem is an actor using the gem's second skill (or, for meta totems, the socketed skill) with the owner's weapon, mods and the gem's supports; it acts while the totem stands: the gem's use places it for `base_totem_duration`. All totems up to the limit stand after one placement (placing each is not simulated); totem life is ignored | gem data | data; the simplifications are guesses |
+| Curses and marks | applied to what the (damage-less) skill hits, for `base_skill_effect_duration` x duration mods, scaled by curse / mark effect and the monster's curse effect; one curse (+ "additional curses"), one mark; the oldest gives way. Effects from "base_skill_buff_..._to_apply": resistances, armour, damage dealt, action speed; marks: crit bonus, freeze / electrocute buildup against the marked enemy. Curse activation delay is NOT simulated | gem data | data |
+| Buff skills | a non-persistent Buff skill with a duration grants its own stats for that time; a skill that consumes charges grants one stack per charge with the gem's per-stack stats and duration | gem data | data |
+| Skill damage over time | "base_<type>_damage_to_deal_per_minute": per skill and type one instance on each enemy hit, for the skill's duration; scaled by damage of that type and damage over time; spell damage only if the gem says so; the strongest instance stays | gem data | data |
+| Archmage | non-channelling spells gain X% of damage as lightning per 100 maximum mana and cost an extra share of maximum mana | gem data | data |
+| Trinity | each hit adds resonance to its strongest element (up to 100) and takes some from the others; X% more elemental damage per 50 total resonance; decay over time NOT simulated; the cap of 100 is a GUESS | gem data | guess |
+| Mage's Legacies (Mageblood) | each kind applies once; all gain the belt's "increased effect per duplicate" per duplicate | PoB CalcPerform | pob |
+| Auras | Purity, Discipline...: the gem's "..._to_apply" stat on you, x increased aura effect; presence range ignored | gem data | data |
+| Aftershock | a slam with aftershock chance hits its area once more | stat text | guess (same damage and area) |
+
 ## Resources over time
 
 | Mechanic | Rule | Source | Confidence |

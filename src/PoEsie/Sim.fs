@@ -208,6 +208,8 @@ type Actor =
       /// Stored cooldown uses recharge at the same time (true) or one after another (false).
       ParallelUses: bool
       WardRemnants: WardRemnants option
+      /// The actor only acts while the player has this buff (a totem while it stands).
+      ActiveWhile: string option
       Infusions: Infusions option
       Archons: Archon list }
 
@@ -231,6 +233,7 @@ module Actor =
           KeptChargesPause = 0.0
           ParallelUses = false
           WardRemnants = None
+          ActiveWhile = None
           Infusions = None
           Archons = [] }
 
@@ -1039,8 +1042,15 @@ module Sim =
 
     /// The actor is free to act; a stunned or frozen player waits.
     let private onReady env rng name (w: World) =
+        let actor = actorDef env name
+        let standing =
+            match actor.ActiveWhile with
+            | Some buff -> (Map.find env.Fight.Player.Name w.Actors).Buffs |> Map.exists (fun k e -> k = buff && e.Expires > w.Time)
+            | None -> true
         match w.Player with
         | Some p when name = env.Fight.Player.Name && p.LockedUntil > w.Time -> schedule p.LockedUntil (Ready name) w
+        // a totem that isn't placed waits
+        | _ when not standing -> schedule (w.Time + 0.1) (Ready name) w
         | _ -> onReadyUnlocked env rng name w
 
     /// Statuses the game tracks for "recently" conditions: (name, seconds).

@@ -70,6 +70,8 @@ type GemData =
       Tags: Set<string>
       /// Attribute requirement shares (percent of the gem's requirement): Str, Dex, Int.
       Requirements: float * float * float
+      /// Further skills the gem grants (a totem's own attack: "additionalGrantedEffectId1").
+      AdditionalEffects: string list
       /// Weapon base types the skill needs ("Bow", "Two Hand Mace", "Quarterstaff", "Any Martial Weapon"...).
       WeaponRequirements: string list }
 
@@ -174,6 +176,7 @@ module GameData =
                     (Json.numField "reqStr" j |> Option.defaultValue 0.0),
                     (Json.numField "reqDex" j |> Option.defaultValue 0.0),
                     (Json.numField "reqInt" j |> Option.defaultValue 0.0)
+                  AdditionalEffects = [ 1..3 ] |> List.choose (fun k -> Json.strField (sprintf "additionalGrantedEffectId%d" k) j)
                   WeaponRequirements =
                     (Json.strField "weaponRequirements" j |> Option.defaultValue "").Split(',')
                     |> Array.map (fun x -> x.Trim()) |> Array.filter ((<>) "") |> List.ofArray })
