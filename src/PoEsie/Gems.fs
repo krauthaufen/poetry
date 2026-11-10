@@ -370,6 +370,8 @@ module Gems =
                     @ (if data.Types.Contains "Attack" then weapon |> Option.map (fun w -> w.Tags) |> Option.defaultValue [] else [])
                     @ requirementTags
                     @ [ Tag("Gem:" + data.Name) ]
+                    // every skill type, for conditions that name one ("Nova Skill Gems")
+                    @ (data.Types |> Set.toList |> List.map (fun t -> Tag("Type:" + t)))
                     |> Set.ofList
                 let ctx = { Ctx.empty with SkillName = data.Name; SkillTags = tags }
                 let level = setup.Level + int (Mods.sumBase ctx [ Named "GemLevel" ] characterMods)
@@ -411,7 +413,7 @@ module Gems =
             match List.tryItem (setup.StatSet - 1) data.StatSets with
             | None -> []
             | Some set ->
-                let tags = data.Types |> Set.toList |> List.choose tagOfType |> Set.ofList
+                let tags = (data.Types |> Set.toList |> List.choose tagOfType) @ (data.Types |> Set.toList |> List.map (fun t -> Tag("Type:" + t))) @ [ Tag("Gem:" + data.Name) ] |> Set.ofList
                 let ctx = { Ctx.empty with SkillName = data.Name; SkillTags = tags }
                 let maxLevel = data.Levels |> Map.toList |> List.map fst |> List.fold max 1
                 let level = min maxLevel (setup.Level + int (Mods.sumBase ctx [ Named "GemLevel" ] characterMods))

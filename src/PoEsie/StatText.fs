@@ -285,11 +285,16 @@ module StatText =
         let l = line.Trim()
         let prefix, suffix = "to Level of all ", " Skills"
         let i = l.IndexOf prefix
+        // "+1 to Level of all Nova Skill Gems": skills of a type
+        let gemSuffix = " Skill Gems"
+        let between (sfx: string) = l.Length - i - prefix.Length - sfx.Length
+        let value () = match System.Double.TryParse(l.Substring(0, i).Trim()) with | true, v -> Some v | _ -> None
+        if not ((l.StartsWith "+" || l.StartsWith "-") && i > 0) then None
+        elif l.EndsWith gemSuffix && between gemSuffix > 0 then
+            value () |> Option.map (fun v -> [ "typed_skill_level:" + l.Substring(i + prefix.Length, between gemSuffix).Replace(" ", ""), v ])
         // a name must sit between them ("+1 to Level of all Skills" has none)
-        if (l.StartsWith "+" || l.StartsWith "-") && i > 0 && l.EndsWith suffix && l.Length - i - prefix.Length - suffix.Length > 0 then
-            match System.Double.TryParse(l.Substring(0, i).Trim()) with
-            | true, v -> Some [ "specific_skill_level:" + l.Substring(i + prefix.Length, l.Length - i - prefix.Length - suffix.Length), v ]
-            | _ -> None
+        elif l.EndsWith suffix && between suffix > 0 then
+            value () |> Option.map (fun v -> [ "specific_skill_level:" + l.Substring(i + prefix.Length, between suffix), v ])
         else None
 
     let private parseInWithNamed context index line =

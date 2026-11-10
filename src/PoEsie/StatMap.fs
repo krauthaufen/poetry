@@ -462,6 +462,8 @@ module StatMap =
         | "critical_strike_multiplier_+_if_have_not_dealt_critical_strike_recently" -> one (Mod.inc CritBonus v |> Mod.whenever (Not(WhileBuff "CritRecently")))
         | "ailment_chance_+%_vs_exposed" ->
             Some(Mods(allAilments |> List.map (fun a -> Mod.inc (AilmentChance a) v |> Mod.whenever (EnemyHas "Exposed"))))
+        | id when id.StartsWith "typed_skill_level:" ->
+            one (Mod.base' (Named "GemLevel") v |> Mod.whenever (SkillIs(Tag("Type:" + id.Substring 18))))
         | id when id.StartsWith "specific_skill_level:" ->
             one (Mod.base' (Named "GemLevel") v |> Mod.whenever (SkillIs(Tag("Gem:" + id.Substring 21))))
         | "triggered_skill_damage_+%" -> one (Mod.inc (Damage AllDamage) v |> Mod.whenever (SkillIs Triggered))

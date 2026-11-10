@@ -46,6 +46,16 @@ module Items =
               "EvasionBasePercentile:"; "EnergyShieldBasePercentile:"; "Cluster Jewel"; "Flask: "; "Runic Ward:" ]
         prefixes |> List.exists (fun p -> line.StartsWith p)
 
+    /// Lines that describe the item itself or character-building, with no effect in a fight.
+    let private inertLine (l: string) =
+        [ "Corrupting will always result in change"; "Grants "; "Forged by "; "Can tattoo Runes"; "additional Rune-only sockets"
+          "Triple Attribute requirements"; "Has "; "Passive Skill Points become Weapon Set" ]
+        |> List.exists (fun p ->
+            if p = "Grants " then l.StartsWith p && l.Contains "Passive Skill Point"
+            elif p = "Has " then l.StartsWith p && (l.EndsWith "Charm Slots" || l.EndsWith "Charm Slot" || l.Contains "Socket")
+            else l.StartsWith p || l.EndsWith p)
+        || (l.EndsWith " socket" || l.EndsWith " sockets") && l.Length < 30
+
     /// Weapon kind from the base: its type, refined by base tags (quarterstaves are type
     /// "Staff" with the tag "warstaff").
     let private weaponTags (b: WeaponBase) =
@@ -181,7 +191,9 @@ module Items =
                 // handled by the build: allocated passives
                 && not (l.StartsWith "Allocates ")
                 // already reflected in the reported values of socketed runes / idols
-                && not (l.Contains "effect of Socketed") && not (l.StartsWith "This item gains bonuses from Socketed Items"))
+                && not (l.Contains "effect of Socketed") && not (l.StartsWith "This item gains bonuses from Socketed Items")
+                // about the item or the character sheet, not about a fight
+                && not (inertLine l))
         // armour pieces and weapons carry local stats; jewellery, jewels and charms don't
         let hasLocalDefences =
             lines |> List.exists (fun l -> l.StartsWith "Armour:" || l.StartsWith "Evasion" || l.StartsWith "Energy Shield:")

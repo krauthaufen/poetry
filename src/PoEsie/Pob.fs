@@ -241,6 +241,40 @@ module Pob =
                 mods, (slot, String.concat "\n" rest))
             |> List.unzip
             |> fun (ms, its) -> List.concat ms, its
+        // Rune / idol / soul core lines that depend on where they sit ("Boots: 5% increased
+        // Movement Speed"): keep the ones for this item's kind, without the prefix.
+        let items =
+            items
+            |> List.map (fun (slot, text) ->
+                let lines = text.Split('\n') |> List.ofArray
+                let isWeaponSlot = slot.StartsWith "Weapon 1"
+                let martial = isWeaponSlot && lines |> List.exists (fun l -> Map.containsKey (l.Trim()) db.Weapons)
+                let fits (kind: string) =
+                    match kind with
+                    | "All Equipment" -> Some true
+                    | "Body Armours" -> Some(slot = "Body Armour")
+                    | "Helmets" -> Some(slot = "Helmet")
+                    | "Gloves" -> Some(slot = "Gloves")
+                    | "Boots" -> Some(slot = "Boots")
+                    | "Shields" | "Shield" -> Some(slot.StartsWith "Weapon 2" && not martial)
+                    | "Martial Weapon" | "Martial Weapons" -> Some martial
+                    | "Wand or Staff" | "Caster Weapon" | "Caster Weapons" -> Some(isWeaponSlot && not martial)
+                    | "Crossbow, Bow or Spear" -> Some martial
+                    | "Armour" -> Some(List.contains slot [ "Body Armour"; "Helmet"; "Gloves"; "Boots" ] || slot.StartsWith "Weapon 2")
+                    | _ -> None
+                let lines =
+                    lines |> List.choose (fun l ->
+                        let t = l.Trim()
+                        match t.IndexOf ": " with
+                        | k when k > 0 ->
+                            match fits (t.Substring(0, k)) with
+                            | Some true -> Some(t.Substring(k + 2))
+                            | Some false -> None
+                            | None -> Some l
+                        | _ ->
+                            // a bare category header ("Body Armours:")
+                            if t.EndsWith ":" && (fits (t.TrimEnd(':'))).IsSome then None else Some l)
+                slot, String.concat "\n" lines)
         let parsed = items |> List.map (fun (slot, text) -> slot, Items.parse db text)
         let mainHand = parsed |> List.tryFind (fun (slot, _) -> slot = "Weapon 1") |> Option.bind (fun (_, p) -> p.Weapon)
         let swapHand =
