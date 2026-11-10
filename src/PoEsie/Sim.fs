@@ -883,6 +883,22 @@ module Sim =
                     { hit with
                         Unmitigated = Dmg.map (fun _ v -> v * mult) hit.Unmitigated
                         Dealt = Dmg.map (fun _ v -> v * mult) hit.Dealt }
+                // ailments are rolled before the damage lands; a shock the hit applies already
+                // counts for the hit itself (user observation)
+                let inflicted = Ailments.fromHit rng ctx mods def hit
+                let hit =
+                    let currentShock =
+                        Map.tryFind "Shocked" e.Debuffs
+                        |> Option.filter (fun x -> x.Expires > w.Time)
+                        |> Option.map (fun x -> x.Mods |> List.sumBy (fun m -> m.Value))
+                        |> Option.defaultValue 0.0
+                    let newShock = inflicted |> List.tryPick (function Status (Shock, m, _) when m > currentShock -> Some m | _ -> None)
+                    match newShock with
+                    | Some m ->
+                        let withoutOld = def.Mods |> ModDb.toList |> List.filter (fun x -> x.Source <> "Shock")
+                        let def' = { def with Mods = ModDb.ofList (Mod.inc (DamageTaken AllDamage) m |> Mod.from "Shock" :: withoutOld) }
+                        { hit with Dealt = Hit.mitigate ctx mods def' hit.Unmitigated }
+                    | None -> hit
                 let dealt = Dmg.total hit.Dealt
                 let life = e.Life - dealt
                 let dead = life <= 1e-9
@@ -911,7 +927,6 @@ module Sim =
                     | _ -> w
                 // a killing hit still inflicts its ailments (they count for meta energy and Archon);
                 // only their damage over time on the dead monster is dropped
-                let inflicted = Ailments.fromHit rng ctx mods def hit
                 let w =
                     if dead then
                         react env rng actor OnKill skill None w

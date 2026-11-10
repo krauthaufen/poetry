@@ -50,7 +50,7 @@ Confidence levels:
 | DoT mitigation | enemy resist of the dealt type (no penetration), damage taken mods, `DotTaken`. Bleeding ignores armour. Recomputed continuously, so a curse applied later still counts. | CalcOffence.lua ~5180 | pob |
 | Ignite / shock chance | (dmg / ailment threshold × 20 (ignite) or 25 (shock) + flat chance) × inc × more, capped 100 | CalcOffence.lua ~5457; GameConstants | pob + data |
 | Ailment threshold | monster table by level × `AilmentThreshold` mods | Misc.lua `monsterAilmentThresholdTable` | data |
-| Shock | 20% increased damage taken, strongest applies, doesn't stack | GameConstants `BaseShockMagnitude`=20 | data |
+| Shock | 20% increased damage taken, strongest applies, doesn't stack; a shock a hit applies already counts for that hit | GameConstants `BaseShockMagnitude`=20; same-hit: user | data + user |
 | Shock duration | `BaseShockDuration` = 8 | GameConstants | data, **but the commonly quoted value is 4 s — check** |
 | Chill | magnitude = 100 × cold / threshold × mods, capped 50%; applied when ≥1% | CalcOffence.lua ~5386 | pob |
 | PoB's shock formula | PoB still has the PoE1 `50 × (dmg/threshold)^0.4` shock effect | CalcOffence.lua ~5515 | pob-wrong, we use the flat 20% |
