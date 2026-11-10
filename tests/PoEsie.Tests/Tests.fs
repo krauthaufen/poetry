@@ -172,5 +172,7 @@ let main _ =
         let f = { fight skill 5000.0 with Player = Actor.make "Player" [] [ skill ] }
         equal (Sim.run f 7u) (Sim.run f 7u))
 
+    DataTests.run test near (fun a b -> equal a b)
+
     printfn "%d passed, %d failed" passed failures
     if failures = 0 then 0 else 1

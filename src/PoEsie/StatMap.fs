@@ -18,6 +18,8 @@ type Meaning =
     | NotOffensive
     /// Understood and offensive, but the engine doesn't model the mechanic yet.
     | Unsimulated of mechanic: string
+    /// Engine-internal flags of the game (targeting, visuals, pathing): no meaning for us.
+    | Structural
     | Unmapped
 
 /// Game stat id + value -> modifiers. This file is the simulator's knowledge of
@@ -220,19 +222,17 @@ module StatMap =
 
     // ---- patterns over the words of the id (reversed, so suffixes come first) ----
 
-    let private incDamage rev v =
-        match rev with
-        | "+%" :: rest -> damageMod Inc (List.rev rest) v
-        | _ ->
-            // "damage_+%_with_two_handed_weapons": scope after the +%
-            let words = List.rev rev
-            match List.tryFindIndex ((=) "+%") words with
-            | Some i when i > 0 && words.[i - 1] = "damage" -> damageMod Inc (List.take i words @ List.skip (i + 1) words) v
-            | _ -> None
-
-    let private moreDamage rev v =
-        match rev with
-        | "final" :: "+%" :: rest -> damageMod More (List.rev rest) v
+    /// "<words with 'damage'> +% [final] [condition words]": increased, or more if "final".
+    let private scaledDamage rev v =
+        let words = List.rev rev
+        match List.tryFindIndex ((=) "+%") words with
+        | Some i when i > 0 ->
+            let after = List.skip (i + 1) words
+            let kind, after =
+                match after with
+                | "final" :: rest -> More, rest
+                | rest -> Inc, rest
+            damageMod kind (List.take i words @ after) v
         | _ -> None
 
     /// "<scope> minimum|maximum added <type> damage"
@@ -325,7 +325,7 @@ module StatMap =
                 |> Option.map (fun sc -> [ apply sc (Mod.base' (Named "GemLevel") v) |> fun m -> List.foldBack Mod.whenever elements m ])
         | _ -> None
 
-    let private rules = [ incDamage; moreDamage; addedDamage; penetration; gainAs; convert; ailmentStat; crit; speed; gemLevel ]
+    let private rules = [ scaledDamage; addedDamage; penetration; gainAs; convert; ailmentStat; crit; speed; gemLevel ]
 
     let private pattern (id: string) (v: float) : Meaning option =
         let rev = List.rev (split id)
@@ -405,11 +405,19 @@ module StatMap =
         elif id.StartsWith "active_skill_" then direct (id.Substring 13) value
         else None
 
+    let private structural (id: string) =
+        let words = split id
+        let has w = List.contains w words
+        has "index" || has "visual" || has "show" || has "cursor" || has "pathing" || has "contact"
+        || has "collide" || has "targets" || id.StartsWith "can_perform_skill" || id.StartsWith "base_is_"
+        || id.StartsWith "is_" || id.EndsWith "_step_distance"
+
     /// What a stat means. Local stats first, then the explicit table, then patterns,
     /// then gem-name prefixes, then the non-offensive bucket. Anything else is Unmapped.
     let meaning (id: string) (value: float) : Meaning =
         match local id value with
         | Some m -> m
+        | None when structural id -> Structural
         | None ->
             match direct id value with
             | Some m -> m

@@ -14,6 +14,7 @@ let classify (id, n) =
     | Mods _ -> "mods", id, n
     | Local _ -> "local", id, n
     | NotOffensive -> "not-offensive", id, n
+    | Structural -> "structural", id, n
     | Unsimulated m -> "unsimulated", id, n
     | Unmapped -> "unmapped", id, n
 let cls = ids |> List.map classify
