@@ -25,6 +25,7 @@
 ///   --kept-pause S   charges kept by "chance to not remove" freeze their timer for S seconds (default 1)
 ///   --max K=N,...    override resource maxima with observed ones, e.g. "Mote:blue=0"
 ///   --noflask        don't use the mana flask
+///   --rotation A,B   skills you press, cycled in this order (meta gems trigger the rest)
 ///   --suite          run the standard scenarios (pack, pack + 2 rares, surrounded, boss) and print a table
 ///   --data DIR       exported game data (default: data/game next to the repo)
 module PoEsie.Cli
@@ -211,10 +212,38 @@ let main argv =
                     | None -> enemies
                 printfn "  enemies: %s" (enemies |> List.countBy (fun e -> Rarity.name e.Rarity) |> List.map (fun (r, n) -> sprintf "%d %s" n r) |> String.concat ", ")
                 printfn "  delivery: %A" skill.Delivery
+                // meta gems and the spells they trigger
+                let metas = Behaviours.metas db sheet build
+                for (m, spells) in metas do
+                    printfn "  meta %-28s %-14s energy x%.2f, %s per trigger (max %.0f), sources %A -> %s"
+                        m.Name (match m.Release with Invocation cd -> sprintf "invoke /%.1fs" cd | AtMaximum -> "at maximum") m.EnergyMult
+                        (sprintf "%.0f" m.Cost) m.MaxEnergy m.Sources (spells |> List.map (fun s -> s.Name) |> String.concat ", ")
+                // --rotation "A,B": skills you press, cycled in this order (default: the simulated group)
+                let pressed =
+                    match Map.tryFind "rotation" o with
+                    | Some r ->
+                        r.Split(',') |> Array.map (fun x -> x.Trim()) |> List.ofArray
+                        |> List.choose (fun n ->
+                            build.Groups |> List.tryPick (fun g ->
+                                if g.Gems |> List.exists (fun x -> x.Name = n && not x.IsSupport) then
+                                    Pob.groupSkill db sheet { g with Gems = g.Gems |> List.filter (fun x -> x.IsSupport || x.Name = n) }
+                                    |> List.tryHead |> Option.bind (function Ok (s, _) -> Some(Behaviours.applyObserved s) | _ -> None)
+                                else None))
+                    | None -> [ skill ]
+                let rotation =
+                    match pressed with
+                    | [ single ] -> [ Actor.always single.Name ]
+                    | many ->
+                        many |> List.mapi (fun i s ->
+                            let previous = many.[(i + many.Length - 1) % many.Length].Name
+                            { Use = s.Name; When = fun v -> v.LastUsed = previous || (v.LastUsed = "" && i = 0) })
+                        |> fun steps -> steps @ [ Actor.always many.Head.Name ]
                 let fight =
                     { Enemies = enemies
                       Player =
-                        { Actor.make "Player" sheet.Mods [ skill ] with
+                        { Actor.make "Player" sheet.Mods (pressed @ (metas |> List.collect snd)) with
+                            Rotation = rotation
+                            Metas = metas |> List.map fst
                             Resources = resources
                             Cycles = cycles
                             Vitals = (if Map.containsKey "immortal" o then None else Some vitals)

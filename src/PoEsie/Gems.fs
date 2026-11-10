@@ -197,12 +197,21 @@ module Gems =
             t.StartsWith "buff grants" || t.StartsWith "grants" || t.Contains " you " || t.Contains "your " || t.StartsWith "you "
         | None -> false
 
+    let isMeta (db: GameDb) name =
+        skillOfGem db name |> Option.exists (fun d -> d.Types.Contains "Meta")
+
+    /// Skill data for a gem name.
+    let data (db: GameDb) name = skillOfGem db name
+
     let isPersistentBuff (db: GameDb) name =
         skillOfGem db name |> Option.exists (fun d -> d.Types.Contains "Persistent" && d.Types.Contains "Buff")
 
     /// A stat set flagged to be shown with the main set: it happens in the same use
     /// (Falling Thunder's projectiles). Other sets are alternatives (Spark's Cold-Infused).
-    let private isPart (set: StatSetData) = set.Stats |> List.contains "display_statset_hide_usage_stats"
+    /// "X-Infused" stat sets are what the skill does when it consumes an infusion: an
+    /// alternative, not a part.
+    let private isPart (set: StatSetData) =
+        set.Stats |> List.contains "display_statset_hide_usage_stats" && not (set.Label.EndsWith "-Infused")
 
     /// One stat set of a skill as a simulator Skill.
     let private buildSet altQuality (data: SkillData) (set: StatSetData) name tags level quality (supportStats: (string * float) list) (weapon: Weapon option) =
@@ -265,6 +274,8 @@ module Gems =
                         Explosion = if data.Types.Contains "Area" && not (List.contains "is_area_damage" set.Stats) then radius else None }
             else
                 match radius with
+                // "ice_nova_number_of_frost_bolts_to_cast_on": cast on a Frostbolt near the target
+                | Some r when (statOf "ice_nova_number_of_frost_bolts_to_cast_on" |> Option.defaultValue 0.0) > 0.0 -> AreaAtTarget r
                 | Some r when data.Types.Contains "Nova" -> AreaAroundSelf r
                 | Some r -> AreaAtTarget r
                 | _ -> Single
@@ -281,7 +292,9 @@ module Gems =
           Mods = mods
           Parts = []
           Consumes = if data.Types.Contains "SkillConsumesPowerChargesOnUse" then Some "PowerCharge" else None
-          Cost = gemLevel |> Option.bind (fun l -> l.ManaCost) |> Option.defaultValue 0.0 },
+          Cost = gemLevel |> Option.bind (fun l -> l.ManaCost) |> Option.defaultValue 0.0
+          // "comet_fall_time_ms": hits land this long after the cast
+          HitDelay = (ownStats |> List.filter (fun (id, _) -> id.EndsWith "_fall_time_ms") |> List.sumBy snd) / 1000.0 },
         cov
 
     /// Build a simulator Skill from a socketed gem. `characterMods` are needed for

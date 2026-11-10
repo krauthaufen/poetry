@@ -200,6 +200,11 @@ module StatMap =
         | "additional_strength_and_dexterity" -> each [ Attribute "Str"; Attribute "Dex" ]
         | "additional_strength_and_intelligence" -> each [ Attribute "Str"; Attribute "Int" ]
         | "additional_dexterity_and_intelligence" -> each [ Attribute "Dex"; Attribute "Int" ]
+        | "base_block_chance_luck" -> one (Mod.flag (Named "LuckyBlock"))
+        | "base_block_%_damage_taken" -> one (Mod.base' (Named "BlockedDamageTaken") v)
+        | "block_chance_+%" -> one (Mod.inc (Named "Block") v)
+        | "additional_block_%" -> one (Mod.base' (Named "Block") v)
+        | "additional_maximum_block_%" -> one (Mod.base' (Named "MaxBlock") v)
         | "base_maximum_life" -> one (Mod.base' MaxLife v)
         | "maximum_life_+%" -> one (Mod.inc MaxLife v)
         | "base_maximum_mana" -> one (Mod.base' MaxMana v)
@@ -317,6 +322,13 @@ module StatMap =
         | "power_charge_duration_+%" -> one (Mod.inc (Named "PowerChargeDuration") v)
         | "frenzy_charge_duration_+%" | "base_frenzy_charge_duration_+%" -> one (Mod.inc (Named "FrenzyChargeDuration") v)
         | "endurance_charge_duration_+%" | "base_endurance_charge_duration_+%" -> one (Mod.inc (Named "EnduranceChargeDuration") v)
+        | "energy_generated_+%" -> one (Mod.inc (Named "EnergyGenerated") v)
+        | "triggered_skill_damage_+%" -> one (Mod.inc (Damage AllDamage) v |> Mod.whenever (SkillIs Triggered))
+        | "cast_on_crit_global_critical_hit_chance_granted_+%" -> one (Mod.inc CritChance v)
+        | "support_spell_cascade_number_of_cascades_per_side" -> one (Mod.base' (Named "CascadesPerSide") v)
+        | "trigger_skills_refund_half_energy_spent_chance_%" -> one (Mod.base' (Named "EnergyRefundChance") v)
+        | id when id.Contains "_centienergy_" || id.StartsWith "generic_ongoing_trigger_" || id = "total_cast_time_+_ms" || id.EndsWith "_fall_time_ms" ->
+            Some Structural
         | "max_power_charges" -> one (Mod.base' (Named "MaxPowerCharge") v)
         | "max_frenzy_charges" -> one (Mod.base' (Named "MaxFrenzyCharge") v)
         | "max_endurance_charges" -> one (Mod.base' (Named "MaxEnduranceCharge") v)

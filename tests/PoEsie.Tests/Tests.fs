@@ -159,7 +159,7 @@ let main _ =
             { Actor.make "Player" [ noIgnite ] [ bolt; nova ] with
                 Rotation = [ Actor.always "Bolt" ]
                 Rules = [ { Hook = OnHit; Filter = Called "Bolt"; Chance = 100.0; Reaction = GainEnergy("Cast on Hit", 50.0) } ]
-                Metas = [ { Name = "Cast on Hit"; MaxEnergy = 100.0; Triggers = "Nova" } ] }
+                Metas = [ Meta.simple "Cast on Hit" 100.0 "Nova" ] }
         let o = Sim.run { fight bolt 1e9 with Player = player; MaxTime = 10.5 } 1u
         equal 10 o.Counts.["hits:Bolt"]
         equal 5 o.Counts.["trigger:Nova"])
@@ -262,7 +262,7 @@ let main _ =
     let vitals =
         { Str = 0.0; Dex = 0.0; Int = 0.0; Life = 100.0; Mana = 100.0; EnergyShield = 0.0; Armour = 0.0; Evasion = 0.0
           Deflection = 0.0; Resist = Map.ofList [ Fire, 0.0; Cold, 0.0; Lightning, 0.0; Chaos, 0.0 ]
-          LifeRegen = 0.0; ManaRegen = 10.0; EnergyShieldRecharge = 0.0 }
+          LifeRegen = 0.0; ManaRegen = 10.0; EnergyShieldRecharge = 0.0; Block = 0.0; LuckyBlock = false; BlockedDamageTaken = 0.0 }
 
     test "vitals: a skill that costs more than regen waits for mana" (fun () ->
         // 50 mana per 1 s cast, 100 mana pool, 10 mana/s regen: 2 free casts, then one cast per 5 s

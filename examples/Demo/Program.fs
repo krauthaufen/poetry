@@ -43,7 +43,7 @@ let player =
             [ { Hook = OnCrit; Filter = Called "Arc Bolt"; Chance = 100.0; Reaction = GainEnergy("Cast on Crit", 40.0) }
               { Hook = OnUse; Filter = Called "Ember Curse"; Chance = 100.0
                 Reaction = ApplyCurse("Ember Curse", 6.0, [ Mod.base' (Resist Fire) -25.0 ]) } ]
-        Metas = [ { Name = "Cast on Crit"; MaxEnergy = 100.0; Triggers = "Flare" } ] }
+        Metas = [ Meta.simple "Cast on Crit" 100.0 "Flare" ] }
 
 let hound =
     let bite =

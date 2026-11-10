@@ -74,7 +74,9 @@ type Skill =
       /// Charge this skill consumes on use, e.g. "PowerCharge".
       Consumes: string option
       /// Mana per use before cost modifiers (gem cost × support multipliers).
-      Cost: float }
+      Cost: float
+      /// Seconds between the use and its hits (a comet falling).
+      HitDelay: float }
 
 module Skill =
     let make name tags =
@@ -91,7 +93,8 @@ module Skill =
           Mods = []
           Parts = []
           Consumes = None
-          Cost = 0.0 }
+          Cost = 0.0
+          HitDelay = 0.0 }
 
     let ctx (skill: Skill) crit buffs enemyStatus =
         { Crit = crit

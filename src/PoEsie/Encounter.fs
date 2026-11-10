@@ -119,6 +119,16 @@ module DamageProfile =
     let mixed = [ Physical, 0.4; Fire, 0.2; Cold, 0.2; Lightning, 0.2 ]
     let physical = [ Physical, 1.0 ]
 
+module MonsterPower =
+    /// Monster power by rarity for meta gem energy: normal 1, magic 2, rare 5, unique / boss 20.
+    /// Community values (Mobalytics; boss 20 widely agreed, magic and rare disputed).
+    let ofRarity (r: Rarity) =
+        match r with
+        | Normal -> 1.0
+        | Magic -> 2.0
+        | Rare -> 5.0
+        | Unique -> 20.0
+
 module RarityCharges =
     /// Flask charges per kill: 1 for a normal monster, scaled by the rarity's
     /// monster_base_flask_charges_percent_of_monster_power (+50% / +150% / +150%, game data).

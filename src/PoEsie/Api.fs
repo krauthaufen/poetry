@@ -111,7 +111,7 @@ module Api =
         let get k = Json.strField k item |> Option.defaultValue ""
         let quality = property "Quality" item |> Option.map (fun q -> "Quality: " + q) |> Option.toList
         let defences =
-            [ "Armour", "Armour"; "Evasion Rating", "Evasion Rating"; "Energy Shield", "Energy Shield" ]
+            [ "Armour", "Armour"; "Evasion Rating", "Evasion Rating"; "Energy Shield", "Energy Shield"; "Block chance", "Block chance" ]
             |> List.choose (fun (prop, label) -> property prop item |> Option.map (fun v -> label + ": " + v))
         // flask properties with placeholders: "Recovers {0} Mana over {1} Seconds" [465; 3.50]
         let templated =
@@ -164,14 +164,15 @@ module Api =
                       IsSupport = false
                       StatSet = 1 }
                 let supports =
+                    // socketed gems: supports, and active spells socketed into meta gems
                     Json.list (Json.field "socketedItems" g)
-                    |> List.filter (fun s -> Json.field "support" s = Some(JBool true))
                     |> List.map (fun s ->
+                        let support = Json.field "support" s = Some(JBool true)
                         { Name = Json.strField "typeLine" s |> Option.defaultValue ""
                           Level = gemLevel s
-                          Quality = 0
+                          Quality = if support then 0 else gemQuality s
                           Enabled = true
-                          IsSupport = true
+                          IsSupport = support
                           StatSet = 1 })
                 { Label = active.Name
                   Slot = ""

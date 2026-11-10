@@ -15,7 +15,11 @@ type PlayerStats =
       Resist: Map<DamageType, float>
       LifeRegen: float
       ManaRegen: float
-      EnergyShieldRecharge: float }
+      EnergyShieldRecharge: float
+      /// Chance (%) to block a hit, whether it rolls twice (lucky), % of a blocked hit still taken.
+      Block: float
+      LuckyBlock: bool
+      BlockedDamageTaken: float }
 
 /// A mana flask as equipped (values as the game shows them).
 type ManaFlask =

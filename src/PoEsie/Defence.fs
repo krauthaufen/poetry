@@ -79,6 +79,13 @@ module Defence =
           Resist = DamageType.all |> List.filter ((<>) Physical) |> List.map resist |> Map.ofList
           LifeRegen = if ci then 0.0 else (Mods.sumBase c [ LifeRegen ] db + life * Mods.sumBase c [ LifeRegenPercent ] db / 100.0) * Mods.mult c [ LifeRegen ] db
           ManaRegen = mana * manaRegenPercent / 100.0 * Mods.mult c [ ManaRegen ] db
-          EnergyShieldRecharge = es * esRechargePercent / 100.0 }
+          EnergyShieldRecharge = es * esRechargePercent / 100.0
+          // shield block (shown on the item) + flat block, x increased block, capped at 50 + max block
+          Block =
+            let baseBlock = fromItems (Named "ShieldBlock") + Mods.sumBase c [ Named "Block" ] db
+            let cap = min 90.0 (50.0 + Mods.sumBase c [ Named "MaxBlock" ] db)
+            min cap (baseBlock * Mods.inc c [ Named "Block" ] db)
+          LuckyBlock = Mods.flag c (Named "LuckyBlock") db
+          BlockedDamageTaken = Mods.sumBase c [ Named "BlockedDamageTaken" ] db }
 
     let compute bases sheet = computeWith Map.empty bases sheet

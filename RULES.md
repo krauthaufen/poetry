@@ -164,3 +164,19 @@ Confidence levels:
 | Virtuous Barrier motes | a random colour not at maximum every `base_active_skill_buff_stack_gain_frequency_ms`; maximum per colour = the description's base (`skill_specific_stat_description_mode`, 3) + active skills requiring that attribute, single-attribute skills counting twice; `gem_barrier_<colour>_grants_<stat>` is per mote | skill text and data; supports not counted as skills | data + guess |
 | Gem levels by attribute | `<attribute>_skill_gem_level_+` applies to gems with that attribute requirement | gem data | data |
 | Observed per-skill behaviour | `Behaviours.observed`: facts seen in game that the data lacks. Falling Thunder: projectiles appear ~0.5 m (5 units) out from the impact, radially | user | user |
+
+## Meta gems and triggers
+
+| Mechanic | Rule | Source | Confidence |
+|---|---|---|---|
+| Meta gems | every enabled group whose active gem is typed Meta; the group's other skill gems are triggered (copies with that group's supports, tagged Triggered); the group's supports never reach the character | data | data |
+| Energy sources | from the gem's stats: `*_centienergy_per_monster_power_on_crit / freeze / shock / ignite`, `*_centienergy_on_block`, `*_centienergy_per_10ms_base_cast_time` (spells the player casts) | data | data |
+| Energy per event | per-power value × monster power × (damage of the relevant types / enemy ailment threshold) × (1 + energy generated: gem + group supports) | PoB developer draft (GitHub issue #181); not confirmed game logic | community |
+| Monster power | normal 1, magic 2, rare 5, unique / boss 20 | Mobalytics; boss 20 agreed, magic / rare disputed | community |
+| Energy per trigger | 100 per second of base cast time of the socketed spells (cast time + `total_cast_time_+_ms`); Comet: 1 + 1 s = 200 | "10 per 0.1 s" (community); a guide quotes 300 for Comet (older version?) | community |
+| Release | "Cast on ...": trigger all socketed spells on reaching maximum (= the cost), energy spent. Invocations (Elemental Invocation, Spellslinger): bank up to `generic_ongoing_trigger_maximum_energy`; used as soon as a trigger is covered and its cooldown (0.2 s) is ready, triggering as many times as the energy covers | gem descriptions | data |
+| Energy Retention | chance to get half the spent energy back | gem text | data |
+| Triggered spells | no mana cost, no time spent; hits after `*_fall_time_ms` (Comet 0.55 s) | data | data |
+| Spell Cascade | `number_of_cascades_per_side` extra impacts per side along the line from the player through the target, one radius apart; side impacts don't get their extra −20% area | data; spacing guess | guess |
+| Infused stat sets | "X-Infused" sets are alternatives used when an infusion is consumed, never parts of a normal use (infusions not modelled yet) | data | data |
+| Block | shield block (shown on the item) + flat, × increased block, capped at 50 + max block; lucky block rolls twice; blocked hits deal `base_block_%_damage_taken` | data / game text | data + guess (cap) |

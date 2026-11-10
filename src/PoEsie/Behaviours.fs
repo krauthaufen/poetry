@@ -98,3 +98,67 @@ module Behaviours =
     let chargeDurations (sheet: CharacterSheet) =
         let mods = ModDb.ofList sheet.Mods
         charges |> List.map (fun c -> c, floor (15.0 * Mods.inc Ctx.empty [ Named(c + "Duration") ] mods)) |> Map.ofList
+
+    /// Meta gems of a build and the spells they trigger. Every enabled group whose active gem is
+    /// a Meta gem: energy sources, energy multiplier (gem + the group's supports), refund chance,
+    /// release (Invocation or at maximum) and maximum energy from its stats; the group's other
+    /// skill gems become triggered copies with the group's supports. Energy per trigger = 100 per
+    /// second of base cast time of the socketed spells ("10 per 0.1 s", community source).
+    let metas (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) =
+        let charMods = ModDb.ofList sheet.Mods
+        build.Groups
+        |> List.filter (fun g -> g.Enabled)
+        |> List.indexed
+        |> List.choose (fun (gi, g) ->
+            let enabled = g.Gems |> List.filter (fun x -> x.Enabled)
+            match enabled |> List.tryFind (fun x -> not x.IsSupport && Gems.isMeta db x.Name) with
+            | None -> None
+            | Some metaGem ->
+                let supports = enabled |> List.filter (fun x -> x.IsSupport) |> List.map (fun x -> x.Name, x.Level)
+                let spells = enabled |> List.filter (fun x -> not x.IsSupport && x.Name <> metaGem.Name)
+                let raw = Gems.rawStats db charMods { Gem = metaGem.Name; Level = metaGem.Level; Quality = metaGem.Quality; StatSet = 1; Supports = supports }
+                let sum pred = raw |> List.filter (fun (id, _) -> pred id) |> List.sumBy snd
+                let name = sprintf "%s #%d" metaGem.Name (gi + 1)
+                let sources =
+                    raw
+                    |> List.choose (fun (id, v) ->
+                        if id.EndsWith "_per_monster_power_on_crit" then Some(CritHits(v / 100.0))
+                        elif id.EndsWith "_per_monster_power_on_freeze" then Some(InflictsAilment(Freeze, v / 100.0))
+                        elif id.EndsWith "_per_monster_power_on_shock" then Some(InflictsAilment(Shock, v / 100.0))
+                        elif id.EndsWith "_per_monster_power_on_ignite" then Some(InflictsAilment(Ignite, v / 100.0))
+                        elif id.EndsWith "_centienergy_on_block" then Some(Blocks(v / 100.0))
+                        elif id.EndsWith "_centienergy_per_10ms_base_cast_time" then Some(CastsSpells(v / 100.0))
+                        else None)
+                let triggered =
+                    spells
+                    |> List.choose (fun sp ->
+                        match Gems.skill db charMods sheet.MainHand { Gem = sp.Name; Level = sp.Level; Quality = sp.Quality; StatSet = 1; Supports = supports } with
+                        | Ok (skill, _) ->
+                            let copyName = sprintf "%s (%s)" skill.Name name
+                            let rec rename (s: Skill) = { s with Name = copyName; Tags = s.Tags.Add Triggered; Parts = s.Parts |> List.map (fun p -> { p with Name = copyName + ": " + p.Name; Tags = p.Tags.Add Triggered }) }
+                            let castTime =
+                                (Gems.data db sp.Name |> Option.map (fun d -> d.CastTime) |> Option.defaultValue 1.0)
+                                + (Gems.rawStats db charMods { Gem = sp.Name; Level = sp.Level; Quality = sp.Quality; StatSet = 1; Supports = [] }
+                                   |> List.filter (fun (id, _) -> id = "total_cast_time_+_ms") |> List.sumBy snd) / 1000.0
+                            Some(rename skill, castTime)
+                        | Error _ -> None)
+                let cost = triggered |> List.sumBy (fun (_, ct) -> 100.0 * ct)
+                let invocation = (Gems.data db metaGem.Name |> Option.exists (fun d -> d.Types.Contains "Invocation"))
+                let cooldown =
+                    Gems.data db metaGem.Name
+                    |> Option.bind (fun d -> Map.tryFind metaGem.Level d.Levels |> Option.orElse (Map.tryFind 1 d.Levels))
+                    |> Option.bind (fun l -> l.Cooldown)
+                    |> Option.defaultValue 0.2
+                let maxEnergy =
+                    if invocation then sum ((=) "generic_ongoing_trigger_maximum_energy") * (1.0 + sum ((=) "skill_maximum_energy_+%") / 100.0)
+                    else cost
+                let meta =
+                    { Name = name
+                      Release = (if invocation then Invocation cooldown else AtMaximum)
+                      MaxEnergy = maxEnergy
+                      Cost = cost
+                      Triggers = triggered |> List.map (fun (s, _) -> s.Name)
+                      Sources = sources
+                      EnergyMult = 1.0 + sum ((=) "energy_generated_+%") / 100.0
+                      RefundChance = sum ((=) "trigger_skills_refund_half_energy_spent_chance_%") }
+                Some(meta, triggered |> List.map fst))

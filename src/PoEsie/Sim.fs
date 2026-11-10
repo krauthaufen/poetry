@@ -16,7 +16,9 @@ type View =
       EnemyLifeFraction: float
       EnemyRarity: Rarity
       EnemiesAlive: int
-      Energy: Map<string, float> }
+      Energy: Map<string, float>
+      /// The skill the actor used last (for cycling rotations).
+      LastUsed: string }
 
 type SkillFilter =
     | AnySkill
@@ -24,6 +26,7 @@ type SkillFilter =
     | Called of string
 
 type Hook =
+    | OnBlock
     | OnUse
     | OnHit
     | OnCrit
@@ -53,10 +56,47 @@ type Rule =
       Reaction: Reaction }
 
 /// A meta gem: collects energy from rules, triggers its socketed skill when full.
+/// Where a meta gem's energy comes from. Amounts are energy per monster power, scaled by
+/// how much of the enemy's ailment threshold the hit (or ailment) deals.
+type EnergySource =
+    | CritHits of perPower: float
+    | InflictsAilment of ailment: Ailment * perPower: float
+    /// Flat energy per block.
+    | Blocks of energy: float
+    /// Energy per 10 ms of base cast time of spells the player casts.
+    | CastsSpells of perTenMs: float
+
+/// "Cast on ..." gems trigger on reaching maximum energy; Invocations bank energy and are
+/// used to spend it, possibly several triggers at once.
+type MetaRelease =
+    | AtMaximum
+    | Invocation of cooldown: float
+
+/// A meta gem: gains energy, triggers its socketed spells.
 type Meta =
     { Name: string
+      Release: MetaRelease
       MaxEnergy: float
-      Triggers: string }
+      /// Energy one trigger of all socketed spells costs.
+      Cost: float
+      Triggers: string list
+      Sources: EnergySource list
+      /// Increased energy generated (gem + supports), as a multiplier.
+      EnergyMult: float
+      /// Chance (%) to get half the spent energy back (Energy Retention).
+      RefundChance: float }
+
+module Meta =
+    /// A simple meta: flat energy from rules, triggers one skill at maximum.
+    let simple name maxEnergy triggers =
+        { Name = name
+          Release = AtMaximum
+          MaxEnergy = maxEnergy
+          Cost = maxEnergy
+          Triggers = [ triggers ]
+          Sources = []
+          EnergyMult = 1.0
+          RefundChance = 0.0 }
 
 type Step =
     { Use: string
@@ -213,7 +253,8 @@ module Sim =
         | Expire
 
     type private ActorState =
-        { /// Resource timers paused until this time.
+        { LastUsed: string
+          /// Resource timers paused until this time.
           Paused: Map<string, float>
           Buffs: Map<string, Effect>
           Cooldowns: Map<string, float>
@@ -358,7 +399,8 @@ module Sim =
           EnemyLifeFraction = target |> Option.map (fun e -> e.Life / e.Def.Life) |> Option.defaultValue 0.0
           EnemyRarity = target |> Option.map (fun e -> e.Def.Rarity) |> Option.defaultValue Normal
           EnemiesAlive = (alive w).Length
-          Energy = st.Energy }
+          Energy = st.Energy
+          LastUsed = st.LastUsed }
 
     let private matches filter (skill: Skill) =
         match filter with
@@ -587,16 +629,39 @@ module Sim =
                     | GainEnergy (meta, amount) -> gainEnergy env rng actor meta amount w)
             w
 
-    and private gainEnergy env rng actor metaName amount w =
+    and private gainEnergy env rng (actor: Actor) metaName amount w =
         match actor.Metas |> List.tryFind (fun m -> m.Name = metaName) with
         | None -> w
         | Some meta ->
             let st = Map.find actor.Name w.Actors
-            let energy = (Map.tryFind meta.Name st.Energy |> Option.defaultValue 0.0) + amount
-            let triggered = energy >= meta.MaxEnergy && ready st w.Time (skillOf actor meta.Triggers)
-            let left = if triggered then energy - meta.MaxEnergy else min energy meta.MaxEnergy
-            let w = updateActor actor.Name (fun st -> { st with Energy = Map.add meta.Name left st.Energy }) w
-            if triggered then trigger env rng actor meta.Triggers w else w
+            let energy = min meta.MaxEnergy ((Map.tryFind meta.Name st.Energy |> Option.defaultValue 0.0) + amount)
+            let w = updateActor actor.Name (fun st -> { st with Energy = Map.add meta.Name energy st.Energy }) w
+            releaseMeta env rng actor meta w
+
+    /// Trigger the meta's spells if its energy allows: "Cast on" at maximum, Invocations
+    /// whenever enough is banked and the invocation is off cooldown (as many times as it covers).
+    and private releaseMeta env rng (actor: Actor) (meta: Meta) w =
+        let st = Map.find actor.Name w.Actors
+        let energy = Map.tryFind meta.Name st.Energy |> Option.defaultValue 0.0
+        let triggers =
+            match meta.Release with
+            | AtMaximum -> if energy >= meta.MaxEnergy && meta.Cost > 0.0 then 1 else 0
+            | Invocation _ ->
+                let cdKey = "invocation:" + meta.Name
+                let readyNow = Map.tryFind cdKey st.Cooldowns |> Option.forall (fun t -> t <= w.Time)
+                if readyNow && meta.Cost > 0.0 then int (energy / meta.Cost) else 0
+        if triggers = 0 then w
+        else
+            let spent = float triggers * meta.Cost
+            let refund = if rng.Chance meta.RefundChance then spent / 2.0 else 0.0
+            let w =
+                updateActor actor.Name (fun st ->
+                    let st = { st with Energy = Map.add meta.Name (energy - spent + refund) st.Energy }
+                    match meta.Release with
+                    | Invocation cd -> { st with Cooldowns = Map.add ("invocation:" + meta.Name) (w.Time + cd) st.Cooldowns }
+                    | AtMaximum -> st) w
+            let w = { w with Counts = bump ("meta:" + meta.Name) w.Counts }
+            [ 1..triggers ] |> List.fold (fun w _ -> meta.Triggers |> List.fold (fun w name -> trigger env rng actor name w) w) w
 
     /// Start a use of a skill at the current time, aimed at the current target.
     and private startUse env rng (actor: Actor) (skill: Skill) (useTime: float) (w: World) =
@@ -616,11 +681,12 @@ module Sim =
                 Map.tryFind skill.Name actor.HitPattern
                 |> Option.defaultValue (skill.Hits |> List.map (fun (f, m) -> DuringUse f, m))
             let w = { w with Counts = bump ("uses:" + skill.Name) w.Counts }
+            let w = if useTime > 0.0 then updateActor actor.Name (fun st -> { st with LastUsed = skill.Name }) w else w
             let times =
                 pattern |> List.map (fun (timing, mult) ->
                     (match timing with
-                     | DuringUse f -> w.Time + f * useTime
-                     | After s -> w.Time + s), mult)
+                     | DuringUse f -> w.Time + f * useTime + skill.HitDelay
+                     | After s -> w.Time + s + skill.HitDelay), mult)
             let w =
                 times
                 |> List.fold
@@ -635,6 +701,16 @@ module Sim =
                     let last = times |> List.map fst |> List.fold max w.Time
                     schedule (last + 1e-9) (ConsumeCharges(actor.Name, charge, skill.Name)) w
                 | None -> w
+            // Spellslinger-style energy: per 10 ms of base cast time of spells the player casts
+            let w =
+                if useTime > 0.0 && skill.Tags.Contains Spell then
+                    actor.Metas
+                    |> List.fold
+                        (fun w meta ->
+                            let amount = meta.Sources |> List.sumBy (function CastsSpells per -> per * skill.BaseTime * 100.0 | _ -> 0.0)
+                            if amount > 0.0 then gainEnergy env rng actor meta.Name (amount * meta.EnergyMult) w else w)
+                        w
+                else w
             react env rng actor OnUse skill (Some target.Def.Name) w
 
     and private trigger env rng (actor: Actor) name (w: World) =
@@ -769,6 +845,29 @@ module Sim =
                                     react env rng actor (OnInflict a) skill (Some target) { w with Counts = bump ("inflict:" + Ailment.name a) w.Counts }
                                 | AddBuildup _ -> w)
                             w
+                // meta gem energy: crits and newly inflicted freeze / shock / ignite, scaled by
+                // monster power and by the share of the ailment threshold the hit deals
+                let w =
+                    if actor.Metas.IsEmpty then w
+                    else
+                        let threshold = max 1.0 (Ailments.threshold def)
+                        let power = MonsterPower.ofRarity e.Def.Rarity
+                        let ratio types = Dmg.sumOf types hit.Unmitigated / threshold
+                        let before = status e
+                        let after = if dead then Map.empty else status w.Enemies.[target]
+                        let newly a = after.ContainsKey (Ailment.status a) && not (before.ContainsKey (Ailment.status a))
+                        actor.Metas
+                        |> List.fold
+                            (fun w meta ->
+                                let amount =
+                                    meta.Sources
+                                    |> List.sumBy (fun src ->
+                                        match src with
+                                        | CritHits per when hit.Crit -> per * power * ratio DamageType.all
+                                        | InflictsAilment (a, per) when newly a -> per * power * ratio (Ailments.scalesFrom a)
+                                        | _ -> 0.0)
+                                if amount > 0.0 then gainEnergy env rng actor meta.Name (amount * meta.EnergyMult) w else w)
+                            w
                 let w = markRecently actor.Name true hit.Crit dead w
                 let w = react env rng actor OnHit skill (Some target) w
                 if hit.Crit then react env rng actor OnCrit skill (Some target) w else w
@@ -803,7 +902,24 @@ module Sim =
                             TerrainChain = p.TerrainChain + Mods.sumBase ctx [ Named "TerrainChain" ] mods }
                 | d -> d
             let w = { w with Player = w.Player |> Option.map (fun p -> { p with StrikeLeech = 0.0 }) }
-            Geometry.targetsFrom rng env.Fight.Walls env.Fight.Reach delivery areaMult primary living
+            // Spell Cascade: extra impacts per side along the line from the player through the target,
+            // one radius apart (spacing: guess)
+            let cascades = int (Mods.sumBase ctx [ Named "CascadesPerSide" ] mods)
+            let impacts =
+                match delivery with
+                | AreaAtTarget r when cascades > 0 ->
+                    let d = Vec.length primary.Position
+                    let dir = if d > 0.0 then Vec.scale (1.0 / d) primary.Position else Vec.make 1.0 0.0
+                    let step = Geometry.radius r areaMult
+                    [ for k in -cascades .. cascades -> { primary with Position = Vec.add primary.Position (Vec.scale (float k * step) dir); Size = 0.0 } ]
+                | _ -> [ primary ]
+            impacts
+            |> List.collect (fun centre ->
+                match delivery with
+                | AreaAtTarget r when cascades > 0 ->
+                    let rr = Geometry.radius r areaMult
+                    living |> List.filter (fun e -> Vec.dist centre.Position e.Position <= rr + e.Size) |> List.map (fun e -> e.Name)
+                | _ -> Geometry.targetsFrom rng env.Fight.Walls env.Fight.Reach delivery areaMult primary living)
             |> List.fold (fun w target -> hitEnemy env rng actor skill mult target w) w
 
     /// A monster's hit at the player: evasion, deflection, armour, resistances, then
@@ -833,7 +949,9 @@ module Sim =
                 if not (rng.Chance(Vitals.monsterHitChance v.Evasion accuracy)) then
                     { w with Counts = bump "enemy:evaded" w.Counts }
                 else
-                    let deflected = rng.Chance(Vitals.deflectChance v.Deflection accuracy)
+                    let blockRoll () = rng.Chance v.Block
+                    let blocked = blockRoll () || (v.LuckyBlock && blockRoll ())
+                    let deflected = not blocked && rng.Chance(Vitals.deflectChance v.Deflection accuracy)
                     let dmg =
                         atk.Damage
                         |> Map.toList
@@ -842,6 +960,7 @@ module Sim =
                             match t with
                             | Physical -> d * (1.0 - Vitals.armourReduction v.Armour d / 100.0)
                             | t -> d * (1.0 - (Map.tryFind t v.Resist |> Option.defaultValue 0.0) / 100.0))
+                    let dmg = if blocked then dmg * v.BlockedDamageTaken / 100.0 else dmg
                     let fromMana = min p.Mana (dmg * Mods.sumBase Ctx.empty [ Named "DamageRemovedFromManaFirst" ] (ModDb.ofList env.Fight.Player.Mods) / 100.0)
                     let rest = dmg - fromMana
                     let toEs = min p.EnergyShield rest
@@ -855,9 +974,24 @@ module Sim =
                             Taken = p.Taken + dmg
                             MinLife = min p.MinLife (life / pools.Life)
                             Died = if life <= 0.0 then Some w.Time else None }
-                    { w with
-                        Player = Some p
-                        Counts = w.Counts |> bump "enemy:hit" |> (if deflected then bump "enemy:deflected" else id) }
+                    let w =
+                        { w with
+                            Player = Some p
+                            Counts = w.Counts |> bump "enemy:hit" |> (if deflected then bump "enemy:deflected" else id) |> (if blocked then bump "enemy:blocked" else id) }
+                    if blocked then
+                        // blocks feed meta gems (Cast on Block) and OnBlock rules
+                        let player = env.Fight.Player
+                        let w =
+                            player.Metas
+                            |> List.fold
+                                (fun w meta ->
+                                    let amount = meta.Sources |> List.sumBy (function Blocks e -> e | _ -> 0.0)
+                                    if amount > 0.0 then gainEnergy env rng player meta.Name (amount * meta.EnergyMult) w else w)
+                                w
+                        match player.Skills |> List.tryHead with
+                        | Some anySkill -> react env rng player OnBlock anySkill (Some name) w
+                        | None -> w
+                    else w
         | _ -> w
 
     /// Mark "<what>Recently" for 4 s (gained / consumed charges...).
@@ -1016,7 +1150,8 @@ module Sim =
                 w
         let actors = fight.Player :: fight.Minions
         let empty =
-            { Paused = Map.empty
+            { LastUsed = ""
+              Paused = Map.empty
               Buffs = Map.empty
               Cooldowns = Map.empty
               Energy = Map.empty }

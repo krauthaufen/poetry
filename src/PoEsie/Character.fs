@@ -186,11 +186,12 @@ module Items =
         let defences =
             lines
             |> List.choose (fun l ->
-                let value (prefix: string) = match System.Double.TryParse(l.Substring(prefix.Length).Trim().Split(' ').[0]) with | true, v -> Some v | _ -> None
+                let value (prefix: string) = match System.Double.TryParse(l.Substring(prefix.Length).Trim().Split(' ').[0].TrimEnd('%')) with | true, v -> Some v | _ -> None
                 if l.StartsWith "Armour:" then value "Armour:" |> Option.map (fun v -> Armour, v)
                 elif l.StartsWith "Evasion Rating:" then value "Evasion Rating:" |> Option.map (fun v -> Evasion, v)
                 elif l.StartsWith "Evasion:" then value "Evasion:" |> Option.map (fun v -> Evasion, v)
                 elif l.StartsWith "Energy Shield:" then value "Energy Shield:" |> Option.map (fun v -> MaxEnergyShield, v)
+                elif l.StartsWith "Block chance:" then value "Block chance:" |> Option.map (fun v -> Named "ShieldBlock", v)
                 else None)
         let numbers (l: string) =
             l.Split(' ') |> Array.choose (fun w -> match System.Double.TryParse(w.Trim(',')) with | true, v -> Some v | _ -> None) |> List.ofArray

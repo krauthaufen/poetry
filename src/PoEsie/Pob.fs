@@ -231,9 +231,23 @@ module Pob =
     /// Add the effects of persistent buff gems (Berserk, Eternal Rage, Charge Regulation...)
     /// to the character. Their gem stats apply to everything the character does.
     let withPersistentBuffs (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) =
+        // meta gems are persistent buffs too, but their group's supports belong to the triggered
+        // spells; only the meta gem's own "granted" stats reach the character
+        let metaGranted =
+            build.Groups
+            |> List.filter (fun g -> g.Enabled)
+            |> List.choose (fun g -> g.Gems |> List.tryFind (fun gem -> gem.Enabled && not gem.IsSupport && Gems.isMeta db gem.Name))
+            |> List.collect (fun gem ->
+                Gems.rawStats db (ModDb.ofList sheet.Mods) { Gem = gem.Name; Level = gem.Level; Quality = gem.Quality; StatSet = 1; Supports = [] }
+                |> List.filter (fun (id, _) -> Gems.grantsToCharacter db id)
+                |> List.collect (fun (id, v) -> match StatMap.meaning id v with Mods ms -> ms | _ -> []))
+        let sheet = { sheet with Mods = sheet.Mods @ metaGranted }
         build.Groups
         |> List.filter (fun g -> g.Enabled)
-        |> List.choose (fun g -> g.Gems |> List.tryFind (fun gem -> gem.Enabled && not gem.IsSupport && Gems.isPersistentBuff db gem.Name) |> Option.map (fun _ -> g))
+        |> List.choose (fun g ->
+            g.Gems
+            |> List.tryFind (fun gem -> gem.Enabled && not gem.IsSupport && Gems.isPersistentBuff db gem.Name && not (Gems.isMeta db gem.Name))
+            |> Option.map (fun _ -> g))
         |> List.collect (groupSkill db sheet)
         |> List.fold
             (fun (sheet: CharacterSheet) r ->
