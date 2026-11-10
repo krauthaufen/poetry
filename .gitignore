@@ -3,4 +3,5 @@ obj/
 *.swp
 out/
 builds-private/
-corpus/
+/corpus/
+tools/corpus/report.txt
