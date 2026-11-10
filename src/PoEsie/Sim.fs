@@ -70,6 +70,8 @@ type PeriodicAction =
     /// One stack of a uniformly random resource from the list; at its maximum it only
     /// refreshes the duration (charges).
     | GainAnyRandom of resources: string list
+    /// Like GainAnyRandom, but picked with these weights.
+    | GainWeighted of weights: (string * float) list
     /// One stack of each resource that has any (Charge Regulation). Charge-removal
     /// skip chances apply.
     | ConsumeEach of resources: string list
@@ -894,6 +896,18 @@ module Sim =
                     setStacksWith env actorName true r (stacksOf st r + 1) w
                     |> markStatus actorName ("Gained" + r + "Recently")
                     |> fun w -> { w with Counts = bump ("gained:" + r) w.Counts }
+            | GainWeighted weights ->
+                let total = weights |> List.sumBy snd
+                let roll = rng.Float() * total
+                let r =
+                    weights
+                    |> List.fold (fun (picked, acc) (k, wgt) -> match picked with Some _ -> picked, acc | None -> (if roll < acc + wgt then Some k else None), acc + wgt) (None, 0.0)
+                    |> fst
+                    |> Option.defaultValue (fst (List.last weights))
+                let maxR = Map.tryFind r actor.MaxResources |> Option.defaultValue 0
+                setStacksWith env actorName true r (min maxR (stacksOf st r + 1)) w
+                |> markStatus actorName ("Gained" + r + "Recently")
+                |> fun w -> { w with Counts = bump ("gained:" + r) w.Counts }
             | GainAnyRandom resources ->
                 let r = resources.[min (resources.Length - 1) (int (rng.Float() * float resources.Length))]
                 let maxR = Map.tryFind r actor.MaxResources |> Option.defaultValue 0

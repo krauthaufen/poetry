@@ -105,7 +105,11 @@ let main argv =
                 | _ -> n)
         let vitals = Defence.computeWith startResources bases sheet
         let periodics = Behaviours.periodics db sheet build (Map.tryFind "chargegen" o |> Option.map float |> Option.defaultValue 5.0)
-        for p in periodics do printfn "periodic: %s every %.1fs" p.Name p.Every
+        for p in periodics do
+            printfn "periodic: %s every %.1fs%s" p.Name p.Every
+                (match p.Action with
+                 | GainWeighted ws -> let t = ws |> List.sumBy snd in "  " + (ws |> List.map (fun (k, v) -> sprintf "%s %.0f%%" k (100.0 * v / t)) |> String.concat ", ")
+                 | _ -> "")
         printfn "charge durations: %s" (Behaviours.chargeDurations sheet |> Map.toList |> List.map (fun (k, d) -> sprintf "%s %.0fs" k d) |> String.concat ", ")
         if not moteMax.IsEmpty then printfn "motes: %s" (moteMax |> List.map (fun (k, n) -> sprintf "%s max %d" k n) |> String.concat ", ")
         let sheet =

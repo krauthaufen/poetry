@@ -46,7 +46,20 @@ module Behaviours =
           if consume > 0.0 then
               yield { Name = "consume charges"; Every = consume / 1000.0; Action = ConsumeEach charges }
           if Mods.flag Ctx.empty (Named "GeneratesRandomCharges") mods then
-              yield { Name = "generate charges"; Every = chargeGenSeconds; Action = GainAnyRandom charges }
+              // weighted by the total attribute requirements of socketed skill gems:
+              // Strength -> endurance, Dexterity -> frenzy, Intelligence -> power
+              let gems =
+                  build.Groups
+                  |> List.filter (fun g -> g.Enabled)
+                  |> List.collect (fun g -> g.Gems |> List.filter (fun gem -> gem.Enabled))
+                  |> List.choose (fun gem -> Map.tryFind gem.Name db.Gems |> Option.map (fun d -> gem, d))
+              let total pick =
+                  gems |> List.sumBy (fun (gem, d) -> Gems.attributeRequirement gem.Level (pick d.Requirements) d.Support)
+              let weights =
+                  [ "EnduranceCharge", total (fun (s, _, _) -> s)
+                    "FrenzyCharge", total (fun (_, d, _) -> d)
+                    "PowerCharge", total (fun (_, _, i) -> i) ]
+              yield { Name = "generate charges"; Every = chargeGenSeconds; Action = GainWeighted weights }
           let motes = sum "MoteGainEveryMs"
           if motes > 0.0 then
               yield { Name = "motes"; Every = motes / 1000.0; Action = GainRandom [ "Mote:red"; "Mote:green"; "Mote:blue" ] } ]

@@ -360,3 +360,11 @@ module Gems =
                         | Some s when s.Support -> s.StatSets |> List.tryHead |> Option.map (fun set -> stats s set lvl 0) |> Option.defaultValue []
                         | _ -> [])
                 statsWith alt data set level quality @ supports
+
+    /// Attribute requirement of a skill gem at a level (PoB calcLib.getGemStatRequirement):
+    /// round((5 + (level - 3) * 1.7) * (share / 100) ^ 0.9) + 4, 0 below 8 and for supports.
+    let attributeRequirement level (share: float) isSupport =
+        if share <= 0.0 || isSupport then 0.0
+        else
+            let req = System.Math.Round((5.0 + float (level - 3) * 1.7) * ((share / 100.0) ** 0.9)) + 4.0
+            if req < 8.0 then 0.0 else req
