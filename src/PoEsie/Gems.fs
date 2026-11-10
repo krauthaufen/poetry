@@ -251,7 +251,8 @@ module Gems =
           Delivery = delivery
           Mods = mods
           Parts = []
-          Consumes = if data.Types.Contains "SkillConsumesPowerChargesOnUse" then Some "PowerCharge" else None },
+          Consumes = if data.Types.Contains "SkillConsumesPowerChargesOnUse" then Some "PowerCharge" else None
+          Cost = gemLevel |> Option.bind (fun l -> l.ManaCost) |> Option.defaultValue 0.0 },
         cov
 
     /// Build a simulator Skill from a socketed gem. `characterMods` are needed for
@@ -292,7 +293,12 @@ module Gems =
                         { p with Consumes = None }, c)
                     |> List.unzip
                 let cov = List.fold Coverage.merge cov (supportCov @ partCov)
-                Ok({ main with Parts = parts }, cov)
+                // supports multiply the cost: "Cost Multiplier 130%" is manaMultiplier 30
+                let costMult =
+                    setup.Supports
+                    |> List.choose (fun (name, lvl) -> skillOfGem db name |> Option.bind (fun s -> Map.tryFind (max 1 lvl) s.Levels |> Option.orElse (Map.tryFind 1 s.Levels)))
+                    |> List.fold (fun k l -> k * (1.0 + (l.ManaMultiplier |> Option.defaultValue 0.0) / 100.0)) 1.0
+                Ok({ main with Parts = parts; Cost = main.Cost * costMult }, cov)
 
     /// The game stats of a socketed gem (own stat set, quality, alt quality, supports),
     /// for behaviours that need raw numbers.

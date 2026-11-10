@@ -64,6 +64,9 @@ module Constants =
     let monsterEvasion level = byLevel Tables.monsterEvasion level
     let ailmentThreshold level = byLevel Tables.monsterAilmentThreshold level
     let poiseThreshold level = byLevel Tables.monsterPoiseThreshold level
+    let monsterAccuracy level = byLevel Tables.monsterAccuracy level
+    /// DefaultMonsterStats damage column.
+    let monsterDamage level = byLevel Tables.monsterDamage level
 
     // ---- charges and rage ----
     /// GameConstants BaseMaximumRage; Character.ot max_*_charges.
@@ -71,6 +74,21 @@ module Constants =
     let baseMaxCharges = 3.0
     /// Character.ot attack_damage_final_permyriad_per_rage = 100: 1% more attack damage per Rage.
     let moreAttackDamagePerRage = 1.0
+
+    // ---- player recovery ----
+    /// Leech recovers at most this % of maximum mana per second (PoE convention; guess for PoE2).
+    let maxManaLeechRate = 20.0
+    /// Seconds without being hit before energy shield recharges (PoB EnergyShieldRechargeDelay).
+    let energyShieldRechargeDelay = 4.0
+
+    /// Blinded monsters have this much less accuracy. The buff (BuffDefinitions "blinded":
+    /// accuracy_rating_+%_final_from_blinded) carries no base value in the data; GUESS.
+    let blindAccuracyLess = 20.0
+
+    /// Maim: maim_movement_speed_+%_final -30 (BuffTemplates LabyrinthTrapMaim; base value not in data).
+    let maimSlow = 30.0
+    /// Hinder: hinder_movement_speed_+%_final; no value in the data, GUESS.
+    let hinderSlow = 30.0
 
     /// Server tick, PoB data.misc.ServerTickTime.
     let serverTick = 0.033

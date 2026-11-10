@@ -22,6 +22,7 @@ tables = {
     "monsterArmour": "monsterArmourTable",
     "monsterEvasion": "monsterEvasionTable",
     "monsterAccuracy": "monsterAccuracyTable",
+    "monsterDamage": "monsterDamageTable",
     "monsterAilmentThreshold": "monsterAilmentThresholdTable",
     "monsterPoiseThreshold": "monsterPoiseThresholdTable",
 }

@@ -110,7 +110,10 @@ module Api =
     let itemText (item: Json) =
         let get k = Json.strField k item |> Option.defaultValue ""
         let quality = property "Quality" item |> Option.map (fun q -> "Quality: " + q) |> Option.toList
-        [ "Rarity: " + get "rarity"; get "name"; get "typeLine"; "--------" ] @ quality @ [ "--------" ] @ modLines item
+        let defences =
+            [ "Armour", "Armour"; "Evasion Rating", "Evasion Rating"; "Energy Shield", "Energy Shield" ]
+            |> List.choose (fun (prop, label) -> property prop item |> Option.map (fun v -> label + ": " + v))
+        [ "Rarity: " + get "rarity"; get "name"; get "typeLine"; "--------" ] @ quality @ defences @ [ "--------" ] @ modLines item
         |> String.concat "\n"
 
     let private gemLevel (gem: Json) =
@@ -168,6 +171,17 @@ module Api =
             Json.list (Json.field "passives" c |> Option.bind (Json.field "hashes"))
             |> List.choose Json.num
             |> List.map int
+        let passives = Json.field "passives" c
+        // chosen attributes etc.: node id -> the stats it really grants
+        let overrides =
+            match passives |> Option.bind (Json.field "skill_overrides") with
+            | Some (JObj m) ->
+                m |> Map.toList |> List.choose (fun (k, v) ->
+                    match System.Int32.TryParse k with
+                    | true, id -> Some(id, Json.list (Json.field "stats" v) |> List.choose Json.str |> List.map stripMarkup)
+                    | _ -> None)
+            | _ -> []
+        let quests = Json.list (passives |> Option.bind (Json.field "quest_stats")) |> List.choose Json.str |> List.map stripMarkup
         { Level = Json.numField "level" c |> Option.map int |> Option.defaultValue 1
           ClassName = Json.strField "class" c |> Option.defaultValue ""
           Ascendancy = ""
@@ -175,5 +189,7 @@ module Api =
           TreeNodes = hashes
           Groups = groups
           MainGroup = 1
-          Config = Map.empty },
+          Config = Map.empty
+          TreeOverrides = Map.ofList overrides
+          ExtraLines = quests },
         displayed

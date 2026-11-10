@@ -18,6 +18,7 @@
 ///   --layouts F      random boss and pack layouts (sizes, distances, slam reach, arena walls);
 ///                    write an HTML page with best / median / worst pictures to file F
 ///   --count N        number of layouts per scenario (default 40)
+///   --immortal       ignore incoming damage and mana costs
 ///   --suite          run the standard scenarios (pack, pack + 2 rares, surrounded, boss) and print a table
 ///   --data DIR       exported game data (default: data/game next to the repo)
 module PoEsie.Cli
@@ -41,6 +42,7 @@ let rec private opts (args: string list) =
     | "--bonded" :: rest -> Map.add "bonded" "1" (opts rest)
     | "--all" :: rest -> Map.add "all" "1" (opts rest)
     | "--shotgun" :: rest -> Map.add "shotgun" "1" (opts rest)
+    | "--immortal" :: rest -> Map.add "immortal" "1" (opts rest)
     | k :: v :: rest when k.StartsWith "--" -> Map.add (k.Substring 2) v (opts rest)
     | _ :: rest -> opts rest
     | [] -> Map.empty
@@ -69,6 +71,7 @@ let main argv =
             else Pob.read (decodeBuildCode text), []
         let build = if Map.containsKey "bonded" o then { build with Config = Map.add "bonded" "1" build.Config } else build
         let sheet = Pob.character db tree build |> fun s -> Pob.withPersistentBuffs db s build
+        let vitals = Defence.compute (Defence.classBases (File.ReadAllText(Path.Combine(dataDir, "tree.json")))) sheet
         let sheet =
             match Map.tryFind "skip" o with
             | Some p ->
@@ -95,6 +98,9 @@ let main argv =
                 | _ -> k, n)
 
         printfn "== %s %s, level %d: %d items, %d passives, %d socket groups" build.ClassName build.Ascendancy build.Level build.Items.Length build.TreeNodes.Length build.Groups.Length
+        printfn "player: life %.0f, mana %.0f, ES %.0f | armour %.0f, evasion %.0f, deflection %.0f | res %s | regen life %.0f/s, mana %.0f/s"
+            vitals.Life vitals.Mana vitals.EnergyShield vitals.Armour vitals.Evasion vitals.Deflection
+            (vitals.Resist |> Map.toList |> List.map (fun (t, r) -> sprintf "%s %.0f" (DamageType.name t) r) |> String.concat " / ") vitals.LifeRegen vitals.ManaRegen
         printfn "character: %d modifiers; starts with %s" sheet.Mods.Length (resources |> List.map (fun (k, n) -> sprintf "%d %s" n k) |> String.concat ", ")
         match sheet.MainHand with
         | Some w -> printfn "main hand: %A, %.1f%% crit, %.2f APS" (w.Damage |> Map.toList |> List.map (fun (t, r) -> sprintf "%s %.0f-%.0f" (DamageType.name t) r.Min r.Max)) w.CritChance w.AttacksPerSecond
@@ -168,7 +174,11 @@ let main argv =
                 printfn "  delivery: %A" skill.Delivery
                 let fight =
                     { Enemies = enemies
-                      Player = { Actor.make "Player" sheet.Mods [ skill ] with Resources = resources; Cycles = cycles }
+                      Player =
+                        { Actor.make "Player" sheet.Mods [ skill ] with
+                            Resources = resources
+                            Cycles = cycles
+                            Vitals = (if Map.containsKey "immortal" o then None else Some vitals) }
                       Minions = []
                       Targeting = (if Map.tryFind "target" o = Some "nearest" then Nearest else Strongest)
                       Reach = get "reach" 15.0

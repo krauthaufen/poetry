@@ -185,6 +185,56 @@ module StatMap =
     let private allAilments = [ Ignite; Bleed; Poison; Shock; Chill; Freeze; Electrocute; Daze; Maim; Blind; Hinder; Pin ]
 
     /// Explicit meanings for ids that don't follow a pattern.
+    /// The player's pools, defences, resistances, recovery and costs.
+    let private defensive (id: string) (v: float) : Meaning option =
+        let one m = Some(Mods [ m ])
+        let each stats = Some(Mods(stats |> List.map (fun s -> Mod.base' s v)))
+        match id with
+        | "additional_strength" -> one (Mod.base' (Attribute "Str") v)
+        | "additional_dexterity" -> one (Mod.base' (Attribute "Dex") v)
+        | "additional_intelligence" -> one (Mod.base' (Attribute "Int") v)
+        | "additional_all_attributes" -> each [ Attribute "Str"; Attribute "Dex"; Attribute "Int" ]
+        | "additional_strength_and_dexterity" -> each [ Attribute "Str"; Attribute "Dex" ]
+        | "additional_strength_and_intelligence" -> each [ Attribute "Str"; Attribute "Int" ]
+        | "additional_dexterity_and_intelligence" -> each [ Attribute "Dex"; Attribute "Int" ]
+        | "base_maximum_life" -> one (Mod.base' MaxLife v)
+        | "maximum_life_+%" -> one (Mod.inc MaxLife v)
+        | "base_maximum_mana" -> one (Mod.base' MaxMana v)
+        | "maximum_mana_+%" -> one (Mod.inc MaxMana v)
+        | "base_maximum_energy_shield" -> one (Mod.base' MaxEnergyShield v)
+        | "maximum_energy_shield_+%" -> one (Mod.inc MaxEnergyShield v)
+        | "base_evasion_rating" -> one (Mod.base' Evasion v)
+        | "evasion_rating_+%" -> one (Mod.inc Evasion v)
+        | "base_physical_damage_reduction_rating" -> one (Mod.base' Armour v)
+        | "physical_damage_reduction_rating_+%" -> one (Mod.inc Armour v)
+        | "evasion_and_physical_damage_reduction_rating_+%" -> Some(Mods [ Mod.inc Evasion v; Mod.inc Armour v ])
+        | "armour_and_energy_shield_+%" -> Some(Mods [ Mod.inc Armour v; Mod.inc MaxEnergyShield v ])
+        | "evasion_and_energy_shield_+%" -> Some(Mods [ Mod.inc Evasion v; Mod.inc MaxEnergyShield v ])
+        | "global_defences_+%" | "armour_evasion_energy_shield_+%" ->
+            Some(Mods [ Mod.inc Armour v; Mod.inc Evasion v; Mod.inc MaxEnergyShield v ])
+        | "base_deflection_rating_%_of_evasion_rating" -> one (Mod.base' (Named "DeflectionPercentOfEvasion") v)
+        | "base_resist_all_elements_%" -> each (DamageType.elemental |> List.map Resist)
+        | "additional_maximum_all_elemental_resistances_%" -> each (DamageType.elemental |> List.map MaxResist)
+        | "base_chaos_damage_resistance_%" -> one (Mod.base' (Resist Chaos) v)
+        | "life_regeneration_rate_per_minute_%" -> one (Mod.base' LifeRegenPercent (v / 60.0))
+        | "base_life_regeneration_rate_per_minute" -> one (Mod.base' LifeRegen (v / 60.0))
+        | "life_regeneration_rate_+%" -> one (Mod.inc LifeRegen v)
+        | "mana_regeneration_rate_+%" -> one (Mod.inc ManaRegen v)
+        | "base_mana_cost_efficiency_+%" -> one (Mod.inc ManaCostEfficiency v)
+        | "base_spell_mana_cost_efficiency_+%" -> one (Mod.inc ManaCostEfficiency v |> Mod.whenever (SkillIs Spell))
+        | "base_mana_cost_-%" -> one (Mod.inc ManaCost -v)
+        | "base_mana_gained_on_enemy_death" -> one (Mod.base' ManaOnKill v)
+        | "recover_%_maximum_mana_on_kill" -> one (Mod.base' (Named "ManaPercentOnKill") v)
+        | "recover_x%_of_maximum_mana_when_you_consume_a_power_charge" -> one (Mod.base' (Named "ManaPercentOnConsumePower") v)
+        | "base_mana_leech_from_physical_attack_damage_permyriad" -> one (Mod.base' ManaLeech (v / 100.0) |> Mod.whenever (SkillIs Attack))
+        | "base_damage_removed_from_mana_before_life_%" -> one (Mod.base' (Named "DamageRemovedFromManaFirst") v)
+        | _ ->
+            // "base_<type>_damage_resistance_%", "base_maximum_<type>_damage_resistance_%"
+            match split id with
+            | [ "base"; t; "damage"; "resistance"; "%" ] when (typeWord t).IsSome -> one (Mod.base' (Resist (typeWord t).Value) v)
+            | [ "base"; "maximum"; t; "damage"; "resistance"; "%" ] when (typeWord t).IsSome -> one (Mod.base' (MaxResist (typeWord t).Value) v)
+            | _ -> None
+
     let private explicit (id: string) (v: float) : Meaning option =
         let one m = Some(Mods [ m ])
         match id with
@@ -484,7 +534,10 @@ module StatMap =
     let private direct id value =
         match explicit id value with
         | Some m -> Some m
-        | None -> pattern id value
+        | None ->
+            match defensive id value with
+            | Some m -> Some m
+            | None -> pattern id value
 
     /// Gem stats carry the gem's name: "support_controlled_destruction_spell_damage_+%_final".
     /// Try the id with 1..4 name words removed after the prefix.

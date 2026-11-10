@@ -69,7 +69,9 @@ type Skill =
       /// Other parts of the same use (e.g. Falling Thunder's slam + its projectiles).
       Parts: Skill list
       /// Charge this skill consumes on use, e.g. "PowerCharge".
-      Consumes: string option }
+      Consumes: string option
+      /// Mana per use before cost modifiers (gem cost × support multipliers).
+      Cost: float }
 
 module Skill =
     let make name tags =
@@ -85,7 +87,8 @@ module Skill =
           Delivery = Single
           Mods = []
           Parts = []
-          Consumes = None }
+          Consumes = None
+          Cost = 0.0 }
 
     let ctx (skill: Skill) crit buffs enemyStatus =
         { Crit = crit

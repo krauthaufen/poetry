@@ -21,7 +21,17 @@ type Summary =
       /// Mean count per run.
       Counts: (string * float) list
       /// Per rarity: time until the last enemy of that rarity died (runs where all did).
-      KillTimes: (Rarity * Stats) list }
+      KillTimes: (Rarity * Stats) list
+      /// Fraction of runs in which the player died.
+      DeathRate: float
+      /// Damage taken per second.
+      DamageTakenPerSecond: float
+      /// Lowest life fraction reached (mean, worst).
+      MinLife: float * float
+      /// Fraction of the fight spent waiting for mana.
+      Starved: float
+      /// Mean mana per second by source.
+      ManaGained: (string * float) list }
 
 module Summary =
     let stats (xs: float list) =
@@ -52,6 +62,11 @@ module Summary =
             |> meanOf (fun o -> let t = max 1e-9 (total o) in o.DamageBy |> Map.map (fun _ v -> v / t))
           Uptime = outcomes |> meanOf (fun o -> o.Uptime |> Map.map (fun _ v -> v / max 1e-9 o.Duration))
           Counts = outcomes |> meanOf (fun o -> o.Counts |> Map.map (fun _ v -> float v))
+          DeathRate = float (outcomes |> List.filter (fun o -> o.Died.IsSome) |> List.length) / float outcomes.Length
+          DamageTakenPerSecond = outcomes |> List.averageBy (fun o -> o.DamageTaken / max 1e-9 o.Duration)
+          MinLife = (outcomes |> List.averageBy (fun o -> o.MinLife)), (outcomes |> List.map (fun o -> o.MinLife) |> List.min)
+          Starved = outcomes |> List.averageBy (fun o -> o.ManaStarved / max 1e-9 o.Duration)
+          ManaGained = outcomes |> meanOf (fun o -> o.ManaGained |> Map.map (fun _ v -> v / max 1e-9 o.Duration))
           KillTimes =
             [ Normal; Magic; Rare; Unique ]
             |> List.choose (fun r ->
@@ -77,7 +92,10 @@ module Summary =
                | Some t -> "clear (s) " + st t
                | None -> "clear     never") ]
             @ (s.KillTimes |> List.map (fun (r, t) -> sprintf "  last %-7s dead at %s" (Rarity.name r) (st t)))
-            @ [ "DPS      " + st s.Dps; "damage share:" ]
+            @ [ "DPS      " + st s.Dps
+                sprintf "player   died in %.0f%% of runs, took %.0f damage/s, lowest life %.0f%% (worst %.0f%%)" (s.DeathRate * 100.0) s.DamageTakenPerSecond (fst s.MinLife * 100.0) (snd s.MinLife * 100.0)
+                sprintf "mana     waited for mana %.1f%% of the time; gained per second: %s" (s.Starved * 100.0) (s.ManaGained |> List.map (fun (k, v) -> sprintf "%s %.0f" k v) |> String.concat ", ")
+                "damage share:" ]
             @ (s.DamageShare |> List.map (fun (k, v) -> sprintf "  %-28s %5.1f%%" k (v * 100.0)))
             @ [ "uptime:" ]
             @ (s.Uptime |> List.map (fun (k, v) -> sprintf "  %-28s %5.1f%%" k (v * 100.0)))

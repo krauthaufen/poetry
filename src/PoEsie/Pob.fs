@@ -27,12 +27,20 @@ type PobBuild =
       Groups: PobGroup list
       MainGroup: int
       /// PoB configuration inputs, name -> value.
-      Config: Map<string, string> }
+      Config: Map<string, string>
+      /// Passive nodes whose stats differ from the tree data (chosen attributes).
+      TreeOverrides: Map<int, string list>
+      /// Character-wide lines from elsewhere (quest rewards).
+      ExtraLines: string list }
 
 /// A character ready to simulate: global mods, main-hand weapon, how well we understood it.
 type CharacterSheet =
     { Mods: Mod list
       MainHand: Weapon option
+      /// Armour / evasion / energy shield shown on the equipped items.
+      ItemDefences: (Stat * float) list
+      Level: int
+      ClassName: string
       Coverage: Coverage }
 
 module Pob =
@@ -130,7 +138,9 @@ module Pob =
           TreeNodes = nodes
           Groups = groups
           MainGroup = build |> Option.bind (Xml.attr "mainSocketGroup") |> fun m -> int' m 1
-          Config = config }
+          Config = config
+          TreeOverrides = Map.empty
+          ExtraLines = [] }
 
     /// Slots whose items always apply. Flasks and charms only apply while active.
     let private alwaysOn (slot: string) =
@@ -180,10 +190,16 @@ module Pob =
             parsed
             |> List.map (fun (slot, p) -> { p.Coverage with UnknownText = p.Coverage.UnknownText |> List.map (fun l -> slot + ": " + l) })
             |> List.fold Coverage.merge Coverage.empty
+        let tree = build.TreeOverrides |> Map.fold (fun t id stats -> match Map.tryFind id t with Some n -> Map.add id { n with Stats = stats } t | None -> t) tree
         let treeMods, treeCov = Tree.mods db tree build.TreeNodes
-        { Mods = itemMods @ treeMods
+        let extraStats, extraUnknown = StatText.parseLines db.Text build.ExtraLines
+        let extraMods, _, extraCov = Items.interpret extraStats
+        { Mods = itemMods @ treeMods @ extraMods
           MainHand = mainHand
-          Coverage = Coverage.merge itemCov treeCov }
+          ItemDefences = parsed |> List.collect (fun (_, p) -> p.Defences)
+          Level = build.Level
+          ClassName = build.ClassName
+          Coverage = Coverage.merge (Coverage.merge itemCov treeCov) { extraCov with UnknownText = extraUnknown |> List.map (fun l -> "quest: " + l) } }
 
     /// The skill of a socket group: its first enabled active gem with the group's supports.
     let groupSkill (db: GameDb) (sheet: CharacterSheet) (group: PobGroup) =

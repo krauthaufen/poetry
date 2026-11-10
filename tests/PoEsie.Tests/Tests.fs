@@ -169,7 +169,7 @@ let main _ =
         let f = { fight skill 5000.0 with Player = Actor.make "Player" [] [ skill ] }
         equal (Sim.run f 7u) (Sim.run f 7u))
 
-    let dummy name x y = { EnemyDef.atLevel 83 1e9 with Name = name; Position = Vec.make x y; Size = 4.0; Mods = [] }
+    let dummy name x y = { EnemyDef.atLevel 83 1e9 with Name = name; Position = Vec.make x y; Size = 4.0; Mods = []; Attack = None }
 
     test "geometry: area at target hits everything within radius + body size" (fun () ->
         let a, b, c = dummy "a" 30.0 0.0, dummy "b" 40.0 0.0, dummy "c" 60.0 0.0
@@ -249,6 +249,30 @@ let main _ =
         equal 5 picks
         let dmg = o.DamageBy.["Bolt (hit)"]
         if dmg < 900.0 || dmg > 1800.0 || dmg % 100.0 <> 0.0 then failwithf "unexpected damage %g" dmg)
+
+    let vitals =
+        { Str = 0.0; Dex = 0.0; Int = 0.0; Life = 100.0; Mana = 100.0; EnergyShield = 0.0; Armour = 0.0; Evasion = 0.0
+          Deflection = 0.0; Resist = Map.ofList [ Fire, 0.0; Cold, 0.0; Lightning, 0.0; Chaos, 0.0 ]
+          LifeRegen = 0.0; ManaRegen = 10.0; EnergyShieldRecharge = 0.0 }
+
+    test "vitals: a skill that costs more than regen waits for mana" (fun () ->
+        // 50 mana per 1 s cast, 100 mana pool, 10 mana/s regen: 2 free casts, then one cast per 5 s
+        let bolt = { fireSpell 100.0 with Cost = 50.0 }
+        let player = { Actor.make "Player" [ noIgnite ] [ bolt ] with Vitals = Some vitals }
+        let o = Sim.run (Fight.single (boss 1e9) player 20.0) 1u
+        let uses = o.Counts.["uses:Bolt"]
+        if uses < 5 || uses > 7 then failwithf "expected about 6 uses, got %d" uses
+        if o.ManaStarved < 8.0 then failwithf "expected long mana waits, got %g" o.ManaStarved)
+
+    test "vitals: monsters walk up, hit, and can kill the player" (fun () ->
+        let attack = { Interval = 1.0; Damage = Map.ofList [ Physical, 30.0 ]; Accuracy = 1e9; Range = 5.0 }
+        let brute = { dummy "brute" 50.0 0.0 with Attack = Some attack; Speed = 10.0 }
+        let player = { Actor.make "Player" [ noIgnite ] [ { fireSpell 0.0 with BaseDamage = Map.empty } ] with Vitals = Some vitals }
+        let o = Sim.run (Fight.single brute player 30.0) 1u
+        // walks 50 - 4 size - 5 range = 41 units at 10/s, then 30 per second against 100 life
+        match o.Died with
+        | Some t when t > 4.0 && t < 9.0 -> ()
+        | d -> failwithf "expected death between 4 and 9 s, got %A" d)
 
     DataTests.run test near (fun a b -> equal a b)
 

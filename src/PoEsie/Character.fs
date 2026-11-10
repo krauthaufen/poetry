@@ -7,6 +7,8 @@ type ParsedItem =
       Weapon: Weapon option
       /// Global modifiers the item gives the character.
       Mods: Mod list
+      /// Armour / evasion / energy shield as the item shows them (local mods and quality included).
+      Defences: (Stat * float) list
       Coverage: Coverage }
 
 type TreeNode =
@@ -167,10 +169,20 @@ module Items =
         let mods, locals, cov = interpret stats
         // Lines before the first understood stat are usually the name block; don't report them.
         let unknown = unknown |> List.filter (fun l -> l.Contains " " && not (Some l = baseName))
+        let defences =
+            lines
+            |> List.choose (fun l ->
+                let value (prefix: string) = match System.Double.TryParse(l.Substring(prefix.Length).Trim().Split(' ').[0]) with | true, v -> Some v | _ -> None
+                if l.StartsWith "Armour:" then value "Armour:" |> Option.map (fun v -> Armour, v)
+                elif l.StartsWith "Evasion Rating:" then value "Evasion Rating:" |> Option.map (fun v -> Evasion, v)
+                elif l.StartsWith "Evasion:" then value "Evasion:" |> Option.map (fun v -> Evasion, v)
+                elif l.StartsWith "Energy Shield:" then value "Energy Shield:" |> Option.map (fun v -> MaxEnergyShield, v)
+                else None)
         { Name = name
           BaseName = baseName |> Option.defaultValue ""
           Weapon = baseName |> Option.map (fun b -> weapon db.Weapons.[b] (quality lines) locals)
           Mods = mods
+          Defences = defences
           Coverage = { cov with UnknownText = unknown } }
 
 module Tree =

@@ -48,6 +48,20 @@ type Stat =
     | PhysicalReduction
     | AilmentThreshold
     | PoiseThreshold
+    // ---- the player's own pools and defences ----
+    | Attribute of string // "Str" | "Dex" | "Int"
+    | MaxLife
+    | MaxMana
+    | MaxEnergyShield
+    | Evasion
+    | Deflection
+    | LifeRegen // flat per second
+    | LifeRegenPercent // % of max life per second
+    | ManaRegen // increased mana regeneration rate
+    | ManaCostEfficiency
+    | ManaCost // increased / reduced mana cost
+    | ManaOnKill
+    | ManaLeech // % of physical attack damage leeched as mana
     // ---- minions ----
     | ForMinions of Stat
     // ---- anything else, by name ----

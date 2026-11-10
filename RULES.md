@@ -116,3 +116,28 @@ Confidence levels:
 | Slam impact point | `Reach` units in front of the player towards the aimed enemy, at most its centre | setting (default 15) | guess |
 | Walls and terrain chain | projectiles stop at walls; with "chance to chain 1 extra time from terrain" (Ricochet) they chain once from the wall: towards the nearest enemy within chain range that this projectile hasn't hit, with the remaining range. No target in range: mirror bounce | game text ("chain" = targeted) | guess (no-target fallback, chain range 3 m) |
 | Arenas | open field, round room or corridor; random layouts in `--layouts` always enclose player and monsters | modelling choice | — |
+
+## The player: pools, costs, incoming damage
+
+| Mechanic | Rule | Source | Confidence |
+|---|---|---|---|
+| Attributes | class base (tree data) + attribute mods; the API's `skill_overrides` give the chosen "+5 to any Attribute" nodes; quest rewards from `quest_stats` | data | data |
+| Life | (16 + 12 × level + 2 × Str + flat) × inc × more | PoB CalcSetup / CalcPerform; Character.ot life_per_level | pob + data |
+| Mana | (30 + 4 × level + 2 × Int + flat) × inc × more | same | pob + data |
+| Armour, evasion, energy shield | items' displayed values (local mods and quality included) + flat, × global inc × more | API / PoB item text | data |
+| Deflection | % of evasion (`base_deflection_rating_%_of_evasion_rating`) + flat | game text | data |
+| Resistances | sum, capped at 75 + max resist mods (≤ 90); no penalty | — | guess (no campaign penalty) |
+| Mana regeneration | 4% of max mana per second × inc | Character.ot 240 per minute | data |
+| Energy shield recharge | 12.5% per second after 4 s without being hit | Character.ot 750 per minute; PoB delay 4 s | data + pob |
+| Skill cost | gem level cost × support cost multipliers (`manaMultiplier`, percent more) × increased cost / (1 + cost efficiency) | skill data; PoB SupportManaMultiplier | data (efficiency formula: guess) |
+| Not enough mana | the use waits until regeneration and leech cover it | — | modelling choice |
+| Mana leech | % of physical attack damage dealt, recovered at most 20% of max mana per second | PoE convention | guess |
+| Mana on kill | flat and % of max mana per kill, also for damage-over-time kills? no: hit kills only | game text | guess (DoT kills) |
+| Monster hits | 1.5 × level damage × (1/4.4 normal/magic/rare, 4/4.4 unique) × rarity damage modifier, every 1.5 s, 40% physical / 20% each element | PoB enemy presets; rarity mod from Mods.dat | pob heuristic + guess |
+| Monster movement | walk towards the player at 3.5 m/s until within 0.8 m; frozen / stunned / electrocuted / pinned don't move; maimed and hindered 30% slower; chilled slower by its magnitude | maim −30% from BuffTemplates; hinder, speed, range: guesses | guess |
+| Monster hit chance | 1 − 0.95 E / (E + 4 Acc); blinded monsters have 20% less accuracy | PoB monsterHitChance; blind value a guess | pob + guess |
+| Deflection | P(not deflected) = Acc / (Acc + 0.12 D) × 1.5 − 0.5, capped 95%; deflected hits deal 40% less | PoB deflectChance; GameConstants | pob + data |
+| Mitigation | armour A / (A + 10 D) capped 90% for physical, resistances for the rest; "damage removed from mana first", then energy shield, then life | PoB; game text | pob |
+| Frozen / stunned / electrocuted monsters | don't attack | buff data `stopped_by_*` | data |
+| Chill | monsters attack slower by the chill magnitude | buff data action_speed_+%_final_from_chill | data |
+| Not modelled | flasks and charms, life leech, block, evade-based crit, monster skills and phases, ranged monsters | — | missing |

@@ -1,10 +1,79 @@
 {
   "steam": "/home/schorsch/games/SteamLibrary/steamapps/common/Path of Exile 2",
-  "translations": ["English"],
+  "translations": [
+    "English"
+  ],
   "tables": [
-    { "name": "Stats", "columns": ["Id"] },
-    { "name": "Mods", "columns": ["Id", "Level", "Domain", "GenerationType", "Stat1", "Stat2", "Stat3", "Stat4", "Stat5", "Stat6", "Stat1Value", "Stat2Value", "Stat3Value", "Stat4Value", "Stat5Value", "Stat6Value"] },
-    { "name": "Projectiles", "columns": ["Id", "ProjectileSpeed", "CollisionRadius", "CollisionCandidateRadius", "UseTargetLocation"] },
-    { "name": "MonsterVarieties", "columns": ["Id", "Name", "ObjectSize", "LifeMultiplier", "DamageMultiplier", "AttackSpeed", "MovementSpeed"] }
+    {
+      "name": "Stats",
+      "columns": [
+        "Id"
+      ]
+    },
+    {
+      "name": "Mods",
+      "columns": [
+        "Id",
+        "Level",
+        "Domain",
+        "GenerationType",
+        "Stat1",
+        "Stat2",
+        "Stat3",
+        "Stat4",
+        "Stat5",
+        "Stat6",
+        "Stat1Value",
+        "Stat2Value",
+        "Stat3Value",
+        "Stat4Value",
+        "Stat5Value",
+        "Stat6Value"
+      ]
+    },
+    {
+      "name": "Projectiles",
+      "columns": [
+        "Id",
+        "ProjectileSpeed",
+        "CollisionRadius",
+        "CollisionCandidateRadius",
+        "UseTargetLocation"
+      ]
+    },
+    {
+      "name": "MonsterVarieties",
+      "columns": [
+        "Id",
+        "Name",
+        "ObjectSize",
+        "LifeMultiplier",
+        "DamageMultiplier",
+        "AttackSpeed",
+        "MovementSpeed"
+      ]
+    },
+    {
+      "name": "BuffDefinitions",
+      "columns": [
+        "Id",
+        "Name",
+        "Description",
+        "Stats",
+        "GrantedFlags",
+        "GrantedStats",
+        "MergeMode",
+        "BuffLimit"
+      ]
+    },
+    {
+      "name": "BuffTemplates",
+      "columns": [
+        "Id",
+        "BuffDefinition",
+        "Buff_StatValues",
+        "Stats"
+      ]
+    }
   ]
 }

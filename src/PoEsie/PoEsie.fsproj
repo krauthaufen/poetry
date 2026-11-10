@@ -17,6 +17,7 @@
     <Compile Include="Ailments.fs" />
     <Compile Include="RarityData.fs" />
     <Compile Include="Encounter.fs" />
+    <Compile Include="Vitals.fs" />
     <Compile Include="Sim.fs" />
     <Compile Include="Summary.fs" />
     <Compile Include="Json.fs" />
@@ -27,6 +28,7 @@
     <Compile Include="Character.fs" />
     <Compile Include="Xml.fs" />
     <Compile Include="Pob.fs" />
+    <Compile Include="Defence.fs" />
     <Compile Include="Api.fs" />
     <Compile Include="Behaviours.fs" />
     <Compile Include="Picture.fs" />

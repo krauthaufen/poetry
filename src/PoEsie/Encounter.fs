@@ -41,6 +41,16 @@ type RarityProfile =
       /// Body radius in game units.
       Size: float }
 
+/// How a monster attacks the player.
+type EnemyAttack =
+    { /// Seconds between hits at normal speed.
+      Interval: float
+      /// Average damage per hit, by type, before the player's mitigation.
+      Damage: Map<DamageType, float>
+      Accuracy: float
+      /// Distance (game units, edge to player) from which it can hit.
+      Range: float }
+
 type EnemyDef =
     { Name: string
       Level: int
@@ -51,7 +61,10 @@ type EnemyDef =
       Position: Vec
       Size: float
       /// Bleeding deals double damage to moving enemies.
-      Moving: bool }
+      Moving: bool
+      Attack: EnemyAttack option
+      /// Movement speed towards the player, game units per second.
+      Speed: float }
 
 /// Which enemy the player aims at.
 type Targeting =
@@ -101,7 +114,27 @@ module Rarity =
           ExposureEffect = stat r "exposure_effect_on_self_+%_final_from_rarity"
           Size = (if r = Unique then 10.0 else 4.0) * pct "base_actor_scale_+%" }
 
+/// Damage profiles for monster hits: share of each damage type.
+module DamageProfile =
+    let mixed = [ Physical, 0.4; Fire, 0.2; Cold, 0.2; Lightning, 0.2 ]
+    let physical = [ Physical, 1.0 ]
+
 module EnemyDef =
+    /// Default attack: a hit of 1.5 x the level's monster damage, scaled like PoB's enemy
+    /// presets (normal 1/4.4, standard boss 4/4.4), times the rarity's damage modifier (game
+    /// data), every 1.5 s from melee range. The per-hit scale is PoB's heuristic; interval,
+    /// range and type split are guesses (scenario settings).
+    let defaultAttack level (rarity: Rarity) =
+        let key = match rarity with Normal -> "" | Magic -> "Magic" | Rare -> "Rare" | Unique -> "Unique"
+        let rarityMult =
+            1.0 + (RarityData.stats |> List.tryPick (fun (r, s, v) -> if r = key && s = "monster_rarity_damage_+%_final" then Some v else None) |> Option.defaultValue 0.0) / 100.0
+        let classMult = if rarity = Unique then 4.0 / 4.4 else 1.0 / 4.4
+        let hit = Constants.monsterDamage level * 1.5 * classMult * rarityMult
+        { Interval = 1.5
+          Damage = DamageProfile.mixed |> List.map (fun (t, k) -> t, hit * k) |> Map.ofList
+          Accuracy = Constants.monsterAccuracy level
+          Range = 8.0 }
+
     /// A monster of the given level and rarity at a position.
     let make (profile: Rarity -> RarityProfile) level rarity name position =
         let p = profile rarity
@@ -119,13 +152,16 @@ module EnemyDef =
             @ Mod.resistAllElemental p.ElementalResist
           Position = position
           Size = p.Size
-          Moving = false }
+          Moving = false
+          Attack = Some(defaultAttack level rarity)
+          Speed = 35.0 }
 
     /// A single target with explicit life, for tests and dummy fights.
     let atLevel level life =
         { make Rarity.defaults level Unique "Target" (Vec.make 30.0 0.0) with
             Life = life
-            Mods = [ Mod.base' Armour (Constants.monsterArmour level) ] }
+            Mods = [ Mod.base' Armour (Constants.monsterArmour level) ]
+            Attack = None }
 
 /// Fight setups.
 module Encounter =

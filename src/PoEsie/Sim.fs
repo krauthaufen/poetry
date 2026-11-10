@@ -84,7 +84,9 @@ type Actor =
       /// Charges, rage...: stacks the actor starts the fight with. They don't expire;
       /// skills that consume them remove them.
       Resources: (string * int) list
-      Cycles: Cycle list }
+      Cycles: Cycle list
+      /// The player's pools and defences. None: the actor can't be hurt and pays no costs.
+      Vitals: PlayerStats option }
 
 module Actor =
     let make name mods skills =
@@ -96,7 +98,8 @@ module Actor =
           Rules = []
           Metas = []
           Resources = []
-          Cycles = [] }
+          Cycles = []
+          Vitals = None }
 
     let always skill = { Use = skill; When = fun _ -> true }
 
@@ -146,7 +149,17 @@ type Outcome =
       /// Event counts: "uses:Skill", "hits:Skill", "crits:Skill", "inflict:Ignite", "trigger:Skill"...
       Counts: Map<string, int>
       /// Seconds each status was active, averaged over the enemies alive at the time.
-      Uptime: Map<string, float> }
+      Uptime: Map<string, float>
+      /// When the player died, if they did.
+      Died: float option
+      /// Damage the player took (after mitigation).
+      DamageTaken: float
+      /// Seconds the player waited for mana.
+      ManaStarved: float
+      /// Lowest life as a fraction of maximum.
+      MinLife: float
+      /// Mana by source: "regen", "leech", "kill".
+      ManaGained: Map<string, float> }
 
 module Sim =
     type private Event =
@@ -156,6 +169,8 @@ module Sim =
         | ConsumeCharges of actor: string * charge: string * skill: string
         /// A cycle picks its next variant.
         | CycleTick of actor: string * cycle: string
+        /// A monster hits at the player.
+        | EnemyAttack of enemy: string
         | Expire
 
     type private ActorState =
@@ -171,8 +186,22 @@ module Sim =
           Buildup: Map<Ailment, float>
           Db: ModDb }
 
+    type private PlayerState =
+        { Life: float
+          EnergyShield: float
+          Mana: float
+          LastHit: float
+          /// Mana still to be recovered from leech.
+          LeechPool: float
+          Died: float option
+          Taken: float
+          Starved: float
+          MinLife: float
+          ManaGained: Map<string, float> }
+
     type private World =
-        { Time: float
+        { Player: PlayerState option
+          Time: float
           Enemies: Map<string, EnemyState>
           Actors: Map<string, ActorState>
           Queue: Map<float * int, Event>
@@ -203,6 +232,9 @@ module Sim =
 
     let private alive (w: World) = w.Enemies |> Map.toList |> List.map snd |> List.filter (fun e -> e.Life > 0.0)
     let private allDead (w: World) = alive w |> List.isEmpty
+
+    let private updateEnemyDef name (pos: Vec) (w: World) =
+        { w with Enemies = w.Enemies |> Map.change name (Option.map (fun e -> { e with Def = { e.Def with Position = pos } })) }
 
     // ---- views of an enemy ----
 
@@ -302,7 +334,55 @@ module Sim =
                     Uptime = status e |> Map.fold (fun m k _ -> addf k (span / n) m) w.Uptime
                     Kills = if dead then (e.Def.Name, e.Def.Rarity, w.Time + span) :: w.Kills else w.Kills }
             let w = living |> List.fold step w
+            // monsters walk towards the player until they're in attack range
+            let move (w: World) (e: EnemyState) =
+                match e.Def.Attack with
+                | Some atk when e.Life > 0.0 && w.Player.IsSome ->
+                    let st = status e
+                    let stopped = [ "Frozen"; "HeavilyStunned"; "Electrocuted"; "Pinned" ] |> List.exists st.ContainsKey
+                    let slow =
+                        (if st.ContainsKey "Maimed" then 1.0 - Constants.maimSlow / 100.0 else 1.0)
+                        * (if st.ContainsKey "Hindered" then 1.0 - Constants.hinderSlow / 100.0 else 1.0)
+                        * (1.0 - (e.Debuffs |> Map.tryFind "Chilled" |> Option.map (fun x -> x.Mods |> List.sumBy (fun m -> m.Value)) |> Option.defaultValue 0.0) / 100.0)
+                    let d = Vec.length e.Def.Position
+                    let gap = d - e.Def.Size - atk.Range
+                    if stopped || gap <= 0.0 then w
+                    else
+                        let step = min gap (e.Def.Speed * slow * dt)
+                        let pos = Vec.scale ((d - step) / d) e.Def.Position
+                        updateEnemyDef e.Def.Name pos w
+                | _ -> w
+            let w = alive w |> List.fold move w
             { w with Time = t }
+
+    /// Mana recovery while time passes: regeneration, leech (rate-capped), ES recharge, life regen.
+    let private recover (stats: PlayerStats option) dt (w: World) =
+        match stats, w.Player with
+        | Some v, Some p when dt > 0.0 && p.Died.IsNone ->
+            let leech = min p.LeechPool (v.Mana * Constants.maxManaLeechRate / 100.0 * dt)
+            let regen = v.ManaRegen * dt
+            let mana = min v.Mana (p.Mana + regen + leech)
+            let es =
+                if w.Time - p.LastHit >= Constants.energyShieldRechargeDelay then min v.EnergyShield (p.EnergyShield + v.EnergyShieldRecharge * dt)
+                else p.EnergyShield
+            let gained = p.ManaGained |> addf "regen" (min regen (v.Mana - p.Mana)) |> addf "leech" leech
+            { w with
+                Player =
+                    Some
+                        { p with
+                            Mana = mana
+                            LeechPool = p.LeechPool - leech
+                            EnergyShield = es
+                            Life = min v.Life (p.Life + v.LifeRegen * dt)
+                            ManaGained = gained } }
+        | _ -> w
+
+    let private gainMana (v: PlayerStats) source amount (w: World) =
+        match w.Player with
+        | Some p when amount > 0.0 ->
+            let m = min v.Mana (p.Mana + amount)
+            { w with Player = Some { p with Mana = m; ManaGained = addf source (m - p.Mana) p.ManaGained } }
+        | _ -> w
 
     let private prune (w: World) =
         let live (x: Effect) = x.Expires > w.Time
@@ -367,6 +447,9 @@ module Sim =
                 addDebuff target "Shocked" duration 1 [ Mod.inc (DamageTaken AllDamage) magnitude |> Mod.from "Shock" ] w
             else
                 w
+        | Status (Chill, magnitude, duration) ->
+            // the slow is read back by the monster's attack timing
+            addDebuff target "Chilled" duration 1 [ Mod.base' (Named "ChillMagnitude") magnitude ] w
         | Status (a, _, duration) -> addDebuff target (Ailment.status a) duration 1 [] w
         | AddBuildup (a, pct) ->
             let e = w.Enemies.[target]
@@ -506,7 +589,20 @@ module Sim =
         | Some step ->
             let skill = skillOf actor step.Use
             let t = useTime env actor skill w
-            startUse env rng actor skill t w |> schedule (w.Time + t) (Ready name)
+            // mana cost: base x increased cost / (1 + cost efficiency)
+            let db = skillDb env actor skill st
+            let cost = skill.Cost * Mods.mult Ctx.empty [ ManaCost ] db / Mods.inc Ctx.empty [ ManaCostEfficiency ] db
+            match actor.Vitals, w.Player with
+            | Some v, Some p when p.Mana < cost ->
+                // not enough mana: wait until regeneration and leech have covered it
+                let rate = v.ManaRegen + (if p.LeechPool > 0.0 then v.Mana * Constants.maxManaLeechRate / 100.0 else 0.0)
+                let wait = max Constants.serverTick (if rate > 0.0 then (cost - p.Mana) / rate else 1.0)
+                { w with Player = Some { p with Starved = p.Starved + wait } } |> schedule (w.Time + wait) (Ready name)
+            | Some _, Some p ->
+                { w with Player = Some { p with Mana = p.Mana - cost } }
+                |> startUse env rng actor skill t
+                |> schedule (w.Time + t) (Ready name)
+            | _ -> startUse env rng actor skill t w |> schedule (w.Time + t) (Ready name)
         | None ->
             // Nothing usable: wait for the next cooldown, or a server tick.
             let next =
@@ -560,6 +656,17 @@ module Sim =
                         DamageBy = addf (skill.Name + " (hit)") (min dealt e.Life) w.DamageBy
                         Counts = w.Counts |> bump ("hits:" + skill.Name) |> (if hit.Crit then bump ("crits:" + skill.Name) else id)
                         Kills = if dead then (target, e.Def.Rarity, w.Time) :: w.Kills else w.Kills }
+                // mana leech from physical attack damage dealt, recovered over time
+                let w =
+                    match actor.Vitals, w.Player with
+                    | Some v, Some p ->
+                        let leech = Dmg.get Physical hit.Dealt * Mods.sumBase ctx [ ManaLeech ] mods / 100.0
+                        let w = { w with Player = Some { p with LeechPool = p.LeechPool + leech } }
+                        if dead then
+                            let kill = Mods.sumBase Ctx.empty [ ManaOnKill ] mods + v.Mana * Mods.sumBase Ctx.empty [ Named "ManaPercentOnKill" ] mods / 100.0
+                            gainMana v "kill" kill w
+                        else w
+                    | _ -> w
                 let w =
                     if dead then
                         react env rng actor OnKill skill None w
@@ -609,16 +716,67 @@ module Sim =
             Geometry.targetsFrom rng env.Fight.Walls env.Fight.Reach delivery areaMult primary living
             |> List.fold (fun w target -> hitEnemy env rng actor skill mult target w) w
 
+    /// A monster's hit at the player: evasion, deflection, armour, resistances, then
+    /// energy shield and life. Frozen / stunned / electrocuted monsters don't act; chill
+    /// slows them; blind lowers their accuracy.
+    let private enemyAttack env (rng: Rng) name (w: World) =
+        let e = w.Enemies.[name]
+        match e.Def.Attack, env.Fight.Player.Vitals, w.Player with
+        | Some atk, Some v, Some p when e.Life > 0.0 && p.Died.IsNone ->
+            let st = status e
+            let stopped = [ "Frozen"; "HeavilyStunned"; "Electrocuted" ] |> List.exists st.ContainsKey
+            let chill = e.Debuffs |> Map.tryFind "Chilled" |> Option.map (fun x -> x.Mods |> List.sumBy (fun m -> m.Value)) |> Option.defaultValue 0.0
+            let next = atk.Interval / max 0.1 (1.0 - chill / 100.0)
+            let w = schedule (w.Time + next) (EnemyAttack name) w
+            let inRange = Vec.length e.Def.Position - e.Def.Size <= atk.Range + 1e-6
+            if stopped then
+                { w with Counts = bump "enemy:stopped" w.Counts }
+            elif not inRange then
+                w
+            else
+                let accuracy = atk.Accuracy * (if st.ContainsKey "Blinded" then 1.0 - Constants.blindAccuracyLess / 100.0 else 1.0)
+                if not (rng.Chance(Vitals.monsterHitChance v.Evasion accuracy)) then
+                    { w with Counts = bump "enemy:evaded" w.Counts }
+                else
+                    let deflected = rng.Chance(Vitals.deflectChance v.Deflection accuracy)
+                    let dmg =
+                        atk.Damage
+                        |> Map.toList
+                        |> List.sumBy (fun (t, d) ->
+                            let d = if deflected then d * (1.0 - Vitals.deflectEffect / 100.0) else d
+                            match t with
+                            | Physical -> d * (1.0 - Vitals.armourReduction v.Armour d / 100.0)
+                            | t -> d * (1.0 - (Map.tryFind t v.Resist |> Option.defaultValue 0.0) / 100.0))
+                    let fromMana = min p.Mana (dmg * Mods.sumBase Ctx.empty [ Named "DamageRemovedFromManaFirst" ] (ModDb.ofList env.Fight.Player.Mods) / 100.0)
+                    let rest = dmg - fromMana
+                    let toEs = min p.EnergyShield rest
+                    let life = p.Life - (rest - toEs)
+                    let p =
+                        { p with
+                            Mana = p.Mana - fromMana
+                            EnergyShield = p.EnergyShield - toEs
+                            Life = life
+                            LastHit = w.Time
+                            Taken = p.Taken + dmg
+                            MinLife = min p.MinLife (life / v.Life)
+                            Died = if life <= 0.0 then Some w.Time else None }
+                    { w with
+                        Player = Some p
+                        Counts = w.Counts |> bump "enemy:hit" |> (if deflected then bump "enemy:deflected" else id) }
+        | _ -> w
+
     let private step env rng (w: World) =
         let (KeyValue ((t, sq), ev)) = Seq.head w.Queue
-        let w = { w with Queue = Map.remove (t, sq) w.Queue } |> advance t
-        if allDead w then
+        let dt = t - w.Time
+        let w = { w with Queue = Map.remove (t, sq) w.Queue } |> advance t |> recover env.Fight.Player.Vitals dt
+        if allDead w || (w.Player |> Option.exists (fun p -> p.Died.IsSome)) then
             w
         else
             let w = prune w
             match ev with
             | Ready name -> onReady env rng name w
             | Strike (name, skill, mult, aimedAt) -> onStrike env rng name skill mult aimedAt w
+            | EnemyAttack name -> enemyAttack env rng name w
             | CycleTick (name, cycleName) ->
                 let actor = actorDef env name
                 match actor.Cycles |> List.tryFind (fun c -> c.Name = cycleName) with
@@ -664,7 +822,20 @@ module Sim =
               Cooldowns = Map.empty
               Energy = Map.empty }
         let w0 =
-            { Time = 0.0
+            { Player =
+                fight.Player.Vitals
+                |> Option.map (fun v ->
+                    { Life = v.Life
+                      EnergyShield = v.EnergyShield
+                      Mana = v.Mana
+                      LastHit = -1e9
+                      LeechPool = 0.0
+                      Died = None
+                      Taken = 0.0
+                      Starved = 0.0
+                      MinLife = 1.0
+                      ManaGained = Map.empty })
+              Time = 0.0
               Enemies =
                 fight.Enemies
                 |> List.map (fun d ->
@@ -694,9 +865,16 @@ module Sim =
               Kills = [] }
             |> fun w -> actors |> List.fold (fun w a -> schedule 0.0 (Ready a.Name) w) w
             |> fun w -> actors |> List.fold (fun w a -> a.Cycles |> List.fold (fun w c -> schedule 0.0 (CycleTick(a.Name, c.Name)) w) w) w
+            |> fun w ->
+                if fight.Player.Vitals.IsNone then w
+                else
+                    // monsters start attacking at random points in their first interval
+                    fight.Enemies
+                    |> List.fold (fun w e -> match e.Attack with Some a -> schedule (rng.Float() * a.Interval) (EnemyAttack e.Name) w | None -> w) w
             |> schedule fight.MaxTime Expire
         let rec loop (w: World) =
-            if allDead w || Map.isEmpty w.Queue || fst (Seq.head w.Queue).Key > fight.MaxTime then w
+            let died = w.Player |> Option.exists (fun p -> p.Died.IsSome)
+            if died || allDead w || Map.isEmpty w.Queue || fst (Seq.head w.Queue).Key > fight.MaxTime then w
             else loop (step env rng w)
         let w = loop w0
         let cleared = if allDead w then w.Kills |> List.map (fun (_, _, t) -> t) |> List.fold max 0.0 |> Some else None
@@ -705,4 +883,9 @@ module Sim =
           Kills = List.rev w.Kills
           DamageBy = w.DamageBy
           Counts = w.Counts
-          Uptime = w.Uptime }
+          Uptime = w.Uptime
+          Died = w.Player |> Option.bind (fun p -> p.Died)
+          DamageTaken = w.Player |> Option.map (fun p -> p.Taken) |> Option.defaultValue 0.0
+          ManaStarved = w.Player |> Option.map (fun p -> p.Starved) |> Option.defaultValue 0.0
+          MinLife = w.Player |> Option.map (fun p -> p.MinLife) |> Option.defaultValue 1.0
+          ManaGained = w.Player |> Option.map (fun p -> p.ManaGained) |> Option.defaultValue Map.empty }
