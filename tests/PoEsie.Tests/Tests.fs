@@ -348,6 +348,13 @@ let main _ =
         let spell = run [ Mod.base' (Named "Accuracy") 50.0 ] (fireSpell 10.0)
         equal false (spell.Counts.ContainsKey "miss:Bolt"))
 
+    test "skill damage over time ticks for its duration and doesn't stack" (fun () ->
+        // no hit damage; 100 chaos per second for 2 s, recast every second: always exactly one instance
+        let drain = { Skill.make "Drain" [ Spell ] with Dots = Map.ofList [ Chaos, 100.0 ]; Duration = 2.0; BaseTime = 1.0 }
+        let o = Sim.run (Fight.single (boss 1e9) (Actor.make "Player" [ noIgnite ] [ drain ]) 10.5) 1u
+        // first hit lands at 1 s; 9.5 s of ticking
+        near 950.0 o.DamageBy.["Drain (chaos over time)"])
+
     DataTests.run test near (fun a b -> equal a b)
 
     printfn "%d passed, %d failed" passed failures

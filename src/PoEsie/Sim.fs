@@ -272,7 +272,9 @@ type Effect =
       Expires: float }
 
 type DotInstance =
-    { Ailment: Ailment
+    { /// The ailment, or None for a skill's own damage over time (named by Label).
+      Ailment: Ailment option
+      Label: string
       Type: DamageType
       Dps: float
       Expires: float
@@ -414,7 +416,7 @@ module Sim =
     /// Damaging ailments that actually deal damage: the strongest N of each kind.
     let private activeDots (e: EnemyState) =
         e.Dots
-        |> List.groupBy (fun d -> d.Ailment)
+        |> List.groupBy (fun d -> d.Label)
         |> List.collect (fun (_, ds) ->
             let limit = ds |> List.map (fun d -> d.MaxStacks) |> List.max
             ds |> List.sortByDescending (fun d -> d.Dps) |> List.truncate limit)
@@ -423,7 +425,8 @@ module Sim =
         let fromDebuffs = e.Debuffs |> Map.map (fun _ x -> x.Stacks)
         let withDots =
             activeDots e
-            |> List.countBy (fun d -> Ailment.status d.Ailment)
+            |> List.choose (fun d -> d.Ailment |> Option.map Ailment.status)
+            |> List.countBy id
             |> List.fold (fun m (k, n) -> Map.add k n m) fromDebuffs
         let ailing = withDots |> Map.exists (fun k _ -> allAilments |> List.exists (fun a -> Ailment.status a = k))
         withDots
@@ -516,8 +519,8 @@ module Sim =
                 let parts =
                     activeDots e
                     |> List.map (fun d ->
-                        let k = if d.Ailment = Bleed then bleedK else 1.0
-                        Ailment.name d.Ailment, d.Dps * k * Ailments.dotTakenMult def d.Type)
+                        let k = if d.Ailment = Some Bleed then bleedK else 1.0
+                        d.Label, d.Dps * k * Ailments.dotTakenMult def d.Type)
                 let dps = parts |> List.sumBy snd
                 let span = if dps > 0.0 && e.Life <= dps * dt then e.Life / dps else dt
                 let life = e.Life - dps * span
@@ -715,7 +718,8 @@ module Sim =
         match i with
         | Dot (a, t, dps, duration, maxStacks) ->
             let d =
-                { Ailment = a
+                { Ailment = Some a
+                  Label = Ailment.name a
                   Type = t
                   Dps = dps
                   Expires = w.Time + duration
@@ -1135,6 +1139,22 @@ module Sim =
                                 | Dot (a, _, _, _, _) | Status (a, _, _) ->
                                     react env rng actor (OnInflict a) skill (Some target) { w with Counts = bump ("inflict:" + Ailment.name a) w.Counts }
                                 | AddBuildup _ -> w)
+                            w
+                // the skill's own damage over time: one instance per skill and type, the strongest stays
+                let w =
+                    if dead || skill.Dots.IsEmpty then w
+                    else
+                        // spell (or attack) damage mods only count if the skill says so
+                        let dotCtx = if skill.Tags.Contains(Tag "SpellDot") then ctx else { ctx with SkillTags = ctx.SkillTags |> Set.remove Spell |> Set.remove Attack }
+                        let duration = (if skill.Duration > 0.0 then skill.Duration else 1.0) * Mods.mult ctx [ SkillDuration ] mods
+                        skill.Dots
+                        |> Map.fold
+                            (fun w t perSecond ->
+                                let label = sprintf "%s (%s over time)" skill.Name ((DamageType.name t).ToLowerInvariant())
+                                let dps = perSecond * Hit.damageMult dotCtx mods t * Mods.mult dotCtx [ Named "DotDamage" ] mods
+                                let d = { Ailment = None; Label = label; Type = t; Dps = dps; Expires = w.Time + duration; MaxStacks = 1; Owner = actor.Name }
+                                updateEnemy target (fun e -> { e with Dots = d :: (e.Dots |> List.filter (fun x -> x.Label <> label || x.Dps > dps)) }) w
+                                |> schedule d.Expires Expire)
                             w
                 // meta gem energy: crits and newly inflicted freeze / shock / ignite, scaled by
                 // monster power and by the share of the ailment threshold the hit deals

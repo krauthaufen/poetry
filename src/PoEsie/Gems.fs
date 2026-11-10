@@ -346,7 +346,17 @@ module Gems =
           Consumes = if data.Types.Contains "SkillConsumesPowerChargesOnUse" then Some "PowerCharge" else None
           Cost = gemLevel |> Option.bind (fun l -> l.ManaCost) |> Option.defaultValue 0.0
           // "comet_fall_time_ms": hits land this long after the cast
-          HitDelay = (ownStats |> List.filter (fun (id, _) -> id.EndsWith "_fall_time_ms") |> List.sumBy snd) / 1000.0 },
+          HitDelay = (ownStats |> List.filter (fun (id, _) -> id.EndsWith "_fall_time_ms") |> List.sumBy snd) / 1000.0
+          // "base_chaos_damage_to_deal_per_minute": damage over time on what the skill hits
+          Dots =
+            DamageType.all
+            |> List.choose (fun t ->
+                let id = sprintf "base_%s_damage_to_deal_per_minute" ((DamageType.name t).ToLowerInvariant())
+                match statOf id with
+                | Some v when v > 0.0 -> Some(t, v / 60.0)
+                | _ -> None)
+            |> Map.ofList
+          Duration = (statOf "base_skill_effect_duration" |> Option.defaultValue 0.0) / 1000.0 },
         cov
 
     /// Build a simulator Skill from a socketed gem. `characterMods` are needed for
@@ -387,6 +397,8 @@ module Gems =
                     @ [ Tag("Gem:" + data.Name) ]
                     // every skill type, for conditions that name one ("Nova Skill Gems")
                     @ (data.Types |> Set.toList |> List.map (fun t -> Tag("Type:" + t)))
+                    // "Spell damage modifiers apply to this skill's damage over time"
+                    @ (if set.Stats |> List.contains "spell_damage_modifiers_apply_to_skill_dot" then [ Tag "SpellDot" ] else [])
                     |> Set.ofList
                 let ctx = { Ctx.empty with SkillName = data.Name; SkillTags = tags }
                 let level = setup.Level + int (Mods.sumBase ctx [ Named "GemLevel" ] characterMods)

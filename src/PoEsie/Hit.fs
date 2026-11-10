@@ -78,7 +78,12 @@ type Skill =
       /// Mana per use before cost modifiers (gem cost × support multipliers).
       Cost: float
       /// Seconds between the use and its hits (a comet falling).
-      HitDelay: float }
+      HitDelay: float
+      /// Damage over time the skill applies to what it hits: base damage per second by type
+      /// ("base_<type>_damage_to_deal_per_minute"), for Duration seconds (x skill duration mods).
+      Dots: Map<DamageType, float>
+      /// Base duration of the skill's effect in seconds (0: none).
+      Duration: float }
 
 module Skill =
     let make name tags =
@@ -97,7 +102,9 @@ module Skill =
           Parts = []
           Consumes = None
           Cost = 0.0
-          HitDelay = 0.0 }
+          HitDelay = 0.0
+          Dots = Map.empty
+          Duration = 0.0 }
 
     let ctx (skill: Skill) crit buffs enemyStatus =
         { Crit = crit
@@ -126,6 +133,9 @@ module Hit =
         @ (if DamageType.isElemental t then [ Damage Elemental ] else [])
 
     /// Fractions per destination type for one source type, scaled down if they exceed 100%.
+    /// Increased and more damage that applies to damage of this type with this skill.
+    let damageMult ctx mods t = Mods.mult ctx (scopesFor t) mods
+
     let private conversionShares ctx mods stat from =
         let raw =
             DamageType.all

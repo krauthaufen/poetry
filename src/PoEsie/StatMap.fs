@@ -483,6 +483,9 @@ module StatMap =
         // "Convert 100% of maximum Energy Shield to maximum Mana; Mana Costs are Doubled"
         | "keystone_eldritch_battery" -> Some(Mods [ Mod.base' (Named "ESConvertedToMana") v; Mod.more ManaCost 100.0 ])
         | "keystone_chaos_inoculation" -> one (Mod.flag (Named "Keystone:Chaos Inoculation"))
+        | "damage_over_time_+%" -> one (Mod.inc (Named "DotDamage") v)
+        | "damage_over_time_+%_final" -> one (Mod.more (Named "DotDamage") v)
+        | "base_skill_effect_duration" | "spell_damage_modifiers_apply_to_skill_dot" -> Some Structural
         | "global_always_hit" | "always_hit" -> one (Mod.override' HitChance 100.0)
         | "cannot_be_light_stunned" -> one (Mod.base' (Named "AvoidStun") 100.0)
         | "accuracy_rating_is_doubled" -> one (Mod.more (Named "Accuracy") 100.0)
