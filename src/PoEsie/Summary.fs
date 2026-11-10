@@ -124,6 +124,7 @@ module Scenarios =
                   Minions = minions
                   Targeting = targeting
                   Reach = 15.0
+                  CascadeSpacing = 1.0
                   Walls = []
                   MaxTime = maxTime })
 

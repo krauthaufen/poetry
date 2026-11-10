@@ -115,6 +115,16 @@ type WardRemnants =
       /// Ward can overflow to this multiple of its maximum.
       Overflow: float }
 
+/// An Archon buff: gained by a trigger (ignite with a skill that has the chance), lasts its
+/// duration, then a recovery period in which no Archon can be gained.
+type Archon =
+    { Name: string
+      /// Stat on the skill (or character) that gives the chance on ignite.
+      OnIgniteStat: string
+      Duration: float
+      Recovery: float
+      Mods: Mod list }
+
 /// Something that happens on its own every few seconds.
 type PeriodicAction =
     /// One stack of a random resource that isn't at its maximum (Thaumaturgical Dynamism,
@@ -172,7 +182,8 @@ type Actor =
       /// Consuming charges that are kept ("chance to not remove") pauses their timer for this
       /// many seconds (the timer keeps its current value). 0: no pause.
       KeptChargesPause: float
-      WardRemnants: WardRemnants option }
+      WardRemnants: WardRemnants option
+      Archons: Archon list }
 
 module Actor =
     let make name mods skills =
@@ -192,7 +203,8 @@ module Actor =
           MaxResources = Map.empty
           ResourceDurations = Map.empty
           KeptChargesPause = 0.0
-          WardRemnants = None }
+          WardRemnants = None
+          Archons = [] }
 
     let always skill = { Use = skill; When = fun _ -> true }
 
@@ -203,6 +215,8 @@ type Fight =
       Targeting: Targeting
       /// How far in front of the player ground skills (slams) land, game units.
       Reach: float
+      /// Spell Cascade: distance between impacts, as a multiple of the impact radius.
+      CascadeSpacing: float
       Walls: Geometry.Wall list
       MaxTime: float }
 
@@ -213,6 +227,7 @@ module Fight =
           Minions = []
           Targeting = Strongest
           Reach = infinity
+          CascadeSpacing = 1.0
           Walls = []
           MaxTime = maxTime }
 
@@ -893,11 +908,12 @@ module Sim =
                             gainMana v "kill" kill w
                         else w
                     | _ -> w
+                let inflicted = if dead then [] else Ailments.fromHit rng ctx mods def hit
                 let w =
                     if dead then
                         react env rng actor OnKill skill None w
                     else
-                        Ailments.fromHit rng ctx mods def hit
+                        inflicted
                         |> List.fold
                             (fun w i ->
                                 let w = inflict target actor.Name i w
@@ -929,6 +945,29 @@ module Sim =
                                         | _ -> 0.0)
                                 if amount > 0.0 then gainEnergy env rng actor meta.Name (amount * meta.EnergyMult) w else w)
                             w
+                // Archon: gained on a new ignite by a skill with the chance; none while one is active or
+                // during the recovery period after one ends
+                let w =
+                    // every ignite applied by this hit counts, not only a first one
+                    let ignited = (not dead) && (inflicted |> List.exists (function Dot (Ignite, _, _, _, _) -> true | _ -> false))
+                    if not ignited || actor.Archons.IsEmpty then w
+                    else
+                        let st = Map.find actor.Name w.Actors
+                        let active = actor.Archons |> List.exists (fun a -> Map.containsKey a.Name st.Buffs)
+                        let recovering = Map.tryFind "ArchonRecovery" st.Cooldowns |> Option.exists (fun t -> t > w.Time)
+                        if active || recovering then w
+                        else
+                            actor.Archons
+                            |> List.tryFind (fun a -> rng.Chance(Mods.sumBase ctx [ Named a.OnIgniteStat ] mods))
+                            |> function
+                                | Some a ->
+                                    updateActor actor.Name (fun st ->
+                                        { st with
+                                            Buffs = Map.add a.Name { Name = a.Name; Mods = a.Mods; Stacks = 1; Expires = w.Time + a.Duration } st.Buffs
+                                            Cooldowns = Map.add "ArchonRecovery" (w.Time + a.Duration + a.Recovery) st.Cooldowns }) w
+                                    |> schedule (w.Time + a.Duration) Expire
+                                    |> fun w -> { w with Counts = bump ("archon:" + a.Name) w.Counts }
+                                | None -> w
                 // Runic Ward remnants from kills and stuns
                 let w =
                     match actor.WardRemnants, w.Player with
@@ -984,7 +1023,7 @@ module Sim =
                 | AreaAtTarget r when cascades > 0 ->
                     let d = Vec.length primary.Position
                     let dir = if d > 0.0 then Vec.scale (1.0 / d) primary.Position else Vec.make 1.0 0.0
-                    let step = Geometry.radius r areaMult
+                    let step = Geometry.radius r areaMult * env.Fight.CascadeSpacing
                     [ for k in -cascades .. cascades -> { primary with Position = Vec.add primary.Position (Vec.scale (float k * step) dir); Size = 0.0 } ]
                 | _ -> [ primary ]
             impacts

@@ -203,6 +203,14 @@ module StatMap =
         | "you_and_allies_in_presence_all_damage_can_ignite" | "all_damage_can_ignite" -> one (Mod.flag (Named "AllDamageIgnites"))
         | "all_damage_can_chill" -> one (Mod.flag (Named "AllDamageChills"))
         | "all_damage_can_shock" -> one (Mod.flag (Named "AllDamageShocks"))
+        | "gain_archon_elemental_when_you_ignite_enemy_chance_%" -> one (Mod.base' (Named "ElementalArchonOnIgnite") v)
+        | "archon_effect_on_you_+%" -> one (Mod.inc (Named "ArchonEffect") v)
+        | "archon_duration_+%" -> one (Mod.inc (Named "ArchonDuration") v)
+        | "archon_delay_expires_x%_faster" -> one (Mod.inc (Named "ArchonRecoveryFaster") v)
+        | "archon_no_recovery_period" -> one (Mod.flag (Named "ArchonNoRecovery"))
+        | "archon_grants_all_elemental_resistance_+%" | "archon_grants_base_critical_strike_multiplier_+"
+        | "archon_grants_critical_strike_chance_+%" | "archon_grants_movement_speed_+%" ->
+            one (Mod.base' (Named("ArchonGrants:" + id)) v)
         | "base_maximum_ward" -> one (Mod.base' (Named "Ward") v)
         | "maximum_ward_+%" -> one (Mod.inc (Named "Ward") v)
         | "ward_regeneration_rate_+%" -> one (Mod.inc (Named "WardRegen") v)

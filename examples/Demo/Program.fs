@@ -60,6 +60,7 @@ let fight =
       Minions = [ hound ]
       Targeting = Strongest
       Reach = infinity
+      CascadeSpacing = 1.0
       Walls = []
       MaxTime = 120.0 }
 

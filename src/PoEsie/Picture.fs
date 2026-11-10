@@ -35,3 +35,19 @@ module Picture =
             |> String.concat ""
         sprintf "<figure><svg viewBox='%s %s %s %s' role='img' aria-label='%s'><clipPath id='c%d'><rect x='%s' y='%s' width='%s' height='%s'/></clipPath><g clip-path='url(#c%d)'>%s</g></svg><figcaption>%s<br>%d projectiles, %d hits, %d chained from a wall</figcaption></figure>"
             (f minX) (f -maxY) (f (2.0 * half)) (f (2.0 * half)) title clipId (f minX) (f -maxY) (f (2.0 * half)) (f (2.0 * half)) clipId body title paths.Length hits bounced
+
+    /// Area impacts (Spell Cascade comets): circles, enemies inside highlighted.
+    let areas (title: string) (centres: Vec list) (radius: float) (enemies: EnemyDef list) =
+        figureId <- figureId + 1
+        let pts = Vec.zero :: centres @ (enemies |> List.map (fun e -> e.Position))
+        let cx, cy = (pts |> List.averageBy (fun v -> v.X)), (pts |> List.averageBy (fun v -> v.Y))
+        let half = (pts |> List.map (fun v -> max (abs (v.X - cx)) (abs (v.Y - cy))) |> List.max) + radius + 20.0
+        let inside (e: EnemyDef) = centres |> List.filter (fun c -> Vec.dist c e.Position <= radius + e.Size) |> List.length
+        let hits = enemies |> List.sumBy inside
+        let body =
+            [ for e in enemies -> sprintf "<circle cx='%s' cy='%s' r='%s' class='%s'/>" (f e.Position.X) (f -e.Position.Y) (f e.Size) (if inside e > 0 then "enemy hitE" else "enemy")
+              for c in centres -> sprintf "<circle cx='%s' cy='%s' r='%s' class='impactArea'/>" (f c.X) (f -c.Y) (f radius)
+              yield "<circle cx='0' cy='0' r='2.2' class='player'/>" ]
+            |> String.concat ""
+        sprintf "<figure><svg viewBox='%s %s %s %s' role='img' aria-label='%s'>%s</svg><figcaption>%s<br>%d impacts, %d enemy hits</figcaption></figure>"
+            (f (cx - half)) (f (-cy - half)) (f (2.0 * half)) (f (2.0 * half)) title body title centres.Length hits

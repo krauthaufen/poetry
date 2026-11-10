@@ -28,6 +28,8 @@
 ///   --infused        always have infusions: skills use their "-Infused" stat sets
 ///   --pickup S       seconds to collect a remnant (default 1)
 ///   --rotation A,B   skills you press, cycled in this order (meta gems trigger the rest)
+///   --cascade-check F  geometric check of Spell Cascade impacts at several spacings; page to F
+///   --cascade-spacing K  distance between cascade impacts as a multiple of the radius (default 1)
 ///   --suite          run the standard scenarios (pack, pack + 2 rares, surrounded, boss) and print a table
 ///   --data DIR       exported game data (default: data/game next to the repo)
 module PoEsie.Cli
@@ -118,6 +120,8 @@ let main argv =
                  | GainWeighted ws -> let t = ws |> List.sumBy snd in "  " + (ws |> List.map (fun (k, v) -> sprintf "%s %.0f%%" k (100.0 * v / t)) |> String.concat ", ")
                  | _ -> "")
         printfn "charge durations: %s" (Behaviours.chargeDurations sheet |> Map.toList |> List.map (fun (k, d) -> sprintf "%s %.0fs" k d) |> String.concat ", ")
+        let archon = Behaviours.elementalArchon sheet
+        printfn "elemental archon: %.1fs, recovery %.1fs, %s" archon.Duration archon.Recovery (archon.Mods |> List.map (fun m -> sprintf "%A %A %.0f" m.Stat m.Kind m.Value) |> String.concat "; ")
         if not moteMax.IsEmpty then printfn "motes: %s" (moteMax |> List.map (fun (k, n) -> sprintf "%s max %d" k n) |> String.concat ", ")
         let sheet =
             match Map.tryFind "skip" o with
@@ -259,6 +263,7 @@ let main argv =
                             ResourceDurations = Behaviours.chargeDurations sheet
                             KeptChargesPause = get "kept-pause" 1.0
                             WardRemnants = Behaviours.wardRemnants db sheet build (get "pickup" 1.0)
+                            Archons = [ Behaviours.elementalArchon sheet ]
                             ManaFlask =
                                 if Map.containsKey "immortal" o || Map.containsKey "noflask" o then None
                                 else
@@ -274,10 +279,60 @@ let main argv =
                       Targeting = (if Map.tryFind "target" o = Some "nearest" then Nearest else Strongest)
                       // "Cast on Self": the slam lands on the player
                       Reach = (if Map.containsKey "cast-on-self" o then 0.0 else get "reach" 15.0)
+                      CascadeSpacing = get "cascade-spacing" 1.0
                       Walls = []
                       MaxTime = get "time" 60.0 }
                 printfn ""
-                if Map.containsKey "layouts" o then
+                if Map.containsKey "cascade-check" o then
+                    // geometric check of Spell Cascade impacts for the first triggered area spell with cascades
+                    let candidates = metas |> List.collect snd
+                    match candidates |> List.tryFind (fun s -> match s.Delivery with AreaAtTarget _ -> true | _ -> false) with
+                    | None -> printfn "no triggered area spell"
+                    | Some sk ->
+                        let db' = ModDb.ofList (sheet.Mods @ sk.Mods)
+                        let ctx = { Ctx.empty with SkillTags = sk.Tags; SkillName = sk.Name }
+                        let cascades = int (Mods.sumBase ctx [ Named "CascadesPerSide" ] db')
+                        let r = match sk.Delivery with AreaAtTarget r -> Geometry.radius r (Mods.mult ctx [ AreaOfEffect ] db') | _ -> 0.0
+                        printfn "%s: radius %.0f, %d cascade(s) per side" sk.Name r cascades
+                        let impactsFor (target: Vec) spacing =
+                            let d = Vec.length target
+                            let dir = if d > 0.0 then Vec.scale (1.0 / d) target else Vec.make 1.0 0.0
+                            [ for k in -cascades .. cascades -> Vec.add target (Vec.scale (float k * r * spacing) dir) ]
+                        let rows = ResizeArray()
+                        let pics = ResizeArray()
+                        for spacing in [ 1.0; 1.5; 2.0 ] do
+                            // boss: impacts per comet that touch it
+                            for size in [ 6.0; 12.0; 20.0; 25.0 ] do
+                                let boss = { (List.head (Encounter.boss level profile 0.0)) with Size = size; Position = Vec.make (30.0 + size) 0.0 }
+                                let centres = impactsFor boss.Position spacing
+                                let hit = centres |> List.filter (fun c -> Vec.dist c boss.Position <= r + boss.Size) |> List.length
+                                rows.Add(sprintf "<tr><td>%.1f×</td><td>boss r%.0f</td><td>%d of %d</td></tr>" spacing size hit centres.Length)
+                                printfn "spacing %.1f x radius, boss radius %2.0f: %d of %d impacts hit" spacing size hit centres.Length
+                                if size = 6.0 then pics.Add(Picture.areas (sprintf "spacing %.1f× radius, small boss (r%.0f)" spacing size) centres r [ boss ])
+                            // a pack: enemies hit per comet, averaged over layouts
+                            let mutable total = 0.0
+                            for i in 1..40 do
+                                let pack = Encounter.pack level profile [ Normal, 8; Magic, 3 ] 35.0 25.0 false (uint32 i)
+                                let aimAt = Geometry.aim Strongest pack |> Option.get
+                                let centres = impactsFor aimAt.Position spacing
+                                total <- total + float (pack |> List.sumBy (fun e -> centres |> List.filter (fun c -> Vec.dist c e.Position <= r + e.Size) |> List.length))
+                                if i = 1 then pics.Add(Picture.areas (sprintf "spacing %.1f× radius, pack" spacing) centres r pack)
+                            rows.Add(sprintf "<tr><td>%.1f×</td><td>pack (11)</td><td>%.1f enemy hits per comet</td></tr>" spacing (total / 40.0))
+                            printfn "spacing %.1f x radius, pack of 11: %.1f enemy hits per comet" spacing (total / 40.0)
+                        let html =
+                            sprintf """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Spell Cascade check</title>
+<style>:root{--bg:#fbfaf7;--fg:#1d1d1b;--muted:#6b6a66;--line:#e2dfd8;--enemy:#c9c3b6;--hit:#c2410c;--area:rgba(29,78,216,.12);--areaS:#1d4ed8;--player:#1d4ed8}
+@media (prefers-color-scheme:dark){:root{--bg:#161614;--fg:#ecebe7;--muted:#a3a199;--line:#34332f;--enemy:#4a4740;--hit:#fb923c;--area:rgba(96,165,250,.15);--areaS:#60a5fa;--player:#60a5fa}}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,sans-serif}main{max-width:1100px;margin:0 auto;padding:24px 16px}
+h1{font-size:22px;margin:0 0 6px}p{color:var(--muted)}.pics{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px}
+figure{margin:0;border:1px solid var(--line);border-radius:10px;padding:10px}svg{width:100%%;height:auto;aspect-ratio:1}figcaption{font-size:13px;color:var(--muted)}
+.enemy{fill:var(--enemy)}.hitE{fill:var(--hit)}.impactArea{fill:var(--area);stroke:var(--areaS);stroke-width:.6}.player{fill:var(--player)}
+table{border-collapse:collapse;margin-top:18px;font-size:14px}td{padding:3px 10px;border-bottom:1px solid var(--line)}</style></head><body><main>
+<h1>%s: Spell Cascade impacts</h1><p>Radius %.0f (game units, 10 = 1 m), %d cascade per side along the line from you through the target. The data doesn't give the spacing between impacts, so three are shown. Enemies hit are orange.</p>
+<div class="pics">%s</div><table><tbody>%s</tbody></table></main></body></html>""" sk.Name r cascades (String.concat "" pics) (String.concat "" rows)
+                        File.WriteAllText(o.["cascade-check"], html)
+                        printfn "wrote %s" o.["cascade-check"]
+                elif Map.containsKey "layouts" o then
                     let projectilePart =
                         (skill :: skill.Parts) |> List.tryPick (fun s -> match s.Delivery with Projectiles p -> Some p | _ -> None)
                     let charges = resources |> List.tryPick (fun (k, n) -> if k = "PowerCharge" then Some n else None) |> Option.defaultValue 0

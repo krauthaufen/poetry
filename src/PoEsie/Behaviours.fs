@@ -190,3 +190,28 @@ module Behaviours =
                               ExtraChance = sum "chance_%_to_create_additional_remnant"
                               Delay = pickupSeconds + sum "remnant_delay_X_ms" / 1000.0
                               Overflow = 1.5 }))
+
+    /// Elemental Archon (BuffTemplates ArchonElemental: 25% more elemental damage with spells,
+    /// 100% more ignite chance / freeze buildup / shock chance with spells), plus "Archon Buffs
+    /// also grant ..." mods, all x increased Archon effect. Base duration 10 s, recovery 20 s
+    /// (poe2db), scaled by Archon duration / "recovery period expires faster"; none with
+    /// "no recovery period".
+    let elementalArchon (sheet: CharacterSheet) =
+        let mods = ModDb.ofList sheet.Mods
+        let c = Ctx.empty
+        let effect = Mods.inc c [ Named "ArchonEffect" ] mods
+        let grant id = Mods.sumBase c [ Named("ArchonGrants:" + id) ] mods * effect
+        let spell m = m |> Mod.whenever (SkillIs Spell)
+        { Name = "Elemental Archon"
+          OnIgniteStat = "ElementalArchonOnIgnite"
+          Duration = 10.0 * Mods.inc c [ Named "ArchonDuration" ] mods
+          Recovery = if Mods.flag c (Named "ArchonNoRecovery") mods then 0.0 else 20.0 / Mods.inc c [ Named "ArchonRecoveryFaster" ] mods
+          Mods =
+            [ spell (Mod.more (Damage Elemental) (25.0 * effect))
+              spell (Mod.more (AilmentChance Ignite) (100.0 * effect))
+              spell (Mod.more (Buildup Freeze) (100.0 * effect))
+              spell (Mod.more (AilmentChance Shock) (100.0 * effect))
+              Mod.inc CritChance (grant "archon_grants_critical_strike_chance_+%")
+              Mod.base' CritBonus (grant "archon_grants_base_critical_strike_multiplier_+") ]
+            @ Mod.resistAllElemental (grant "archon_grants_all_elemental_resistance_+%")
+            |> List.map (Mod.from "Elemental Archon") }
