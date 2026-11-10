@@ -99,6 +99,23 @@ module Behaviours =
         let mods = ModDb.ofList sheet.Mods
         charges |> List.map (fun c -> c, floor (15.0 * Mods.inc Ctx.empty [ Named(c + "Duration") ] mods)) |> Map.ofList
 
+    /// The infusion a gem's skill consumes ("active_skill_consumes_a_X_infusion") and its
+    /// "-Infused" stat set as a skill.
+    let infusedCopy (db: GameDb) (charMods: ModDb) mainHand (setup: GemSetup) =
+        let consumes =
+            Gems.rawStats db charMods setup
+            |> List.tryPick (fun (id, v) ->
+                if v > 0.0 && id.StartsWith "active_skill_consumes_a_" && id.EndsWith "_infusion" then
+                    let el = id.Substring(24, id.Length - 24 - 9)
+                    Some(string (System.Char.ToUpperInvariant el.[0]) + el.Substring 1 + "Infusion")
+                else None)
+        match consumes, Gems.infusedSet db setup.Gem with
+        | Some element, Some set ->
+            match Gems.skill db charMods mainHand { setup with StatSet = set } with
+            | Ok (skill, _) -> Some(element, skill)
+            | Error _ -> None
+        | _ -> None
+
     /// Meta gems of a build and the spells they trigger. Every enabled group whose active gem is
     /// a Meta gem: energy sources, energy multiplier (gem + the group's supports), refund chance,
     /// release (Invocation or at maximum) and maximum energy from its stats; the group's other
@@ -129,6 +146,8 @@ module Behaviours =
                         elif id.EndsWith "_centienergy_on_block" then Some(Blocks(v / 100.0))
                         elif id.EndsWith "_centienergy_per_10ms_base_cast_time" then Some(CastsSpells(v / 100.0))
                         else None)
+                let rename copyName (s: Skill) =
+                    { s with Name = copyName; Tags = s.Tags.Add Triggered; Parts = s.Parts |> List.map (fun p -> { p with Name = copyName + ": " + p.Name; Tags = p.Tags.Add Triggered }) }
                 let triggered =
                     spells
                     |> List.choose (fun sp ->
@@ -136,14 +155,24 @@ module Behaviours =
                         match Gems.skill db charMods sheet.MainHand { Gem = sp.Name; Level = sp.Level; Quality = sp.Quality; StatSet = set; Supports = supports } with
                         | Ok (skill, _) ->
                             let copyName = sprintf "%s (%s)" skill.Name name
-                            let rec rename (s: Skill) = { s with Name = copyName; Tags = s.Tags.Add Triggered; Parts = s.Parts |> List.map (fun p -> { p with Name = copyName + ": " + p.Name; Tags = p.Tags.Add Triggered }) }
                             let castTime =
                                 (Gems.data db sp.Name |> Option.map (fun d -> d.CastTime) |> Option.defaultValue 1.0)
                                 + (Gems.rawStats db charMods { Gem = sp.Name; Level = sp.Level; Quality = sp.Quality; StatSet = 1; Supports = [] }
                                    |> List.filter (fun (id, _) -> id = "total_cast_time_+_ms") |> List.sumBy snd) / 1000.0
                                   * Constants.addedCastTimeEnergyWeight
-                            Some(rename skill, castTime)
+                            Some(rename copyName skill, castTime)
                         | Error _ -> None)
+                // the infused copies, used when an infusion is consumed
+                let consumers =
+                    if infused then []
+                    else
+                        spells
+                        |> List.choose (fun sp ->
+                            let setup = { Gem = sp.Name; Level = sp.Level; Quality = sp.Quality; StatSet = 1; Supports = supports }
+                            infusedCopy db charMods sheet.MainHand setup
+                            |> Option.map (fun (element, copy) ->
+                                let copyName = sprintf "%s (%s)" copy.Name name
+                                copyName, element, rename (copyName + " infused") copy))
                 let cost = triggered |> List.sumBy (fun (_, ct) -> 100.0 * ct)
                 let invocation = (Gems.data db metaGem.Name |> Option.exists (fun d -> d.Types.Contains "Invocation"))
                 let cooldown =
@@ -163,7 +192,7 @@ module Behaviours =
                       Sources = sources
                       EnergyMult = 1.0 + sum ((=) "energy_generated_+%") / 100.0
                       RefundChance = sum ((=) "trigger_skills_refund_half_energy_spent_chance_%") }
-                Some(meta, triggered |> List.map fst))
+                Some(meta, triggered |> List.map fst, consumers))
 
     /// Runic Ward Remnants from a persistent gem with `ward_remnants_gain_per_globe`, with its
     /// group's supports (Remnant Potency, Harmonic Remnants). Collecting takes `pickupSeconds`
@@ -191,6 +220,73 @@ module Behaviours =
                               ExtraChance = sum "chance_%_to_create_additional_remnant"
                               Delay = pickupSeconds + sum "remnant_delay_X_ms" / 1000.0
                               Overflow = 1.5 }))
+
+    /// The elemental (and Verisium) infusions: maximum 3 each (BaseMaximumInfusionCount, plus
+    /// "maximum X infusion stacks"), 20 s (BaseInfusionDurationMs, "infusion duration").
+    let infusionResources = [ "FireInfusion"; "ColdInfusion"; "LightningInfusion"; "VerisiumInfusion" ]
+
+    let infusionMaxima (sheet: CharacterSheet) =
+        let mods = ModDb.ofList sheet.Mods
+        let baseMax = Map.find "BaseMaximumInfusionCount" Tables.gameConstants
+        infusionResources
+        |> List.map (fun r -> r, int (baseMax + Mods.sumBase Ctx.empty [ Named("Max" + r); Named "MaxInfusions" ] mods))
+        |> Map.ofList
+
+    /// Infusion durations; Verisium ones also with their gem's "verisium infusion duration".
+    let infusionDurations (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) =
+        let mods = ModDb.ofList sheet.Mods
+        let baseD = Map.find "BaseInfusionDurationMs" Tables.gameConstants / 1000.0 * Mods.inc Ctx.empty [ Named "InfusionDuration" ] mods
+        let verisium =
+            build.Groups
+            |> List.filter (fun g -> g.Enabled)
+            |> List.collect (fun g -> g.Gems |> List.filter (fun x -> x.Enabled && not x.IsSupport))
+            |> List.sumBy (fun gem ->
+                Gems.rawStats db mods { Gem = gem.Name; Level = gem.Level; Quality = gem.Quality; StatSet = 1; Supports = [] }
+                |> List.filter (fun (id, _) -> id = "verisium_infusion_duration_+%") |> List.sumBy snd)
+        infusionResources
+        |> List.map (fun r -> r, (if r = "VerisiumInfusion" then baseD * (1.0 + verisium / 100.0) else baseD))
+        |> Map.ofList
+
+    /// Infusion remnants from a persistent gem (Siphon Elements) with its group's supports
+    /// (Harmonic Remnants: a second remnant).
+    let infusions (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) (pickupSeconds: float) (consumers: Map<string, string * string>) =
+        let charMods = ModDb.ofList sheet.Mods
+        let remnants, extra, delay =
+            build.Groups
+            |> List.filter (fun g -> g.Enabled)
+            |> List.tryPick (fun g ->
+                let enabled = g.Gems |> List.filter (fun x -> x.Enabled)
+                enabled
+                |> List.tryPick (fun gem ->
+                    if gem.IsSupport then None
+                    else
+                        let supports = enabled |> List.filter (fun x -> x.IsSupport) |> List.map (fun x -> x.Name, x.Level)
+                        let raw = Gems.rawStats db charMods { Gem = gem.Name; Level = gem.Level; Quality = gem.Quality; StatSet = 1; Supports = supports }
+                        let sum id = raw |> List.filter (fun (k, _) -> k = id) |> List.sumBy snd
+                        let r =
+                            [ Freeze, "ColdInfusion", sum "infusion_remnants_%_chance_to_spawn_cold_infusion_on_freezing_an_enemy"
+                              Ignite, "FireInfusion", sum "infusion_remnants_%_chance_to_spawn_fire_infusion_on_igniting_an_enemy"
+                              Shock, "LightningInfusion", sum "infusion_remnants_%_chance_to_spawn_lightning_infusion_on_shocking_an_enemy" ]
+                            |> List.filter (fun (_, _, c) -> c > 0.0)
+                        if r.IsEmpty then None
+                        else Some(r, sum "chance_%_to_create_additional_remnant", pickupSeconds + sum "remnant_delay_X_ms" / 1000.0)))
+            |> Option.defaultValue ([], 0.0, pickupSeconds)
+        if remnants.IsEmpty && consumers.IsEmpty then None
+        else
+            Some
+                { Remnants = remnants
+                  ExtraRemnantChance = extra
+                  Delay = delay
+                  Consumers = consumers
+                  Wildcard = Some "VerisiumInfusion" }
+
+    /// A skill that grants Verisium infusions when used (Powered by Verisium): (count) from
+    /// "verisium_infusion_skill_number_of_verisium_infusion_to_grant".
+    let verisiumGrant (db: GameDb) (charMods: ModDb) (setup: GemSetup) =
+        Gems.rawStats db charMods setup
+        |> List.filter (fun (id, _) -> id = "verisium_infusion_skill_number_of_verisium_infusion_to_grant")
+        |> List.sumBy snd
+        |> int
 
     /// Elemental Archon (BuffTemplates ArchonElemental: 25% more elemental damage with spells,
     /// 100% more ignite chance / freeze buildup / shock chance with spells), plus "Archon Buffs

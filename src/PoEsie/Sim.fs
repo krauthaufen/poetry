@@ -47,6 +47,8 @@ type Reaction =
     /// Feed a meta gem.
     | GainEnergy of meta: string * amount: float
     | RemoveBuff of name: string
+    /// Stacks of a resource (infusions from Powered by Verisium), capped at its maximum.
+    | GainResource of resource: string * count: int
 
 type Rule =
     { Hook: Hook
@@ -125,6 +127,20 @@ type Archon =
       Recovery: float
       Mods: Mod list }
 
+/// Infusions: per-element resources that skills consume for their "-Infused" stat set.
+type Infusions =
+    { /// Remnants: inflicting the ailment has this % chance to drop one of the infusion.
+      Remnants: (Ailment * string * float) list
+      /// Chance (%) a remnant comes as two.
+      ExtraRemnantChance: float
+      /// Seconds from the remnant dropping to the infusion arriving (pickup).
+      Delay: float
+      /// Skills that consume an infusion: skill name -> (infusion, name of the infused copy).
+      /// Each impact (Spell Cascade: every impact) consumes one.
+      Consumers: Map<string, string * string>
+      /// Used in place of any element when the element's own is missing ("VerisiumInfusion").
+      Wildcard: string option }
+
 /// Something that happens on its own every few seconds.
 type PeriodicAction =
     /// One stack of a random resource that isn't at its maximum (Thaumaturgical Dynamism,
@@ -183,6 +199,7 @@ type Actor =
       /// many seconds (the timer keeps its current value). 0: no pause.
       KeptChargesPause: float
       WardRemnants: WardRemnants option
+      Infusions: Infusions option
       Archons: Archon list }
 
 module Actor =
@@ -204,6 +221,7 @@ module Actor =
           ResourceDurations = Map.empty
           KeptChargesPause = 0.0
           WardRemnants = None
+          Infusions = None
           Archons = [] }
 
     let always skill = { Use = skill; When = fun _ -> true }
@@ -287,6 +305,8 @@ module Sim =
         | PeriodicTick of actor: string * periodic: string
         /// A ward remnant's ward arrives.
         | WardArrives of amount: float
+        /// Stacks of a resource arrive (picked-up infusion remnants, Verisium).
+        | GainStacks of actor: string * resource: string * count: int
         | Expire
 
     type private ActorState =
@@ -696,7 +716,8 @@ module Sim =
                             if amount * k >= current then addDebuff t name duration 1 [ Mod.base' (Resist dt) (-amount * k) ] w
                             else w)
                     | TriggerSkill name -> trigger env rng actor name w
-                    | GainEnergy (meta, amount) -> gainEnergy env rng actor meta amount w)
+                    | GainEnergy (meta, amount) -> gainEnergy env rng actor meta amount w
+                    | GainResource (r, n) -> schedule w.Time (GainStacks(actor.Name, r, n)) w)
             w
 
     and private gainEnergy env rng (actor: Actor) metaName amount w =
@@ -981,6 +1002,26 @@ module Sim =
                                         | _ -> 0.0)
                                 if amount > 0.0 then gainEnergy env rng actor meta.Name (amount * meta.EnergyMult) w else w)
                             w
+                // infusion remnants (Siphon Elements): each freeze / shock / ignite inflicted
+                let w =
+                    match actor.Infusions with
+                    | Some inf when not inf.Remnants.IsEmpty ->
+                        let newly a =
+                            match a with
+                            | Freeze ->
+                                if dead then
+                                    inflicted |> List.exists (function AddBuildup (Freeze, pct) -> (Map.tryFind Freeze e.Buildup |> Option.defaultValue 0.0) + pct >= 100.0 | _ -> false)
+                                else (status w.Enemies.[target]).ContainsKey (Ailment.status Freeze) && not ((status e).ContainsKey (Ailment.status Freeze))
+                            | _ -> inflicted |> List.exists (function Dot (x, _, _, _, _) | Status (x, _, _) -> x = a | _ -> false)
+                        inf.Remnants
+                        |> List.fold
+                            (fun w (a, r, chance) ->
+                                if newly a && rng.Chance chance then
+                                    let n = if rng.Chance inf.ExtraRemnantChance then 2 else 1
+                                    { w with Counts = bump ("remnant:" + r) w.Counts } |> schedule (w.Time + inf.Delay) (GainStacks(actor.Name, r, n))
+                                else w)
+                            w
+                    | _ -> w
                 // Archon: gained on a new ignite by a skill with the chance; none while one is active or
                 // during the recovery period after one ends
                 let w =
@@ -1021,6 +1062,31 @@ module Sim =
                 let w = react env rng actor OnHit skill (Some target) w
                 if hit.Crit then react env rng actor OnCrit skill (Some target) w else w
 
+    let private markStatus actorName (name: string) (w: World) =
+        updateActor actorName (fun st -> { st with Buffs = Map.add name { Name = name; Mods = []; Stacks = 1; Expires = w.Time + 4.0 } st.Buffs }) w
+        |> schedule (w.Time + 4.0) Expire
+
+    let private stacksOf (st: ActorState) r = Map.tryFind r st.Buffs |> Option.map (fun e -> e.Stacks) |> Option.defaultValue 0
+
+    /// Set a resource's stacks. `refresh`: a gain restarts its duration; a loss keeps it.
+    let private setStacksWith (env: Env) actorName refresh r n (w: World) =
+        let actor = actorDef env actorName
+        let duration = Map.tryFind r actor.ResourceDurations
+        let w =
+            updateActor actorName (fun st ->
+                if n <= 0 then { st with Buffs = Map.remove r st.Buffs }
+                else
+                    let expires =
+                        match duration, Map.tryFind r st.Buffs with
+                        | Some d, _ when refresh -> w.Time + d
+                        | _, Some old -> old.Expires
+                        | Some d, None -> w.Time + d
+                        | None, None -> infinity
+                    { st with Buffs = Map.add r { Name = r; Mods = []; Stacks = n; Expires = expires } st.Buffs }) w
+        match duration with
+        | Some d when refresh && n > 0 -> schedule (w.Time + d) Expire w
+        | _ -> w
+
     let private onStrike env (rng: Rng) name skillName mult aimedAt (w: World) =
         let actor = actorDef env name
         let skill = skillOf actor skillName
@@ -1033,41 +1099,76 @@ module Sim =
         | None -> w
         | Some primary ->
             let st = Map.find name w.Actors
-            let ctx = Skill.ctx skill false (skillStacks actor skill st) Map.empty
-            let mods = skillDb env actor skill st
-            let areaMult = Mods.mult ctx [ AreaOfEffect ] mods
-            let delivery =
-                match skill.Delivery with
-                | Projectiles p ->
-                    let fromCharges =
-                        match p.PerCharge with
-                        | Some (charge, per) -> per * (Map.tryFind charge (skillStacks actor skill st) |> Option.defaultValue 0)
-                        | None -> 0
-                    Projectiles
-                        { p with
-                            Count = p.Count + fromCharges + (if p.Count + fromCharges > 0 then int (Mods.sumBase ctx [ AdditionalProjectiles ] mods) else 0)
-                            Pierce = p.Pierce + int (Mods.sumBase ctx [ Pierce ] mods)
-                            Chains = p.Chains + int (Mods.sumBase ctx [ Chains ] mods)
-                            TerrainChain = p.TerrainChain + Mods.sumBase ctx [ Named "TerrainChain" ] mods }
-                | d -> d
+            let shape (skill: Skill) =
+                let ctx = Skill.ctx skill false (skillStacks actor skill st) Map.empty
+                let mods = skillDb env actor skill st
+                let areaMult = Mods.mult ctx [ AreaOfEffect ] mods
+                let delivery =
+                    match skill.Delivery with
+                    | Projectiles p ->
+                        let fromCharges =
+                            match p.PerCharge with
+                            | Some (charge, per) -> per * (Map.tryFind charge (skillStacks actor skill st) |> Option.defaultValue 0)
+                            | None -> 0
+                        Projectiles
+                            { p with
+                                Count = p.Count + fromCharges + (if p.Count + fromCharges > 0 then int (Mods.sumBase ctx [ AdditionalProjectiles ] mods) else 0)
+                                Pierce = p.Pierce + int (Mods.sumBase ctx [ Pierce ] mods)
+                                Chains = p.Chains + int (Mods.sumBase ctx [ Chains ] mods)
+                                TerrainChain = p.TerrainChain + Mods.sumBase ctx [ Named "TerrainChain" ] mods }
+                    | d -> d
+                ctx, mods, areaMult, delivery
+            // Infusions: each impact consumes one of the skill's element (or the wildcard) and
+            // uses the infused copy; without one, the plain skill
+            let consumer = actor.Infusions |> Option.bind (fun inf -> Map.tryFind skillName inf.Consumers |> Option.map (fun c -> inf, c))
+            let variant (w: World) =
+                match consumer with
+                | None -> skill, w
+                | Some (inf, (element, infusedName)) ->
+                    let st = Map.find name w.Actors
+                    let have r = stacksOf st r > 0
+                    let source = if have element then Some element else inf.Wildcard |> Option.filter have
+                    match source with
+                    | None -> skill, { w with Counts = bump ("uninfused:" + skillName) w.Counts }
+                    | Some r ->
+                        let infused = skillOf actor infusedName
+                        let keep = Mods.sumBase Ctx.empty [ Named "InfusionKeepChance" ] (skillDb env actor infused st)
+                        let w = { w with Counts = bump ("infused:" + skillName) w.Counts }
+                        let w = markStatus name "ConsumedInfusionRecently" w
+                        if rng.Chance keep then infused, w
+                        else infused, setStacksWith env name false r (stacksOf st r - 1) w
             let w = { w with Player = w.Player |> Option.map (fun p -> { p with StrikeLeech = 0.0 }) }
-            // Spell Cascade: extra impacts per side along the line from the player through the target,
-            // one radius apart (spacing: guess)
             // Spell Cascade: extra impacts on either side of the target "along a randomly chosen
             // axis"; side impacts have their own less area; spacing: user observation
-            let cascades = int (Mods.sumBase ctx [ Named "CascadesPerSide" ] mods)
-            match delivery with
-            | AreaAtTarget r when cascades > 0 ->
+            let ctx0, mods0, _, _ = shape skill
+            let cascades = int (Mods.sumBase ctx0 [ Named "CascadesPerSide" ] mods0)
+            match skill.Delivery with
+            | AreaAtTarget _ when cascades > 0 ->
                 let axis = Vec.ofAngle (rng.Float() * 2.0 * System.Math.PI)
-                let centreR = Geometry.radius r areaMult
-                let sideR = Geometry.radius r (areaMult * Mods.more ctx [ Named "CascadeArea" ] mods)
-                let step = centreR * env.Fight.CascadeSpacing
-                [ for k in -cascades .. cascades ->
-                    Vec.add primary.Position (Vec.scale (float k * step) axis), (if k = 0 then centreR else sideR) ]
-                |> List.collect (fun (centre, rr) ->
-                    living |> List.filter (fun e -> Vec.dist centre e.Position <= rr + e.Size) |> List.map (fun e -> e.Name))
-            | _ -> Geometry.targetsFrom rng env.Fight.Walls env.Fight.Reach delivery areaMult primary living
-            |> List.fold (fun w target -> hitEnemy env rng actor skill mult target w) w
+                // the centre impact first (it takes the first infusion); its radius sets the spacing
+                let order = 0 :: [ for i in 1 .. cascades do yield -i; yield i ]
+                order
+                |> List.fold
+                    (fun (w, step) k ->
+                        let sk, w = variant w
+                        let ctx, mods, areaMult, delivery = shape sk
+                        let r = match delivery with AreaAtTarget r -> r | _ -> 0.0
+                        let centreR = Geometry.radius r areaMult
+                        let step = if k = 0 then centreR * env.Fight.CascadeSpacing else step
+                        let rr = if k = 0 then centreR else Geometry.radius r (areaMult * Mods.more ctx [ Named "CascadeArea" ] mods)
+                        let centre = Vec.add primary.Position (Vec.scale (float k * step) axis)
+                        let w =
+                            living
+                            |> List.filter (fun e -> Vec.dist centre e.Position <= rr + e.Size)
+                            |> List.fold (fun w e -> hitEnemy env rng actor sk mult e.Name w) w
+                        w, step)
+                    (w, 0.0)
+                |> fst
+            | _ ->
+                let sk, w = variant w
+                let _, _, areaMult, delivery = shape sk
+                Geometry.targetsFrom rng env.Fight.Walls env.Fight.Reach delivery areaMult primary living
+                |> List.fold (fun w target -> hitEnemy env rng actor sk mult target w) w
 
     /// A monster's hit at the player: evasion, deflection, armour, resistances, then
     /// energy shield and life. Frozen / stunned / electrocuted monsters don't act; chill
@@ -1142,31 +1243,6 @@ module Sim =
         | _ -> w
 
     /// Mark "<what>Recently" for 4 s (gained / consumed charges...).
-    let private markStatus actorName (name: string) (w: World) =
-        updateActor actorName (fun st -> { st with Buffs = Map.add name { Name = name; Mods = []; Stacks = 1; Expires = w.Time + 4.0 } st.Buffs }) w
-        |> schedule (w.Time + 4.0) Expire
-
-    let private stacksOf (st: ActorState) r = Map.tryFind r st.Buffs |> Option.map (fun e -> e.Stacks) |> Option.defaultValue 0
-
-    /// Set a resource's stacks. `refresh`: a gain restarts its duration; a loss keeps it.
-    let private setStacksWith (env: Env) actorName refresh r n (w: World) =
-        let actor = actorDef env actorName
-        let duration = Map.tryFind r actor.ResourceDurations
-        let w =
-            updateActor actorName (fun st ->
-                if n <= 0 then { st with Buffs = Map.remove r st.Buffs }
-                else
-                    let expires =
-                        match duration, Map.tryFind r st.Buffs with
-                        | Some d, _ when refresh -> w.Time + d
-                        | _, Some old -> old.Expires
-                        | Some d, None -> w.Time + d
-                        | None, None -> infinity
-                    { st with Buffs = Map.add r { Name = r; Mods = []; Stacks = n; Expires = expires } st.Buffs }) w
-        match duration with
-        | Some d when refresh && n > 0 -> schedule (w.Time + d) Expire w
-        | _ -> w
-
     let private onPeriodic env (rng: Rng) actorName periodicName (w: World) =
         let actor = actorDef env actorName
         match actor.Periodics |> List.tryFind (fun p -> p.Name = periodicName) with
@@ -1277,6 +1353,12 @@ module Sim =
                     else
                         updateActor name (fun st -> { st with Buffs = Map.remove charge st.Buffs }) w
                         |> fun w -> { w with Counts = bump ("consumed:" + charge) w.Counts }
+            | GainStacks (name, r, n) ->
+                let actor = actorDef env name
+                let st = Map.find name w.Actors
+                let maxR = Map.tryFind r actor.MaxResources |> Option.defaultValue n
+                setStacksWith env name true r (min maxR (stacksOf st r + n)) w
+                |> fun w -> { w with Counts = bump ("gained:" + r) w.Counts }
             | Expire -> w
 
     let private envOf (fight: Fight) =

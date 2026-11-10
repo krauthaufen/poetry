@@ -25,7 +25,9 @@
 ///   --kept-pause S   charges kept by "chance to not remove" freeze their timer for S seconds (default 1.5, user observation)
 ///   --max K=N,...    override resource maxima with observed ones, e.g. "Mote:blue=0"
 ///   --noflask        don't use the mana flask
-///   --infused        always have infusions: skills use their "-Infused" stat sets
+///   --infused        unlimited infusions: skills always use their "-Infused" stat sets
+///                    (default: infusions are a resource, gained from remnants and Verisium)
+///   --on-cooldown A,B  skills cast whenever ready, before the rotation (Powered by Verisium, Frost Bomb)
 ///   --pickup S       seconds to collect a remnant (default 1.5, user observation)
 ///   --rotation A,B   skills you press, cycled in this order (meta gems trigger the rest)
 ///   --cascade-check F  geometric check of Spell Cascade impacts at several spacings; page to F
@@ -221,25 +223,52 @@ let main argv =
                 printfn "  delivery: %A" skill.Delivery
                 // meta gems and the spells they trigger
                 let infused = Map.containsKey "infused" o
+                let infusionMaxima = Behaviours.infusionMaxima sheet
                 let metas = Behaviours.metas db sheet build infused
-                for (m, spells) in metas do
+                for (m, spells, _) in metas do
                     printfn "  meta %-28s %-14s energy x%.2f, %s per trigger (max %.0f), sources %A -> %s"
                         m.Name (match m.Release with Invocation cd -> sprintf "invoke /%.1fs" cd | AtMaximum -> "at maximum") m.EnergyMult
                         (sprintf "%.0f" m.Cost) m.MaxEnergy m.Sources (spells |> List.map (fun s -> s.Name) |> String.concat ", ")
+                // a pressed skill by gem name, with its group's supports; plus its infused copy
+                let charMods = ModDb.ofList sheet.Mods
+                let pressedSkill (n: string) =
+                    build.Groups |> List.tryPick (fun g ->
+                        match g.Gems |> List.tryFind (fun x -> x.Name = n && not x.IsSupport && x.Enabled) with
+                        | None -> None
+                        | Some gem ->
+                            let pick (x: PobGem) =
+                                if infused && x.Name = n then { x with StatSet = Gems.infusedSet db n |> Option.defaultValue x.StatSet } else x
+                            let g' = { g with Gems = g.Gems |> List.filter (fun x -> x.IsSupport || x.Name = n) |> List.map pick }
+                            match Pob.groupSkill db sheet g' |> List.tryHead with
+                            | Some (Ok (s, _)) ->
+                                let supports = g.Gems |> List.filter (fun x -> x.IsSupport && x.Enabled) |> List.map (fun x -> x.Name, x.Level)
+                                let setup = { Gem = gem.Name; Level = gem.Level; Quality = gem.Quality; StatSet = 1; Supports = supports }
+                                let copy =
+                                    if infused then None
+                                    else Behaviours.infusedCopy db charMods sheet.MainHand setup |> Option.map (fun (el, c) -> s.Name, el, { (Behaviours.applyObserved c) with Name = s.Name + " infused" })
+                                Some(Behaviours.applyObserved s, copy, Behaviours.verisiumGrant db charMods setup)
+                            | _ -> None)
+                let names key = (Map.tryFind key o |> Option.defaultValue "").Split(',') |> Array.map (fun x -> x.Trim()) |> Array.filter ((<>) "") |> List.ofArray
                 // --rotation "A,B": skills you press, cycled in this order (default: the simulated group)
-                let pressed =
+                let pressedAll =
                     match Map.tryFind "rotation" o with
-                    | Some r ->
-                        r.Split(',') |> Array.map (fun x -> x.Trim()) |> List.ofArray
-                        |> List.choose (fun n ->
-                            build.Groups |> List.tryPick (fun g ->
-                                if g.Gems |> List.exists (fun x -> x.Name = n && not x.IsSupport) then
-                                    let pick (x: PobGem) =
-                                        if infused && x.Name = n then { x with StatSet = Gems.infusedSet db n |> Option.defaultValue x.StatSet } else x
-                                    Pob.groupSkill db sheet { g with Gems = g.Gems |> List.filter (fun x -> x.IsSupport || x.Name = n) |> List.map pick }
-                                    |> List.tryHead |> Option.bind (function Ok (s, _) -> Some(Behaviours.applyObserved s) | _ -> None)
-                                else None))
-                    | None -> [ skill ]
+                    | Some _ -> names "rotation" |> List.choose pressedSkill
+                    | None -> [ skill, None, 0 ]
+                let onCooldown = names "on-cooldown" |> List.choose pressedSkill
+                // skills that only grant infusions don't hit
+                let onCooldown = onCooldown |> List.map (fun (s, c, g) -> (if g > 0 then { s with Hits = [] } else s), c, g)
+                let pressed = pressedAll |> List.map (fun (s, _, _) -> s)
+                let consumers =
+                    (pressedAll @ onCooldown |> List.choose (fun (_, c, _) -> c))
+                    @ (metas |> List.collect (fun (_, _, c) -> c))
+                let grantRules =
+                    onCooldown
+                    |> List.filter (fun (_, _, g) -> g > 0)
+                    |> List.map (fun (s, _, g) -> { Hook = OnUse; Filter = Called s.Name; Chance = 100.0; Reaction = GainResource("VerisiumInfusion", g) })
+                let infusionSetup =
+                    if infused then None
+                    else Behaviours.infusions db sheet build (get "pickup" 1.0) (consumers |> List.map (fun (n, el, c) -> n, (el, c.Name)) |> Map.ofList)
+                for (n, el, _) in consumers do printfn "  consumes %s: %s" el n
                 let rotation =
                     match pressed with
                     | [ single ] -> [ Actor.always single.Name ]
@@ -248,19 +277,29 @@ let main argv =
                             let previous = many.[(i + many.Length - 1) % many.Length].Name
                             { Use = s.Name; When = fun v -> v.LastUsed = previous || (v.LastUsed = "" && i = 0) })
                         |> fun steps -> steps @ [ Actor.always many.Head.Name ]
+                let rotation = (onCooldown |> List.map (fun (s, _, _) -> Actor.always s.Name)) @ rotation
                 let fight =
                     { Enemies = enemies
                       Player =
-                        { Actor.make "Player" sheet.Mods (pressed @ (metas |> List.collect snd)) with
+                        { Actor.make "Player" sheet.Mods (pressed @ (onCooldown |> List.map (fun (s, _, _) -> s)) @ (metas |> List.collect (fun (_, s, _) -> s)) @ (consumers |> List.map (fun (_, _, c) -> c))) with
                             Rotation = rotation
-                            Metas = metas |> List.map fst
-                            Resources = resources
+                            Rules = grantRules
+                            Metas = metas |> List.map (fun (m, _, _) -> m)
+                            Infusions = infusionSetup
+                            // infusions start full (kept up while clearing), scaled like invocations
+                            Resources =
+                                resources
+                                @ (match infusionSetup with
+                                   | Some inf ->
+                                       let used = (consumers |> List.map (fun (_, el, _) -> el)) @ Option.toList inf.Wildcard |> List.distinct
+                                       used |> List.map (fun r -> r, int (float (Map.find r infusionMaxima) * get "banked" 1.0))
+                                   | None -> [])
                             Cycles = cycles
                             Vitals = (if Map.containsKey "immortal" o then None else Some vitals)
                             VitalsAt = Some(fun current -> Defence.computeWith current bases sheet)
                             Periodics = periodics
-                            MaxResources = maxResources
-                            ResourceDurations = Behaviours.chargeDurations sheet
+                            MaxResources = Map.fold (fun m k v -> Map.add k v m) maxResources infusionMaxima
+                            ResourceDurations = Map.fold (fun m k v -> Map.add k v m) (Behaviours.chargeDurations sheet) (Behaviours.infusionDurations db sheet build)
                             KeptChargesPause = get "kept-pause" 1.0
                             WardRemnants = Behaviours.wardRemnants db sheet build (get "pickup" 1.0)
                             Archons = [ Behaviours.elementalArchon sheet ]
@@ -286,7 +325,7 @@ let main argv =
                 printfn ""
                 if Map.containsKey "cascade-check" o then
                     // geometric check of Spell Cascade impacts for the first triggered area spell with cascades
-                    let candidates = metas |> List.collect snd
+                    let candidates = metas |> List.collect (fun (_, s, _) -> s)
                     match candidates |> List.tryFind (fun s -> match s.Delivery with AreaAtTarget _ -> true | _ -> false) with
                     | None -> printfn "no triggered area spell"
                     | Some sk ->
