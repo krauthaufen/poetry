@@ -180,11 +180,13 @@ Confidence levels:
 | Infusions | fire / cold / lightning / verisium stacks, max 3 each (BaseMaximumInfusionCount + "maximum X infusion stacks"), 20 s (BaseInfusionDurationMs); gaining refreshes the duration | game constants | data |
 | Infusion use | a skill with `active_skill_consumes_a_X_infusion` uses its "-Infused" stat set when it consumes one; every impact consumes one (Spell Cascade: each impact, centre first; the centre's radius sets the spacing); missing element -> a Verisium one; none -> plain stat set; `chance_to_not_consume_infusion_%` keeps it | user (cascades eat separately, Verisium as any element) | user |
 | Infusion remnants | Siphon Elements: each ignite / shock inflicted, and each new freeze, has the gem's chance (5% + 0.1%/quality) to drop a remnant; Harmonic Remnants: chance for two; picked up after `--pickup` seconds | gem data; pickup delay a guess | data + guess |
-| Powered by Verisium | grants 4 Verisium infusions per cast, capped at 3 (one wasted); Ward cost not deducted (TODO); stored uses from Second Wind not modelled (sustained rate unchanged) | gem data, user | data |
+| Powered by Verisium | grants 4 Verisium infusions per cast, capped at 3 (one wasted); Ward cost not deducted (TODO) | gem data, user | data |
 | Fights start with infusions | every consumed element and Verisium start at maximum x `--banked` (picked up while clearing) | user | user |
 | Infusion-generating skills | a non-persistent skill with types GeneratesInfusion + GeneratesRemnants and one element (Frost Bomb) drops a remnant of that element per use, at detonation (`base_skill_detonation_time` x Short Fuse) + pickup; Harmonic Remnants: chance for two | gem data + description, user | data |
 | Frost Bomb exposure | `active_skill_all_elemental_exposure_magnitude` to fire, cold and lightning on use, x (1 + exposure effect), for `base_secondary_skill_effect_duration`; compounding per pulse ignored (Short Fuse orb lives 0.8 s) | gem data | data |
-| Atziri's Impatience | loses 25% of life, ES and mana per use: NOT modelled yet | gem data | todo |
+| Atziri's Impatience | "Lose 25% of maximum Life, Mana and Energy Shield when you use Supported Skills": applied on use, life floors at 1 | stat description | data |
+| Stored cooldown uses | gem level `storedUses`, doubled by Second Wind; each use recharges independently ("just two cooldowns"); `--sequential-uses` for one after another | user (poedb describes sequential) | user |
+| Verisium in the rotation | cast when ready, but only while Verisium infusions are below maximum | player behaviour | guess |
 | Second Wind | `base_cooldown_speed_+%_final` = less cooldown recovery; Verisium 4.9 s -> 5.4 s, as the game shows | gem data, in-game value | data |
 | Banked invocations | fights start with invocations at maximum energy (banked while clearing); `--banked 0` starts empty | user (presses both invocations when ready) | user |
 | Stat text with only a literal | a template with no placeholder but one number ("down to a minimum of -50%") gives that number as the stat value | game text | data |

@@ -302,6 +302,8 @@ module StatMap =
         | "minion_attack_and_cast_speed_+%" -> one (Mod.inc (ForMinions Speed) v)
         | "base_cooldown_speed_+%" -> one (Mod.inc CooldownRecovery v)
         | "base_cooldown_speed_+%_final" -> one (Mod.more CooldownRecovery v)
+        | "support_double_number_of_cooldown_uses" -> one (Mod.base' (Named "DoubleCooldownUses") 1.0)
+        | "lose_%_of_life_es_and_mana_when_skill_is_used" -> one (Mod.base' (Named "LosePoolsOnUse") v)
         | "support_cooldown_reduction_cooldown_recovery_+%" -> one (Mod.inc CooldownRecovery v)
         | "skill_effect_duration_+%" -> one (Mod.inc SkillDuration v)
         | "ailment_chance_+%" -> Some(Mods(allAilments |> List.map (fun a -> Mod.inc (AilmentChance a) v)))

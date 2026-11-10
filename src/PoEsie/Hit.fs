@@ -63,6 +63,8 @@ type Skill =
       /// Seconds per use with no speed modifiers (1 / weapon APS * skill time multiplier for attacks).
       BaseTime: float
       Cooldown: float option
+      /// Uses stored before the cooldown blocks the skill (gem level data; Second Wind doubles).
+      StoredUses: int
       /// Hits produced by one use: (fraction of the use time, damage multiplier). Default: one hit at the end.
       Hits: (float * float) list
       /// How a use finds its targets.
@@ -88,6 +90,7 @@ module Skill =
           BaseCrit = 5.0
           BaseTime = 1.0
           Cooldown = None
+          StoredUses = 1
           Hits = [ 1.0, 1.0 ]
           Delivery = Single
           Mods = []

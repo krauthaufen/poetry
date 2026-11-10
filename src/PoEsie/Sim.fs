@@ -201,6 +201,8 @@ type Actor =
       /// Consuming charges that are kept ("chance to not remove") pauses their timer for this
       /// many seconds (the timer keeps its current value). 0: no pause.
       KeptChargesPause: float
+      /// Stored cooldown uses recharge at the same time (true) or one after another (false).
+      ParallelUses: bool
       WardRemnants: WardRemnants option
       Infusions: Infusions option
       Archons: Archon list }
@@ -223,6 +225,7 @@ module Actor =
           MaxResources = Map.empty
           ResourceDurations = Map.empty
           KeptChargesPause = 0.0
+          ParallelUses = false
           WardRemnants = None
           Infusions = None
           Archons = [] }
@@ -318,6 +321,8 @@ module Sim =
           Paused: Map<string, float>
           Buffs: Map<string, Effect>
           Cooldowns: Map<string, float>
+          /// Per skill: when its spent stored uses come back.
+          Recharges: Map<string, float list>
           Energy: Map<string, float> }
 
     type private EnemyState =
@@ -772,8 +777,25 @@ module Sim =
                 match skill.Cooldown with
                 | Some cd ->
                     let recovery = Mods.mult ctx [ CooldownRecovery ] mods
-                    updateActor actor.Name (fun st -> { st with Cooldowns = Map.add skill.Name (w.Time + cd / recovery) st.Cooldowns }) w
+                    let uses = skill.StoredUses * (if Mods.sumBase ctx [ Named "DoubleCooldownUses" ] mods > 0.0 then 2 else 1)
+                    updateActor actor.Name (fun st ->
+                        let pending = Map.tryFind skill.Name st.Recharges |> Option.defaultValue [] |> List.filter (fun t -> t > w.Time)
+                        let start = if actor.ParallelUses || pending.IsEmpty then w.Time else List.max pending
+                        let pending = List.sort (pending @ [ start + cd / recovery ])
+                        { st with
+                            Recharges = Map.add skill.Name pending st.Recharges
+                            // blocked once every stored use is recharging; free again when the first is back
+                            Cooldowns = if pending.Length >= uses then Map.add skill.Name pending.Head st.Cooldowns else Map.remove skill.Name st.Cooldowns }) w
                 | None -> w
+            // "Lose X% of maximum Life, Mana and Energy Shield when you use" (Atziri's Impatience); life stays >= 1
+            let w =
+                let lose = Mods.sumBase ctx [ Named "LosePoolsOnUse" ] mods / 100.0
+                match actor.Vitals, w.Player with
+                | Some v, Some p when lose > 0.0 && useTime > 0.0 ->
+                    { w with
+                        Player = Some { p with Life = max (min 1.0 p.Life) (p.Life - lose * v.Life); EnergyShield = max 0.0 (p.EnergyShield - lose * v.EnergyShield); Mana = max 0.0 (p.Mana - lose * v.Mana) }
+                        Counts = bump "pool loss on use" w.Counts }
+                | _ -> w
             let pattern =
                 Map.tryFind skill.Name actor.HitPattern
                 |> Option.defaultValue (skill.Hits |> List.map (fun (f, m) -> DuringUse f, m))
@@ -1393,6 +1415,7 @@ module Sim =
               Paused = Map.empty
               Buffs = Map.empty
               Cooldowns = Map.empty
+              Recharges = Map.empty
               Energy = Map.empty }
         let w0 =
             { Player =

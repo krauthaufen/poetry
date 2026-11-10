@@ -27,6 +27,7 @@
 ///   --noflask        don't use the mana flask
 ///   --infused        unlimited infusions: skills always use their "-Infused" stat sets
 ///                    (default: infusions are a resource, gained from remnants and Verisium)
+///   --sequential-uses  stored cooldown uses (Second Wind) recharge one after another (default: independently)
 ///   --on-cooldown A,B  skills cast whenever ready, before the rotation (Powered by Verisium, Frost Bomb)
 ///   --pickup S       seconds to collect a remnant (default 1.5, user observation)
 ///   --rotation A,B   skills you press, cycled in this order (meta gems trigger the rest)
@@ -59,6 +60,7 @@ let rec private opts (args: string list) =
     | "--noflask" :: rest -> Map.add "noflask" "1" (opts rest)
     | "--cast-on-self" :: rest -> Map.add "cast-on-self" "1" (opts rest)
     | "--infused" :: rest -> Map.add "infused" "1" (opts rest)
+    | "--sequential-uses" :: rest -> Map.add "sequential-uses" "1" (opts rest)
     | k :: v :: rest when k.StartsWith "--" -> Map.add (k.Substring 2) v (opts rest)
     | _ :: rest -> opts rest
     | [] -> Map.empty
@@ -279,7 +281,15 @@ let main argv =
                             let previous = many.[(i + many.Length - 1) % many.Length].Name
                             { Use = s.Name; When = fun v -> v.LastUsed = previous || (v.LastUsed = "" && i = 0) })
                         |> fun steps -> steps @ [ Actor.always many.Head.Name ]
-                let rotation = (onCooldown |> List.map (fun (s, _, _) -> Actor.always s.Name)) @ rotation
+                // on cooldown; a skill that only grants Verisium infusions waits until they aren't full
+                let rotation =
+                    (onCooldown
+                     |> List.map (fun (s, _, g) ->
+                         if g > 0 then
+                             let cap = Map.find "VerisiumInfusion" infusionMaxima
+                             { Use = s.Name; When = fun v -> (Map.tryFind "VerisiumInfusion" v.Buffs |> Option.defaultValue 0) < cap }
+                         else Actor.always s.Name))
+                    @ rotation
                 let fight =
                     { Enemies = enemies
                       Player =
@@ -303,6 +313,8 @@ let main argv =
                             MaxResources = Map.fold (fun m k v -> Map.add k v m) maxResources infusionMaxima
                             ResourceDurations = Map.fold (fun m k v -> Map.add k v m) (Behaviours.chargeDurations sheet) (Behaviours.infusionDurations db sheet build)
                             KeptChargesPause = get "kept-pause" 1.0
+                            // user: stored uses are "just two cooldowns"
+                            ParallelUses = not (Map.containsKey "sequential-uses" o)
                             WardRemnants = Behaviours.wardRemnants db sheet build (get "pickup" 1.0)
                             Archons = [ Behaviours.elementalArchon sheet ]
                             ManaFlask =

@@ -292,6 +292,7 @@ module Gems =
           BaseCrit = crit
           BaseTime = time
           Cooldown = gemLevel |> Option.bind (fun l -> l.Cooldown)
+          StoredUses = gemLevel |> Option.bind (fun l -> l.StoredUses) |> Option.map int |> Option.defaultValue 1
           Hits = [ 1.0, 1.0 ]
           Delivery = delivery
           Mods = mods
