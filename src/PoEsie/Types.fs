@@ -13,6 +13,14 @@ module DamageType =
     let all = [ Physical; Lightning; Cold; Fire; Chaos ]
     let elemental = [ Lightning; Cold; Fire ]
 
+    let name t =
+        match t with
+        | Physical -> "Physical"
+        | Lightning -> "Lightning"
+        | Cold -> "Cold"
+        | Fire -> "Fire"
+        | Chaos -> "Chaos"
+
     let isElemental t =
         match t with
         | Lightning | Cold | Fire -> true

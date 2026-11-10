@@ -17,6 +17,10 @@
     <Compile Include="Ailments.fs" />
     <Compile Include="Sim.fs" />
     <Compile Include="Summary.fs" />
+    <Compile Include="Json.fs" />
+    <Compile Include="GameData.fs" />
+    <Compile Include="StatText.fs" />
+    <Compile Include="StatMap.fs" />
   </ItemGroup>
 
   <!-- Fable: ship sources in the package so it can be compiled to JS. -->
