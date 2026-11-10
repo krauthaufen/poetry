@@ -227,7 +227,8 @@ module Fight =
           Minions = []
           Targeting = Strongest
           Reach = infinity
-          CascadeSpacing = 1.0
+          // Spell Cascade impacts land about 1.5 radii apart (user observation)
+          CascadeSpacing = 1.5
           Walls = []
           MaxTime = maxTime }
 

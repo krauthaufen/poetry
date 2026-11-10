@@ -22,14 +22,14 @@
 ///   --start S        full (default: charges, rage, motes at maximum) | empty (only power charges and rage)
 ///   --chargegen S    seconds between Thaumaturgical Dynamism charges (default 5)
 ///   --cast-on-self   ground skills land on the player (slam reach 0)
-///   --kept-pause S   charges kept by "chance to not remove" freeze their timer for S seconds (default 1)
+///   --kept-pause S   charges kept by "chance to not remove" freeze their timer for S seconds (default 1.5, user observation)
 ///   --max K=N,...    override resource maxima with observed ones, e.g. "Mote:blue=0"
 ///   --noflask        don't use the mana flask
 ///   --infused        always have infusions: skills use their "-Infused" stat sets
-///   --pickup S       seconds to collect a remnant (default 1)
+///   --pickup S       seconds to collect a remnant (default 1.5, user observation)
 ///   --rotation A,B   skills you press, cycled in this order (meta gems trigger the rest)
 ///   --cascade-check F  geometric check of Spell Cascade impacts at several spacings; page to F
-///   --cascade-spacing K  distance between cascade impacts as a multiple of the radius (default 1)
+///   --cascade-spacing K  distance between cascade impacts as a multiple of the radius (default 1.5, user observation)
 ///   --suite          run the standard scenarios (pack, pack + 2 rares, surrounded, boss) and print a table
 ///   --data DIR       exported game data (default: data/game next to the repo)
 module PoEsie.Cli
@@ -279,7 +279,7 @@ let main argv =
                       Targeting = (if Map.tryFind "target" o = Some "nearest" then Nearest else Strongest)
                       // "Cast on Self": the slam lands on the player
                       Reach = (if Map.containsKey "cast-on-self" o then 0.0 else get "reach" 15.0)
-                      CascadeSpacing = get "cascade-spacing" 1.0
+                      CascadeSpacing = get "cascade-spacing" 1.5
                       Walls = []
                       MaxTime = get "time" 60.0 }
                 printfn ""
