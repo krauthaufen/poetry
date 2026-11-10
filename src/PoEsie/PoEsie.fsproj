@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <WarnOn>3390;$(WarnOn)</WarnOn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Rng.fs" />
+    <Compile Include="Types.fs" />
+    <Compile Include="Mods.fs" />
+    <Compile Include="Tables.fs" />
+    <Compile Include="Constants.fs" />
+    <Compile Include="Hit.fs" />
+    <Compile Include="Ailments.fs" />
+    <Compile Include="Sim.fs" />
+    <Compile Include="Summary.fs" />
+  </ItemGroup>
+
+  <!-- Fable: ship sources in the package so it can be compiled to JS. -->
+  <ItemGroup>
+    <Content Include="*.fsproj; **\*.fs" PackagePath="fable\" />
+  </ItemGroup>
+
+</Project>

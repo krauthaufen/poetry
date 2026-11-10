@@ -1,0 +1,194 @@
+namespace PoEsie
+
+/// A skill as the engine sees it: where its damage comes from and how long it takes.
+type Skill =
+    { Name: string
+      Tags: Set<SkillTag>
+      /// Base damage per type. For attacks this is the weapon's (local mods already applied).
+      BaseDamage: Map<DamageType, Range>
+      /// "Attack damage: 120% of base" / spell base multiplier.
+      BaseMultiplier: float
+      /// Spells: share of added damage the skill receives (1.0 = 100%).
+      AddedDamageEffectiveness: float
+      /// Percent, before modifiers. Weapon crit for attacks.
+      BaseCrit: float
+      /// Seconds per use with no speed modifiers (1 / weapon APS * skill time multiplier for attacks).
+      BaseTime: float
+      Cooldown: float option
+      /// Hits produced by one use: (fraction of the use time, damage multiplier). Default: one hit at the end.
+      Hits: (float * float) list
+      /// Mods that only exist while using this skill (gem stats, supports).
+      Mods: Mod list }
+
+module Skill =
+    let make name tags =
+        { Name = name
+          Tags = Set.ofList tags
+          BaseDamage = Map.empty
+          BaseMultiplier = 1.0
+          AddedDamageEffectiveness = 1.0
+          BaseCrit = 5.0
+          BaseTime = 1.0
+          Cooldown = None
+          Hits = [ 1.0, 1.0 ]
+          Mods = [] }
+
+    let ctx (skill: Skill) crit buffs enemyStatus =
+        { Crit = crit
+          SkillName = skill.Name
+          SkillTags = skill.Tags
+          Buffs = buffs
+          EnemyStatus = enemyStatus }
+
+/// The target, as far as a single hit is concerned.
+type Defender =
+    { Level: int
+      /// Mods describing the defender: base resists, armour, plus active debuffs
+      /// (exposure, curses, shock, ...).
+      Mods: ModDb }
+
+type HitResult =
+    { Crit: bool
+      /// After all attacker modifiers, before enemy mitigation. Ailments scale from this.
+      Unmitigated: Dmg
+      /// Actually taken by the enemy.
+      Dealt: Dmg }
+
+module Hit =
+    let private scopesFor t =
+        [ Damage AllDamage; Damage(OfType t) ]
+        @ (if DamageType.isElemental t then [ Damage Elemental ] else [])
+
+    /// Fractions per destination type for one source type, scaled down if they exceed 100%.
+    let private conversionShares ctx mods stat from =
+        let raw =
+            DamageType.all
+            |> List.filter (fun into -> into > from)
+            |> List.map (fun into -> into, max 0.0 (Mods.sumBase ctx [ stat (from, into) ] mods) / 100.0)
+        let total = raw |> List.sumBy snd
+        if total > 1.0 then raw |> List.map (fun (t, v) -> t, v / total) else raw
+
+    /// Push base damage through conversion (skill first, then global on what is left),
+    /// type by type in conversion order, so converted damage can convert again further down.
+    let private hasAny pred (db: ModDb) = db |> Map.exists (fun stat _ -> pred stat)
+
+    let convert ctx (mods: ModDb) (initial: Map<DamageType, Range>) : Map<DamageType, Range> =
+        if not (mods |> hasAny (function SkillConvert _ | Convert _ -> true | _ -> false)) then initial else
+        let get t (m: Map<DamageType, Range>) = Map.tryFind t m |> Option.defaultValue Range.zero
+        let addTo t r m = Map.add t (Range.add (get t m) r) m
+        DamageType.all
+        |> List.fold
+            (fun (acc: Map<DamageType, Range>) from ->
+                let pool = get from acc
+                let skillShares = conversionShares ctx mods SkillConvert from
+                let skillTotal = skillShares |> List.sumBy snd
+                let globalShares = conversionShares ctx mods Convert from
+                let globalTotal = globalShares |> List.sumBy snd
+                let kept = (1.0 - skillTotal) * (1.0 - globalTotal)
+                let moved =
+                    DamageType.all
+                    |> List.filter (fun into -> into > from)
+                    |> List.map (fun into ->
+                        let share t xs = xs |> List.tryFind (fst >> (=) t) |> Option.map snd |> Option.defaultValue 0.0
+                        into, share into skillShares + (1.0 - skillTotal) * share into globalShares)
+                let acc = Map.add from (Range.scale kept pool) acc
+                moved |> List.fold (fun a (into, k) -> if k > 0.0 then addTo into (Range.scale k pool) a else a) acc)
+            initial
+        |> Map.filter (fun _ r -> r.Max > 0.0)
+
+    /// "Gain X% of A damage as extra B", taken from post-conversion damage.
+    let gain ctx (mods: ModDb) (converted: Map<DamageType, Range>) =
+        if not (mods |> hasAny (function GainAs _ -> true | _ -> false)) then converted else
+        let extra =
+            [ for KeyValue (from, r) in converted do
+                  for into in DamageType.all do
+                      let pct = Mods.sumBase ctx [ GainAs(from, into) ] mods
+                      if pct > 0.0 then yield into, Range.scale (pct / 100.0) r ]
+        extra
+        |> List.fold
+            (fun m (t, r) -> Map.add t (Range.add (Map.tryFind t m |> Option.defaultValue Range.zero) r) m)
+            converted
+
+    /// Base damage ranges before inc/more: skill base + added damage, times the base multiplier.
+    let baseDamage ctx mods (skill: Skill) =
+        let addedEffect = skill.AddedDamageEffectiveness * Mods.mult ctx [ AddedDamageEffect ] mods
+        DamageType.all
+        |> List.choose (fun t ->
+            let b = Map.tryFind t skill.BaseDamage |> Option.defaultValue Range.zero
+            let added =
+                { Min = Mods.sumBase ctx [ AddedMin t ] mods
+                  Max = Mods.sumBase ctx [ AddedMax t ] mods }
+            let r = Range.scale skill.BaseMultiplier (Range.add b (Range.scale addedEffect added))
+            if r.Max > 0.0 then Some(t, r) else None)
+        |> Map.ofList
+
+    /// Damage ranges ready to roll: base, converted, gained.
+    let ranges ctx mods skill = baseDamage ctx mods skill |> convert ctx mods |> gain ctx mods
+
+    let critChance ctx mods (skill: Skill) =
+        match Mods.override' ctx CritChance mods with
+        | Some v -> v
+        | None ->
+            let baseCrit = skill.BaseCrit + Mods.sumBase ctx [ CritChance ] mods
+            min 100.0 (max 0.0 (baseCrit * Mods.mult ctx [ CritChance ] mods))
+
+    /// Multiplier applied to crit damage (2.0 = +100% bonus).
+    let critMultiplier ctx mods =
+        let bonus = Constants.playerBaseCritBonus + Mods.sumBase ctx [ CritBonus ] mods
+        1.0 + max 0.0 (bonus * Mods.mult ctx [ CritBonus ] mods) / 100.0
+
+    /// Roll one hit's damage before mitigation.
+    let rollUnmitigated (rng: Rng) (ctx: Ctx) mods (skill: Skill) (crit: bool) : Dmg =
+        let ctx = { ctx with Crit = crit }
+        let lucky = Mods.flag ctx LuckyDamage mods
+        let critMult = if crit then critMultiplier ctx mods else 1.0
+        let doubled = rng.Chance(Mods.sumBase ctx [ DoubleDamageChance ] mods)
+        ranges ctx mods skill
+        |> Map.map (fun t r ->
+            let roll () = rng.Between(r.Min, r.Max)
+            let rolled = if lucky then max (roll ()) (roll ()) else roll ()
+            rolled
+            * Mods.mult ctx (scopesFor t) mods
+            * critMult
+            * (if doubled then 2.0 else 1.0))
+
+    /// Effective resistance after exposure/curses (already in the defender's mods) and
+    /// penetration. Penetration cannot take resistance below zero.
+    let effectiveResist (attackerCtx: Ctx) attackerMods (defender: Defender) t =
+        let dctx = Ctx.empty
+        let maxRes =
+            min Constants.resistCeiling (Constants.enemyBaseMaxResist + Mods.sumBase dctx [ MaxResist t ] defender.Mods)
+        let res =
+            Mods.sumBase dctx [ Resist t ] defender.Mods
+            |> min maxRes
+            |> max Constants.resistFloor
+        let pen = Mods.sumBase attackerCtx [ Penetration t ] attackerMods
+        if res > 0.0 then max 0.0 (res - pen) else res
+
+    /// Armour: reduction = A / (A + 10 * damage), plus flat reduction, capped at 75% for monsters.
+    let physicalReduction (defender: Defender) damage =
+        let dctx = Ctx.empty
+        let armour = max 0.0 (Mods.total dctx [ Armour ] defender.Mods)
+        let fromArmour = if armour <= 0.0 && damage <= 0.0 then 0.0 else armour / (armour + Constants.armourRatio * damage) * 100.0
+        min Constants.enemyMaxPhysReduction (fromArmour + Mods.sumBase dctx [ PhysicalReduction ] defender.Mods)
+
+    let damageTakenMult (defender: Defender) t =
+        Mods.mult Ctx.empty (scopesFor t |> List.map (function Damage s -> DamageTaken s | s -> s)) defender.Mods
+
+    let mitigate ctx mods (defender: Defender) (unmitigated: Dmg) : Dmg =
+        unmitigated
+        |> Map.map (fun t v ->
+            let reduction =
+                match t with
+                | Physical -> physicalReduction defender v
+                | _ -> effectiveResist ctx mods defender t
+            v * (1.0 - reduction / 100.0) * damageTakenMult defender t)
+
+    /// Full hit: crit roll, damage roll, mitigation.
+    let roll (rng: Rng) (ctx: Ctx) mods (skill: Skill) (defender: Defender) =
+        let crit = rng.Chance(critChance ctx mods skill)
+        let ctx = { ctx with Crit = crit }
+        let unmitigated = rollUnmitigated rng ctx mods skill crit
+        { Crit = crit
+          Unmitigated = unmitigated
+          Dealt = mitigate ctx mods defender unmitigated }
