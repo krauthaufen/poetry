@@ -217,10 +217,12 @@ let main argv =
                             | many -> [ Cycle many ], None
                         (names "buff" |> List.map KeepBuff) @ (names "on-cooldown" |> List.map OnCooldown) @ rot, main
                 let player = Setup.player c options play main
+                for m in c.Minions do printfn "  minion %s: %s" m.Name (m.Skills |> List.map (fun s -> s.Name) |> String.concat ", ")
+                for n in c.MinionNotes do printfn "  minion note: %s" n
                 match player.Infusions with
                 | Some inf -> for KeyValue (n, (el, _)) in inf.Consumers do printfn "  consumes %s: %s" el n
                 | None -> ()
-                let fight = Setup.fight options player enemies
+                let fight = Setup.fight c options player enemies
                 printfn ""
                 if Map.containsKey "cascade-check" o then
                     // geometric check of Spell Cascade impacts for the first triggered area spell with cascades

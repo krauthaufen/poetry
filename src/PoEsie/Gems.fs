@@ -7,6 +7,7 @@ type GameDb =
       /// Every entry of a gem name (Mace Strike: one per weapon type).
       GemVariants: Map<string, GemData list>
       Weapons: Map<string, WeaponBase>
+      Minions: Map<string, MinionData>
       /// Every item base name (weapons, armour, jewellery...).
       BaseNames: Set<string>
       Text: StatText.Index
@@ -55,6 +56,7 @@ module GameDb =
           Gems = GameData.parseGems (read "gems.json")
           GemVariants = GameData.parseGemList (read "gems.json") |> List.groupBy (fun g -> g.Name) |> Map.ofList
           Weapons = GameData.parseWeapons (read "bases.json")
+          Minions = GameData.parseMinions (read "minions.json")
           BaseNames =
             match Json.parse (read "bases.json") with
             | JObj m -> m |> Map.toList |> List.map fst |> Set.ofList
@@ -350,10 +352,23 @@ module Gems =
     /// Build a simulator Skill from a socketed gem. `characterMods` are needed for
     /// "+N to level of ... gems". Attacks need a weapon. Stat sets that belong to the
     /// same use become Parts of the skill.
-    let skill (db: GameDb) (characterMods: ModDb) (weapon: Weapon option) (setup: GemSetup) : Result<Skill * Coverage, string> =
+    let rec skill (db: GameDb) (characterMods: ModDb) (weapon: Weapon option) (setup: GemSetup) : Result<Skill * Coverage, string> =
         match skillOfGemFor db setup.Gem weapon with
         | None -> Error(sprintf "unknown gem %s" setup.Gem)
+        | Some data -> skillFromData db characterMods weapon setup data
+
+    /// A minion's skill: its values scale with the minion's level, not a gem level
+    /// (stat sets with few levels use the actor's level, PoB buildSkillInstanceStats).
+    and minionSkill (db: GameDb) (ownerMods: ModDb) (weapon: Weapon option) (skillId: string) (minionLevel: float) (supports: (string * int) list) =
+        match Map.tryFind skillId db.Skills with
+        | None -> Error(sprintf "unknown minion skill %s" skillId)
         | Some data ->
+            let atLevel (set: StatSetData) =
+                if set.Levels.Count < 5 then { set with Levels = set.Levels |> Map.map (fun _ l -> { l with ActorLevel = minionLevel }) } else set
+            let data = { data with StatSets = data.StatSets |> List.map atLevel }
+            skillFromData db ownerMods weapon { Gem = skillId; Level = 1; Quality = 0; StatSet = 1; Supports = supports } data
+
+    and private skillFromData (db: GameDb) (characterMods: ModDb) (weapon: Weapon option) (setup: GemSetup) (data: SkillData) : Result<Skill * Coverage, string> =
             match List.tryItem (setup.StatSet - 1) data.StatSets with
             | None -> Error(sprintf "%s has no stat set %d" setup.Gem setup.StatSet)
             | Some set ->

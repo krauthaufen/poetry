@@ -53,10 +53,11 @@ let runOne (path: string) : Result =
                     actives |> List.filter (fun (n, _, g) -> usable n && not (g.Gems |> List.exists (fun x -> not x.IsSupport && Gems.isMeta db x.Name)))
                     |> List.sortByDescending (fun (_, k, _) -> k) |> List.tryHead |> Option.map (fun (n, _, _) -> n)
                 else Some mainGem
-            match pressedGem with
-            | None -> { blank with Error = Some "nothing to press"; Main = mainGem; MissingGems = missing }
+            // nothing to press: the minions fight alone
+            match pressedGem |> Option.orElse (Some "") with
+            | None -> blank
             | Some pg ->
-                let play = Setup.auto c o pg
+                let play = if pg = "" then [] else Setup.auto c o pg
                 let failed = play |> List.collect (function Spam g | OnCooldown g | KeepBuff g -> [ g ] | _ -> []) |> List.filter (fun g -> (Setup.pressed c o g).IsNone)
                 let skillCov =
                     match Setup.pressed c o pg with
@@ -66,20 +67,20 @@ let runOne (path: string) : Result =
                         |> Option.bind (function Ok (_, cov) -> Some cov | Error _ -> None)
                     | None -> None
                 let player = Setup.player c o play None
-                let sum = Setup.fight o player (Encounter.boss 83 Rarity.defaults 30.0 |> List.map (fun e -> { e with Life = 1e13 })) |> Summary.simulate 3
+                let sum = Setup.fight c o player (Encounter.boss 83 Rarity.defaults 30.0 |> List.map (fun e -> { e with Life = 1e13 })) |> Summary.simulate 3
                 let cov = c.Sheet.Coverage
                 let sk = skillCov |> Option.defaultValue Coverage.empty
                 { blank with
-                    Main = (if pg = mainGem then pg else sprintf "%s (pressed %s)" mainGem pg)
+                    Main = (if pg = mainGem then pg elif pg = "" then mainGem + " (minions only)" else sprintf "%s (pressed %s)" mainGem pg)
                     Dps = sum.Dps.Mean
                     Unknown = cov.UnknownText |> List.map (fun l -> let k = l.IndexOf(": ") in if k > 0 then l.Substring(k + 2) else l) |> List.distinct
                     Unmapped = (cov.Unmapped |> List.map fst) @ (sk.Unmapped |> List.map (fun (s, _) -> "skill: " + s)) |> List.distinct
                     Unsimulated = (cov.Unsimulated |> List.map (fun (s, m) -> sprintf "%s [%s]" s m)) @ (sk.Unsimulated |> List.map (fun (s, m) -> sprintf "skill: %s [%s]" s m)) |> List.distinct
                     MissingGems = missing
-                    Notes = failed |> List.map (fun g -> "cannot build skill: " + g) }
+                    Notes = (failed |> List.map (fun g -> "cannot build skill: " + g)) @ (c.MinionNotes |> List.map (fun n -> "minion: " + (n.Substring(n.IndexOf(": ") + 2)))) }
     with e -> { blank with Error = Some(e.GetType().Name + ": " + e.Message.Split('\n').[0]) }
 
-let files = System.IO.Directory.GetFiles(dir, "*.json") |> Array.sort
+let files = System.IO.Directory.GetFiles(dir, "*.json") |> Array.filter (fun f -> System.Char.IsDigit (System.IO.Path.GetFileName f).[0]) |> Array.sort
 let results =
     files
     |> Array.Parallel.map (fun f ->

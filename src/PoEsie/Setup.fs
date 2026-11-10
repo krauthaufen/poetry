@@ -89,7 +89,10 @@ type Loaded =
       Vitals: PlayerStats
       Periodics: Periodic list
       Cycles: Cycle list
-      MoteMaxima: (string * int) list }
+      MoteMaxima: (string * int) list
+      /// Persistent minions, and notes on minion skills left out.
+      Minions: Actor list
+      MinionNotes: string list }
 
 module Setup =
     /// A build from its text: official character API JSON or PoB XML.
@@ -169,6 +172,7 @@ module Setup =
                           Supports = g.Gems |> List.filter (fun x -> x.IsSupport) |> List.map (fun x -> x.Name, x.Level) }
                 | None -> None)
             |> Behaviours.cycles db (ModDb.ofList sheet.Mods)
+        let minionActors = Behaviours.minions db sheet build
         { Db = db
           Build = build
           Sheet = sheet
@@ -178,7 +182,9 @@ module Setup =
           Vitals = vitals
           Periodics = periodics
           Cycles = cycles
-          MoteMaxima = moteMax }
+          MoteMaxima = moteMax
+          Minions = fst minionActors
+          MinionNotes = snd minionActors }
 
     /// A skill the player uses, by gem name, with its group's supports: the skill, its
     /// infused copy (skill name, infusion, copy), Verisium infusions it grants, and the rules
@@ -327,10 +333,10 @@ module Setup =
                     Defence.flask "Mana" (ModDb.ofList sheet.Mods) sheet.ManaFlask }
 
     /// A fight against these enemies.
-    let fight (o: Options) (player: Actor) (enemies: EnemyDef list) : Fight =
+    let fight (c: Loaded) (o: Options) (player: Actor) (enemies: EnemyDef list) : Fight =
         { Enemies = enemies
           Player = player
-          Minions = []
+          Minions = c.Minions
           Targeting = o.Targeting
           Reach = (if o.CastOnSelf then 0.0 else o.Reach)
           CascadeSpacing = o.CascadeSpacing

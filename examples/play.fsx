@@ -24,4 +24,4 @@ let fights =
       "pack", Encounter.pack level Rarity.defaults [ Normal, 8; Magic, 3; Rare, 1 ] 30.0 25.0 false 1u ]
 for name, enemies in fights do
     printfn "== %s" name
-    Setup.fight options player enemies |> Summary.simulate 50 |> Summary.format |> printfn "%s"
+    Setup.fight character options player enemies |> Summary.simulate 50 |> Summary.format |> printfn "%s"

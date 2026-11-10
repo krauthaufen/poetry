@@ -83,7 +83,7 @@ end
 
 -- ---- skills (active, support, minion) ----
 local skills = {}
-for _, f in ipairs({ "act_str", "act_dex", "act_int", "sup_str", "sup_dex", "sup_int", "other", "minion" }) do
+for _, f in ipairs({ "act_str", "act_dex", "act_int", "sup_str", "sup_dex", "sup_int", "other", "minion", "spectre" }) do
   load("Data/Skills/" .. f .. ".lua", skills, stub, stub, stub)
 end
 -- keep only data fields
@@ -112,6 +112,28 @@ for id, s in pairs(skills) do
   clean[id] = c
 end
 write("skills.json", clean)
+
+-- ---- minions and spectres: the monsters skills summon ----
+local minions = {}
+local modStub = function(...) return { ... } end
+for _, f in ipairs({ "Minions", "Spectres" }) do
+  local ok, err = pcall(load, "Data/" .. f .. ".lua", minions, modStub)
+  if not ok then print("skipped " .. f .. ": " .. tostring(err)) end
+end
+local minionKeep = {
+  name = true, monsterTags = true, life = true, damage = true, damageSpread = true, attackTime = true,
+  attackRange = true, accuracy = true, critChance = true, weaponType1 = true, weaponType2 = true,
+  skillList = true, monsterCategory = true, fireResist = true, coldResist = true, lightningResist = true,
+  chaosResist = true, armour = true, evasion = true, energyShield = true, limit = true,
+  baseDamageIgnoresAttackSpeed = true, spectreReservation = true, companionReservation = true,
+}
+local cleanMinions = {}
+for id, m in pairs(minions) do
+  local c = {}
+  for k, v in pairs(m) do if minionKeep[k] then c[k] = v end end
+  cleanMinions[id] = c
+end
+write("minions.json", cleanMinions)
 
 -- ---- gems ----
 write("gems.json", load("Data/Gems.lua"))
@@ -159,7 +181,22 @@ for id, n in pairs(tree.nodes or {}) do
     orbitIndex = n.orbitIndex, classStartIndex = n.classStartIndex, skill = n.skill,
   }
 end
-write("tree.json", { version = treeVersion, nodes = nodes, classes = tree.classes })
+-- node positions: group centre + orbit radius at the orbit angle
+local const = tree.constants or {}
+local radii, angles = const.orbitRadii, const.orbitAnglesByOrbit
+if radii and angles and tree.groups then
+  for id, n in pairs(tree.nodes or {}) do
+    local g = n.group and tree.groups[n.group]
+    local a = n.orbit and n.orbitIndex and angles[n.orbit + 1] and angles[n.orbit + 1][n.orbitIndex + 1]
+    if g and a then
+      local node = nodes[tostring(id)]
+      node.x = g.x + math.sin(a) * radii[n.orbit + 1]
+      node.y = g.y - math.cos(a) * radii[n.orbit + 1]
+    end
+  end
+end
+-- jewelSlots: the character API's jewel index -> socket node id
+write("tree.json", { version = treeVersion, nodes = nodes, classes = tree.classes, jewelSlots = tree.jewelSlots })
 
 -- ---- per-skill stat descriptions (Specific_Skill_Stat_Descriptions/*.lua), keyed by file name ----
 local specific = {}

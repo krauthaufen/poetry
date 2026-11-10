@@ -43,7 +43,21 @@ type SkillData =
       StatSets: StatSetData list
       QualityStats: (string * float) list
       /// Alternate quality effects (granted by e.g. Gemling's Advanced Thaumaturgy).
-      AltQualityStats: (string * float) list }
+      AltQualityStats: (string * float) list
+      /// Minions the skill summons (ids in minions.json).
+      MinionList: string list }
+
+/// A monster a skill summons (PoB Data/Minions, Data/Spectres: from the game's monster tables).
+type MinionData =
+    { Id: string
+      Name: string
+      /// Multipliers on the monster life / damage of the minion's level.
+      Life: float
+      Damage: float
+      DamageSpread: float
+      AttackTime: float
+      CritChance: float
+      SkillList: string list }
 
 type GemData =
     { GameId: string
@@ -113,7 +127,24 @@ module GameData =
           Levels = Json.items (Json.field "levels" j) |> List.map (fun (i, l) -> i, skillLevel l) |> Map.ofList
           StatSets = Json.list (Json.field "statSets" j) |> List.map statSet
           QualityStats = statPairs (Json.field "qualityStats" j)
-          AltQualityStats = statPairs (Json.field "altQualityStats" j) }
+          AltQualityStats = statPairs (Json.field "altQualityStats" j)
+          MinionList = Json.list (Json.field "minionList" j) |> List.choose Json.str }
+
+    /// minions.json
+    let parseMinions (json: string) : Map<string, MinionData> =
+        match Json.parse json with
+        | JObj m ->
+            m |> Map.map (fun id j ->
+                let num k d = Json.numField k j |> Option.defaultValue d
+                { Id = id
+                  Name = Json.strField "name" j |> Option.defaultValue id
+                  Life = num "life" 1.0
+                  Damage = num "damage" 1.0
+                  DamageSpread = num "damageSpread" 0.2
+                  AttackTime = num "attackTime" 1.0
+                  CritChance = num "critChance" 5.0
+                  SkillList = Json.list (Json.field "skillList" j) |> List.choose Json.str })
+        | _ -> Map.empty
 
     /// skills.json: grantedEffectId -> skill.
     let parseSkills (json: string) : Map<string, SkillData> =

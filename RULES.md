@@ -201,6 +201,18 @@ Confidence levels:
 | Whispers of Doom | +1 curse (curses themselves not simulated yet) | partial |
 | Ritual Cadence, Resonance, Heartstopper, Primal Hunger, Scarred Faith, Hollow Palm Technique, Conduit, Necromantic Talisman, Trusted Kinship, Ancestral Bond, Lord of the Wilds, Bulwark | NOT modelled | todo |
 
+### Minions
+
+| Mechanic | Rule | Source | Confidence |
+|---|---|---|---|
+| Which monster | the gem's first minion (skills' minion list); "Spectre: X" / "Companion: X" by monster name | game data (PoB Minions / Spectres export) | data |
+| Level | the gem level's level requirement (spectre / companion gems: a minion gem's curve) | PoB | pob |
+| Attack damage | monster damage of that level x the monster's damage multiplier, +- its spread, as physical "weapon" damage at its attack time, 5% crit | PoB minion weaponData | pob |
+| Skills | the monster's skills that deal damage, scaled to its level; cooldown skills when ready, else the strongest; the gem's supports apply | game data | data; choice of skill is a guess |
+| Owner's mods | "Minions deal / have ..." mods apply; minion gem levels from "+ to level of minion skills" are NOT applied | | partial |
+| Count | 1 per gem, or the gem's pack size; how many a build reserves spirit for is unknown from the API | | guess, usually too low |
+| Not modelled | temporary minions (zombies, raging spirits), minion life and death, command skills, minion accuracy (always hit), auras from minions | | todo |
+
 ## Resources over time
 
 | Mechanic | Rule | Source | Confidence |

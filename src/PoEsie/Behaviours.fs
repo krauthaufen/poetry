@@ -374,6 +374,74 @@ module Behaviours =
             | _ -> []
         exposure @ remnant
 
+    /// Persistent minions of a build as actors. Each minion is the monster its gem names
+    /// (skills' minion list; "Spectre: X" / "Companion: X" by monster name) at the gem's level:
+    /// its attacks use "weapon" damage = monster damage of that level x the monster's damage
+    /// multiplier (+- spread) at its attack time; its skills scale with its level; the gem's
+    /// supports apply to them; "Minions deal / have ..." mods of the owner apply.
+    /// Returns the actors and notes about what was left out.
+    let minions (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) : Actor list * string list =
+        let charMods = ModDb.ofList sheet.Mods
+        let minionMods = Mods.forMinions sheet.Mods
+        let levelOf (gemName: string) (gemLevel: int) =
+            let req name = Gems.data db name |> Option.bind (fun d -> Map.tryFind gemLevel d.Levels) |> Option.map (fun l -> int l.LevelRequirement)
+            // spectre / companion gems aren't in the gem data: take a minion gem's level curve
+            req gemName |> Option.filter (fun l -> l > 0) |> Option.orElse (req "Skeletal Warrior") |> Option.defaultValue sheet.Level |> max 1
+        build.Groups
+        |> List.filter (fun g -> g.Enabled)
+        |> List.map (fun g ->
+            let enabled = g.Gems |> List.filter (fun x -> x.Enabled)
+            let supports = enabled |> List.filter (fun x -> x.IsSupport) |> List.map (fun x -> x.Name, x.Level)
+            enabled
+            |> List.filter (fun x -> not x.IsSupport)
+            |> List.map (fun gem ->
+                let after (prefix: string) = if gem.Name.StartsWith prefix then Some(gem.Name.Substring prefix.Length) else None
+                let byName = after "Spectre: " |> Option.orElse (after "Companion: ")
+                let data = Gems.data db gem.Name
+                let persistent = byName.IsSome || (data |> Option.exists (fun d -> d.Types.Contains "Persistent"))
+                let monsters =
+                    match byName with
+                    | Some n -> db.Minions |> Map.toList |> List.map snd |> List.filter (fun m -> m.Name = n) |> List.truncate 1
+                    | None -> data |> Option.map (fun d -> d.MinionList) |> Option.defaultValue [] |> List.truncate 1 |> List.choose (fun id -> Map.tryFind id db.Minions)
+                match monsters with
+                | [] ->
+                    [], (if byName.IsSome || (data |> Option.exists (fun d -> not d.MinionList.IsEmpty)) then [ sprintf "%s: no monster data" gem.Name ] else [])
+                | _ when not persistent -> [], [ sprintf "%s: temporary minions are not simulated" gem.Name ]
+                | m :: _ ->
+                    let level = levelOf gem.Name gem.Level
+                    let avg = m.Damage * Constants.monsterDamage level
+                    let weapon =
+                        { Damage = Map.ofList [ Physical, { Min = avg * (1.0 - m.DamageSpread); Max = avg * (1.0 + m.DamageSpread) } ]
+                          CritChance = m.CritChance
+                          AttacksPerSecond = 1.0 / max 0.05 m.AttackTime
+                          Tags = [] }
+                    let skills =
+                        m.SkillList
+                        |> List.choose (fun sid ->
+                            match Gems.minionSkill db charMods (Some weapon) sid (float level) supports with
+                            | Ok (s, _) when not s.BaseDamage.IsEmpty -> Some { s with Name = m.Name + ": " + s.Name; Cost = 0.0 }
+                            | _ -> None)
+                    let estimate (s: Skill) =
+                        (s.BaseDamage |> Map.toList |> List.sumBy (fun (_, r) -> (r.Min + r.Max) / 2.0)) * s.BaseMultiplier / max 0.05 s.BaseTime
+                    // cooldown skills when ready, otherwise the strongest of the rest
+                    let ordered =
+                        (skills |> List.filter (fun s -> s.Cooldown.IsSome))
+                        @ (skills |> List.filter (fun s -> s.Cooldown.IsNone) |> List.sortByDescending estimate |> List.truncate 1)
+                    // a pack counts as several ("skill_wolf_pack_size")
+                    let count =
+                        Gems.rawStats db charMods { Gem = gem.Name; Level = gem.Level; Quality = gem.Quality; StatSet = 1; Supports = [] }
+                        |> List.tryPick (fun (k, v) -> if k.EndsWith "_pack_size" then Some(int v) else None)
+                        |> Option.defaultValue 1
+                    if ordered.IsEmpty then [], [ sprintf "%s: none of the minion's skills could be built" gem.Name ]
+                    else
+                        [ for i in 1 .. count ->
+                            let name = if count > 1 then sprintf "%s %d" m.Name i else m.Name
+                            Actor.make name minionMods ordered ],
+                        []))
+        |> List.concat
+        |> List.unzip
+        |> fun (actors, notes) -> List.concat actors, List.concat notes
+
     /// Elemental Archon (BuffTemplates ArchonElemental: 25% more elemental damage with spells,
     /// 100% more ignite chance / freeze buildup / shock chance with spells), plus "Archon Buffs
     /// also grant ..." mods, all x increased Archon effect. Base duration 10 s, recovery 20 s
