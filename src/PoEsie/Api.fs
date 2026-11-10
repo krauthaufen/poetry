@@ -24,6 +24,37 @@ module Api =
                 i <- i + 1
         sb.ToString()
 
+    /// Text with numbers removed, for matching a host's summed line to its source.
+    let private shape (line: string) =
+        (stripMarkup line).ToLowerInvariant()
+        |> String.filter (fun c -> not (System.Char.IsDigit c || c = '.' || c = '+' || c = '%' || c = '-'))
+        |> fun t -> t.Trim()
+
+    /// A socketed item's bonded lines without the "Bonded:" header and host category.
+    let private bondedShapes (socketed: Json) =
+        Json.list (Json.field "bondedMods" socketed)
+        |> List.choose Json.str
+        |> List.map stripMarkup
+        |> List.filter (fun l -> not (l.EndsWith "Bonded:"))
+        |> List.map (fun l -> match l.IndexOf(": ") with | -1 -> l | k -> l.Substring(k + 2))
+        |> List.map shape
+
+    /// "Bonded:" lines on the host count only if they come from an idol and the item
+    /// says "Idols socketed in this item gain the benefits of their Bonded modifiers".
+    /// Those lines lose their prefix; all other Bonded lines keep it (Shaman only).
+    let private resolveBonded (item: Json) (lines: string list) =
+        let socketed = Json.list (Json.field "socketedItems" item)
+        let isIdol (s: Json) = (Json.strField "typeLine" s |> Option.defaultValue "").Contains "Idol"
+        let enabled = lines |> List.exists (fun l -> l.Contains "gain the benefits of their Bonded modifiers")
+        let idolBonded = socketed |> List.filter isIdol |> List.collect bondedShapes |> Set.ofList
+        lines
+        |> List.choose (fun l ->
+            if l.Contains "gain the benefits of their Bonded modifiers" then None
+            elif l.StartsWith "Bonded: " then
+                let body = l.Substring 8
+                if enabled && idolBonded.Contains(shape body) then Some body else Some l
+            else Some l)
+
     let private modLines (item: Json) =
         [ "enchantMods"; "implicitMods"; "runeMods"; "explicitMods"; "craftedMods"; "fracturedMods"; "desecratedMods" ]
         |> List.collect (fun key ->
@@ -34,6 +65,7 @@ module Api =
                 | JObj _ -> Json.strField "description" m
                 | _ -> None))
         |> List.collect (fun l -> (stripMarkup l).Split('\n') |> List.ofArray)
+        |> resolveBonded item
 
     let private property name (item: Json) =
         Json.list (Json.field "properties" item)
