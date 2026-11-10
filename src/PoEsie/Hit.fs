@@ -9,7 +9,8 @@ type ProjectileShape =
       Chains: int
       ChainRange: float
       Range: float
-      /// Several projectiles of one use may hit the same enemy.
+      /// Several projectiles of one use may hit the same enemy (each projectile still
+      /// hits an enemy at most once). Geometry decides how many actually do.
       CanShotgun: bool
       /// Radius of an explosion where a projectile hits, if any.
       Explosion: float option
@@ -36,7 +37,7 @@ module ProjectileShape =
           Chains = 0
           ChainRange = 30.0
           Range = 100.0
-          CanShotgun = false
+          CanShotgun = true
           Explosion = None
           PerCharge = None
           FromImpact = false }

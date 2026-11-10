@@ -180,8 +180,50 @@ module Geometry =
     let radius baseRadius areaMult =
         floor (baseRadius * floor (100.0 * sqrt areaMult) / 100.0)
 
+    /// Where a ground skill lands: `reach` in front of the player towards the aimed
+    /// enemy, but not past its centre.
+    let impactPoint (reach: float) (primary: EnemyDef) =
+        let d = Vec.length primary.Position
+        if d <= reach || d = 0.0 then primary.Position
+        else Vec.scale (reach / d) primary.Position
+
+    /// One projectile's flight for pictures: start, end of flight, enemies it hit.
+    type Path =
+        { From: Vec
+          To: Vec
+          Hit: string list }
+
+    /// Projectile paths of one use (straight flights, pierce included; chains not drawn).
+    let paths (p: ProjectileShape) (reach: float) (primary: EnemyDef) (alive: EnemyDef list) =
+        let origin = if p.FromImpact then impactPoint reach primary else Vec.zero
+        let aimAngle = Vec.angle primary.Position
+        let spread = p.Spread * System.Math.PI / 180.0
+        let angles =
+            if p.Count <= 1 then [ aimAngle ]
+            elif p.Spread >= 360.0 then [ for k in 0 .. p.Count - 1 -> aimAngle + 2.0 * System.Math.PI * float k / float p.Count ]
+            else [ for k in 0 .. p.Count - 1 -> aimAngle - spread / 2.0 + spread * float k / float (p.Count - 1) ]
+        angles
+        |> List.map (fun a ->
+            let dir = Vec.ofAngle a
+            let hit =
+                alive
+                |> List.choose (fun e ->
+                    let toE = Vec.sub e.Position origin
+                    if Vec.length toE <= e.Size then Some(0.0, e)
+                    else
+                        let t = toE.X * dir.X + toE.Y * dir.Y
+                        let c2 = (Vec.length toE) ** 2.0 - t * t
+                        if t < 0.0 || c2 > e.Size * e.Size then None
+                        else
+                            let entry = t - sqrt (e.Size * e.Size - c2)
+                            if entry <= p.Range then Some(entry, e) else None)
+                |> List.sortBy fst
+                |> List.truncate (p.Pierce + 1)
+                |> List.map (fun (_, e) -> e.Name)
+            { From = origin; To = Vec.add origin (Vec.scale p.Range dir); Hit = hit })
+
     /// Enemies hit by one use: names, each once per hit it receives.
-    let targets (delivery: Delivery) (areaMult: float) (primary: EnemyDef) (alive: EnemyDef list) : string list =
+    let targetsFrom (reach: float) (delivery: Delivery) (areaMult: float) (primary: EnemyDef) (alive: EnemyDef list) : string list =
         match delivery with
         | Single -> [ primary.Name ]
         | AreaAtTarget r ->
@@ -191,12 +233,13 @@ module Geometry =
             let r = radius r areaMult
             alive |> List.filter (within Vec.zero r) |> List.map (fun e -> e.Name)
         | Projectiles p ->
-            let origin = if p.FromImpact then primary.Position else Vec.zero
+            let origin = if p.FromImpact then impactPoint reach primary else Vec.zero
             // "forwards": away from the player
             let aimAngle = Vec.angle primary.Position
             let spread = p.Spread * System.Math.PI / 180.0
             let angles =
                 if p.Count <= 1 then [ aimAngle ]
+                elif p.Spread >= 360.0 then [ for k in 0 .. p.Count - 1 -> aimAngle + 2.0 * System.Math.PI * float k / float p.Count ]
                 else [ for k in 0 .. p.Count - 1 -> aimAngle - spread / 2.0 + spread * float k / float (p.Count - 1) ]
             let explode (at: Vec) =
                 match p.Explosion with
@@ -237,3 +280,6 @@ module Geometry =
                     acc @ hits, hits |> List.fold (fun s n -> s.Add n) hitByUse)
                 ([], Set.empty)
             |> fst
+
+    /// `targetsFrom` with the slam landing on the aimed enemy.
+    let targets delivery areaMult primary alive = targetsFrom infinity delivery areaMult primary alive

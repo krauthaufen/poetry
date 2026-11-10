@@ -105,6 +105,8 @@ type Fight =
       Player: Actor
       Minions: Actor list
       Targeting: Targeting
+      /// How far in front of the player ground skills (slams) land, game units.
+      Reach: float
       MaxTime: float }
 
 module Fight =
@@ -113,6 +115,7 @@ module Fight =
           Player = player
           Minions = []
           Targeting = Strongest
+          Reach = infinity
           MaxTime = maxTime }
 
 /// A timed effect with stacks.
@@ -600,7 +603,7 @@ module Sim =
                             Pierce = p.Pierce + int (Mods.sumBase ctx [ Pierce ] mods)
                             Chains = p.Chains + int (Mods.sumBase ctx [ Chains ] mods) }
                 | d -> d
-            Geometry.targets delivery areaMult primary living
+            Geometry.targetsFrom env.Fight.Reach delivery areaMult primary living
             |> List.fold (fun w target -> hitEnemy env rng actor skill mult target w) w
 
     let private step env rng (w: World) =

@@ -13,6 +13,8 @@
 ///   --skip P         override the chance (%) to not remove charges when consuming
 ///   --bonded         apply "Bonded:" rune lines (normally Shaman only)
 ///   --shotgun        let several projectiles of one use hit the same enemy
+///   --positions F    sweep gap to the boss / slam reach / boss radius; write an HTML page with
+///                    the table and pictures of the best and worst layout to file F
 ///   --suite          run the standard scenarios (pack, pack + 2 rares, surrounded, boss) and print a table
 ///   --data DIR       exported game data (default: data/game next to the repo)
 module PoEsie.Cli
@@ -159,9 +161,73 @@ let main argv =
                       Player = { Actor.make "Player" sheet.Mods [ skill ] with Resources = resources; Cycles = cycles }
                       Minions = []
                       Targeting = (if Map.tryFind "target" o = Some "nearest" then Nearest else Strongest)
+                      Reach = get "reach" 15.0
                       MaxTime = get "time" 60.0 }
                 printfn ""
-                if Map.containsKey "suite" o then
+                if Map.containsKey "positions" o then
+                    let projectilePart =
+                        (skill :: skill.Parts) |> List.tryPick (fun s -> match s.Delivery with Projectiles p -> Some p | _ -> None)
+                    let charges = resources |> List.tryPick (fun (k, n) -> if k = "PowerCharge" then Some n else None) |> Option.defaultValue 0
+                    let layouts =
+                        [ for size in [ 8.0; 12.0; 20.0 ] do
+                            for gap in [ 0.0; 5.0; 10.0; 20.0; 35.0 ] do
+                                for reach in [ 10.0; 15.0; 25.0 ] -> size, gap, reach ]
+                    let runs = int (get "runs" 30.0)
+                    let results =
+                        layouts
+                        |> List.map (fun (size, gap, reach) ->
+                            let boss =
+                                { (List.head (Encounter.boss level profile (gap + size))) with
+                                    Size = size
+                                    Life = get "life" 1e12 }
+                            let f = { fight with Enemies = [ boss ]; Reach = reach; MaxTime = get "time" 20.0 }
+                            let sum = Summary.simulate runs f
+                            let perSlam =
+                                let c k = sum.Counts |> List.tryPick (fun (n, v) -> if n = k then Some v else None) |> Option.defaultValue 0.0
+                                let parts = skill.Parts |> List.sumBy (fun p -> c ("hits:" + p.Name))
+                                if c ("uses:" + skill.Name) > 0.0 then parts / c ("uses:" + skill.Name) else 0.0
+                            (size, gap, reach, boss), sum.Dps.Mean, perSlam)
+                        |> List.sortByDescending (fun (_, d, _) -> d)
+                    printfn "%-7s %-6s %-6s %10s %14s" "radius" "gap" "reach" "proj/slam" "DPS"
+                    for ((size, gap, reach, _), dps, per) in results do
+                        printfn "%-7.0f %-6.0f %-6.0f %10.1f %14.0f" size gap reach per dps
+                    match projectilePart with
+                    | Some p ->
+                        let p = { p with Count = p.Count + (match p.PerCharge with Some (_, per) -> per * charges | None -> 0) }
+                        let pic ((size, gap, reach, boss: EnemyDef), dps: float, per: float) label =
+                            Picture.svg (sprintf "%s: boss radius %.0f, gap %.0f, slam reach %.0f, %.1fM DPS" label size gap reach (dps / 1e6)) reach p boss [ boss ]
+                        let rows =
+                            results
+                            |> List.map (fun ((size, gap, reach, _), dps, per) ->
+                                sprintf "<tr><td>%.0f</td><td>%.0f</td><td>%.0f</td><td>%.1f</td><td>%.1fM</td></tr>" size gap reach per (dps / 1e6))
+                            |> String.concat ""
+                        let html =
+                            sprintf """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>%s positioning</title>
+<style>
+:root{--bg:#fbfaf7;--fg:#1d1d1b;--muted:#6b6a66;--line:#e2dfd8;--enemy:#c9c3b6;--hit:#c2410c;--miss:#b9b4aa;--player:#1d4ed8}
+@media (prefers-color-scheme:dark){:root{--bg:#161614;--fg:#ecebe7;--muted:#a3a199;--line:#34332f;--enemy:#4a4740;--hit:#fb923c;--miss:#55524b;--player:#60a5fa}}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,sans-serif}
+main{max-width:980px;margin:0 auto;padding:24px 16px}
+h1{font-size:22px;margin:0 0 4px}p{color:var(--muted);margin:0 0 20px}
+.pics{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-bottom:28px}
+figure{margin:0;border:1px solid var(--line);border-radius:10px;padding:12px}
+svg{width:100%%;height:auto;max-height:420px}
+figcaption{font-size:13px;color:var(--muted);margin-top:8px}
+.enemy{fill:var(--enemy);stroke:none}.hit{stroke:var(--hit);stroke-width:.8}.miss{stroke:var(--miss);stroke-width:.4;stroke-dasharray:2 2}
+.player{fill:var(--player)}.impact{stroke:var(--fg);stroke-width:.8;fill:none}
+table{border-collapse:collapse;width:100%%;font-variant-numeric:tabular-nums;font-size:14px}
+th,td{text-align:right;padding:4px 10px;border-bottom:1px solid var(--line)}th{color:var(--muted);font-weight:600}
+</style></head><body><main>
+<h1>%s: positioning against a single boss</h1>
+<p>%d power charges, %d projectiles per slam in a nova from the impact point. Player (blue) at the left, boss in grey, × marks where the slam lands. Orange: projectiles that hit, dashed: misses. Boss radii are assumptions (game units, 10 = 1 m); the game stores only a size category.</p>
+<div class="pics">%s%s</div>
+<table><thead><tr><th>boss radius</th><th>gap</th><th>slam reach</th><th>projectile hits / slam</th><th>DPS</th></tr></thead><tbody>%s</tbody></table>
+</main></body></html>"""
+                                skill.Name skill.Name charges p.Count (pic (List.head results) "Best") (pic (List.last results) "Worst") rows
+                        File.WriteAllText(o.["positions"], html)
+                        printfn "wrote %s" o.["positions"]
+                    | None -> printfn "skill has no projectiles to draw"
+                elif Map.containsKey "suite" o then
                     Scenarios.standard level profile
                     |> List.map (fun (n, es) ->
                         n, (match Map.tryFind "life" o with Some l -> es |> List.map (fun e -> { e with Life = float l }) | None -> es))

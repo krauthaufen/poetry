@@ -189,9 +189,19 @@ let main _ =
 
     test "geometry: without shotgun, a use hits each enemy once" (fun () ->
         let a = dummy "a" 30.0 0.0
-        let p = { ProjectileShape.make 3 with Spread = 5.0 }
+        let p = { ProjectileShape.make 3 with Spread = 5.0; CanShotgun = false }
         equal [ "a" ] (Geometry.targets (Projectiles p) 1.0 a [ a ])
         equal [ "a"; "a"; "a" ] (Geometry.targets (Projectiles { p with CanShotgun = true }) 1.0 a [ a ]))
+
+    test "geometry: nova from an impact point outside the boss hits with the share of the circle it covers" (fun () ->
+        // boss radius 10 at distance 40; impact 20 in front of the player -> 20 from the centre
+        // covered angle = 2 asin(10/20) = 60 degrees -> 6 of 36 projectiles (edges counted)
+        let boss = { dummy "b" 40.0 0.0 with Size = 10.0 }
+        let p = { ProjectileShape.make 36 with Spread = 360.0; FromImpact = true; Range = 200.0 }
+        let hits = Geometry.targetsFrom 20.0 (Projectiles p) 1.0 boss [ boss ] |> List.length
+        if hits < 5 || hits > 7 then failwithf "expected about 6 hits, got %d" hits
+        // impact inside the boss: every projectile hits
+        equal 36 (Geometry.targetsFrom 35.0 (Projectiles p) 1.0 boss [ boss ] |> List.length))
 
     test "geometry: chains jump to the nearest unhit enemy in range" (fun () ->
         let a, b, c = dummy "a" 30.0 0.0, dummy "b" 30.0 20.0, dummy "c" 30.0 -60.0

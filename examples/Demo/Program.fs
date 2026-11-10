@@ -59,6 +59,7 @@ let fight =
       Player = player
       Minions = [ hound ]
       Targeting = Strongest
+      Reach = infinity
       MaxTime = 120.0 }
 
 [<EntryPoint>]

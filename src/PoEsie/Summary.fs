@@ -105,6 +105,7 @@ module Scenarios =
                   Player = player
                   Minions = minions
                   Targeting = targeting
+                  Reach = 15.0
                   MaxTime = maxTime })
 
     let format (results: (string * Summary) list) =
