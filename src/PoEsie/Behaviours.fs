@@ -345,6 +345,44 @@ module Behaviours =
             | _ -> []
         | None -> []
 
+    /// A curse or mark from its gem data: the debuff it puts on monsters, what it gives
+    /// you against them, and its duration. Curses ("AppliesCurse") and Marks:
+    /// - "base_skill_buff_<stat>_to_apply / _to_grant": resistances, armour, damage dealt;
+    /// - "base_skill_debuff_action_speed_+%_final_to_inflict": action speed;
+    /// - marks: extra crit damage against the marked enemy, more freeze / electrocute buildup.
+    /// Returns (debuff name, duration, monster-side mods, player-side mods).
+    let curseOf (db: GameDb) (charMods: ModDb) (setup: GemSetup) (skill: Skill) : (string * float * Mod list * Mod list) option =
+        let types = Gems.data db setup.Gem |> Option.map (fun d -> d.Types) |> Option.defaultValue Set.empty
+        let isCurse, isMark = types.Contains "AppliesCurse", types.Contains "Mark"
+        if not (isCurse || isMark) then None
+        else
+            let raw = Gems.rawStats db charMods { setup with Supports = [] }
+            let name = (if isCurse then "Curse:" else "Mark:") + skill.Name
+            let against = EnemyHas name
+            let ctx = { Ctx.empty with SkillTags = skill.Tags; SkillName = skill.Name }
+            let all = ModDb.ofList (ModDb.toList charMods @ skill.Mods)
+            let duration =
+                (raw |> List.tryPick (fun (k, v) -> if k = "base_skill_effect_duration" then Some(v / 1000.0) else None) |> Option.defaultValue 8.0)
+                * Mods.mult ctx [ SkillDuration; Named(if isCurse then "CurseDuration" else "MarkDuration") ] all
+            let monster, player =
+                raw
+                |> List.fold
+                    (fun (ms, ps) (id, v) ->
+                        match id with
+                        | "base_skill_buff_chaos_damage_resistance_%_to_apply" -> Mod.base' (Resist Chaos) v :: ms, ps
+                        | "base_skill_buff_all_elements_resistance_%_to_apply" -> (DamageType.elemental |> List.map (fun t -> Mod.base' (Resist t) v)) @ ms, ps
+                        | "base_skill_buff_total_armour_-_to_grant" -> Mod.base' Armour (-v) :: ms, ps
+                        | "base_skill_buff_damage_+%_final_to_apply" -> Mod.more (Named "DamageDealt") v :: ms, ps
+                        | "base_skill_debuff_action_speed_+%_final_to_inflict" -> Mod.more (Named "ActionSpeed") v :: ms, ps
+                        | "enemy_additional_critical_strike_multiplier_against_self" -> ms, (Mod.base' CritBonus v |> Mod.whenever against) :: ps
+                        | id when id.EndsWith "_hit_damage_freeze_multiplier_+%_final" -> ms, (Mod.more (Buildup Freeze) v |> Mod.whenever against) :: ps
+                        | id when id.EndsWith "_hit_damage_electrocute_multiplier_+%" -> ms, (Mod.inc (Buildup Electrocute) v |> Mod.whenever against) :: ps
+                        | _ -> ms, ps)
+                    ([], [])
+            // your curse / mark effect scales what it does
+            let effect = Mods.mult ctx [ Named(if isCurse then "CurseEffect" else "MarkEffect") ] all
+            Some(name, duration, monster |> List.map (Mod.scaled effect), player |> List.map (Mod.scaled effect >> Mod.from skill.Name))
+
     /// What a used skill does besides hitting, from its gem data:
     /// - "all elemental exposure magnitude" (Frost Bomb): exposure to fire, cold and lightning
     ///   for its secondary duration, x (1 + exposure effect);

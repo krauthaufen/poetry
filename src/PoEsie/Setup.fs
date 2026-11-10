@@ -14,6 +14,8 @@ type Play =
     | KeepBuff of gem: string
     /// While the player has fewer than `count` stacks of the resource ("PowerCharge").
     | WhileBelow of resource: string * count: int * gem: string
+    /// A curse or mark: cast when the enemy aimed at doesn't have it.
+    | KeepCurse of gem: string
     /// Any condition.
     | When of condition: (View -> bool) * gem: string
 
@@ -193,7 +195,12 @@ module Setup =
         { Skill: Skill
           Infused: (string * string * Skill) option
           GrantsVerisium: int
-          Rules: Rule list }
+          Rules: Rule list
+          /// Mods the skill gives the character while it is in the build (a mark's bonuses
+          /// against marked enemies).
+          Grants: Mod list
+          /// The debuff a curse or mark applies ("Curse:Despair").
+          Curse: string option }
 
     let pressed (c: Loaded) (o: Options) (gemName: string) : Pressed option =
         let db, sheet = c.Db, c.Sheet
@@ -212,17 +219,29 @@ module Setup =
                     let copy =
                         if o.Infused then None
                         else Behaviours.infusedCopy db charMods (Gems.chooseWeapon db setup.Gem sheet.Weapons) setup |> Option.map (fun (el, cp) -> s.Name, el, { (Behaviours.applyObserved cp) with Name = s.Name + " infused" })
-                    let rules = Behaviours.useRules db charMods setup s.Name o.Pickup @ Behaviours.buffRules db charMods setup s
+                    let curse = Behaviours.curseOf db charMods setup s
+                    let curseRules =
+                        match curse with
+                        | Some (name, duration, monster, _) -> [ { Hook = OnHit; Filter = Called s.Name; Chance = 100.0; Reaction = ApplyCurse(name, duration, monster) } ]
+                        | None -> []
+                    let rules = Behaviours.useRules db charMods setup s.Name o.Pickup @ Behaviours.buffRules db charMods setup s @ curseRules
                     let grants = Behaviours.verisiumGrant db charMods setup
                     let s = Behaviours.applyObserved s
                     // skills that deal no damage (buffs, infusion grants) don't hit
-                    let s = if grants > 0 || (s.BaseDamage.IsEmpty && not (s.Tags.Contains Attack) && s.Parts.IsEmpty) then { s with Hits = [] } else s
-                    Some { Skill = s; Infused = copy; GrantsVerisium = grants; Rules = rules }
+                    // (curses and marks do "hit": that is how they reach their targets)
+                    let s = if grants > 0 || (curse.IsNone && s.BaseDamage.IsEmpty && s.Dots.IsEmpty && not (s.Tags.Contains Attack) && s.Parts.IsEmpty) then { s with Hits = [] } else s
+                    Some
+                        { Skill = s
+                          Infused = copy
+                          GrantsVerisium = grants
+                          Rules = rules
+                          Grants = (match curse with Some (_, _, _, player) -> player | None -> [])
+                          Curse = curse |> Option.map (fun (name, _, _, _) -> name) }
                 | _ -> None)
 
     let private gemOf (p: Play) =
         match p with
-        | Spam g | OnCooldown g | KeepBuff g | WhileBelow (_, _, g) | When (_, g) -> [ g ]
+        | Spam g | OnCooldown g | KeepBuff g | KeepCurse g | WhileBelow (_, _, g) | When (_, g) -> [ g ]
         | Cycle gs -> gs
 
     /// A play style from skill types, for builds without one. Only what the simulator models is
@@ -239,10 +258,11 @@ module Setup =
             |> List.choose (fun x ->
                 match Gems.data c.Db x.Name, pressed c o x.Name with
                 | Some d, Some p ->
-                    let skip = [ "Mark"; "Warcry"; "Travel"; "Minion"; "ModifiesNextSkill"; "Persistent"; "SummonsTotem"; "AppliesCurse" ] |> List.exists d.Types.Contains
+                    let skip = [ "Warcry"; "Travel"; "Minion"; "ModifiesNextSkill"; "Persistent"; "SummonsTotem" ] |> List.exists d.Types.Contains
                     let grantsBuff = p.Rules |> List.exists (fun r -> match r.Reaction with ChargeBuff _ | GrantBuff _ -> true | _ -> false)
                     let cooldown = p.Skill.Cooldown |> Option.defaultValue 0.0
                     if skip then None
+                    elif p.Curse.IsSome then (if p.Rules |> List.exists (fun r -> match r.Reaction with ApplyCurse (_, _, ms) -> not ms.IsEmpty | _ -> false) || not p.Grants.IsEmpty then Some(KeepCurse x.Name) else None)
                     elif grantsBuff then Some(KeepBuff x.Name)
                     elif cooldown >= 1.0 && (not p.Skill.Hits.IsEmpty || not p.Rules.IsEmpty || p.GrantsVerisium > 0) then Some(OnCooldown x.Name)
                     else None
@@ -259,7 +279,7 @@ module Setup =
         let resolve g =
             match main with
             | Some (name, s) when name = g ->
-                Some { (pressed c o g |> Option.defaultValue { Skill = s; Infused = None; GrantsVerisium = 0; Rules = [] }) with Skill = s }
+                Some { (pressed c o g |> Option.defaultValue { Skill = s; Infused = None; GrantsVerisium = 0; Rules = []; Grants = []; Curse = None }) with Skill = s }
             | _ -> pressed c o g
         let used = play |> List.collect gemOf |> List.distinct |> List.choose (fun g -> resolve g |> Option.map (fun p -> g, p))
         let byGem g = used |> List.tryFind (fun (n, _) -> n = g) |> Option.map snd
@@ -291,6 +311,10 @@ module Setup =
                             |> Option.defaultValue (fun _ -> true)
                         [ { Use = p.Skill.Name; When = fun v -> not (v.Buffs.ContainsKey(p.Skill.Name + " buff")) && full v } ]
                     | None -> []
+                | KeepCurse g ->
+                    match byGem g with
+                    | Some { Curse = Some name; Skill = sk } -> [ { Use = sk.Name; When = fun v -> not (v.EnemyStatus.ContainsKey name) } ]
+                    | _ -> []
                 | WhileBelow (r, n, g) -> [ { Use = nameOf g; When = fun v -> (Map.tryFind r v.Buffs |> Option.defaultValue 0) < n } ]
                 | When (cond, g) -> [ { Use = nameOf g; When = cond } ])
         let pressedSkills = used |> List.map (fun (_, p) -> p.Skill)
@@ -303,7 +327,7 @@ module Setup =
         let infusionSetup =
             if o.Infused then None
             else Behaviours.infusions db sheet c.Build o.Pickup (consumers |> List.map (fun (n, el, cp) -> n, (el, cp.Name)) |> Map.ofList)
-        { Actor.make "Player" sheet.Mods (pressedSkills @ (metas |> List.collect (fun (_, s, _) -> s)) @ (consumers |> List.map (fun (_, _, cp) -> cp))) with
+        { Actor.make "Player" (sheet.Mods @ (used |> List.collect (fun (_, p) -> p.Grants))) (pressedSkills @ (metas |> List.collect (fun (_, s, _) -> s)) @ (consumers |> List.map (fun (_, _, cp) -> cp))) with
             Rotation = steps
             Rules = grantRules @ (used |> List.collect (fun (_, p) -> p.Rules))
             Metas = metas |> List.map (fun (m, _, _) -> m)

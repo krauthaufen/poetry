@@ -497,6 +497,10 @@ module StatMap =
         | "aggravate_inflicted_bleeding" ->
             one (Mod.more (AilmentMagnitude(Some Bleed)) ((Constants.bleedMovingMultiplier - 1.0) * 100.0) |> Mod.whenever (Not(EnemyHas "Moving")))
         | "number_of_additional_curses_allowed" -> one (Mod.base' (Named "MaxCurses") v)
+        | "curse_effect_+%" -> one (Mod.inc (Named "CurseEffect") v)
+        | "base_curse_duration_+%" | "curse_skill_effect_duration_+%" -> one (Mod.inc (Named "CurseDuration") v)
+        | "mark_effect_+%" -> one (Mod.inc (Named "MarkEffect") v)
+        | "mark_skill_duration_+%" | "mark_duration_+%" -> one (Mod.inc (Named "MarkDuration") v)
         | "keystone_elemental_equilibrium" -> one (Mod.flag (Named "InfusionRemnantsRotate"))
         // "Storm and Plant Spells deal 50% more damage"
         | "marauder_hidden_ascendancy_damage_+%_final" ->

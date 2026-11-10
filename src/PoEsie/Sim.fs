@@ -433,6 +433,7 @@ module Sim =
         |> fun m -> if e.Def.Moving then Map.add "Moving" 1 m else m
         |> fun m -> if ailing then Map.add "AnyAilment" 1 m else m
         |> fun m -> if e.Debuffs |> Map.exists (fun k _ -> k.StartsWith "Curse:") then Map.add "Cursed" 1 m else m
+        |> fun m -> if e.Debuffs |> Map.exists (fun k _ -> k.StartsWith "Mark:") then Map.add "Marked" 1 m else m
         |> fun m -> if e.Debuffs |> Map.exists (fun k _ -> k.StartsWith "Exposure:") then Map.add "Exposed" 1 m else m
         |> fun m -> if e.Def.Rarity = Rare || e.Def.Rarity = Unique then Map.add "RareOrUnique" 1 m else m
         // low life: at or below 35% (PoE2); full life: untouched
@@ -789,7 +790,19 @@ module Sim =
                     | ApplyCurse (name, duration, mods) ->
                         onTarget (fun t ->
                             let k = effectOnSelf w.Enemies.[t] "CurseEffectOnSelf"
-                            addDebuff t ("Curse:" + name) duration 1 (mods |> List.map (Mod.scaled k)) w)
+                            // "Curse:X" / "Mark:X" keep their prefix; plain names are curses
+                            let full = if name.StartsWith "Curse:" || name.StartsWith "Mark:" then name else "Curse:" + name
+                            let prefix = full.Substring(0, full.IndexOf ':' + 1)
+                            // one curse (plus "additional curses"), one mark: the oldest gives way
+                            let limit = if prefix = "Mark:" then 1 else 1 + int (Mods.sumBase Ctx.empty [ Named "MaxCurses" ] (ModDb.ofList actor.Mods))
+                            let others =
+                                w.Enemies.[t].Debuffs |> Map.toList
+                                |> List.filter (fun (n, x) -> n.StartsWith prefix && n <> full && x.Expires > w.Time)
+                                |> List.sortBy (fun (_, x) -> x.Expires)
+                            let drop = others |> List.truncate (max 0 (others.Length + 1 - limit)) |> List.map fst
+                            let w = updateEnemy t (fun e -> { e with Debuffs = drop |> List.fold (fun d n -> Map.remove n d) e.Debuffs }) w
+                            addDebuff t full duration 1 (mods |> List.map (Mod.scaled k)) w
+                            |> fun w -> { w with Counts = bump ("apply:" + full) w.Counts })
                     | ApplyExposure (dt, amount, duration) ->
                         onTarget (fun t ->
                             let k = effectOnSelf w.Enemies.[t] "ExposureEffectOnSelf"
@@ -1371,7 +1384,12 @@ module Sim =
             let st = status e
             let stopped = [ "Frozen"; "HeavilyStunned"; "Electrocuted" ] |> List.exists st.ContainsKey
             let chill = e.Debuffs |> Map.tryFind "Chilled" |> Option.map (fun x -> x.Mods |> List.sumBy (fun m -> m.Value)) |> Option.defaultValue 0.0
-            let next = atk.Interval / max 0.1 (1.0 - chill / 100.0)
+            // curses on the monster: action speed (Temporal Chains), damage dealt (Enfeeble)
+            let debuffs = (defender e).Mods
+            let actionSpeed = max 0.1 (Mods.more Ctx.empty [ Named "ActionSpeed" ] debuffs)
+            let dealt = max 0.0 (Mods.more Ctx.empty [ Named "DamageDealt" ] debuffs)
+            let atk = { atk with Damage = atk.Damage |> Map.map (fun _ d -> d * dealt) }
+            let next = atk.Interval / max 0.1 (1.0 - chill / 100.0) / actionSpeed
             let w = schedule (w.Time + next) (EnemyAttack name) w
             let inRange = Vec.length e.Def.Position - e.Def.Size <= atk.Range + 1e-6
             if stopped then
