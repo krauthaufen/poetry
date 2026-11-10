@@ -78,7 +78,12 @@ let runOne (path: string) : Result =
                     Unsimulated = (cov.Unsimulated |> List.map (fun (s, m) -> sprintf "%s [%s]" s m)) @ (sk.Unsimulated |> List.map (fun (s, m) -> sprintf "skill: %s [%s]" s m)) |> List.distinct
                     MissingGems = missing
                     Notes = (failed |> List.map (fun g -> "cannot build skill: " + g)) @ (c.MinionNotes |> List.map (fun n -> "minion: " + (n.Substring(n.IndexOf(": ") + 2)))) }
-    with e -> { blank with Error = Some(e.GetType().Name + ": " + e.Message.Split('\n').[0]) }
+    with e ->
+        // the innermost exception and where it was thrown
+        let rec inner (x: exn) = if isNull x.InnerException then x else inner x.InnerException
+        let x = inner e
+        let at = (string x.StackTrace).Split('\n') |> Array.tryFind (fun l -> l.Contains "PoEsie.") |> Option.map (fun l -> l.Trim()) |> Option.defaultValue ""
+        { blank with Error = Some(sprintf "%s: %s %s" (x.GetType().Name) (x.Message.Split('\n').[0]) at) }
 
 let files = System.IO.Directory.GetFiles(dir, "*.json") |> Array.filter (fun f -> System.Char.IsDigit (System.IO.Path.GetFileName f).[0]) |> Array.sort
 let results =

@@ -319,6 +319,10 @@ module Setup =
                 | WhileBelow (r, n, g) -> [ { Use = nameOf g; When = fun v -> (Map.tryFind r v.Buffs |> Option.defaultValue 0) < n } ]
                 | When (cond, g) -> [ { Use = nameOf g; When = cond } ])
         let pressedSkills = used |> List.map (fun (_, p) -> p.Skill)
+        // a step whose skill couldn't be built is left out (the fight goes on without it)
+        let steps =
+            let known = pressedSkills |> List.map (fun s -> s.Name) |> Set.ofList
+            steps |> List.filter (fun st -> known.Contains st.Use)
         let consumers =
             (used |> List.choose (fun (_, p) -> p.Infused)) @ (metas |> List.collect (fun (_, _, cs) -> cs))
         let grantRules =

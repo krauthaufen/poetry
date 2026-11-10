@@ -80,9 +80,15 @@ module Api =
         |> Option.bind (fun v -> Json.list (Some v) |> List.tryHead |> Option.bind Json.str)
 
     let private parseRange (s: string) =
-        match s.Split('-') with
-        | [| lo; hi |] -> Some { Min = float lo; Max = float hi }
+        // "12-30", or "12-30, 14-33" for two hands (the first is the main hand)
+        match s.Split(',').[0].Trim().Split('-') with
+        | [| lo; hi |] ->
+            match System.Double.TryParse lo, System.Double.TryParse hi with
+            | (true, a), (true, b) -> Some { Min = a; Max = b }
+            | _ -> None
         | _ -> None
+
+    let private first (s: string) = match System.Double.TryParse s with | true, v -> Some v | _ -> None
 
     /// The weapon numbers the game displays.
     let displayedWeapon (item: Json) : DisplayedWeapon =
@@ -91,8 +97,9 @@ module Api =
             |> List.choose (fun t -> property (DamageType.name t + " Damage") item |> Option.bind parseRange |> Option.map (fun r -> t, r))
             |> Map.ofList
         { Damage = damage
-          CritChance = property "Critical Hit Chance" item |> Option.map (fun s -> float (s.TrimEnd('%')))
-          AttacksPerSecond = property "Attacks per Second" item |> Option.map float }
+          // dual stats ("14.73%, 14.73%") show both hands: the first is the main hand
+          CritChance = property "Critical Hit Chance" item |> Option.bind (fun s -> first (s.Split(',').[0].Trim().TrimEnd('%')))
+          AttacksPerSecond = property "Attacks per Second" item |> Option.bind (fun s -> first (s.Split(',').[0].Trim())) }
 
     let private slotName (inventoryId: string) =
         match inventoryId with
