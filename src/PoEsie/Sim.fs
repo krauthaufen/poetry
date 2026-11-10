@@ -434,6 +434,11 @@ module Sim =
         |> fun m -> if ailing then Map.add "AnyAilment" 1 m else m
         |> fun m -> if e.Debuffs |> Map.exists (fun k _ -> k.StartsWith "Curse:") then Map.add "Cursed" 1 m else m
         |> fun m -> if e.Debuffs |> Map.exists (fun k _ -> k.StartsWith "Mark:") then Map.add "Marked" 1 m else m
+        |> fun m -> if [ "Frozen"; "HeavilyStunned"; "Electrocuted"; "Pinned" ] |> List.exists m.ContainsKey then Map.add "Immobilised" 1 m else m
+        |> fun m ->
+            match [ "Ignited"; "Chilled"; "Frozen"; "Shocked"; "Electrocuted" ] |> List.filter m.ContainsKey |> List.length with
+            | 0 -> m
+            | n -> Map.add "ElementalAilments" n m
         |> fun m -> if e.Debuffs |> Map.exists (fun k _ -> k.StartsWith "Exposure:") then Map.add "Exposed" 1 m else m
         |> fun m -> if e.Def.Rarity = Rare || e.Def.Rarity = Unique then Map.add "RareOrUnique" 1 m else m
         // low life: at or below 35% (PoE2); full life: untouched
@@ -964,7 +969,13 @@ module Sim =
             let t = max Constants.serverTick (useTime env actor skill w)
             // mana cost: base x increased cost / (1 + cost efficiency)
             let db = skillDb env actor skill st
-            let cost = skill.Cost * Mods.mult Ctx.empty [ ManaCost ] db / Mods.inc Ctx.empty [ ManaCostEfficiency ] db
+            let costCtx = { Ctx.empty with SkillTags = skill.Tags; SkillName = skill.Name }
+            // Archmage: spells cost an extra share of maximum mana
+            let extraCost =
+                match actor.Vitals with
+                | Some pools -> pools.Mana * Mods.sumBase costCtx [ Named "ExtraCostPercentOfMaxMana" ] db / 100.0
+                | None -> 0.0
+            let cost = (skill.Cost + extraCost) * Mods.mult costCtx [ ManaCost ] db / Mods.inc costCtx [ ManaCostEfficiency ] db
             // drink the mana flask when mana is getting low and it isn't already running
             let w =
                 match actor.ManaFlask, w.Player with
@@ -1257,6 +1268,21 @@ module Sim =
                             { w with Counts = bump "ward remnant" w.Counts } |> schedule (w.Time + r.Delay) (WardArrives(r.WardPerRemnant * count))
                         else w
                     | _ -> w
+                // Trinity: the hit's strongest element gains resonance (up to 100), the others lose some
+                let w =
+                    let gain = Mods.sumBase ctx [ Named "TrinityGain" ] mods
+                    let elemental = DamageType.elemental |> List.map (fun t -> t, Dmg.get t hit.Unmitigated) |> List.filter (fun (_, d) -> d > 0.0)
+                    if gain <= 0.0 || elemental.IsEmpty || actor.Name <> env.Fight.Player.Name then w
+                    else
+                        let top = elemental |> List.maxBy snd |> fst
+                        let loss = Mods.sumBase ctx [ Named "TrinityLoss" ] mods
+                        updateActor actor.Name (fun st ->
+                            let key t = "Resonance:" + DamageType.name t
+                            let get t = Map.tryFind (key t) st.Buffs |> Option.map (fun e -> e.Stacks) |> Option.defaultValue 0
+                            let values = DamageType.elemental |> List.map (fun t -> t, (if t = top then min 100 (get t + int gain) else max 0 (get t - int loss)))
+                            let put k n (b: Map<string, Effect>) = if n > 0 then Map.add k { Name = k; Mods = []; Stacks = n; Expires = infinity } b else Map.remove k b
+                            let buffs = values |> List.fold (fun b (t, n) -> put (key t) n b) st.Buffs
+                            { st with Buffs = put "Resonance" (values |> List.sumBy snd) buffs }) w
                 let w = markRecently actor.Name true hit.Crit dead w
                 let w = react env rng actor OnHit skill (Some target) w
                 if hit.Crit then react env rng actor OnCrit skill (Some target) w else w
@@ -1311,7 +1337,12 @@ module Sim =
                             | None -> 0
                         Projectiles
                             { p with
-                                Count = p.Count + fromCharges + (if p.Count + fromCharges > 0 then int (Mods.sumBase ctx [ AdditionalProjectiles ] mods) else 0)
+                                Count =
+                                    p.Count + fromCharges
+                                    + (if p.Count + fromCharges > 0 then
+                                           int (Mods.sumBase ctx [ AdditionalProjectiles ] mods)
+                                           + (if rng.Chance(Mods.sumBase ctx [ Named "ExtraProjectileChance2" ] mods) then 2 else 0)
+                                       else 0)
                                 Pierce = p.Pierce + int (Mods.sumBase ctx [ Pierce ] mods)
                                 Chains = p.Chains + int (Mods.sumBase ctx [ Chains ] mods)
                                 TerrainChain = p.TerrainChain + Mods.sumBase ctx [ Named "TerrainChain" ] mods }
@@ -1365,9 +1396,16 @@ module Sim =
                 |> fst
             | _ ->
                 let sk, w = variant w
-                let _, _, areaMult, delivery = shape sk
-                Geometry.targetsFrom rng env.Fight.Walls env.Fight.Reach delivery areaMult primary living
-                |> List.fold (fun w target -> hitEnemy env rng actor sk mult target w) w
+                let ctx, mods, areaMult, delivery = shape sk
+                let strike (w: World) =
+                    Geometry.targetsFrom rng env.Fight.Walls env.Fight.Reach delivery areaMult primary living
+                    |> List.fold (fun w target -> hitEnemy env rng actor sk mult target w) w
+                let w = strike w
+                // Aftershock: a slam has a chance to hit its area once more
+                if sk.Tags.Contains Slam && rng.Chance(Mods.sumBase ctx [ Named "AftershockChance" ] mods) then
+                    let again = strike w
+                    { again with Counts = bump ("aftershock:" + sk.Name) again.Counts }
+                else w
 
     /// A monster's hit at the player: evasion, deflection, armour, resistances, then
     /// energy shield and life. Frozen / stunned / electrocuted monsters don't act; chill
@@ -1430,7 +1468,7 @@ module Sim =
                     let taken =
                         unmitigated
                         |> Map.map (fun t d ->
-                            let d = if deflected then d * (1.0 - Vitals.deflectEffect / 100.0) else d
+                            let d = if deflected then d * (1.0 - v.DeflectEffect / 100.0) else d
                             let d =
                                 match t with
                                 | Physical ->
@@ -1446,6 +1484,10 @@ module Sim =
                               * (if blocked then v.BlockedDamageTaken / 100.0 else 1.0))
                     let w = takeDamage pools taken { w with Player = Some p } |> fun w -> { w with Player = w.Player |> Option.map (fun p -> { p with LastHit = w.Time }) }
                     let w = if crit then { w with Counts = bump "enemy:crit" w.Counts } else w
+                    let w =
+                        updateActor env.Fight.Player.Name (fun st ->
+                            { st with Buffs = Map.add "BeenHitRecently" { Name = "BeenHitRecently"; Mods = []; Stacks = 1; Expires = w.Time + 4.0 } st.Buffs }) w
+                        |> schedule (w.Time + 4.0) Expire
                     // ailments and stuns the hit inflicts on the player (not when blocked)
                     let w =
                         if blocked then w
@@ -1608,7 +1650,9 @@ module Sim =
                           "LowLife", v.Life > 1.0 && p.Life <= 0.35 * v.Life
                           "FullMana", p.Mana >= v.Mana
                           "LowMana", p.Mana <= 0.35 * v.Mana
-                          "HasEnergyShield", p.EnergyShield > 0.0 ]
+                          "HasEnergyShield", p.EnergyShield > 0.0
+                          // surrounded: at least 5 monsters within 3 m (PoB SurroundedRadiusBase, game constant)
+                          "Surrounded", (alive w |> List.filter (fun e -> Vec.length e.Def.Position - e.Def.Size <= 30.0) |> List.length) >= 5 ]
                     updateActor env.Fight.Player.Name (fun st ->
                         { st with
                             Buffs =

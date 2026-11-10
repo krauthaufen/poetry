@@ -224,7 +224,12 @@ module Hit =
         | Some v -> v
         | None ->
             let baseCrit = skill.BaseCrit + Mods.sumBase ctx [ CritChance ] mods
-            min 100.0 (max 0.0 (baseCrit * Mods.mult ctx [ CritChance ] mods))
+            let chance = min 100.0 (max 0.0 (baseCrit * Mods.mult ctx [ CritChance ] mods))
+            // "maximum Critical Hit Chance is X%"
+            let cap = Mods.sumBase ctx [ Named "MaxCritChance" ] mods
+            let chance = if cap > 0.0 then min cap chance else chance
+            // "roll Critical Hits twice": lucky
+            if Mods.flag ctx (Named "LuckyCrit") mods then 100.0 - (100.0 - chance) * (100.0 - chance) / 100.0 else chance
 
     /// Multiplier applied to crit damage (2.0 = +100% bonus).
     let critMultiplier ctx mods =

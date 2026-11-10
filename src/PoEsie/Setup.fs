@@ -179,8 +179,9 @@ module Setup =
           Build = build
           Sheet = sheet
           Bases = bases
-          MaxResources = maxResources
-          Resources = startResources |> Map.toList
+          // "per 100 maximum mana" (Archmage) reads this permanent stack count
+          MaxResources = Map.add "MaxMana100" (int (vitals.Mana / 100.0)) maxResources
+          Resources = (startResources |> Map.toList) @ [ "MaxMana100", int (vitals.Mana / 100.0) ]
           Vitals = vitals
           Periodics = periodics
           Cycles = cycles
@@ -358,6 +359,13 @@ module Setup =
 
     /// A fight against these enemies.
     let fight (c: Loaded) (o: Options) (player: Actor) (enemies: EnemyDef list) : Fight =
+        // auras that weaken monsters near you (Overwhelming Presence); presence range is ignored
+        let db = ModDb.ofList c.Sheet.Mods
+        let aura stat name =
+            let k = Mods.more Ctx.empty [ Named name ] db
+            if k <> 1.0 then [ Mod.more stat ((k - 1.0) * 100.0) |> Mod.from "aura" ] else []
+        let auraMods = aura AilmentThreshold "EnemyAura:AilmentThreshold" @ aura PoiseThreshold "EnemyAura:PoiseThreshold"
+        let enemies = if auraMods.IsEmpty then enemies else enemies |> List.map (fun e -> { e with Mods = e.Mods @ auraMods })
         { Enemies = enemies
           Player = player
           Minions = c.Minions

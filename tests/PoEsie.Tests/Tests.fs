@@ -355,6 +355,20 @@ let main _ =
         // first hit lands at 1 s; 9.5 s of ticking
         near 950.0 o.DamageBy.["Drain (chaos over time)"])
 
+    test "gem stats: a skill's internal name is not read as scope words" (fun () ->
+        // Falling Thunder's stats start with "lightning_strike_": neither a lightning nor a Strike restriction
+        let ids =
+            [ "lightning_strike_damage_+%_final_per_power_charge"; "lightning_strike_damage_+%_final_when_charged"
+              "lightning_strike_base_number_of_projectiles_per_power_charge"; "lightning_strike_maximum_action_distance_+_when_empowered"
+              "active_skill_base_area_of_effect_radius" ]
+        equal (Some "lightning_strike_") (Gems.skillPrefix ids)
+        match Gems.gemMeaningWith (Some "lightning_strike_") ids.Head 50.0 with
+        | Mods [ m ] ->
+            equal (Damage AllDamage) m.Stat
+            equal More m.Kind
+            equal [ PerStack("PowerCharge", 1.0) ] m.Conds
+        | other -> failwithf "unexpected meaning %A" other)
+
     DataTests.run test near (fun a b -> equal a b)
 
     printfn "%d passed, %d failed" passed failures

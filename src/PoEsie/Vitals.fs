@@ -81,7 +81,9 @@ type PlayerStats =
       UnluckyEvade: bool
       LuckyDeflect: bool
       /// Multiplier on how fast leeched life is recovered.
-      LifeLeechRate: float }
+      LifeLeechRate: float
+      /// Deflected hits deal this % less.
+      DeflectEffect: float }
 
 module PlayerStats =
     /// Bare pools with no defences or recovery: a starting point for hand-built players.
@@ -96,7 +98,7 @@ module PlayerStats =
           SelfEffect = Map.empty; SelfDuration = Map.empty; LifeOnKill = 0.0; ESOnKill = 0.0; LifeOnBlock = 0.0
           ManaOnBlock = 0.0; Recoup = []; RecoupSeconds = 4.0; LifeRecoveryRate = 1.0; ManaRecoveryRate = 1.0
           ESRecoveryRate = 1.0; LifeFlask = None; CostsLife = false; LifeRecharge = 0.0; UnluckyEvade = false
-          LuckyDeflect = false; LifeLeechRate = 1.0 }
+          LuckyDeflect = false; LifeLeechRate = 1.0; DeflectEffect = 40.0 }
 
 /// Hit resolution against the player (formulas: PoB CalcDefence, constants: game data).
 module Vitals =

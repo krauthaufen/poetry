@@ -58,18 +58,21 @@ module StatMap =
         | "trap" -> Some(Cond(SkillIs(Tag "Trap")))
         | "mine" -> Some(Cond(SkillIs(Tag "Mine")))
         | "warcry" -> Some(Cond(SkillIs Warcry))
-        | "bow" -> Some(Cond(SkillIs Bow))
-        | "crossbow" -> Some(Cond(SkillIs Crossbow))
-        | "mace" -> Some(Cond(SkillIs Mace))
-        | "spear" -> Some(Cond(SkillIs Spear))
-        | "quarterstaff" -> Some(Cond(SkillIs Quarterstaff))
-        | "sword" -> Some(Cond(SkillIs Sword))
-        | "axe" -> Some(Cond(SkillIs Axe))
-        | "dagger" -> Some(Cond(SkillIs Dagger))
-        | "claw" -> Some(Cond(SkillIs Claw))
-        | "flail" -> Some(Cond(SkillIs Flail))
-        | "wand" -> Some(Cond(SkillIs Wand))
-        | "staff" -> Some(Cond(SkillIs Staff))
+        | "bow" | "bows" -> Some(Cond(SkillIs Bow))
+        | "crossbow" | "crossbows" -> Some(Cond(SkillIs Crossbow))
+        | "slam" | "slams" -> Some(Cond(SkillIs Slam))
+        | "strike" | "strikes" -> Some(Cond(SkillIs Strike))
+        | "curse" -> Some(Cond(SkillIs Curse))
+        | "mace" | "maces" -> Some(Cond(SkillIs Mace))
+        | "spear" | "spears" -> Some(Cond(SkillIs Spear))
+        | "quarterstaff" | "quarterstaves" -> Some(Cond(SkillIs Quarterstaff))
+        | "sword" | "swords" -> Some(Cond(SkillIs Sword))
+        | "axe" | "axes" -> Some(Cond(SkillIs Axe))
+        | "dagger" | "daggers" -> Some(Cond(SkillIs Dagger))
+        | "claw" | "claws" -> Some(Cond(SkillIs Claw))
+        | "flail" | "flails" -> Some(Cond(SkillIs Flail))
+        | "wand" | "wands" -> Some(Cond(SkillIs Wand))
+        | "staff" | "staves" -> Some(Cond(SkillIs Staff))
         | "unarmed" -> Some(Cond(SkillIs Unarmed))
         | "minion" | "minions" -> Some MinionWrap
         | "two" -> Some(Cond(SkillIs(Tag "TwoHanded")))
@@ -107,6 +110,9 @@ module StatMap =
         | "pinned" -> Some "Pinned"
         | "cursed" -> Some "Cursed"
         | "stunned" -> Some "HeavilyStunned"
+        | "immobilised" -> Some "Immobilised"
+        | "exposed" -> Some "Exposed"
+        | "marked" -> Some "Marked"
         | _ -> None
 
     let private titleCase (words: string list) =
@@ -124,6 +130,16 @@ module StatMap =
                 go (EnemyHas "RareOrUnique" :: acc) tail
             | ("vs" | "against") :: "enemies" :: "affected" :: "by" :: "status" :: "ailments" :: tail ->
                 go (EnemyHas "AnyAilment" :: acc) tail
+            | ("vs" | "against") :: "rare" :: "or" :: "unique" :: ("enemy" | "enemies") :: tail -> go (EnemyHas "RareOrUnique" :: acc) tail
+            | "if" :: "rare" :: "or" :: "unique" :: "enemy" :: "nearby" :: tail -> go (EnemyHas "RareOrUnique" :: acc) tail
+            | "when" :: "hit" :: tail | "if" :: "have" :: "been" :: "hit" :: "recently" :: tail | "if" :: "been" :: "hit" :: "recently" :: tail ->
+                go (WhileBuff "BeenHitRecently" :: acc) tail
+            | "if" :: "have" :: "not" :: "been" :: "hit" :: "recently" :: tail | "if" :: "not" :: "hit" :: "recently" :: tail ->
+                go (Not(WhileBuff "BeenHitRecently") :: acc) tail
+            | "for" :: "4" :: "seconds" :: "on" :: "crit" :: tail -> go (WhileBuff "CritRecently" :: acc) tail
+            | ("while" | "if") :: "surrounded" :: tail -> go (WhileBuff "Surrounded" :: acc) tail
+            | "per" :: "enemy" :: "elemental" :: "ailment" :: tail -> go (PerEnemyStack("ElementalAilments", 1.0) :: acc) tail
+            | "if" :: "have" :: "consumed" :: "infusion" :: "recently" :: tail -> go (WhileBuff "ConsumedInfusionRecently" :: acc) tail
             | ("vs" | "against") :: "enemies" :: "on" :: "low" :: "life" :: tail -> go (EnemyHas "LowLife" :: acc) tail
             | ("vs" | "against") :: "enemies" :: "on" :: "full" :: "life" :: tail -> go (EnemyHas "FullLife" :: acc) tail
             | ("when" | "while") :: "on" :: "low" :: "life" :: tail -> go (WhileBuff "LowLife" :: acc) tail
@@ -483,6 +499,53 @@ module StatMap =
         // "Convert 100% of maximum Energy Shield to maximum Mana; Mana Costs are Doubled"
         | "keystone_eldritch_battery" -> Some(Mods [ Mod.base' (Named "ESConvertedToMana") v; Mod.more ManaCost 100.0 ])
         | "keystone_chaos_inoculation" -> one (Mod.flag (Named "Keystone:Chaos Inoculation"))
+        // ---- engine-internal or cosmetic gem stats ----
+        | "base_deal_no_damage" | "base_deal_no_damage_over_time" | "skill_desired_amount_override" | "number_of_broken_faces"
+        | "has_modular_projectiles_enabled" | "should_use_additive_aiming_animation" | "skill_can_fire_arrows"
+        | "action_can_be_used_in_aiming_stance" | "action_allowed_queue_time_override_ms" | "active_skill_ignore_setting_aim_stance"
+        | "can_be_used_instantly_in_any_set" | "skill_override_pvp_scaling_time_ms" | "terrain_arrow_attachment_chance_reduction_+%"
+        | "triggerable_in_any_set" | "attack_is_not_melee_override" | "immune_to_corrupted_blood" | "minions_are_gigantic"
+        | "spark_min_time_between_target_clearing_ms" | "active_skill_additional_projectiles_description_mode"
+        | "item_can_have_catalyst_quality_in_addition_to_base_quality" | "skill_empower_limitation_specifier_for_stat_description"
+        | "phylactery_can_only_contain_non_unique_jewel" | "has_unique_chaos_shrine_effect" -> Some Structural
+        | id when id.StartsWith "dummy_stat_" || id.StartsWith "warping_rune_add_item_tag_" || id.StartsWith "quality_display_"
+                  || id.StartsWith "pvp_" || id.StartsWith "replace_" || id.EndsWith "_art_variation" -> Some Structural
+        // read by id where the mechanic lives (Behaviours): remnants, infusions, conflux, motes
+        | id when id.StartsWith "ward_remnants_" || id.StartsWith "infusion_remnants_" || id.StartsWith "skill_elemental_conflux_"
+                  || id = "base_remnant_duration_ms" || id = "verisium_infusion_skill_number_of_verisium_infusion_to_grant" -> Some Structural
+        // ---- more offence ----
+        | "maim_on_hit_%" -> one (Mod.base' (AilmentChance Maim) v)
+        | "base_skill_cost_efficiency_+%" -> one (Mod.inc ManaCostEfficiency v)
+        | "number_of_additional_projectiles" -> one (Mod.base' AdditionalProjectiles v)
+        | "number_of_additional_arrows" -> one (Mod.base' AdditionalProjectiles v |> Mod.whenever (SkillIs Bow))
+        // "X% chance for Spell Skills to fire 2 additional Projectiles": the average
+        | "spell_skills_fire_2_additional_projectiles_final_chance_%" -> one (Mod.base' (Named "ExtraProjectileChance2") v |> Mod.whenever (SkillIs Spell))
+        | "attacks_roll_crits_twice" -> one (Mod.flag (Named "LuckyCrit") |> Mod.whenever (SkillIs Attack))
+        | id when id.StartsWith "maximum_critical_strike_chance_is_%" -> one (Mod.base' (Named "MaxCritChance") v)
+        | "your_slam_aftershock_chance_%" | "slam_aftershock_chance_%" -> one (Mod.base' (Named "AftershockChance") v |> Mod.whenever (SkillIs Slam))
+        | "hit_damage_immobilisation_multiplier_+%" ->
+            Some(Mods([ Freeze; HeavyStun; Electrocute; Pin ] |> List.map (fun a -> Mod.inc (Buildup a) v)))
+        | "non_damaging_ailment_effect_+%" -> Some(Mods([ Shock; Chill ] |> List.map (fun a -> Mod.inc (AilmentMagnitude(Some a)) v)))
+        | "base_damage_%_deflected" -> one (Mod.base' (Named "DeflectEffect") v)
+        | "slows_have_no_potency_on_you" -> one (Mod.more (Named "SelfEffect:Chill") -100.0)
+        // ---- persistent buff gems ----
+        // Archmage: non-channelling spells gain X% of damage as lightning per 100 maximum mana, and cost more
+        | "archmage_all_damage_%_to_gain_as_lightning_to_grant_to_non_channelling_spells_per_100_max_mana" ->
+            Some(Mods(DamageType.all |> List.filter ((<>) Lightning) |> List.map (fun t ->
+                Mod.base' (GainAs(t, Lightning)) v |> Mod.whenever (SkillIs Spell) |> Mod.whenever (Not(SkillIs Channelling)) |> Mod.whenever (PerStack("MaxMana100", 1.0)))))
+        | "archmage_max_mana_permyriad_to_add_to_non_channelled_spell_mana_cost" ->
+            one (Mod.base' (Named "ExtraCostPercentOfMaxMana") (v / 100.0) |> Mod.whenever (SkillIs Spell) |> Mod.whenever (Not(SkillIs Channelling)))
+        // Trinity: X% more elemental damage per 50 resonance; resonance per hit
+        | "trinity_damage_+%_final_to_grant_per_50_resonance" -> one (Mod.more (Damage Elemental) v |> Mod.whenever (PerStack("Resonance", 50.0)))
+        | "trinity_resonance_to_grant" -> one (Mod.base' (Named "TrinityGain") v)
+        | "trinity_loss_per_hit" -> one (Mod.base' (Named "TrinityLoss") v)
+        | "trinity_resonance_decay_delay_ms" | "trinity_resonance_loss_per_second" -> Some Structural
+        // Wind Dancer: more evasion per stage; taken at full stages (they return within seconds)
+        | "wind_dancer_evasion_rating_+%_final_per_stage" -> one (Mod.more Evasion (v * 3.0))
+        | "wind_dancer_stages_gained_every_x_ms" | "wind_dancer_maximum_number_of_stages" -> Some Structural
+        // Overwhelming Presence: monsters near you are easier to stun and to inflict ailments on
+        | "skill_overwhelming_pressure_aura_enemy_ailment_threshold_+%" -> one (Mod.more (Named "EnemyAura:AilmentThreshold") v)
+        | "skill_overwhelming_pressure_aura_enemy_stun_threshold_+%" -> one (Mod.more (Named "EnemyAura:PoiseThreshold") v)
         | "damage_over_time_+%" -> one (Mod.inc (Named "DotDamage") v)
         | "damage_over_time_+%_final" -> one (Mod.more (Named "DotDamage") v)
         | "base_skill_effect_duration" | "spell_damage_modifiers_apply_to_skill_dot" -> Some Structural
@@ -759,9 +822,19 @@ module StatMap =
 
     let private rules = [ perMote; accuracy; defenceScaled; areaOfEffect; buildup; scaledDamage; addedDamage; penetration; gainAs; convert; ailmentStat; crit; speed; gemLevel ]
 
+    /// Try the pattern rules on the whole id; failing that, pull the conditions out of it
+    /// ("..._vs_shocked_enemies", "..._when_on_low_life") and try what is left.
     let private pattern (id: string) (v: float) : Meaning option =
-        let rev = List.rev (split id)
-        rules |> List.tryPick (fun rule -> rule rev v) |> Option.map Mods
+        let words = split id
+        let tryRules (ws: string list) =
+            let rev = List.rev ws
+            rules |> List.tryPick (fun rule -> rule rev v)
+        match tryRules words with
+        | Some ms -> Some(Mods ms)
+        | None ->
+            let conds, rest = conditions words
+            if conds.IsEmpty || rest.IsEmpty then None
+            else tryRules rest |> Option.map (fun ms -> Mods(ms |> List.map (fun m -> { m with Conds = conds @ m.Conds })))
 
     /// Item-local stats: they change the weapon, not the character.
     let private local (id: string) v =
@@ -836,13 +909,24 @@ module StatMap =
         // A penetration / enemy debuff line mentions resistance but is offensive.
         words |> List.exists noCombatWords.Contains
 
-    let private direct id value =
+    let rec private direct (id: string) value =
         match explicit id value with
         | Some m -> Some m
         | None ->
             match defensive id value with
             | Some m -> Some m
-            | None -> pattern id value
+            | None ->
+                match pattern id value with
+                | Some m -> Some m
+                | None ->
+                    // aura gems: "base_skill_buff_<stat>_to_apply" grants <stat> (Purity of Fire, Discipline)
+                    let prefix = "base_skill_buff_"
+                    if id.StartsWith prefix && (id.EndsWith "_to_apply" || id.EndsWith "_to_grant") then
+                        let inner = id.Substring(prefix.Length, id.Length - prefix.Length - 9)
+                        match inner with
+                        | "total_maximum_energy_shield_+" -> Some(Mods [ Mod.base' MaxEnergyShield value ])
+                        | _ -> direct inner value |> Option.orElse (direct ("base_" + inner) value)
+                    else None
 
     /// Gem stats carry the gem's name: "support_controlled_destruction_spell_damage_+%_final".
     /// Try the id with 1..4 name words removed after the prefix.

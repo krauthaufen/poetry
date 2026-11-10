@@ -178,6 +178,7 @@ module Defence =
           LifeRecharge = if lifeRecharges && not ci then life * esRechargePercent / 100.0 * lifeRecovery else 0.0
           UnluckyEvade = flag "UnluckyEvade"
           LuckyDeflect = flag "LuckyDeflect"
-          LifeLeechRate = max 0.05 (Mods.mult c [ Named "LifeLeechRate" ] db) }
+          LifeLeechRate = max 0.05 (Mods.mult c [ Named "LifeLeechRate" ] db)
+          DeflectEffect = min 100.0 (Vitals.deflectEffect + named "DeflectEffect") }
 
     let compute bases sheet = computeWith Map.empty bases sheet

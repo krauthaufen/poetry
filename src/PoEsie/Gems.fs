@@ -170,8 +170,40 @@ module Gems =
             |> Option.defaultValue original
         | m -> m
 
+    /// The skill's internal name as its stats carry it ("lightning_strike_" on Falling
+    /// Thunder's stats): the longest word prefix (1 to 3 words) that at least two of the
+    /// skill's stats share and that doesn't start with a generic stat word. Words of that
+    /// name must not be read as scopes ("strike", "staff", "lightning").
+    let private genericStart =
+        set [ "base"; "active"; "skill"; "support"; "global"; "minimum"; "maximum"; "spell"; "attack"; "number"; "projectile"
+              "projectiles"; "is"; "can"; "cannot"; "display"; "quality"; "total"; "movement"; "never"; "always"; "melee"
+              "main"; "off"; "non"; "additional"; "damage"; "critical"; "chance"; "virtual"; "local"; "minion"; "minions" ]
+
+    let skillPrefix (ids: string list) =
+        let words = ids |> List.distinct |> List.map (fun (id: string) -> id.Split('_') |> List.ofArray)
+        // the prefix most of the stats share; of equally common ones, the longest
+        [ 1; 2; 3 ]
+        |> List.collect (fun k ->
+            words
+            |> List.filter (fun ws -> ws.Length > k + 1 && not (genericStart.Contains ws.Head))
+            |> List.countBy (List.truncate k)
+            |> List.filter (fun (_, n) -> n >= 2)
+            |> List.map (fun (ws, n) -> ws, n, k))
+        |> List.sortByDescending (fun (_, n, k) -> n, k)
+        |> List.tryHead
+        |> Option.map (fun (ws, _, _) -> String.concat "_" ws + "_")
+
+    /// A gem stat's meaning when the skill's internal name is known: the rest of the id first.
+    let gemMeaningWith (prefix: string option) (id: string) v =
+        match prefix with
+        | Some p when id.StartsWith p && id.Length > p.Length ->
+            match StatMap.meaning (id.Substring p.Length) v with
+            | Mods ms -> Mods(ms |> List.map (Mod.from ("skill-specific:" + id)))
+            | _ -> gemMeaning id v
+        | _ -> gemMeaning id v
+
     /// Turn game stats into mods, sorting out what we couldn't use.
-    let private interpret (stats: (string * float) list) =
+    let private interpret (prefix: string option) (stats: (string * float) list) =
         stats
         |> List.fold
             (fun (mods, cov: Coverage) (id, v) ->
@@ -179,7 +211,7 @@ module Gems =
                 | Some _ -> mods, cov
                 | None when deliveryStats.Contains id || id.EndsWith "_number_of_projectiles_per_power_charge" -> mods, cov
                 | None ->
-                    match gemMeaning id v with
+                    match gemMeaningWith prefix id v with
                     | Mods ms -> mods @ ms, cov
                     | Local _
                     | Structural
@@ -263,7 +295,11 @@ module Gems =
     let private buildSet altQuality (data: SkillData) (set: StatSetData) name tags level quality (supportStats: (string * float) list) (weapon: Weapon option) =
         let gemLevel = Map.tryFind level data.Levels
         let ownStats = statsWith altQuality data set level quality
-        let mods, cov = interpret (ownStats @ supportStats)
+        // the skill's internal name, from all its stat sets
+        let prefix = skillPrefix (data.StatSets |> List.collect (fun st -> st.Stats @ (st.ConstantStats |> List.map fst)))
+        let ownMods, ownCov = interpret prefix ownStats
+        let supportMods, supportCov = interpret None supportStats
+        let mods, cov = ownMods @ supportMods, Coverage.merge ownCov supportCov
         let isAttack = data.Types.Contains "Attack"
         let baseDamage =
             if isAttack then
