@@ -164,6 +164,33 @@ Confidence levels:
 | Light stun on the player | chance = hit / stun threshold (maximum life before CI + mods); physical +100%, melee +33% (monster object stats); nothing below 15% (LightStunMinimumChancePlayer); interrupts for 0.35 s (GUESS); a stun only delays the next action, it does not cancel one under way. Heavy stun on the player: not modelled | game constants; formula a guess | guess |
 | Evasion | every monster hit can be evaded | PoE2 0.3 (recollection) | guess |
 
+### Keystones
+
+| Keystone | Rule | Confidence |
+|---|---|---|
+| Chaos Inoculation, Pyromantic Pact | by name (see above) | data |
+| Pain Attunement | 30% less crit bonus on full life, 30% more on low life (35% or less). With Chaos Inoculation you are always on full life | data; CI = full life is a PoE convention |
+| Zealot's Oath | life regeneration goes to energy shield; no ES recharge | data |
+| Iron Reflexes | all evasion becomes armour | data |
+| Avatar of Fire | 75% of every non-fire type converted to fire; the rest deals nothing | data |
+| Glancing Blows | evade unlucky (two rolls must both evade), deflect lucky | data |
+| Oasis | 30% more flask recovery (charms are not simulated anyway) | data |
+| Eternal Youth | life recharges like energy shield would; 50% less life flask recovery | data |
+| Mind Over Matter | all damage from mana before life; 50% less mana recovery | data |
+| Blood Magic | no mana; skills cost life (a use that would kill waits) | data |
+| Eldritch Battery | energy shield becomes mana (after its own increases); costs doubled | data; which increases apply is a guess |
+| Unwavering Stance | cannot be light stunned | data |
+| Resolute Technique | never crit; accuracy doubled (accuracy not simulated yet) | data |
+| Dance with Death | 25% more skill speed with a one-handed weapon and empty off hand | data |
+| Blackflame Covenant | fire spells convert fire to chaos; ignite stays fire (NOT yet chaos) | partial |
+| Crimson Assault | bleeding is aggravated (as if the enemy moved), base duration 1 s, 50% more magnitude | data |
+| Vaal Pact | 50% more life leeched, 67% slower, no other life recovery | data |
+| Giant's Blood | life from Strength halved (the weapons are already equipped) | data |
+| Elemental Equilibrium | infusion remnants rotate: fire -> lightning -> cold -> fire | data |
+| Wildsurge Incantation | Storm and Plant spells: 50% more damage, 50% less cost, 75% less duration | data |
+| Whispers of Doom | +1 curse (curses themselves not simulated yet) | partial |
+| Ritual Cadence, Resonance, Heartstopper, Primal Hunger, Scarred Faith, Hollow Palm Technique, Conduit, Necromantic Talisman, Trusted Kinship, Ancestral Bond, Lord of the Wilds, Bulwark | NOT modelled | todo |
+
 ## Resources over time
 
 | Mechanic | Rule | Source | Confidence |

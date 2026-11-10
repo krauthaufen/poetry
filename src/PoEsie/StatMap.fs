@@ -124,6 +124,12 @@ module StatMap =
                 go (EnemyHas "RareOrUnique" :: acc) tail
             | ("vs" | "against") :: "enemies" :: "affected" :: "by" :: "status" :: "ailments" :: tail ->
                 go (EnemyHas "AnyAilment" :: acc) tail
+            | ("vs" | "against") :: "enemies" :: "on" :: "low" :: "life" :: tail -> go (EnemyHas "LowLife" :: acc) tail
+            | ("vs" | "against") :: "enemies" :: "on" :: "full" :: "life" :: tail -> go (EnemyHas "FullLife" :: acc) tail
+            | ("when" | "while") :: "on" :: "low" :: "life" :: tail -> go (WhileBuff "LowLife" :: acc) tail
+            | ("when" | "while") :: "on" :: "full" :: "life" :: tail -> go (WhileBuff "FullLife" :: acc) tail
+            | ("when" | "while") :: "on" :: "low" :: "mana" :: tail -> go (WhileBuff "LowMana" :: acc) tail
+            | ("when" | "while") :: "on" :: "full" :: "mana" :: tail -> go (WhileBuff "FullMana" :: acc) tail
             | "if" :: ("crit" | "crits") :: "recently" :: tail | "if" :: "have" :: "crit" :: "recently" :: tail ->
                 go (WhileBuff "CritRecently" :: acc) tail
             | "if" :: ("hit" | "hits") :: "recently" :: tail -> go (WhileBuff "HitRecently" :: acc) tail
@@ -457,7 +463,44 @@ module StatMap =
         | "endurance_charge_duration_+%" | "base_endurance_charge_duration_+%" -> one (Mod.inc (Named "EnduranceChargeDuration") v)
         | "energy_generated_+%" -> one (Mod.inc (Named "EnergyGenerated") v)
         | "elemental_penetration_can_go_down_to_override" -> one (Mod.base' (Named "PenetrationFloor") v)
+        // ---- keystones ----
+        // "30% less Critical Damage Bonus when on Full Life, 30% more when on Low Life"
+        | "keystone_pain_attunement" ->
+            Some(Mods [ Mod.more CritBonus (-(abs v)) |> Mod.whenever (WhileBuff "FullLife"); Mod.more CritBonus (abs v) |> Mod.whenever (WhileBuff "LowLife") ])
+        // despite its name a plain "X% more Critical Damage Bonus" (Grinning Immolation)
         | "pain_attunement_keystone_critical_strike_multiplier_+%_final" -> one (Mod.more CritBonus v)
+        | "keystone_zealots_oath" -> Some(Mods [ Mod.flag (Named "RegenESInsteadOfLife"); Mod.flag (Named "NoESRecharge") ])
+        | "keystone_iron_reflexes" -> one (Mod.flag (Named "EvasionToArmour"))
+        // "75% of Damage Converted to Fire Damage; Deal no Non-Fire Damage"
+        | "keystone_avatar_of_fire" ->
+            Some(Mods((DamageType.all |> List.filter ((<>) Fire) |> List.map (fun t -> Mod.base' (Convert(t, Fire)) v)) @ [ Mod.flag (Named "DealNoNonFire") ]))
+        | "keystone_glancing_blows" -> Some(Mods [ Mod.flag (Named "UnluckyEvade"); Mod.flag (Named "LuckyDeflect") ])
+        | "keystone_oasis" -> Some(Mods [ Mod.more (Named "LifeFlaskAmount") v; Mod.more (Named "ManaFlaskAmount") v ])
+        | "keystone_eternal_youth" -> Some(Mods [ Mod.flag (Named "LifeRechargesInsteadOfES"); Mod.more (Named "LifeFlaskAmount") (-v) ])
+        // "All Damage is taken from Mana before Life; 50% less Mana Recovery Rate"
+        | "keystone_mana_shield" -> Some(Mods [ Mod.base' (Named "DamageRemovedFromManaFirst") 100.0; Mod.more (Named "ManaRecoveryRate") (-v) ])
+        | "keystone_blood_magic" -> one (Mod.flag (Named "BloodMagic"))
+        // "Convert 100% of maximum Energy Shield to maximum Mana; Mana Costs are Doubled"
+        | "keystone_eldritch_battery" -> Some(Mods [ Mod.base' (Named "ESConvertedToMana") v; Mod.more ManaCost 100.0 ])
+        | "keystone_chaos_inoculation" -> one (Mod.flag (Named "Keystone:Chaos Inoculation"))
+        | "cannot_be_light_stunned" -> one (Mod.base' (Named "AvoidStun") 100.0)
+        | "accuracy_rating_is_doubled" -> one (Mod.more (Named "Accuracy") 100.0)
+        // "25% more Skill Speed while Off Hand is empty and you have a One-Handed Martial Weapon"
+        | "keystone_dance_with_death" -> one (Mod.more Speed v |> Mod.whenever (WhileBuff "OneHandedEmptyOffHand"))
+        | "keystone_fire_spells_become_chaos_spells" ->
+            one (Mod.base' (Convert(Fire, Chaos)) v |> Mod.whenever (SkillIs Spell) |> Mod.whenever (SkillIs(Tag "Fire")))
+        // aggravated bleeding deals damage as though the target were moving
+        | "aggravate_inflicted_bleeding" ->
+            one (Mod.more (AilmentMagnitude(Some Bleed)) ((Constants.bleedMovingMultiplier - 1.0) * 100.0) |> Mod.whenever (Not(EnemyHas "Moving")))
+        | "number_of_additional_curses_allowed" -> one (Mod.base' (Named "MaxCurses") v)
+        | "keystone_elemental_equilibrium" -> one (Mod.flag (Named "InfusionRemnantsRotate"))
+        // "Storm and Plant Spells deal 50% more damage"
+        | "marauder_hidden_ascendancy_damage_+%_final" ->
+            Some(Mods([ "Type:Storm"; "Type:Plant" ] |> List.map (fun t -> Mod.more (Damage AllDamage) v |> Mod.whenever (SkillIs Spell) |> Mod.whenever (SkillIs(Tag t)))))
+        | "base_life_leech_does_not_stop_at_full_life" | "can_wield_2h_axe_sword_mace_in_one_hand" -> Some Structural
+        | "keystone_conduit" | "minions_get_amulet_stats_instead_of_you" | "can_have_2_companions" | "keystone_ancestral_bond" ->
+            Some(Unsimulated "minions / allies")
+        | "keystone_bulwark" -> Some(Unsimulated "movement")
         | "critical_strike_chance_+%_if_triggered_skill_recently" -> one (Mod.inc CritChance v |> Mod.whenever (WhileBuff "TriggeredRecently"))
         | "critical_strike_multiplier_+_if_have_not_dealt_critical_strike_recently" -> one (Mod.inc CritBonus v |> Mod.whenever (Not(WhileBuff "CritRecently")))
         | "ailment_chance_+%_vs_exposed" ->

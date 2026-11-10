@@ -243,9 +243,11 @@ module StatText =
                         | lo, _ when variant.Slots.IsEmpty -> Some(Some(stat, lo |> Option.defaultValue 1.0))
                         // no placeholder, one literal number: that number is the value
                         // ("down to a minimum of -50%")
+                        // several fixed numbers (keystones: "30% less ... 30% more ..."): the stat
+                        // is set; its value is the first number
                         | _ when variant.Slots |> List.forall (function Literal _ -> true | _ -> false) ->
                             match variant.Slots with
-                            | [ Literal v ] -> Some(Some(stat, v))
+                            | Literal v :: _ -> Some(Some(stat, v))
                             | _ -> Some None
                         | _ -> Some None)
             if literalsOk && List.forall Option.isSome values then

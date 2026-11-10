@@ -432,6 +432,9 @@ module Sim =
         |> fun m -> if e.Debuffs |> Map.exists (fun k _ -> k.StartsWith "Curse:") then Map.add "Cursed" 1 m else m
         |> fun m -> if e.Debuffs |> Map.exists (fun k _ -> k.StartsWith "Exposure:") then Map.add "Exposed" 1 m else m
         |> fun m -> if e.Def.Rarity = Rare || e.Def.Rarity = Unique then Map.add "RareOrUnique" 1 m else m
+        // low life: at or below 35% (PoE2); full life: untouched
+        |> fun m -> if e.Life <= 0.35 * e.Def.Life then Map.add "LowLife" 1 m else m
+        |> fun m -> if e.Life >= e.Def.Life then Map.add "FullLife" 1 m else m
 
     let private defender (e: EnemyState) : Defender =
         let debuffMods =
@@ -627,8 +630,9 @@ module Sim =
             let gained =
                 p.ManaGained |> addf "regen" (min regen (v.Mana - p.Mana)) |> addf "leech" leech |> addf "flask" flask
                 |> (if recouped > 0.0 then addf "recoup" recouped else id)
-            let lifeLeech = min p.LifeLeechPool (v.Life * Constants.maxManaLeechRate / 100.0 * dt)
-            let lifeGain = v.LifeRegen * dt + lifeLeech + p.LifeFlaskRate * overlap p.LifeFlaskUntil + stream "Life"
+            let lifeLeech = min p.LifeLeechPool (v.Life * Constants.maxManaLeechRate / 100.0 * v.LifeLeechRate * dt)
+            let lifeRecharge = if v.LifeRecharge > 0.0 && w.Time - p.LastHit >= v.ESRechargeDelay then v.LifeRecharge * dt else 0.0
+            let lifeGain = v.LifeRegen * dt + lifeLeech + lifeRecharge + p.LifeFlaskRate * overlap p.LifeFlaskUntil + stream "Life"
             let lifeCharges =
                 match v.LifeFlask with
                 | Some f -> min f.MaxCharges (p.LifeFlaskCharges + f.ChargesPerSecond * f.ChargeGainMult * dt)
@@ -953,6 +957,15 @@ module Sim =
                         Counts = bump "flask:mana" w.Counts }
                 | _ -> w
             match actor.Vitals, w.Player with
+            | Some v, Some p when v.CostsLife ->
+                // Blood Magic: the cost is paid with life; a skill that would kill waits
+                if p.Life - cost >= 1.0 || cost <= 0.0 then
+                    { w with Player = Some { p with Life = p.Life - cost } }
+                    |> startUse env rng actor skill t
+                    |> schedule (w.Time + t) (Ready name)
+                else
+                    let wait = max Constants.serverTick 0.25
+                    { w with Player = Some { p with Starved = p.Starved + wait } } |> schedule (w.Time + wait) (Ready name)
             | Some v, Some p when v.CostsInfernalFlame ->
                 // Pyromantic Pact: the cost builds Infernal Flame (max: twice max mana); reaching the
                 // maximum empties it and burns maximum life + energy shield as fire damage
@@ -1335,12 +1348,19 @@ module Sim =
                 w
             else
                 let accuracy = atk.Accuracy * (if st.ContainsKey "Blinded" then 1.0 - Constants.blindAccuracyLess / 100.0 else 1.0)
-                if not (rng.Chance(Vitals.monsterHitChance v.Evasion accuracy)) then
+                let hitChance =
+                    let h = Vitals.monsterHitChance v.Evasion accuracy
+                    // Glancing Blows: the evade roll is unlucky (both of two rolls must evade)
+                    if v.UnluckyEvade then 100.0 - (100.0 - h) * (100.0 - h) / 100.0 else h
+                if not (rng.Chance hitChance) then
                     { w with Counts = bump "enemy:evaded" w.Counts }
                 else
                     let blockRoll () = rng.Chance v.Block
                     let blocked = blockRoll () || (v.LuckyBlock && blockRoll ())
-                    let deflected = not blocked && rng.Chance(Vitals.deflectChance v.Deflection accuracy)
+                    let deflectChance =
+                        let d = Vitals.deflectChance v.Deflection accuracy
+                        if v.LuckyDeflect then 100.0 - (100.0 - d) * (100.0 - d) / 100.0 else d
+                    let deflected = not blocked && rng.Chance deflectChance
                     // "<from> damage taken as <to>" moves part of each type before mitigation
                     let incoming =
                         v.TakenAs
@@ -1529,6 +1549,23 @@ module Sim =
             w
         else
             let w = prune w
+            // the player's life and mana state, as buffs conditions can read
+            let w =
+                match env.Fight.Player.Vitals, w.Player with
+                | Some v, Some p ->
+                    let states =
+                        [ "FullLife", p.Life >= v.Life
+                          "LowLife", v.Life > 1.0 && p.Life <= 0.35 * v.Life
+                          "FullMana", p.Mana >= v.Mana
+                          "LowMana", p.Mana <= 0.35 * v.Mana
+                          "HasEnergyShield", p.EnergyShield > 0.0 ]
+                    updateActor env.Fight.Player.Name (fun st ->
+                        { st with
+                            Buffs =
+                                states |> List.fold (fun (b: Map<string, Effect>) (k, on) ->
+                                    if on then (if b.ContainsKey k then b else Map.add k { Name = k; Mods = []; Stacks = 1; Expires = infinity } b)
+                                    else Map.remove k b) st.Buffs }) w
+                | _ -> w
             match ev with
             | Ready name -> onReady env rng name w
             | Strike (name, skill, mult, aimedAt) -> onStrike env rng name skill mult aimedAt w

@@ -72,13 +72,22 @@ module Defence =
             | _ -> 0.0
         let pool stat baseValue = (baseValue + Mods.sumBase c [ stat ] db) * Mods.mult c [ stat ] db
         let ci = Mods.flag c (Named "Keystone:Chaos Inoculation") db
-        let lifeFull = pool MaxLife (baseLife + lifePerLevel * level + 2.0 * str)
+        let flag n = Mods.flag c (Named n) db
+        // Giant's Blood halves the life Strength gives
+        let lifePerStr = if flag "HalfLifeFromStrength" then 1.0 else 2.0
+        let lifeFull = pool MaxLife (baseLife + lifePerLevel * level + lifePerStr * str)
         // "X% of maximum Life converted to / gained as Energy Shield"
         let converted = lifeFull * min 100.0 (Mods.sumBase c [ Named "LifeConvertedToES" ] db) / 100.0
         let gainedAsES = lifeFull * Mods.sumBase c [ Named "LifeGainedAsES" ] db / 100.0
         let life = if ci then 1.0 else lifeFull - converted
-        let mana = pool MaxMana (baseMana + manaPerLevel * level + 2.0 * int')
-        let es = pool MaxEnergyShield (fromItems MaxEnergyShield + esFromBodyEvasion) + converted + gainedAsES
+        let esFull = pool MaxEnergyShield (fromItems MaxEnergyShield + esFromBodyEvasion) + converted + gainedAsES
+        // Eldritch Battery: energy shield becomes mana; Blood Magic: no mana at all
+        let esToMana = esFull * min 100.0 (Mods.sumBase c [ Named "ESConvertedToMana" ] db) / 100.0
+        let bloodMagic = flag "BloodMagic"
+        let mana = if bloodMagic then 0.0 else pool MaxMana (baseMana + manaPerLevel * level + 2.0 * int') + esToMana
+        let es = esFull - esToMana
+        let onlyLeech = flag "OnlyLeechRecoversLife"
+        let lifeRecharges = flag "LifeRechargesInsteadOfES"
         let named n = Mods.sumBase c [ Named n ] db
         let ailments = [ "Ignite"; "Chill"; "Freeze"; "Shock"; "Bleed"; "Poison" ]
         // stun threshold: maximum life (before Chaos Inoculation), ailment threshold: half of it
@@ -93,6 +102,8 @@ module Defence =
         let lifeRegen = (Mods.sumBase c [ LifeRegen ] db + life * Mods.sumBase c [ LifeRegenPercent ] db / 100.0) * Mods.mult c [ LifeRegen ] db
         let armour = pool Armour (fromItems Armour)
         let evasion = pool Evasion (fromItems Evasion)
+        // Iron Reflexes: all evasion becomes armour
+        let armour, evasion = if Mods.flag c (Named "EvasionToArmour") db then armour + evasion, 0.0 else armour, evasion
         let deflection = evasion * Mods.sumBase c [ Named "DeflectionPercentOfEvasion" ] db / 100.0 + Mods.sumBase c [ Deflection ] db
         let resist t =
             // Chaos Inoculation: immune to chaos damage
@@ -110,9 +121,11 @@ module Defence =
           Evasion = evasion
           Deflection = deflection
           Resist = DamageType.all |> List.filter ((<>) Physical) |> List.map resist |> Map.ofList
-          LifeRegen = if ci || regenToES then 0.0 else lifeRegen * lifeRecovery
+          LifeRegen = if ci || regenToES || onlyLeech then 0.0 else lifeRegen * lifeRecovery
           ManaRegen = mana * manaRegenPercent / 100.0 * Mods.mult c [ ManaRegen ] db * manaRecovery
-          EnergyShieldRecharge = es * esRechargePercent / 100.0 * Mods.mult c [ Named "ESRechargeRate" ] db * esRecovery
+          EnergyShieldRecharge =
+            if flag "NoESRecharge" || lifeRecharges then 0.0
+            else es * esRechargePercent / 100.0 * Mods.mult c [ Named "ESRechargeRate" ] db * esRecovery
           // shield block (shown on the item) + flat block, x increased block, capped at 50 + max block
           Block =
             let baseBlock = fromItems (Named "ShieldBlock") + Mods.sumBase c [ Named "Block" ] db
@@ -146,20 +159,25 @@ module Defence =
           Avoid = ailments |> List.map (fun a -> a, named ("Avoid:" + a)) |> Map.ofList
           SelfEffect = ailments |> List.map (fun a -> a, max 0.0 (Mods.mult c [ Named("SelfEffect:" + a) ] db)) |> Map.ofList
           SelfDuration = ailments |> List.map (fun a -> a, max 0.0 (Mods.mult c [ Named("SelfDuration:" + a) ] db)) |> Map.ofList
-          LifeOnKill = if ci then 0.0 else (named "LifeOnKill" + life * named "LifePercentOnKill" / 100.0) * lifeRecovery
+          LifeOnKill = if ci || onlyLeech then 0.0 else (named "LifeOnKill" + life * named "LifePercentOnKill" / 100.0) * lifeRecovery
           ESOnKill = es * named "ESPercentOnKill" / 100.0 * esRecovery
-          LifeOnBlock = if ci then 0.0 else named "LifeOnBlock" * lifeRecovery
+          LifeOnBlock = if ci || onlyLeech then 0.0 else named "LifeOnBlock" * lifeRecovery
           ManaOnBlock = named "ManaOnBlock" * manaRecovery
           Recoup =
             [ "Life", DamageType.all, named "RecoupLife"
               "Life", [ Physical ], named "RecoupLife:Physical"
               "Mana", DamageType.all, named "RecoupMana"
               "ES", DamageType.elemental, named "RecoupES:Elemental" ]
-            |> List.filter (fun (pool, _, v) -> v > 0.0 && not (ci && pool = "Life"))
+            |> List.filter (fun (pool, _, v) -> v > 0.0 && not ((ci || onlyLeech) && pool = "Life"))
           RecoupSeconds = recoupSeconds / max 0.1 (Mods.inc c [ Named "RecoupSpeed" ] db)
           LifeRecoveryRate = lifeRecovery
           ManaRecoveryRate = manaRecovery
           ESRecoveryRate = esRecovery
-          LifeFlask = if ci then None else flask "Life" db sheet.LifeFlask }
+          LifeFlask = if ci || onlyLeech then None else flask "Life" db sheet.LifeFlask
+          CostsLife = bloodMagic
+          LifeRecharge = if lifeRecharges && not ci then life * esRechargePercent / 100.0 * lifeRecovery else 0.0
+          UnluckyEvade = flag "UnluckyEvade"
+          LuckyDeflect = flag "LuckyDeflect"
+          LifeLeechRate = max 0.05 (Mods.mult c [ Named "LifeLeechRate" ] db) }
 
     let compute bases sheet = computeWith Map.empty bases sheet

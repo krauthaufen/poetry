@@ -130,7 +130,18 @@ module Setup =
                             raw |> List.tryPick (fun (k, v) -> if k = "skill_specific_stat_description_mode" then Some(int v) else None)
                         else None))
         let moteMax = match moteBase with Some b -> Behaviours.moteMaxima db build b | None -> []
-        let maxResources = (Pob.maxResources sheet @ moteMax @ o.MaxOverrides) |> Map.ofList
+        // what is held, for "while wielding ..." / "while Off Hand is empty" conditions
+        let equipmentFlags =
+            let offhand = build.Items |> List.tryFind (fun (slot, _) -> slot = "Weapon 2") |> Option.map snd
+            let offhandWeapon = offhand |> Option.exists (fun t -> t.Split('\n') |> Array.exists (fun l -> Map.containsKey (l.Trim()) db.Weapons))
+            let kinds = sheet.MainHand |> Option.map (fun w -> w.Tags |> List.choose (function Tag _ -> None | t -> Some(sprintf "Wielding%A" t))) |> Option.defaultValue []
+            let oneHanded = sheet.MainHand |> Option.exists (fun w -> List.contains (Tag "OneHanded") w.Tags)
+            kinds
+            @ (if oneHanded && offhand.IsNone then [ "OneHandedEmptyOffHand" ] else [])
+            @ (if offhandWeapon then [ "DualWielding" ] else [])
+            @ (if offhand.IsSome && not offhandWeapon then [ "WieldingShield" ] else [])
+            @ (if not (build.Items |> List.exists (fun (slot, _) -> slot = "Weapon 1")) then [ "Unarmed" ] else [])
+        let maxResources = (Pob.maxResources sheet @ moteMax @ o.MaxOverrides @ (equipmentFlags |> List.map (fun f -> f, 1))) |> Map.ofList
         let startResources =
             maxResources
             |> Map.map (fun k n ->

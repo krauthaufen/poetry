@@ -55,7 +55,12 @@ module Ailments =
         Mods.mult ctx [ AilmentMagnitude(Some a); AilmentMagnitude None ] mods
 
     let duration (ctx: Ctx) mods a =
-        baseDuration a * Mods.mult ctx [ AilmentDuration(Some a); AilmentDuration None ] mods
+        // "Base Bleeding Duration is 1 second" (Crimson Assault)
+        let baseD =
+            match a with
+            | Bleed -> Mods.override' ctx (Named "BaseBleedDuration") mods |> Option.defaultValue (baseDuration a)
+            | _ -> baseDuration a
+        baseD * Mods.mult ctx [ AilmentDuration(Some a); AilmentDuration None ] mods
 
     let maxStacks (ctx: Ctx) mods a =
         1 + int (Mods.sumBase ctx [ AilmentStacks a ] mods)

@@ -72,7 +72,16 @@ type PlayerStats =
       LifeRecoveryRate: float
       ManaRecoveryRate: float
       ESRecoveryRate: float
-      LifeFlask: ManaFlask option }
+      LifeFlask: ManaFlask option
+      /// Blood Magic: skill costs are paid with life.
+      CostsLife: bool
+      /// Eternal Youth: life recharges (per second, after the recharge delay) instead of energy shield.
+      LifeRecharge: float
+      /// Glancing Blows: chance to evade is unlucky, chance to deflect is lucky.
+      UnluckyEvade: bool
+      LuckyDeflect: bool
+      /// Multiplier on how fast leeched life is recovered.
+      LifeLeechRate: float }
 
 module PlayerStats =
     /// Bare pools with no defences or recovery: a starting point for hand-built players.
@@ -86,7 +95,8 @@ module PlayerStats =
           AilmentThreshold = life / 2.0; FreezeThreshold = life / 2.0; AvoidStun = 0.0; Avoid = Map.empty
           SelfEffect = Map.empty; SelfDuration = Map.empty; LifeOnKill = 0.0; ESOnKill = 0.0; LifeOnBlock = 0.0
           ManaOnBlock = 0.0; Recoup = []; RecoupSeconds = 4.0; LifeRecoveryRate = 1.0; ManaRecoveryRate = 1.0
-          ESRecoveryRate = 1.0; LifeFlask = None }
+          ESRecoveryRate = 1.0; LifeFlask = None; CostsLife = false; LifeRecharge = 0.0; UnluckyEvade = false
+          LuckyDeflect = false; LifeLeechRate = 1.0 }
 
 /// Hit resolution against the player (formulas: PoB CalcDefence, constants: game data).
 module Vitals =

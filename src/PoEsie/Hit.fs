@@ -192,8 +192,11 @@ module Hit =
     /// conversion then applies to base and gained damage alike (PoB does it the other way round;
     /// the in-game damage split of a fully converted skill points to this order, see RULES.md).
     let ranges ctx mods skill =
-        if Constants.gainBeforeConversion then baseDamage ctx mods skill |> gain ctx mods |> convert ctx mods
-        else baseDamage ctx mods skill |> convert ctx mods |> gain ctx mods
+        let r =
+            if Constants.gainBeforeConversion then baseDamage ctx mods skill |> gain ctx mods |> convert ctx mods
+            else baseDamage ctx mods skill |> convert ctx mods |> gain ctx mods
+        // Avatar of Fire: "Deal no Non-Fire Damage"
+        if Mods.flag ctx (Named "DealNoNonFire") mods then r |> Map.filter (fun t _ -> t = Fire) else r
 
     let critChance ctx mods (skill: Skill) =
         match Mods.override' ctx CritChance mods with

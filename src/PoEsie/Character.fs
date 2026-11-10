@@ -274,6 +274,23 @@ module Tree =
     /// Keystones the engine handles by name (their text is a rule, not a stat).
     let private ruledKeystones = set [ "Chaos Inoculation"; "Pyromantic Pact" ]
 
+    /// Keystone lines the stat descriptions don't cover: (keystone, start of the line, mods).
+    let private keystoneLines : (string * string * Mod list) list =
+        [ "Crimson Assault", "Base Bleeding Duration is 1 second", [ Mod.override' (Named "BaseBleedDuration") 1.0 ]
+          "Crimson Assault", "50% more Magnitude of Bleeding", [ Mod.more (AilmentMagnitude(Some Bleed)) 50.0 ]
+          "Vaal Pact", "50% more amount of Life Leeched", [ Mod.more (Named "LifeLeechAmount") 50.0 ]
+          "Vaal Pact", "Leech Life 67% less quickly", [ Mod.more (Named "LifeLeechRate") -67.0 ]
+          "Vaal Pact", "Cannot Recover Life other than from Leech", [ Mod.flag (Named "OnlyLeechRecoversLife") ]
+          "Giant's Blood", "Inherent Life granted by Strength is halved", [ Mod.flag (Named "HalfLifeFromStrength") ]
+          "Wildsurge Incantation", "Storm and Plant Spells:", []
+          "Wildsurge Incantation", "cost 50% less",
+          [ for t in [ "Type:Storm"; "Type:Plant" ] -> Mod.more ManaCost -50.0 |> Mod.whenever (SkillIs Spell) |> Mod.whenever (SkillIs(Tag t)) ]
+          "Wildsurge Incantation", "have 75% less duration",
+          [ for t in [ "Type:Storm"; "Type:Plant" ] -> Mod.more SkillDuration -75.0 |> Mod.whenever (SkillIs Spell) |> Mod.whenever (SkillIs(Tag t)) ]
+          "Scarred Faith", "Energy Shield does not Recharge", [ Mod.flag (Named "NoESRecharge") ]
+          "Whispers of Doom", "Double Activation Delay of Curses", []
+          "Unwavering Stance", "Cannot Dodge Roll or Sprint", [] ]
+
     /// Mods from allocated passives. Handled keystones become a flag `Named "Keystone:<name>"`.
     let mods (db: GameDb) (nodes: Map<int, TreeNode>) (allocated: int list) =
         allocated
@@ -289,8 +306,14 @@ module Tree =
                     |> List.filter (fun l ->
                         not (l.StartsWith "+5 to any Attribute") && not (l.StartsWith "Grants Skill:")
                         && not (ruledKeystones.Contains node.Name && (l.Contains "Infernal Flame instead" || l.StartsWith "Maximum Mana is replaced")))
+                let ruledLines, relevant =
+                    relevant |> List.partition (fun l -> keystoneLines |> List.exists (fun (k, start, _) -> k = node.Name && l.StartsWith start))
+                let lineMods =
+                    ruledLines |> List.collect (fun l ->
+                        keystoneLines |> List.collect (fun (k, start, ms) -> if k = node.Name && l.StartsWith start then ms |> List.map (Mod.from node.Name) else []))
                 let stats, unknown = StatText.parseLines db.Text relevant
                 let ms, _, c = Items.interpret stats
+                let ms = ms @ lineMods
                 let unknown = unknown |> List.map (fun l -> sprintf "%s: %s" node.Name l)
                 mods @ ms, Coverage.merge cov { c with UnknownText = c.UnknownText @ unknown })
             ([], Coverage.empty)
