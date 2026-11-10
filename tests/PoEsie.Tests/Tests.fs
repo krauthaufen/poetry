@@ -198,10 +198,10 @@ let main _ =
         // covered angle = 2 asin(10/20) = 60 degrees -> 6 of 36 projectiles (edges counted)
         let boss = { dummy "b" 40.0 0.0 with Size = 10.0 }
         let p = { ProjectileShape.make 36 with Spread = 360.0; FromImpact = true; Range = 200.0 }
-        let hits = Geometry.targetsFrom 20.0 (Projectiles p) 1.0 boss [ boss ] |> List.length
+        let hits = Geometry.targetsFrom (Rng 1u) [] 20.0 (Projectiles p) 1.0 boss [ boss ] |> List.length
         if hits < 5 || hits > 7 then failwithf "expected about 6 hits, got %d" hits
         // impact inside the boss: every projectile hits
-        equal 36 (Geometry.targetsFrom 35.0 (Projectiles p) 1.0 boss [ boss ] |> List.length))
+        equal 36 (Geometry.targetsFrom (Rng 1u) [] 35.0 (Projectiles p) 1.0 boss [ boss ] |> List.length))
 
     test "geometry: a projectile bounces off a wall once with terrain chain" (fun () ->
         // flying +x from the origin, wall at x = 20, enemy behind the player at x = -20
