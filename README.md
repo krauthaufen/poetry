@@ -16,6 +16,14 @@ Written in F#: functional, readable, and portable. It runs on .NET and is kept c
 | `src/PoEsie/Ailments.fs` | what a hit inflicts: ignite/bleed/poison, shock/chill, buildup ailments, flat-chance ailments |
 | `src/PoEsie/Sim.fs` | the discrete-event engine: actors, rotations, rules (on use/hit/crit/inflict), buffs, debuffs, meta gems, DoT integration |
 | `src/PoEsie/Summary.fs` | Monte Carlo: TTK / DPS percentiles, damage share, uptimes, event counts |
+| `src/PoEsie/Json.fs`, `Xml.fs` | dependency-free readers (same behaviour on .NET and Fable) |
+| `src/PoEsie/GameData.fs` | typed skills, gems, weapon bases from `data/game` |
+| `src/PoEsie/StatText.fs` | item / passive text → game stat ids, by reversing the game's own stat description templates |
+| `src/PoEsie/StatMap.fs` | game stat id → modifiers. **The simulator's knowledge of what stats mean.** Reads ids word by word; unknown words → Unmapped, never guessed |
+| `src/PoEsie/Gems.fs` | gem + level + quality + supports (+ weapon) → `Skill` |
+| `src/PoEsie/Character.fs` | items (game Ctrl+C or PoB format, local weapon mods) and passive tree → modifiers |
+| `src/PoEsie/Pob.fs` | read a PoB build's inputs (items, tree, gems). Never its computed numbers |
+| `cli/` | `poesie-sim build.xml`: coverage report + simulation of a socket group |
 | `RULES.md` | **every mechanic, its source and how far we trust it** |
 
 ## Run
@@ -24,8 +32,22 @@ Written in F#: functional, readable, and portable. It runs on .NET and is kept c
 dotnet run --project tests/PoEsie.Tests          # test suite (.NET)
 dotnet fable tests/PoEsie.Tests -o out/js && node out/js/Tests.js   # same suite in JS (add {"type":"module"} package.json in out/js)
 dotnet run -c Release --project examples/Demo    # illustrative build, 2000 fights
-python3 tools/gen_tables.py <PoB>/src/Data/Misc.lua > src/PoEsie/Tables.fs
+dotnet run -c Release --project cli -- examples/builds/spark-test.xml --data data/game --hits 3
 ```
+
+## Game data
+
+`data/game/*.json` is exported from PoB-PoE2's *generated* Lua files, which PoB extracts from the game's .dat files: skills and gems per level, item bases, affixes, the passive tree, and the stat description templates. PoB's hand-written parts (its mod parser, stat maps, calc code) are not used.
+
+```bash
+# needs a Lua 5.2 interpreter (lua.org source, `make posix`)
+lua tools/export/export.lua <PoB>/src data/game [treeVersion]
+python3 tools/gen_tables.py <PoB>/src/Data/Misc.lua > src/PoEsie/Tables.fs
+dotnet fsi tools/coverage/text.fsx      # how much item / tree text parses
+dotnet fsi tools/coverage/statids.fsx   # how many stat ids have a meaning
+```
+
+Current coverage: 96.8% of affix lines and ~96% of passive tree lines parse to stat ids. Of the stat ids they produce, ~3,500 occurrences map to modifiers, ~5,100 are understood as non-offensive, ~1,600 are understood but not simulated yet (area, projectiles, curses, charges...), ~1,350 (long tail) are unmapped.
 
 ## Describing a build
 
@@ -44,4 +66,5 @@ See `examples/Demo/Program.fs`.
 ## Status
 
 - Done: hit pipeline, mitigation, ailments, event engine, triggers, metas, minions, Monte Carlo summary, 24 tests.
-- Next: import skill and gem data from the game files (base damage per level, stat sets, supports); parse item and tree mod text into `Mod`s; accuracy and evasion; buildup decay; resource costs; in-game verification of the "guess" rows in RULES.md.
+- Done: game data import, item / tree text parsing, stat meanings, gem assembly, PoB build import, CLI.
+- Next: per-skill behaviours (how many projectiles / hits land on one target, combos, stages); keystones and "Grants Skill"; curse / aura / exposure effect; charges; accuracy; buildup decay; resource costs; in-game verification of the "guess" rows in RULES.md.

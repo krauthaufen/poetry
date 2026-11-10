@@ -29,7 +29,12 @@ module Items =
               "Lightning Damage:"; "Chaos Damage:"; "Critical Hit Chance:"; "Attacks per Second:"; "Weapon Range:"
               "Reload Time:"; "Requirements:"; "Requires:"; "Level:"; "Str:"; "Dex:"; "Int:"; "Sockets:"; "Item Level:"
               "Armour:"; "Evasion Rating:"; "Energy Shield:"; "Block chance:"; "Spirit:"; "Charm Slots:"; "Corrupted"
-              "Unidentified"; "Note:"; "Stack Size:"; "Limited to:"; "Radius:"; "--------" ]
+              "Unidentified"; "Note:"; "Stack Size:"; "Limited to:"; "Radius:"; "--------"
+              // PoB's raw item format
+              "Unique ID:"; "League:"; "Rune:"; "LevelReq:"; "Implicits:"; "Prefix:"; "Suffix:"; "Variant:"
+              "Selected Variant:"; "Has Alt Variant"; "Selected Alt Variant"; "Allow Duplicate Variants:"; "Crafted:"
+              "Unreleased:"; "Catalyst:"; "CatalystQuality:"; "Talisman Tier:"; "Evasion:"; "Ward:"; "ArmourBasePercentile:"
+              "EvasionBasePercentile:"; "EnergyShieldBasePercentile:"; "Cluster Jewel" ]
         prefixes |> List.exists (fun p -> line.StartsWith p)
 
     let private weaponTag (t: string) =
@@ -86,11 +91,64 @@ module Items =
                 | Unmapped -> mods, locals, { cov with Unmapped = cov.Unmapped @ [ id, v ] })
             ([], [], Coverage.empty)
 
-    /// Parse an item in the game's Ctrl+C text format.
+    /// Replace "(lo-hi)" ranges by the value at position r (0..1), as PoB's {range:r} means.
+    let private applyRange (r: float) (line: string) =
+        let sb = System.Text.StringBuilder()
+        let mutable i = 0
+        let isNum c = (c >= '0' && c <= '9') || c = '.'
+        while i < line.Length do
+            let c = line.[i]
+            let close = if c = '(' then line.IndexOf(')', i) else -1
+            let inner = if close > i then line.Substring(i + 1, close - i - 1) else ""
+            let dash = if inner.Length > 1 then inner.IndexOf('-', 1) else -1
+            if close > i && dash > 0 && inner |> Seq.forall (fun ch -> isNum ch || ch = '-') then
+                let lo = float (inner.Substring(0, dash))
+                let hi = float (inner.Substring(dash + 1))
+                let v = lo + (hi - lo) * r
+                let isInt (x: float) = x = System.Math.Round x
+                let v = if isInt lo && isInt hi then System.Math.Round v else System.Math.Round(v, 2)
+                sb.Append(string v) |> ignore
+                i <- close + 1
+            else
+                sb.Append(c) |> ignore
+                i <- i + 1
+        sb.ToString()
+
+    /// PoB prefixes mod lines with {range:x}, {variant:1,2}, {tags:...}, {crafted}...
+    /// Resolve them; drop lines that belong to a variant that isn't selected.
+    let private pobLine (selectedVariant: string option) (line: string) =
+        let rec strip (line: string) range keep =
+            if line.StartsWith "{" && line.IndexOf('}') > 0 then
+                let close = line.IndexOf('}')
+                let tag = line.Substring(1, close - 1)
+                let rest = line.Substring(close + 1)
+                let key, value =
+                    match tag.IndexOf(':') with
+                    | -1 -> tag, ""
+                    | k -> tag.Substring(0, k), tag.Substring(k + 1)
+                match key with
+                | "range" -> strip rest (Some(float value)) keep
+                | "variant" ->
+                    let ok =
+                        match selectedVariant with
+                        | Some sel -> value.Split(',') |> Array.contains sel
+                        | None -> true
+                    strip rest range (keep && ok)
+                | _ -> strip rest range keep
+            else
+                line, range, keep
+        let line, range, keep = strip line None true
+        if not keep then None
+        else Some(match range with Some r -> applyRange r line | None -> line)
+
+    /// Parse an item in the game's Ctrl+C text format, or PoB's raw item format.
     let parse (db: GameDb) (text: string) : ParsedItem =
+        let raw = text.Replace("\r", "").Split('\n') |> List.ofArray |> List.map (fun l -> l.Trim())
+        let selectedVariant =
+            raw |> List.tryPick (fun l -> if l.StartsWith "Selected Variant:" then Some(l.Substring(17).Trim()) else None)
         let lines =
-            text.Replace("\r", "").Split('\n')
-            |> List.ofArray
+            raw
+            |> List.choose (pobLine selectedVariant)
             |> List.map clean
             |> List.filter (fun l -> l <> "")
         let baseName = lines |> List.tryFind (fun l -> Map.containsKey l db.Weapons)
@@ -99,7 +157,7 @@ module Items =
         // Mod lines: everything that isn't a header, the name or the base.
         let candidates =
             lines
-            |> List.filter (fun l -> not (isHeader l) && Some l <> baseName && l <> name)
+            |> List.filter (fun l -> not (isHeader l) && Some l <> baseName && l <> name && not (db.BaseNames.Contains l))
         let stats, unknown = StatText.parseLines db.Text candidates
         let mods, locals, cov = interpret stats
         // Lines before the first understood stat are usually the name block; don't report them.

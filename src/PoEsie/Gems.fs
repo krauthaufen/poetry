@@ -5,6 +5,8 @@ type GameDb =
     { Skills: Map<string, SkillData>
       Gems: Map<string, GemData>
       Weapons: Map<string, WeaponBase>
+      /// Every item base name (weapons, armour, jewellery...).
+      BaseNames: Set<string>
       Text: StatText.Index }
 
 /// A weapon as equipped: base plus its local modifiers.
@@ -48,6 +50,10 @@ module GameDb =
         { Skills = GameData.parseSkills (read "skills.json")
           Gems = GameData.parseGems (read "gems.json")
           Weapons = GameData.parseWeapons (read "bases.json")
+          BaseNames =
+            match Json.parse (read "bases.json") with
+            | JObj m -> m |> Map.toList |> List.map fst |> Set.ofList
+            | _ -> Set.empty
           Text = StatText.build [ read "statdesc_stat_descriptions.json"; read "statdesc_passive_skill_stat_descriptions.json" ] }
 
 module Gems =

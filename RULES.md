@@ -73,3 +73,17 @@ Confidence levels:
 | Server ticks | not quantised: actions happen at exact times | guess, PoE uses 33 ms ticks |
 | DoT damage | integrated exactly between events (DoT dps is constant between events) | exact |
 | Resources (mana, life costs) | not modelled | missing |
+
+## Gems and items
+
+| Mechanic | Rule | Source | Confidence |
+|---|---|---|---|
+| Gem stat values | interpolation 1: value as listed per level; 3: round(effectiveness × value), effectiveness = 3.885209 × baseEffectiveness × (1 + incrementalEffectiveness × (actorLevel − 1)) × (1 + damageIncrementalEffectiveness)^(actorLevel − 1) | PoB CalcTools.buildSkillInstanceStats; GameConstants `SkillDamageBaseEffectiveness` | pob + data |
+| Interpolation 2 | not implemented (PoB itself says it is guessing) | — | missing |
+| Gem quality | stat += truncate(per-quality value × quality) | PoB CalcTools | pob |
+| +N gem levels | `GemLevel` mods matching the skill raise the level, capped at the gem's max | — | guess (cap) |
+| Attack time | 1 / (weapon APS × (1 + attackSpeedMultiplier / 100)), or the gem's fixed attackTime | skill level data | data |
+| Spell added damage | full effectiveness (1.0) | PoB `AddedDamage` multiplier only | pob |
+| Weapon local damage | (base + local added) × (1 + (local increased physical + quality) / 100) for physical; other types just added | — | guess (rounding not applied) |
+| Weapon local crit | base + local flat (stored in hundredths), × local increased | — | guess |
+| Hits per use | 1 unless configured (`--hits`); how many projectiles hit one target is per-skill behaviour, not modelled yet | — | missing |

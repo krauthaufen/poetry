@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Hand-made test build in PoB-PoE2's save format. Not a real character. -->
+<PathOfBuilding2>
+	<Build level="90" className="Sorceress" ascendClassName="Stormweaver" mainSocketGroup="1"/>
+	<Tree activeSpec="1">
+		<Spec treeVersion="0_5" nodes="10398,11315,1143,11736,11861,11838"/>
+	</Tree>
+	<Items activeItemSet="1">
+		<Item id="1">
+Rarity: RARE
+Storm Song
+Attuned Wand
+Item Level: 81
+Quality: 20
+Implicits: 0
+{range:0.5}(60-80)% increased Spell Damage
+{range:1}Adds (3-5) to (60-70) Lightning Damage to Spells
+{crafted}+2 to Level of all Lightning Spell Skills
+12% increased Cast Speed
+{range:0.5}+(30-40)% to Lightning Resistance
+		</Item>
+		<Item id="2">
+Rarity: RARE
+Gale Loop
+Ruby Ring
+Item Level: 80
+Implicits: 1
++25% to Fire Resistance
+30% increased Lightning Damage
+Adds 2 to 40 Lightning Damage to Attacks
+15% increased Critical Hit Chance
++30 to maximum Life
+		</Item>
+		<ItemSet id="1">
+			<Slot name="Weapon 1" itemId="1"/>
+			<Slot name="Ring 1" itemId="2"/>
+		</ItemSet>
+	</Items>
+	<Skills activeSkillSet="1">
+		<SkillSet id="1">
+			<Skill enabled="true" label="" mainActiveSkill="1">
+				<Gem nameSpec="Spark" skillId="SparkPlayer" gemId="Metadata/Items/Gems/SkillGemSpark" level="20" quality="20" enabled="true"/>
+				<Gem nameSpec="Controlled Destruction" skillId="SupportControlledDestructionPlayer" gemId="Metadata/Items/Gem/SupportGemControlledDestruction" level="1" quality="0" enabled="true"/>
+			</Skill>
+			<Skill enabled="true" label="" mainActiveSkill="1">
+				<Gem nameSpec="Arc" skillId="ArcPlayer" gemId="Metadata/Items/Gems/SkillGemArc" level="20" quality="0" enabled="true"/>
+			</Skill>
+		</SkillSet>
+	</Skills>
+	<Config><ConfigSet id="1"><Input name="enemyLevel" number="83"/></ConfigSet></Config>
+</PathOfBuilding2>
