@@ -21,7 +21,8 @@
 ///   --immortal       ignore incoming damage and mana costs
 ///   --start S        full (default: charges, rage, motes at maximum) | empty (only power charges and rage)
 ///   --chargegen S    seconds between Thaumaturgical Dynamism charges (default 5)
-///   --kept-refresh   hypothesis: charges kept by "chance to not remove" restart their timer
+///   --cast-on-self   ground skills land on the player (slam reach 0)
+///   --kept-pause S   charges kept by "chance to not remove" freeze their timer for S seconds (default 1)
 ///   --max K=N,...    override resource maxima with observed ones, e.g. "Mote:blue=0"
 ///   --noflask        don't use the mana flask
 ///   --suite          run the standard scenarios (pack, pack + 2 rares, surrounded, boss) and print a table
@@ -49,7 +50,7 @@ let rec private opts (args: string list) =
     | "--shotgun" :: rest -> Map.add "shotgun" "1" (opts rest)
     | "--immortal" :: rest -> Map.add "immortal" "1" (opts rest)
     | "--noflask" :: rest -> Map.add "noflask" "1" (opts rest)
-    | "--kept-refresh" :: rest -> Map.add "kept-refresh" "1" (opts rest)
+    | "--cast-on-self" :: rest -> Map.add "cast-on-self" "1" (opts rest)
     | k :: v :: rest when k.StartsWith "--" -> Map.add (k.Substring 2) v (opts rest)
     | _ :: rest -> opts rest
     | [] -> Map.empty
@@ -180,6 +181,7 @@ let main argv =
                         Delivery = (match s.Delivery with Projectiles p -> Projectiles { p with CanShotgun = true } | d -> d)
                         Parts = s.Parts |> List.map shotgun }
                 let skill = if Map.containsKey "shotgun" o then shotgun skill else skill
+                let skill = Behaviours.applyObserved skill
                 let rec withSpread deg (s: Skill) =
                     { s with
                         Delivery = (match s.Delivery with Projectiles p -> Projectiles { p with Spread = deg } | d -> d)
@@ -220,7 +222,7 @@ let main argv =
                             Periodics = periodics
                             MaxResources = maxResources
                             ResourceDurations = Behaviours.chargeDurations sheet
-                            KeptChargesRefresh = Map.containsKey "kept-refresh" o
+                            KeptChargesPause = get "kept-pause" 1.0
                             ManaFlask =
                                 if Map.containsKey "immortal" o || Map.containsKey "noflask" o then None
                                 else
@@ -234,7 +236,8 @@ let main argv =
                                           ChargeGainMult = 1.0 + inc / 100.0 }) }
                       Minions = []
                       Targeting = (if Map.tryFind "target" o = Some "nearest" then Nearest else Strongest)
-                      Reach = get "reach" 15.0
+                      // "Cast on Self": the slam lands on the player
+                      Reach = (if Map.containsKey "cast-on-self" o then 0.0 else get "reach" 15.0)
                       Walls = []
                       MaxTime = get "time" 60.0 }
                 printfn ""
@@ -268,7 +271,7 @@ let main argv =
                             let rng = Rng(uint32 (1000 + i))
                             let size = 6.0 + rng.Float() * 19.0
                             let gap = rng.Float() * 40.0
-                            let reach = 8.0 + rng.Float() * 17.0
+                            let reach = if Map.containsKey "cast-on-self" o then 0.0 else 8.0 + rng.Float() * 17.0
                             let angle = rng.Float() * 2.0 * System.Math.PI
                             let boss =
                                 { (List.head (Encounter.boss level profile 0.0)) with
@@ -290,7 +293,7 @@ let main argv =
                                 Encounter.pack level profile [ Normal, 8; Magic, 3; Rare, rares ] distance (10.0 + rng.Float() * 20.0) around (uint32 i)
                             let center = Vec.make (enemies |> List.averageBy (fun e -> e.Position.X)) (enemies |> List.averageBy (fun e -> e.Position.Y))
                             let arenaName, walls = arena rng center enemies
-                            let reach = 8.0 + rng.Float() * 17.0
+                            let reach = if Map.containsKey "cast-on-self" o then 0.0 else 8.0 + rng.Float() * 17.0
                             let sum = simulate enemies walls reach 30.0
                             let clear = sum.Ttk |> Option.map (fun t -> t.Mean) |> Option.defaultValue infinity
                             let label = sprintf "%s pack, %d rares, at %.0f, reach %.0f, %s" (if around then "surrounding" else "frontal") rares distance reach arenaName
@@ -299,7 +302,10 @@ let main argv =
                     match projectilePart with
                     | None -> printfn "skill has no projectiles to draw"
                     | Some p ->
-                        let p = { p with Count = p.Count + (match p.PerCharge with Some (_, per) -> per * charges | None -> 0); TerrainChain = p.TerrainChain + terrain }
+                        let extraConsumed =
+                            int (Mods.sumBase { Ctx.empty with SkillTags = skill.Tags } [ Named "ExtraPowerChargesConsumed" ] (ModDb.ofList (sheet.Mods @ skill.Mods)))
+                        let consumed = if charges > 0 then charges + extraConsumed else 0
+                        let p = { p with Count = p.Count + (match p.PerCharge with Some (_, per) -> per * consumed | None -> 0); TerrainChain = p.TerrainChain + terrain }
                         let pick (xs: 'a list) = [ "Best", List.head xs; "Median", xs.[xs.Length / 2]; "Worst", List.last xs ]
                         let section title (xs: ((string * EnemyDef list * Geometry.Wall list * float) * float * string) list) =
                             let pics =

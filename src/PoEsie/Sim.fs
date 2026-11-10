@@ -116,8 +116,9 @@ type Actor =
       /// Duration per resource (charges): all stacks of a kind share it, gaining refreshes it,
       /// and they all expire together. Missing: no duration.
       ResourceDurations: Map<string, float>
-      /// Hypothesis: consuming charges that are kept ("chance to not remove") restarts their timer.
-      KeptChargesRefresh: bool }
+      /// Consuming charges that are kept ("chance to not remove") pauses their timer for this
+      /// many seconds (the timer keeps its current value). 0: no pause.
+      KeptChargesPause: float }
 
 module Actor =
     let make name mods skills =
@@ -136,7 +137,7 @@ module Actor =
           Periodics = []
           MaxResources = Map.empty
           ResourceDurations = Map.empty
-          KeptChargesRefresh = false }
+          KeptChargesPause = 0.0 }
 
     let always skill = { Use = skill; When = fun _ -> true }
 
@@ -212,7 +213,9 @@ module Sim =
         | Expire
 
     type private ActorState =
-        { Buffs: Map<string, Effect>
+        { /// Resource timers paused until this time.
+          Paused: Map<string, float>
+          Buffs: Map<string, Effect>
           Cooldowns: Map<string, float>
           Energy: Map<string, float> }
 
@@ -972,9 +975,19 @@ module Sim =
                         |> schedule (w.Time + 4.0) Expire
                     if rng.Chance skip then
                         let w = { w with Counts = bump ("kept:" + charge) w.Counts }
-                        if actor.KeptChargesRefresh then
+                        if actor.KeptChargesPause > 0.0 then
+                            // freeze the timer: push expiry back by the part of the pause that
+                            // doesn't overlap an earlier one
                             let st = Map.find name w.Actors
-                            setStacksWith env name true charge (stacksOf st charge) w
+                            let pausedUntil = Map.tryFind charge st.Paused |> Option.defaultValue w.Time
+                            let newUntil = w.Time + actor.KeptChargesPause
+                            let extension = max 0.0 (newUntil - max w.Time pausedUntil)
+                            match Map.tryFind charge st.Buffs with
+                            | Some e when e.Expires < infinity ->
+                                let e = { e with Expires = e.Expires + extension }
+                                updateActor name (fun st -> { st with Buffs = Map.add charge e st.Buffs; Paused = Map.add charge newUntil st.Paused }) w
+                                |> schedule e.Expires Expire
+                            | _ -> w
                         else w
                     else
                         updateActor name (fun st -> { st with Buffs = Map.remove charge st.Buffs }) w
@@ -1003,7 +1016,8 @@ module Sim =
                 w
         let actors = fight.Player :: fight.Minions
         let empty =
-            { Buffs = Map.empty
+            { Paused = Map.empty
+              Buffs = Map.empty
               Cooldowns = Map.empty
               Energy = Map.empty }
         let w0 =

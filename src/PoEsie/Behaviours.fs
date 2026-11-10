@@ -3,6 +3,19 @@ namespace PoEsie
 /// Per-skill behaviour that stats alone don't describe. Each entry says where its
 /// rules come from; numbers are read from the gem's stats.
 module Behaviours =
+    /// Behaviour observed in game that the data doesn't carry, per skill (granted effect id or
+    /// name). Each entry says who observed it. Applied to the skill and its parts.
+    let observed : (string * (Skill -> Skill)) list =
+        let projectiles f (s: Skill) =
+            { s with Delivery = (match s.Delivery with Projectiles p -> Projectiles(f p) | d -> d) }
+        [ // user: Falling Thunder's projectiles appear about half a metre out from the impact
+          "Falling Thunder", projectiles (fun p -> { p with StartOffset = 5.0 }) ]
+
+    let applyObserved (skill: Skill) =
+        match observed |> List.tryFind (fun (n, _) -> n = skill.Name) with
+        | Some (_, f) -> { f skill with Parts = skill.Parts |> List.map f }
+        | None -> skill
+
     let private stat (stats: (string * float) list) id =
         stats |> List.filter (fst >> (=) id) |> List.sumBy snd
 
