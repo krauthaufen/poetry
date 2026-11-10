@@ -60,6 +60,7 @@ let fight =
       Minions = [ hound ]
       Targeting = Strongest
       Reach = infinity
+      Walls = []
       MaxTime = 120.0 }
 
 [<EntryPoint>]

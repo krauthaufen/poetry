@@ -100,7 +100,7 @@ Confidence levels:
 | Area radius | floor(base × floor(100 × sqrt(area multiplier)) / 100); hits enemies whose body overlaps | PoB calcRadius | pob |
 | Projectiles | fanned evenly over the spread angle towards the aimed enemy; first enemy along the path is hit; pierce continues, chains jump to the nearest unhit enemy in chain range | — | guess (geometry), data (counts) |
 | Default spread | 30° unless the skill sets `total_projectile_spread_angle_override` | — | guess |
-| Shotgun | one use's projectiles hit each enemy once unless the skill has `projectiles_can_shotgun` | inferred from the flag existing on only a few skills | guess |
+| Several projectiles, one enemy | every projectile of a use may hit the same enemy; each projectile hits an enemy at most once (pierce continues, it never re-hits). How many reach the enemy is pure geometry | user: "some of them may hit the boss, it's geometric" | guess (geometry) |
 | Damage per target | rolled independently for every enemy hit | — | guess |
 | Per-skill motion (Spark wandering, Ice Shot shards from the impact point, Frost Bomb pulses) | not modelled yet: needs per-skill behaviours | — | missing |
 | Resistances "treated as negated" | positive elemental resist counts as its negative, rolled per hit for a chance | game text | guess (interaction with penetration/exposure order) |
@@ -113,3 +113,6 @@ Confidence levels:
 | Increased area of effect | `<scope> area of effect +% [final]` scales radii by the square root, PoB's calcRadius | — | pob |
 | Default gem quality | 20% unless the import states one; supports have none | user convention | — |
 | Persistent buffs | their gem stats apply to the character, except skill-specific ones (ids named after the skill, e.g. `herald_of_ash_fire_damage_+%`), which describe the skill itself; explicitly known character-wide ones (Berserk's `berserk_maximum_rage_granted_+` → max rage) do apply | — | guess per stat |
+| Slam impact point | `Reach` units in front of the player towards the aimed enemy, at most its centre | setting (default 15) | guess |
+| Walls and terrain chain | projectiles stop at walls; with "chance to chain 1 extra time from terrain" (Ricochet) they reflect once off a wall and fly on with the remaining range | game text | guess (reflection angle, range after bounce) |
+| Arenas | open field, round room or corridor; random layouts in `--layouts` always enclose player and monsters | modelling choice | — |

@@ -17,7 +17,9 @@ type ProjectileShape =
       /// Extra projectiles per stack of a charge: ("PowerCharge", 3).
       PerCharge: (string * int) option
       /// Projectiles start where the skill lands (on the aimed enemy), not at the player.
-      FromImpact: bool }
+      FromImpact: bool
+      /// Chance (%) to bounce off a wall once ("chain 1 extra time from terrain").
+      TerrainChain: float }
 
 /// How a skill use finds its targets.
 type Delivery =
@@ -40,7 +42,8 @@ module ProjectileShape =
           CanShotgun = true
           Explosion = None
           PerCharge = None
-          FromImpact = false }
+          FromImpact = false
+          TerrainChain = 0.0 }
 
 /// A skill as the engine sees it: where its damage comes from and how long it takes.
 type Skill =

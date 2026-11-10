@@ -203,6 +203,19 @@ let main _ =
         // impact inside the boss: every projectile hits
         equal 36 (Geometry.targetsFrom 35.0 (Projectiles p) 1.0 boss [ boss ] |> List.length))
 
+    test "geometry: a projectile bounces off a wall once with terrain chain" (fun () ->
+        // flying +x from the origin, wall at x = 20, enemy behind the player at x = -20
+        let behind = dummy "behind" -20.0 0.0
+        let wall = Vec.make 20.0 -50.0, Vec.make 20.0 50.0
+        let p chance = { ProjectileShape.make 1 with Range = 100.0; TerrainChain = chance }
+        let fly chance = Geometry.trace (Rng 1u) [ wall ] (p chance) Vec.zero (Vec.make 1.0 0.0) [ behind ]
+        equal [ "behind" ] (fly 100.0).Hit
+        equal ([]: string list) (fly 0.0).Hit
+        // a second wall behind: still only one bounce
+        let back = Vec.make -40.0 -50.0, Vec.make -40.0 50.0
+        let path = Geometry.trace (Rng 1u) [ wall; back ] (p 100.0) Vec.zero (Vec.make 1.0 0.0) []
+        equal 3 path.Points.Length)
+
     test "geometry: chains jump to the nearest unhit enemy in range" (fun () ->
         let a, b, c = dummy "a" 30.0 0.0, dummy "b" 30.0 20.0, dummy "c" 30.0 -60.0
         let p = { ProjectileShape.make 1 with Chains = 2; ChainRange = 30.0 }

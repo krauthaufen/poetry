@@ -13,8 +13,9 @@
 ///   --skip P         override the chance (%) to not remove charges when consuming
 ///   --bonded         apply "Bonded:" rune lines (normally Shaman only)
 ///   --shotgun        let several projectiles of one use hit the same enemy
-///   --positions F    sweep gap to the boss / slam reach / boss radius; write an HTML page with
-///                    the table and pictures of the best and worst layout to file F
+///   --layouts F      random boss and pack layouts (sizes, distances, slam reach, arena walls);
+///                    write an HTML page with best / median / worst pictures to file F
+///   --count N        number of layouts per scenario (default 40)
 ///   --suite          run the standard scenarios (pack, pack + 2 rares, surrounded, boss) and print a table
 ///   --data DIR       exported game data (default: data/game next to the repo)
 module PoEsie.Cli
@@ -162,71 +163,111 @@ let main argv =
                       Minions = []
                       Targeting = (if Map.tryFind "target" o = Some "nearest" then Nearest else Strongest)
                       Reach = get "reach" 15.0
+                      Walls = []
                       MaxTime = get "time" 60.0 }
                 printfn ""
-                if Map.containsKey "positions" o then
+                if Map.containsKey "layouts" o then
                     let projectilePart =
                         (skill :: skill.Parts) |> List.tryPick (fun s -> match s.Delivery with Projectiles p -> Some p | _ -> None)
                     let charges = resources |> List.tryPick (fun (k, n) -> if k = "PowerCharge" then Some n else None) |> Option.defaultValue 0
-                    let layouts =
-                        [ for size in [ 8.0; 12.0; 20.0 ] do
-                            for gap in [ 0.0; 5.0; 10.0; 20.0; 35.0 ] do
-                                for reach in [ 10.0; 15.0; 25.0 ] -> size, gap, reach ]
-                    let runs = int (get "runs" 30.0)
-                    let results =
-                        layouts
-                        |> List.map (fun (size, gap, reach) ->
+                    let terrain = Mods.sumBase Ctx.empty [ Named "TerrainChain" ] (ModDb.ofList (sheet.Mods @ (skill.Parts |> List.collect (fun p -> p.Mods))))
+                    let count = int (get "count" 40.0)
+                    let runs = int (get "runs" 20.0)
+                    let rotate (a: float) (v: Vec) = Vec.make (v.X * cos a - v.Y * sin a) (v.X * sin a + v.Y * cos a)
+                    /// A random arena around `center` that encloses the player and every monster.
+                    let arena (rng: Rng) (center: Vec) (enemies: EnemyDef list) =
+                        let reachOut = (Vec.length center :: (enemies |> List.map (fun e -> Vec.dist center e.Position + e.Size))) |> List.max
+                        match int (rng.Float() * 3.0) with
+                        | 0 -> "open", Arena.openField
+                        | 1 ->
+                            let r = reachOut + 10.0 + rng.Float() * 60.0
+                            sprintf "round room r%.0f" r, Arena.round center r
+                        | _ ->
+                            // corridor along player -> center; wide enough for everyone
+                            let d = Vec.scale (1.0 / max 1e-9 (Vec.length center)) center
+                            let n = Vec.make -d.Y d.X
+                            let lateral = enemies |> List.map (fun e -> abs (e.Position.X * n.X + e.Position.Y * n.Y) + e.Size) |> List.fold max 5.0
+                            let w = 2.0 * lateral + 10.0 + rng.Float() * 50.0
+                            sprintf "corridor w%.0f" w, Arena.corridor center w 400.0
+                    let simulate (enemies: EnemyDef list) walls reach maxTime =
+                        Summary.simulate runs { fight with Enemies = enemies; Walls = walls; Reach = reach; MaxTime = maxTime }
+                    let bossLayouts =
+                        [ for i in 1..count ->
+                            let rng = Rng(uint32 (1000 + i))
+                            let size = 6.0 + rng.Float() * 19.0
+                            let gap = rng.Float() * 40.0
+                            let reach = 8.0 + rng.Float() * 17.0
+                            let angle = rng.Float() * 2.0 * System.Math.PI
                             let boss =
-                                { (List.head (Encounter.boss level profile (gap + size))) with
+                                { (List.head (Encounter.boss level profile 0.0)) with
                                     Size = size
+                                    Position = rotate angle (Vec.make (gap + size) 0.0)
                                     Life = get "life" 1e12 }
-                            let f = { fight with Enemies = [ boss ]; Reach = reach; MaxTime = get "time" 20.0 }
-                            let sum = Summary.simulate runs f
-                            let perSlam =
-                                let c k = sum.Counts |> List.tryPick (fun (n, v) -> if n = k then Some v else None) |> Option.defaultValue 0.0
-                                let parts = skill.Parts |> List.sumBy (fun p -> c ("hits:" + p.Name))
-                                if c ("uses:" + skill.Name) > 0.0 then parts / c ("uses:" + skill.Name) else 0.0
-                            (size, gap, reach, boss), sum.Dps.Mean, perSlam)
-                        |> List.sortByDescending (fun (_, d, _) -> d)
-                    printfn "%-7s %-6s %-6s %10s %14s" "radius" "gap" "reach" "proj/slam" "DPS"
-                    for ((size, gap, reach, _), dps, per) in results do
-                        printfn "%-7.0f %-6.0f %-6.0f %10.1f %14.0f" size gap reach per dps
+                            let arenaName, walls = arena rng boss.Position [ boss ]
+                            let sum = simulate [ boss ] walls reach 20.0
+                            let label = sprintf "boss r%.0f, gap %.0f, reach %.0f, %s" size gap reach arenaName
+                            (label, [ boss ], walls, reach), sum.Dps.Mean, (sprintf "%.1fM DPS" (sum.Dps.Mean / 1e6)) ]
+                        |> List.sortByDescending (fun (_, v, _) -> v)
+                    let packLayouts =
+                        [ for i in 1..count ->
+                            let rng = Rng(uint32 (2000 + i))
+                            let around = rng.Float() < 0.3
+                            let distance = (if around then 15.0 else 25.0) + rng.Float() * 35.0
+                            let rares = int (rng.Float() * 3.0)
+                            let enemies =
+                                Encounter.pack level profile [ Normal, 8; Magic, 3; Rare, rares ] distance (10.0 + rng.Float() * 20.0) around (uint32 i)
+                            let center = Vec.make (enemies |> List.averageBy (fun e -> e.Position.X)) (enemies |> List.averageBy (fun e -> e.Position.Y))
+                            let arenaName, walls = arena rng center enemies
+                            let reach = 8.0 + rng.Float() * 17.0
+                            let sum = simulate enemies walls reach 30.0
+                            let clear = sum.Ttk |> Option.map (fun t -> t.Mean) |> Option.defaultValue infinity
+                            let label = sprintf "%s pack, %d rares, at %.0f, reach %.0f, %s" (if around then "surrounding" else "frontal") rares distance reach arenaName
+                            (label, enemies, walls, reach), -clear, (if clear < infinity then sprintf "cleared in %.2fs" clear else "not cleared in 30s") ]
+                        |> List.sortByDescending (fun (_, v, _) -> v)
                     match projectilePart with
-                    | Some p ->
-                        let p = { p with Count = p.Count + (match p.PerCharge with Some (_, per) -> per * charges | None -> 0) }
-                        let pic ((size, gap, reach, boss: EnemyDef), dps: float, per: float) label =
-                            Picture.svg (sprintf "%s: boss radius %.0f, gap %.0f, slam reach %.0f, %.1fM DPS" label size gap reach (dps / 1e6)) reach p boss [ boss ]
-                        let rows =
-                            results
-                            |> List.map (fun ((size, gap, reach, _), dps, per) ->
-                                sprintf "<tr><td>%.0f</td><td>%.0f</td><td>%.0f</td><td>%.1f</td><td>%.1fM</td></tr>" size gap reach per (dps / 1e6))
-                            |> String.concat ""
-                        let html =
-                            sprintf """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>%s positioning</title>
-<style>
-:root{--bg:#fbfaf7;--fg:#1d1d1b;--muted:#6b6a66;--line:#e2dfd8;--enemy:#c9c3b6;--hit:#c2410c;--miss:#b9b4aa;--player:#1d4ed8}
-@media (prefers-color-scheme:dark){:root{--bg:#161614;--fg:#ecebe7;--muted:#a3a199;--line:#34332f;--enemy:#4a4740;--hit:#fb923c;--miss:#55524b;--player:#60a5fa}}
-body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,sans-serif}
-main{max-width:980px;margin:0 auto;padding:24px 16px}
-h1{font-size:22px;margin:0 0 4px}p{color:var(--muted);margin:0 0 20px}
-.pics{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-bottom:28px}
-figure{margin:0;border:1px solid var(--line);border-radius:10px;padding:12px}
-svg{width:100%%;height:auto;max-height:420px}
-figcaption{font-size:13px;color:var(--muted);margin-top:8px}
-.enemy{fill:var(--enemy);stroke:none}.hit{stroke:var(--hit);stroke-width:.8}.miss{stroke:var(--miss);stroke-width:.4;stroke-dasharray:2 2}
-.player{fill:var(--player)}.impact{stroke:var(--fg);stroke-width:.8;fill:none}
-table{border-collapse:collapse;width:100%%;font-variant-numeric:tabular-nums;font-size:14px}
-th,td{text-align:right;padding:4px 10px;border-bottom:1px solid var(--line)}th{color:var(--muted);font-weight:600}
-</style></head><body><main>
-<h1>%s: positioning against a single boss</h1>
-<p>%d power charges, %d projectiles per slam in a nova from the impact point. Player (blue) at the left, boss in grey, × marks where the slam lands. Orange: projectiles that hit, dashed: misses. Boss radii are assumptions (game units, 10 = 1 m); the game stores only a size category.</p>
-<div class="pics">%s%s</div>
-<table><thead><tr><th>boss radius</th><th>gap</th><th>slam reach</th><th>projectile hits / slam</th><th>DPS</th></tr></thead><tbody>%s</tbody></table>
-</main></body></html>"""
-                                skill.Name skill.Name charges p.Count (pic (List.head results) "Best") (pic (List.last results) "Worst") rows
-                        File.WriteAllText(o.["positions"], html)
-                        printfn "wrote %s" o.["positions"]
                     | None -> printfn "skill has no projectiles to draw"
+                    | Some p ->
+                        let p = { p with Count = p.Count + (match p.PerCharge with Some (_, per) -> per * charges | None -> 0); TerrainChain = p.TerrainChain + terrain }
+                        let pick (xs: 'a list) = [ "Best", List.head xs; "Median", xs.[xs.Length / 2]; "Worst", List.last xs ]
+                        let section title (xs: ((string * EnemyDef list * Geometry.Wall list * float) * float * string) list) =
+                            let pics =
+                                pick xs
+                                |> List.mapi (fun k (tag, ((label, enemies, walls, reach), _, result)) ->
+                                    let primary = Geometry.aim Strongest enemies |> Option.get
+                                    Picture.svg (sprintf "<b>%s</b>: %s. %s" tag result label) (uint32 (k + 7)) walls reach p primary enemies)
+                                |> String.concat ""
+                            let rows =
+                                xs |> List.map (fun ((label, _, _, _), _, result) -> sprintf "<tr><td>%s</td><td>%s</td></tr>" label result) |> String.concat ""
+                            sprintf "<h2>%s</h2><div class='pics'>%s</div><details><summary>All %d layouts</summary><table><tbody>%s</tbody></table></details>" title pics xs.Length rows
+                        printfn "boss layouts: best %s, median %s, worst %s"
+                            (let (_, _, r) = List.head bossLayouts in r) (let (_, _, r) = bossLayouts.[bossLayouts.Length / 2] in r) (let (_, _, r) = List.last bossLayouts in r)
+                        printfn "pack layouts: best %s, median %s, worst %s"
+                            (let (_, _, r) = List.head packLayouts in r) (let (_, _, r) = packLayouts.[packLayouts.Length / 2] in r) (let (_, _, r) = List.last packLayouts in r)
+                        let html =
+                            sprintf """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>%s layouts</title>
+<style>
+:root{--bg:#fbfaf7;--fg:#1d1d1b;--muted:#6b6a66;--line:#e2dfd8;--enemy:#c9c3b6;--hit:#c2410c;--miss:#b9b4aa;--player:#1d4ed8;--wall:#57534e}
+@media (prefers-color-scheme:dark){:root{--bg:#161614;--fg:#ecebe7;--muted:#a3a199;--line:#34332f;--enemy:#4a4740;--hit:#fb923c;--miss:#55524b;--player:#60a5fa;--wall:#a8a29e}}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,sans-serif}
+main{max-width:1100px;margin:0 auto;padding:24px 16px}
+h1{font-size:22px;margin:0 0 4px}h2{font-size:18px;margin:28px 0 10px}p{color:var(--muted);margin:0 0 16px}
+.pics{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}
+figure{margin:0;border:1px solid var(--line);border-radius:10px;padding:10px}
+svg{width:100%%;height:auto;aspect-ratio:1}
+figcaption{font-size:13px;color:var(--muted);margin-top:6px}figcaption b{color:var(--fg)}
+.enemy{fill:var(--enemy)}.hit{stroke:var(--hit);stroke-width:.8;fill:none}.miss{stroke:var(--miss);stroke-width:.4;stroke-dasharray:2 2;fill:none}
+.wall{stroke:var(--wall);stroke-width:1.6}.player{fill:var(--player)}.impact{stroke:var(--fg);stroke-width:.8;fill:none}
+details{margin-top:10px}summary{cursor:pointer;color:var(--muted)}
+table{border-collapse:collapse;width:100%%;font-size:14px;font-variant-numeric:tabular-nums}td{padding:3px 8px;border-bottom:1px solid var(--line)}td:last-child{text-align:right}
+</style></head><body><main>
+<h1>%s: random layouts</h1>
+<p>%d power charges: %d projectiles per slam, nova from the impact point (×), %.0f%% chance to bounce off a wall once. Player in blue, monsters grey, walls dark. Orange flights hit something, dashed ones miss. Each layout is simulated %d times; pictures show one slam. Boss radii are assumptions (game units, 10 = 1 m).</p>
+%s%s
+</main></body></html>"""
+                                skill.Name skill.Name charges p.Count p.TerrainChain runs
+                                (section "Single boss (sustained DPS)" bossLayouts) (section "Packs (8 normal, 3 magic, 0–2 rares, real life)" packLayouts)
+                        File.WriteAllText(o.["layouts"], html)
+                        printfn "wrote %s" o.["layouts"]
                 elif Map.containsKey "suite" o then
                     Scenarios.standard level profile
                     |> List.map (fun (n, es) ->
