@@ -1662,8 +1662,19 @@ module Sim =
                           "FullMana", p.Mana >= v.Mana
                           "LowMana", p.Mana <= 0.35 * v.Mana
                           "HasEnergyShield", p.EnergyShield > 0.0
+                          "Leeching", p.LeechPool > 0.0 || p.LifeLeechPool > 0.0
                           // surrounded: at least 5 monsters within 3 m (PoB SurroundedRadiusBase, game constant)
                           "Surrounded", (alive w |> List.filter (fun e -> Vec.length e.Def.Position - e.Def.Size <= 30.0) |> List.length) >= 5 ]
+                    // charge states: "while at maximum Power Charges", "while you have no Frenzy Charges"
+                    let playerSt = Map.find env.Fight.Player.Name w.Actors
+                    let states =
+                        states
+                        @ [ for kind in [ "Power"; "Frenzy"; "Endurance" ] do
+                                let n = Map.tryFind (kind + "Charge") playerSt.Buffs |> Option.map (fun e -> e.Stacks) |> Option.defaultValue 0
+                                let maxN = Map.tryFind (kind + "Charge") env.Fight.Player.MaxResources |> Option.defaultValue 0
+                                yield "AtMaximum" + kind + "Charges", maxN > 0 && n >= maxN
+                                yield "No" + kind + "Charges", n = 0
+                                yield "YouHaveNo" + kind + "Charges", n = 0 ]
                     updateActor env.Fight.Player.Name (fun st ->
                         { st with
                             Buffs =

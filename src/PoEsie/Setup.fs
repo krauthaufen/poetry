@@ -143,6 +143,11 @@ module Setup =
             let oneHanded = sheet.MainHand |> Option.exists (fun w -> List.contains (Tag "OneHanded") w.Tags)
             kinds
             @ (if oneHanded && offhand.IsNone then [ "OneHandedEmptyOffHand" ] else [])
+            @ (if offhand.IsNone then [ "OffHandIsEmpty" ] else [])
+            // "while affected by Herald of Ash": every persistent buff gem in the build
+            @ (build.Groups |> List.filter (fun g -> g.Enabled)
+               |> List.collect (fun g -> g.Gems |> List.filter (fun x -> x.Enabled && not x.IsSupport && Gems.isPersistentBuff db x.Name))
+               |> List.map (fun x -> "AffectedBy" + (x.Name.Split(' ') |> Array.map (fun w -> if w = "" then w else string (System.Char.ToUpperInvariant w.[0]) + w.Substring 1) |> String.concat "")))
             @ (if offhandWeapon then [ "DualWielding" ] else [])
             @ (if offhand.IsSome && not offhandWeapon then [ "WieldingShield" ] else [])
             @ (if not (build.Items |> List.exists (fun (slot, _) -> slot = "Weapon 1")) then [ "Unarmed" ] else [])

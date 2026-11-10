@@ -43,12 +43,23 @@ let statRead (s: Stat) =
 
 /// Gem mechanics (base damage, radius, projectiles, energy, remnants) read stat ids directly.
 let readById (id: string) = allEngine.Contains("\"" + id + "\"")
+/// Conditions the engine never makes true ("while Shapeshifted"): the buff or enemy status
+/// name must be set somewhere in the engine.
+let rec condDead (c: Cond) =
+    match c with
+    | WhileBuff b | PerStack (b, _) -> not (namedRead b)
+    | EnemyHas st | PerEnemyStack (st, _) -> not (namedRead st)
+    | Not inner -> condDead inner
+    | _ -> false
 let classifyWith meaning id =
     if readById id then "simulated", "by id" else
     match meaning id 10.0 with
     | Mods ms when ms.IsEmpty -> "inert", ""
     | Mods ms ->
         match ms |> List.filter (fun m -> not (statRead m.Stat)) with
+        | [] when ms |> List.forall (fun m -> m.Conds |> List.exists condDead) ->
+            let dead = ms |> List.collect (fun m -> m.Conds |> List.filter condDead) |> List.distinct |> List.map (sprintf "%A") |> String.concat ","
+            "inert", "condition never true: " + dead
         | [] -> "simulated", ""
         | dead -> "inert", (dead |> List.map (fun m -> match m.Stat with Named n -> n | s -> caseName s) |> List.distinct |> String.concat ",")
     | Local _ -> "local", ""
