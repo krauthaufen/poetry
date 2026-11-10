@@ -49,6 +49,9 @@ type Reaction =
     | RemoveBuff of name: string
     /// Stacks of a resource (infusions from Powered by Verisium), capped at its maximum.
     | GainResource of resource: string * count: int
+    /// A remnant of the resource that arrives after `delay` (detonation + pickup);
+    /// `extraChance` % for two.
+    | DropRemnant of resource: string * delay: float * extraChance: float
 
 type Rule =
     { Hook: Hook
@@ -717,7 +720,10 @@ module Sim =
                             else w)
                     | TriggerSkill name -> trigger env rng actor name w
                     | GainEnergy (meta, amount) -> gainEnergy env rng actor meta amount w
-                    | GainResource (r, n) -> schedule w.Time (GainStacks(actor.Name, r, n)) w)
+                    | GainResource (r, n) -> schedule w.Time (GainStacks(actor.Name, r, n)) w
+                    | DropRemnant (r, delay, extra) ->
+                        let n = if rng.Chance extra then 2 else 1
+                        { w with Counts = bump ("remnant:" + r) w.Counts } |> schedule (w.Time + delay) (GainStacks(actor.Name, r, n)))
             w
 
     and private gainEnergy env rng (actor: Actor) metaName amount w =

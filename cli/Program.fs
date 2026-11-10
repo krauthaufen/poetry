@@ -246,20 +246,22 @@ let main argv =
                                 let copy =
                                     if infused then None
                                     else Behaviours.infusedCopy db charMods sheet.MainHand setup |> Option.map (fun (el, c) -> s.Name, el, { (Behaviours.applyObserved c) with Name = s.Name + " infused" })
-                                Some(Behaviours.applyObserved s, copy, Behaviours.verisiumGrant db charMods setup)
+                                Some(Behaviours.applyObserved s, copy, Behaviours.verisiumGrant db charMods setup, Behaviours.useRules db charMods setup s.Name (get "pickup" 1.0))
                             | _ -> None)
                 let names key = (Map.tryFind key o |> Option.defaultValue "").Split(',') |> Array.map (fun x -> x.Trim()) |> Array.filter ((<>) "") |> List.ofArray
                 // --rotation "A,B": skills you press, cycled in this order (default: the simulated group)
                 let pressedAll =
                     match Map.tryFind "rotation" o with
                     | Some _ -> names "rotation" |> List.choose pressedSkill
-                    | None -> [ skill, None, 0 ]
+                    | None -> [ skill, None, 0, [] ]
                 let onCooldown = names "on-cooldown" |> List.choose pressedSkill
                 // skills that only grant infusions don't hit
-                let onCooldown = onCooldown |> List.map (fun (s, c, g) -> (if g > 0 then { s with Hits = [] } else s), c, g)
-                let pressed = pressedAll |> List.map (fun (s, _, _) -> s)
+                let onCooldown = onCooldown |> List.map (fun (s, c, g, r) -> (if g > 0 then { s with Hits = [] } else s), c, g, r)
+                let pressed = pressedAll |> List.map (fun (s, _, _, _) -> s)
+                let useRules = pressedAll @ onCooldown |> List.collect (fun (_, _, _, r) -> r)
+                let onCooldown = onCooldown |> List.map (fun (s, c, g, _) -> s, c, g)
                 let consumers =
-                    (pressedAll @ onCooldown |> List.choose (fun (_, c, _) -> c))
+                    (pressedAll |> List.choose (fun (_, c, _, _) -> c)) @ (onCooldown |> List.choose (fun (_, c, _) -> c))
                     @ (metas |> List.collect (fun (_, _, c) -> c))
                 let grantRules =
                     onCooldown
@@ -283,7 +285,7 @@ let main argv =
                       Player =
                         { Actor.make "Player" sheet.Mods (pressed @ (onCooldown |> List.map (fun (s, _, _) -> s)) @ (metas |> List.collect (fun (_, s, _) -> s)) @ (consumers |> List.map (fun (_, _, c) -> c))) with
                             Rotation = rotation
-                            Rules = grantRules
+                            Rules = grantRules @ useRules
                             Metas = metas |> List.map (fun (m, _, _) -> m)
                             Infusions = infusionSetup
                             // infusions start full (kept up while clearing), scaled like invocations

@@ -288,6 +288,35 @@ module Behaviours =
         |> List.sumBy snd
         |> int
 
+    /// What a used skill does besides hitting, from its gem data:
+    /// - "all elemental exposure magnitude" (Frost Bomb): exposure to fire, cold and lightning
+    ///   for its secondary duration, x (1 + exposure effect);
+    /// - GeneratesInfusion + GeneratesRemnants with one element (Frost Bomb: "leaving behind a
+    ///   Cold Infusion"): a remnant at detonation, picked up `pickupSeconds` later.
+    let useRules (db: GameDb) (charMods: ModDb) (setup: GemSetup) (skillName: string) (pickupSeconds: float) : Rule list =
+        let raw = Gems.rawStats db charMods setup
+        let sum id = raw |> List.filter (fun (k, _) -> k = id) |> List.sumBy snd
+        let exposure =
+            let m = sum "active_skill_all_elemental_exposure_magnitude"
+            if m <= 0.0 then []
+            else
+                let amount = m * (1.0 + sum "exposure_effect_+%" / 100.0)
+                let duration = sum "base_secondary_skill_effect_duration" / 1000.0
+                [ for dt in [ Fire; Cold; Lightning ] ->
+                    { Hook = OnUse; Filter = Called skillName; Chance = 100.0; Reaction = ApplyExposure(dt, amount, duration) } ]
+        let remnant =
+            match Gems.data db setup.Gem with
+            | Some d when d.Types.Contains "GeneratesInfusion" && d.Types.Contains "GeneratesRemnants" && not (d.Types.Contains "Persistent") ->
+                let elements = [ "Fire"; "Cold"; "Lightning" ] |> List.filter d.Types.Contains
+                match elements with
+                | [ el ] ->
+                    let detonation = sum "base_skill_detonation_time" / 1000.0 * (1.0 + sum "support_fast_forward_detonation_time_+%_final" / 100.0)
+                    [ { Hook = OnUse; Filter = Called skillName; Chance = 100.0
+                        Reaction = DropRemnant(el + "Infusion", detonation + pickupSeconds, sum "chance_%_to_create_additional_remnant") } ]
+                | _ -> []
+            | _ -> []
+        exposure @ remnant
+
     /// Elemental Archon (BuffTemplates ArchonElemental: 25% more elemental damage with spells,
     /// 100% more ignite chance / freeze buildup / shock chance with spells), plus "Archon Buffs
     /// also grant ..." mods, all x increased Archon effect. Base duration 10 s, recovery 20 s
