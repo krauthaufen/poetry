@@ -361,6 +361,10 @@ module Gems =
               ("Shockchain Arrow", "Shockwave"), [ "Vs:Shocked|Electrocuted" ]
               ("Primal Strikes", "Spirits"), [ "Vs:Shocked" ]
               ("Snipe", "Icy Blast"), [ "Vs:Frozen!" ]
+              ("Snipe", "Explosion"), [ "NotVs:Frozen" ]
+              // released with Perfect Timing: the perfect strike takes the place of the normal one
+              ("Perfect Strike", ""), [ "NoHit" ]
+              ("Gathering Storm", ""), [ "NoHit" ]
               ("Icestorm", "Improved Bolt"), [ "Vs:Chilled|Frozen!" ]
               ("Frostflame Nova", "Volatile Ice"), [ "Vs:Ignited" ]
               ("Disengage", "Shockwave"), [ "Vs:Parried!" ]
@@ -394,6 +398,7 @@ module Gems =
             if c.StartsWith "Vs:" then
                 let states = c.Substring 3
                 if states.EndsWith "!" then [ Mod.flag (Named("OnlyVs:" + states.TrimEnd '!')); Mod.flag (Named "ConsumesVs") ] else [ Mod.flag (Named("OnlyVs:" + states)) ]
+            elif c.StartsWith "NotVs:" then [ Mod.flag (Named c) ]
             elif c = "Charge" then [ Mod.flag (Named "OnlyWithCharge") ]
             elif c.StartsWith "Infused:" then [ Mod.flag (Named("OnlyInfused:" + c.Substring 8)) ]
             elif c.StartsWith "DetonatedBy:" then [ Mod.flag (Named c) ]
@@ -541,6 +546,14 @@ module Gems =
         let held = data.Types.Contains "Channel" && not staged && time > 0.0 && minChannel > time && (gemLevel |> Option.bind (fun l -> l.Cooldown)).IsSome
         let heldHits = if held then (let n = max 1 (int (minChannel / time)) in [ for k in 1 .. n -> float k / float n, 1.0 ]) else [ 1.0, 1.0 ]
         let time = if held then minChannel else time
+        // Perfect Timing: the skill's attack time is the channel up to the perfect moment; the
+        // release that follows is a share of it
+        let time =
+            if data.Types.Contains "PerfectTiming" then
+                let release = (statOf "channel_end_duration_as_%_of_attack_time" |> Option.defaultValue 0.0) / 100.0
+                let anim = statOf "channel_skill_end_animation_duration_multiplier_permyriad" |> Option.map (fun v -> v / 10000.0) |> Option.defaultValue 1.0
+                time * (1.0 + release * anim)
+            else time
         let radius =
             let r = statOf "active_skill_base_area_of_effect_radius"
             let extra = if staged then perStage [ "radius_+_per_stage" ] * stages else 0.0

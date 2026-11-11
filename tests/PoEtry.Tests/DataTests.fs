@@ -364,6 +364,24 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         near 70.0 (Behaviours.spiritUses db.Value (sheetOf plain) plain |> List.sumBy (fun u -> u.Flat))
         near 1.0 (Setup.loadWith db.Value treeJson plain Options.defaults).Vitals.StartLife)
 
+    test "perfect timing: the perfect hit replaces the normal one; the release follows the channel" (fun () ->
+        let flag name (sk: Skill) = Mods.flag { Ctx.empty with SkillName = sk.Name } (Named name) (ModDb.ofList sk.Mods)
+        let mace = (Items.parse db.Value "Rarity: Normal\nAkoyan Club\n--------\n").Weapon
+        match Gems.skill db.Value ModDb.empty mace { Gem = "Perfect Strike"; Level = 20; Quality = 0; StatSet = 1; Supports = [] } with
+        | Ok (s, _) ->
+            let perfect = s.Parts |> List.find (fun p -> p.Name.EndsWith ": Perfect Strike")
+            equal (box true) (box (flag "NoHitDamage" s && not (flag "NoHitDamage" perfect)))
+            // 30% of the weapon's attack speed for the channel, then 35% of that for the release
+            near (1.0 / (mace.Value.AttacksPerSecond * 0.3) * 1.35) s.BaseTime
+        | Error e -> failwith e
+        let bow = (Items.parse db.Value "Rarity: Normal\nWarmonger Bow\n--------\n").Weapon
+        match Gems.skill db.Value ModDb.empty bow { Gem = "Snipe"; Level = 20; Quality = 0; StatSet = 1; Supports = [] } with
+        | Ok (s, _) ->
+            // against a frozen enemy the Icy Blast takes the place of the explosion
+            let part (n: string) = s.Parts |> List.find (fun p -> p.Name.EndsWith n)
+            equal (box true) (box (flag "NotVs:Frozen" (part "Explosion") && flag "OnlyVs:Frozen" (part "Icy Blast")))
+        | Error e -> failwith e)
+
     test "parts for one state of the enemy; how many charges a skill consumes" (fun () ->
         let crossbow = (Items.parse db.Value "Rarity: Normal\nAlloy Crossbow\n--------\n").Weapon
         let spear = (Items.parse db.Value "Rarity: Normal\nHardwood Spear\n--------\n").Weapon

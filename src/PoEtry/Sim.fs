@@ -1498,7 +1498,12 @@ module Sim =
             let onlyVs = skill.Mods |> List.tryPick (fun m -> match m.Stat with Named n when n.StartsWith "OnlyVs:" -> Some(n.Substring 7) | _ -> None)
             let consumesVs = skill.Mods |> List.exists (fun m -> m.Stat = Named "ConsumesVs")
             let states = onlyVs |> Option.map (fun (st: string) -> st.Split '|' |> List.ofArray) |> Option.defaultValue []
+            // and one that gives way to another part against that state ("NotVs")
+            let notVs =
+                skill.Mods |> List.tryPick (fun m -> match m.Stat with Named n when n.StartsWith "NotVs:" -> Some(n.Substring 6) | _ -> None)
+                |> Option.map (fun (st: string) -> st.Split '|' |> List.ofArray) |> Option.defaultValue []
             if not states.IsEmpty && not (states |> List.exists enemyStatus.ContainsKey) then w
+            elif notVs |> List.exists enemyStatus.ContainsKey then w
             else
             let w =
                 if consumesVs && not states.IsEmpty then
