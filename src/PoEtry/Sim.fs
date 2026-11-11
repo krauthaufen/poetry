@@ -1223,6 +1223,7 @@ module Sim =
                     (match timing with
                      | DuringUse f -> w.Time + f * useTime + skill.HitDelay
                      | After s -> w.Time + s + skill.HitDelay), mult)
+            let first = times |> List.map fst |> List.fold min infinity
             let w =
                 times
                 |> List.fold
@@ -1237,6 +1238,8 @@ module Sim =
                         let hasCharged = skill.Parts |> List.exists isCharged
                         (skill :: skill.Parts)
                         |> List.filter (fun p -> not (partFlag p "DetonatedByDamage"))
+                        // a part that happens once however long the skill keeps hitting (an eruption)
+                        |> List.filter (fun p -> at <= first || not (partFlag p "OncePerUse"))
                         // a part that only happens when something sets it off (the Bell's shockwave)
                         |> List.filter (fun p -> p.Name = skill.Name || not (partFlag p "OnlyTriggered"))
                         |> List.filter (fun p ->

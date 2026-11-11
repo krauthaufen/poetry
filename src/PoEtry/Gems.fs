@@ -374,6 +374,9 @@ module Gems =
               ("Shred", ""), [ "Seq:0,1/6" ]
               ("Shred", "Fast Strikes"), [ "Seq:2,3,4/6" ]
               ("Shred", "Final Strike"), [ "Seq:5/6"; "Hits:2" ]
+              // the eruption happens once; the sprays that follow rain down around the volcano
+              ("Volcano", ""), [ "Once" ]
+              ("Volcano", "Projectiles"), [ "Rain" ]
               // "sprays a cone of ice shards when it hits a target": on from that target
               ("Ice Shot", "Shards"), [ "Behind" ]
               // one use, several strikes: five stabs before the final one; both gouges hit
@@ -419,6 +422,7 @@ module Gems =
             elif c.StartsWith "Seq:" then
                 let parts = (c.Substring 4).Split '/'
                 [ Mod.flag (Named("SeqSteps:" + parts.[0])); Mod.base' (Named "SeqLength") (float parts.[1]) ]
+            elif c = "Once" then [ Mod.flag (Named "OncePerUse") ]
             elif c.StartsWith "Hits:" then [ Mod.base' (Named "SeqHits") (float (c.Substring 5)) ]
             elif c = "Charge" then [ Mod.flag (Named "OnlyWithCharge") ]
             elif c.StartsWith "Infused:" then [ Mod.flag (Named("OnlyInfused:" + c.Substring 8)) ]
@@ -587,6 +591,7 @@ module Gems =
             if isProjectileSet then
                 // shards sprayed on from the enemy the projectile hit
                 let behind = Map.tryFind (data.Name, set.Label) partConditions |> Option.exists (List.contains "Behind")
+                let rains = Map.tryFind (data.Name, set.Label) partConditions |> Option.exists (List.contains "Rain")
                 let count = statOf "base_number_of_projectiles" |> Option.map int |> Option.defaultValue (if perCharge.IsSome then 0 else 1)
                 Projectiles
                     { ProjectileShape.make count with
@@ -607,7 +612,7 @@ module Gems =
                         // a rain over the skill's area, each projectile with its own small impact
                         Rain =
                             match statOf "active_skill_base_area_of_effect_radius", statOf "active_skill_base_secondary_area_of_effect_radius" with
-                            | Some area, Some impact when data.Types.Contains "Rain" && impact < area && count >= 2 -> Some(area, impact)
+                            | Some a, Some b when count >= 2 && ((data.Types.Contains "Rain" && b < a) || rains) -> Some(max a b, min a b)
                             | _ -> None
                         Explosion = if data.Types.Contains "Area" && not (List.contains "is_area_damage" set.Stats) then radius else None }
             else

@@ -321,6 +321,15 @@ let main _ =
         let hits = (Geometry.targetsFrom (Rng 7u) [] 100.0 rain 1.0 target [ target ]).Length
         equal true (abs (float hits / 10000.0 - 0.223) < 0.015))
 
+    test "a part that happens once per use while the rest keeps hitting" (fun () ->
+        let spray = { fireSpell 10.0 with Name = "Vent: Spray" }
+        let vent = { fireSpell 100.0 with Name = "Vent"; Cooldown = Some 100.0; Mods = [ Mod.flag (Named "OncePerUse") ]; Parts = [ spray ] }
+        let f = { Fight.single (boss 1e12) (Actor.make "Player" [ noIgnite ] [ vent ]) 5.5 with MaxTime = 5.5 }
+        let f = { f with Player = { f.Player with HitPattern = Map.ofList [ "Vent", [ for k in 1 .. 4 -> After(float k), 1.0 ] ] } }
+        let o = Sim.run f 1u
+        near 100.0 o.DamageBy.["Vent (hit)"]
+        near 40.0 o.DamageBy.["Vent: Spray (hit)"])
+
     test "banner: attack hits build its Glory, then its aura lasts for the duration" (fun () ->
         // 200 Glory at 100% of 20 per hit: placed with the tenth hit (10 s) and the twentieth.
         // 4 s of 100% more damage: the hits at 11, 12 and 13 s are doubled, the one at 14 s is not

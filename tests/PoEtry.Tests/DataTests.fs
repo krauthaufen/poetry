@@ -389,6 +389,15 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
             | _ -> failwith "shards are projectiles"
         | Error e -> failwith e)
 
+    test "Volcano: one eruption; the sprays rain down within 30 units, each with a radius of 6" (fun () ->
+        match Gems.skill db.Value ModDb.empty None { Gem = "Volcano"; Level = 20; Quality = 0; StatSet = 1; Supports = [] } with
+        | Ok (s, _) ->
+            equal true (s.Mods |> List.exists (fun m -> m.Stat = Named "OncePerUse"))
+            match (s.Parts |> List.find (fun p -> p.Name.EndsWith "Projectiles")).Delivery with
+            | Projectiles p -> equal (Some(30.0, 6.0)) p.Rain
+            | _ -> failwith "the sprays are projectiles"
+        | Error e -> failwith e)
+
     test "perfect timing: the perfect hit replaces the normal one; the release follows the channel" (fun () ->
         let flag name (sk: Skill) = Mods.flag { Ctx.empty with SkillName = sk.Name } (Named name) (ModDb.ofList sk.Mods)
         let mace = (Items.parse db.Value "Rarity: Normal\nAkoyan Club\n--------\n").Weapon
