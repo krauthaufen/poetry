@@ -75,13 +75,27 @@ if "--static" in sys.argv:
         st, h = s["o"].get("static") or {}, s["h"]
         stored = sum(v for k, v in h.items() if k.endswith("StoredHitAvg"))
         if not st or not stored: continue
-        hit, crit, mult = float(st["hit"]), float(st["crit"]), float(st["mult"])
+        hit, ocrit, mult = float(st["hit"]), float(st["crit"]), float(st["mult"])
+        # PoB shows one stat set of a skill with several: ours is the part closest to it (marked *)
+        for name, v in (st.get("parts") or {}).items():
+            if abs(float(v) - stored) < abs(hit - stored): hit = float(v); f = f[:36] + " *"
         pc = h.get("PreEffectiveCritChance", h.get("CritChance", 0))
         pm = h.get("PreEffectiveCritMultiplier", h.get("CritMultiplier", 0))
-        out.append((hit / stored, f[:38], hit, stored, crit, pc, mult, pm))
+        # what PoB counts under a condition: damage first ("LowLife +195% x1.30")
+        notes = []
+        for key, slots in sorted((s["p"].get("assumes") or {}).items()):
+            inc = sum(v for k, v in slots.items() if k.endswith("Damage INC"))
+            more = 1.0
+            for k, v in slots.items():
+                if k.endswith("Damage MORE"): more *= 1 + v / 100.0
+            gain = sum(v for k, v in slots.items() if "GainAs" in k)
+            crit = sum(v for k, v in slots.items() if k.startswith("Crit"))
+            bits = ([("+%.0f%%" % inc)] if inc else []) + ([("x%.2f" % more)] if abs(more - 1) > 0.005 else []) + ([("gain %.0f%%" % gain)] if gain else []) + ([("crit %.0f" % crit)] if crit else [])
+            if bits: notes.append(key + " " + " ".join(bits))
+        out.append((hit / stored, f[:38], hit, stored, ocrit, pc, mult, pm, "; ".join(notes)))
     out.sort()
     print("%-38s %6s %10s %10s  %11s  %11s" % ("character (main skill pressed)", "ratio", "our hit", "PoB hit", "crit o/p", "mult o/p"))
-    for r in out: print("%-38s %6.2f %10.0f %10.0f  %5.1f/%5.1f  %5.2f/%5.2f" % (r[1], r[0], r[2], r[3], r[4], r[5], r[6], r[7]))
+    for r in out: print("%-38s %6.2f %10.0f %10.0f  %5.1f/%5.1f  %5.2f/%5.2f  %s" % (r[1], r[0], r[2], r[3], r[4], r[5], r[6], r[7], r[8]))
     sys.exit(0)
 if "--starved" in sys.argv:
     for f in sorted(ours, key=lambda f: -float(ours[f].get("starved", 0))):

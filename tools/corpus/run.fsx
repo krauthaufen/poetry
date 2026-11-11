@@ -147,8 +147,13 @@ let runOne (path: string) : Result =
                                let mdb = ModDb.ofList (f.Player.Mods @ sk.Mods)
                                let rng = Rng 1u
                                let n = 400
-                               let avg = ([ for _ in 1 .. n -> Hit.rollUnmitigated rng ctx mdb sk false |> Map.toList |> List.sumBy snd ] |> List.sum) / float n
-                               obj [ "hit", sprintf "%.0f" avg; "crit", sprintf "%.2f" (Hit.critChance ctx mdb sk); "mult", sprintf "%.3f" (Hit.critMultiplier { ctx with Crit = true } mdb) ]
+                               let avgOf (part: Skill) =
+                                   let pdb = if part.Name = sk.Name then mdb else ModDb.ofList (f.Player.Mods @ part.Mods)
+                                   let pctx = { ctx with SkillTags = part.Tags; SkillName = part.Name }
+                                   ([ for _ in 1 .. n -> Hit.rollUnmitigated rng pctx pdb part false |> Map.toList |> List.sumBy snd ] |> List.sum) / float n
+                               let avg = avgOf sk
+                               obj [ "parts", obj (sk.Parts |> List.map (fun p -> p.Name, sprintf "%.0f" (avgOf p)))
+                                     "hit", sprintf "%.0f" avg; "crit", sprintf "%.2f" (Hit.critChance ctx mdb sk); "mult", sprintf "%.3f" (Hit.critMultiplier { ctx with Crit = true } mdb) ]
                            | None -> "{}")
                           "starved", sprintf "%.3f" sum.Starved
                           "mana", sprintf "%.0f" c.Vitals.Mana

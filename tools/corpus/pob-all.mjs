@@ -59,6 +59,28 @@ function mainSkill(args)
   for k, v in pairs(o) do if type(v) == "number" and v ~= 0 and keep(k) then res.out[k] = v end end
   if type(o.MainHand) == "table" then for k, v in pairs(o.MainHand) do if type(v) == "number" and v ~= 0 and keep(k) then res.hand[k] = v end end end
   if type(o.Minion) == "table" then res.minion = {}; for k, v in pairs(o.Minion) do if type(v) == "number" and v ~= 0 and keep(k) then res.minion[k] = v end end end
+  -- what PoB counts only under a condition or per some multiplier: the assumptions behind its number
+  res.assumes = {}
+  if sk and sk.skillModList then
+    for _, name in ipairs({"Damage","PhysicalDamage","ElementalDamage","FireDamage","ColdDamage","LightningDamage","ChaosDamage","CritChance","CritMultiplier","Speed","DamageGainAsChaos","DamageGainAsFire","DamageGainAsCold","DamageGainAsLightning"}) do
+      for _, t in ipairs({"BASE","INC","MORE"}) do
+        for _, row in ipairs(sk.skillModList:Tabulate(t, sk.skillCfg, name)) do
+          for _, tag in ipairs(row.mod) do
+            if tag.type == "Condition" or tag.type == "Multiplier" or tag.type == "ActorCondition" or tag.type == "MultiplierThreshold" or tag.type == "StatThreshold" or tag.type == "PerStat" or tag.type == "DistanceRamp" then
+              local var = tag.var or tag.stat or tag.type
+              if type(var) == "table" then var = table.concat(var, "/") end
+              local key = tostring(tag.type == "ActorCondition" and "Enemy" or "") .. tostring(var) .. (tag.neg and "(not)" or "")
+              if not tostring(var):match("^WeaponSet") and tostring(row.value) ~= "0" then
+                res.assumes[key] = res.assumes[key] or {}
+                local slot = name .. " " .. t
+                res.assumes[key][slot] = (res.assumes[key][slot] or 0) + (tonumber(row.value) or 0)
+              end
+            end
+          end
+        end
+      end
+    end
+  end
   for k, v in pairs(build.configTab.input or {}) do if type(v) ~= "table" and not tostring(k):match("^quest") then res.config[tostring(k)] = v end end
   return dkjson.encode(res)
 end`);
