@@ -358,7 +358,10 @@ module Sim =
           /// Bolts left per crossbow skill (missing: a full load), and the skills whose current
           /// load hasn't been paid for yet (the cost is paid with the first shot of a load).
           Ammo: Map<string, int>
-          LoadDue: Set<string> }
+          LoadDue: Set<string>
+          /// Rage: when some was last gained, and the fraction of a point regenerated or lost so far.
+          RageAt: float
+          RageCarry: float }
 
     type private EnemyState =
         { Def: EnemyDef
@@ -424,7 +427,10 @@ module Sim =
     /// Fixed for the whole fight: mod dbs built once, buffs layered on per event.
     type private Env =
         { Fight: Fight
-          SkillDbs: Map<string * string, ModDb> }
+          SkillDbs: Map<string * string, ModDb>
+          /// The player's rage upkeep: regeneration per second, loss per second, seconds without
+          /// gaining before it is lost, rage when hit, rage on kill.
+          Rage: float * float * float * float * float }
 
     let private allAilments =
         [ Ignite; Bleed; Poison; Shock; Chill; Freeze; Electrocute; HeavyStun; Pin; Daze; Maim; Blind; Hinder ]
@@ -1201,6 +1207,41 @@ module Sim =
                 |> schedule (w.Time + secs) Expire)
             w
 
+    let private markStatus actorName (name: string) (w: World) =
+        updateActor actorName (fun st -> { st with Buffs = Map.add name { Name = name; Mods = []; Stacks = 1; Expires = w.Time + 4.0 } st.Buffs }) w
+        |> schedule (w.Time + 4.0) Expire
+
+    let private stacksOf (st: ActorState) r = Map.tryFind r st.Buffs |> Option.map (fun e -> e.Stacks) |> Option.defaultValue 0
+
+    /// Set a resource's stacks. `refresh`: a gain restarts its duration; a loss keeps it.
+    let private setStacksWith (env: Env) actorName refresh r n (w: World) =
+        let actor = actorDef env actorName
+        let duration = Map.tryFind r actor.ResourceDurations
+        let w =
+            updateActor actorName (fun st ->
+                if n <= 0 then { st with Buffs = Map.remove r st.Buffs }
+                else
+                    let expires =
+                        match duration, Map.tryFind r st.Buffs with
+                        | Some d, _ when refresh -> w.Time + d
+                        | _, Some old -> old.Expires
+                        | Some d, None -> w.Time + d
+                        | None, None -> infinity
+                    { st with Buffs = Map.add r { Name = r; Mods = []; Stacks = n; Expires = expires } st.Buffs }) w
+        match duration with
+        | Some d when refresh && n > 0 -> schedule (w.Time + d) Expire w
+        | _ -> w
+
+    /// The player gains rage, up to the maximum; the loss timer starts again.
+    let private gainRage (env: Env) (amount: float) (w: World) =
+        let name = env.Fight.Player.Name
+        let maxRage = Map.tryFind "Rage" env.Fight.Player.MaxResources |> Option.defaultValue 0
+        if amount <= 0.0 || maxRage <= 0 then w
+        else
+            let st = Map.find name w.Actors
+            setStacksWith env name false "Rage" (min maxRage (stacksOf st "Rage" + int amount)) w
+            |> updateActor name (fun st -> { st with RageAt = w.Time })
+
     /// Something that uses charms happened to the player ("Frozen", "Hit:Fire", "KillRare"...).
     /// A charm for it that is running, or has the charges to be used now, answers; returns
     /// whether the occurrence is prevented (immunity charms).
@@ -1521,34 +1562,17 @@ module Sim =
                                                     let gain = (RarityCharges.flaskChargesPerKill e.Def.Rarity + (if rng.Chance c.ChargeOnKillChance then 1.0 else 0.0)) * c.ChargeGainMult
                                                     Map.add c.Buff (min c.MaxCharges ((Map.tryFind c.Buff m |> Option.defaultValue 0.0) + gain)) m) p.CharmCharges }) }
                         if e.Def.Rarity = Rare || e.Def.Rarity = Unique then fst (charm env "KillRare" w) else w
+                // rage from hitting (once per moment, however many enemies the use hits) and from kills
+                let w =
+                    if actor.Name <> env.Fight.Player.Name then w
+                    else
+                        let st = Map.find actor.Name w.Actors
+                        let onHit = if st.RageAt = w.Time && w.Time > 0.0 then 0.0 else Mods.sumBase ctx [ Named "RageOnHit" ] mods
+                        let _, _, _, _, onKill = env.Rage
+                        gainRage env (onHit + (if dead then onKill else 0.0)) w
                 let w = markRecently actor.Name true hit.Crit dead w
                 let w = react env rng actor OnHit skill (Some target) w
                 if hit.Crit then react env rng actor OnCrit skill (Some target) w else w
-
-    let private markStatus actorName (name: string) (w: World) =
-        updateActor actorName (fun st -> { st with Buffs = Map.add name { Name = name; Mods = []; Stacks = 1; Expires = w.Time + 4.0 } st.Buffs }) w
-        |> schedule (w.Time + 4.0) Expire
-
-    let private stacksOf (st: ActorState) r = Map.tryFind r st.Buffs |> Option.map (fun e -> e.Stacks) |> Option.defaultValue 0
-
-    /// Set a resource's stacks. `refresh`: a gain restarts its duration; a loss keeps it.
-    let private setStacksWith (env: Env) actorName refresh r n (w: World) =
-        let actor = actorDef env actorName
-        let duration = Map.tryFind r actor.ResourceDurations
-        let w =
-            updateActor actorName (fun st ->
-                if n <= 0 then { st with Buffs = Map.remove r st.Buffs }
-                else
-                    let expires =
-                        match duration, Map.tryFind r st.Buffs with
-                        | Some d, _ when refresh -> w.Time + d
-                        | _, Some old -> old.Expires
-                        | Some d, None -> w.Time + d
-                        | None, None -> infinity
-                    { st with Buffs = Map.add r { Name = r; Mods = []; Stacks = n; Expires = expires } st.Buffs }) w
-        match duration with
-        | Some d when refresh && n > 0 -> schedule (w.Time + d) Expire w
-        | _ -> w
 
     let private onStrike env (rng: Rng) name skillName mult aimedAt (w: World) =
         let actor = actorDef env name
@@ -1723,6 +1747,7 @@ module Sim =
                             d * (Map.tryFind t v.TakenMult |> Option.defaultValue 1.0) * (1.0 + shocked / 100.0)
                               * (if blocked then v.BlockedDamageTaken / 100.0 else 1.0))
                     let w = takeDamage pools taken { w with Player = Some p } |> fun w -> { w with Player = w.Player |> Option.map (fun p -> { p with LastHit = w.Time }) }
+                    let w = (let _, _, _, whenHit, _ = env.Rage in gainRage env whenHit w)
                     // charms used when a hit of their damage type is taken (they help from the next hit on)
                     let w = taken |> Map.fold (fun w t d -> if d > 0.0 then fst (charm env ("Hit:" + DamageType.name t) w) else w) w
                     let w = if crit then { w with Counts = bump "enemy:crit" w.Counts } else w
@@ -1903,6 +1928,21 @@ module Sim =
             w
         else
             let w = prune w
+            // rage: regenerated all the time, lost once none has been gained for a while
+            let w =
+                let regen, loss, delay, _, _ = env.Rage
+                let name = env.Fight.Player.Name
+                let st = Map.find name w.Actors
+                let have = stacksOf st "Rage"
+                let maxRage = Map.tryFind "Rage" env.Fight.Player.MaxResources |> Option.defaultValue 0
+                if dt <= 0.0 || maxRage <= 0 || (regen <= 0.0 && have = 0) then w
+                else
+                    let losing = if w.Time - st.RageAt > delay then loss else 0.0
+                    let carry = st.RageCarry + (regen - losing) * dt
+                    let whole = int (System.Math.Truncate carry)
+                    let n = max 0 (min maxRage (have + whole))
+                    let w = if n <> have then setStacksWith env name false "Rage" n w else w
+                    updateActor name (fun st -> { st with RageCarry = (if n = 0 && carry < 0.0 then 0.0 elif n = maxRage && carry > 0.0 then 0.0 else carry - float whole) }) w
             // the player's life and mana state, as buffs conditions can read
             let w =
                 match env.Fight.Player.Vitals, w.Player with
@@ -1994,6 +2034,14 @@ module Sim =
 
     let private envOf (fight: Fight) =
         { Fight = fight
+          Rage =
+            (let db = ModDb.ofList fight.Player.Mods
+             let c = Ctx.empty
+             Mods.sumBase c [ Named "RageRegen" ] db,
+             (if Mods.flag c (Named "NoRageLoss") db then 0.0 else Constants.rageLossPerSecond * Mods.inc c [ Named "RageDecay" ] db),
+             Constants.rageLossDelay + Mods.sumBase c [ Named "RageLossDelay" ] db,
+             Mods.sumBase c [ Named "RageWhenHit" ] db,
+             Mods.sumBase c [ Named "RageOnKill" ] db)
           SkillDbs =
             Map.ofList
                 [ for a in fight.Player :: fight.Minions do
@@ -2021,7 +2069,9 @@ module Sim =
               Recharges = Map.empty
               Energy = Map.empty
               Ammo = Map.empty
-              LoadDue = Set.empty }
+              LoadDue = Set.empty
+              RageAt = 0.0
+              RageCarry = 0.0 }
         let w0 =
             { Player =
                 fight.Player.Vitals

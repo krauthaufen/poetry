@@ -415,6 +415,21 @@ let main _ =
         let first = 1000.0 * (1.0 - 1.0 / 10001.0)
         near (first + 2.0 * 1200.0) broken.DamageBy.["Swing (hit)"])
 
+    test "rage: gained on hits, 1% more attack damage each, lost after 4 s without gaining" (fun () ->
+        let swing = { Skill.make "Swing" [ Attack; Melee ] with BaseDamage = Map.ofList [ Physical, Range.fixedAt 100.0 ]; BaseCrit = 0.0 }
+        let mods = [ Mod.base' (Named "RageOnHit") 5.0 |> Mod.whenever (SkillIs Melee) ]
+        let player = { Actor.make "Player" mods [ swing ] with MaxResources = Map.ofList [ "Rage", 30 ] }
+        let o = Sim.run (Fight.single (boss 1e9) player 8.5) 1u
+        // hits at 1..8 s with 0, 5, 10 ... 30, 30 rage
+        near (100.0 * (1.0 + 1.05 + 1.10 + 1.15 + 1.20 + 1.25 + 1.30 + 1.30)) o.DamageBy.["Swing (hit)"]
+        // 30 rage and nothing to keep it: after 4 s it drains at 5 per second, gone at 10 s
+        let slow = { swing with BaseTime = 12.0 }
+        let idle = { Actor.make "Player" [] [ slow ] with MaxResources = Map.ofList [ "Rage", 30 ]; Resources = [ "Rage", 30 ] }
+        near 100.0 (Sim.run (Fight.single (boss 1e9) idle 12.5) 1u).DamageBy.["Swing (hit)"]
+        // regeneration keeps it up
+        let fed = { idle with Mods = [ Mod.base' (Named "RageRegen") 6.0 ] }
+        near 130.0 (Sim.run (Fight.single (boss 1e9) fed 12.5) 1u).DamageBy.["Swing (hit)"])
+
     test "crossbow: a load of bolts, then a reload" (fun () ->
         // 2 bolts per load, 0.5 s per shot, 1 s reload: two shots every 2 s
         let shot = { Skill.make "Shot" [ Attack; Projectile ] with BaseDamage = Map.ofList [ Physical, Range.fixedAt 10.0 ]; BaseTime = 0.5; Clip = 2; ReloadTime = 1.0 }

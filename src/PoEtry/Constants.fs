@@ -10,6 +10,10 @@ module Constants =
         table.[(max 1 (min level table.Length)) - 1]
 
     // ---- crit ----
+    /// Rage is lost at this rate per second once none has been gained for the delay
+    /// (GameConstants BaseRageLossPerMinute, BaseRageLossDelayMs).
+    let rageLossPerSecond = Map.find "BaseRageLossPerMinute" Tables.gameConstants / 60.0
+    let rageLossDelay = Map.find "BaseRageLossDelayMs" Tables.gameConstants / 1000.0
     /// Armour Break: broken armour comes back after this many seconds without more being broken,
     /// and an enemy whose armour is fully broken takes this much increased physical damage from
     /// hits (PoB CalcPerform: 20%). The duration is a GUESS (12 s).

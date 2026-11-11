@@ -424,7 +424,11 @@ module Setup =
             Infusions = infusionSetup
             // infusions start full (kept up while clearing), scaled like invocations
             Resources =
-                c.Resources
+                // rage is only there if something on the character or its skills generates it
+                (let sources = [ Named "RageOnHit"; Named "RageWhenHit"; Named "RageOnKill"; Named "RageRegen" ]
+                 let has (ms: Mod list) = ms |> List.exists (fun m -> List.contains m.Stat sources && m.Value > 0.0)
+                 if has sheet.Mods || (used |> List.exists (fun (_, p) -> has p.Skill.Mods)) then c.Resources
+                 else c.Resources |> List.map (fun (k, n) -> if k = "Rage" then k, 0 else k, n))
                 // shapeshift skills are used in animal form: "while Shapeshifted" holds
                 @ (if used |> List.exists (fun (g, _) -> Gems.data db g |> Option.exists (fun d -> d.Types.Contains "Shapeshift")) then [ "Shapeshifted", 1 ] else [])
                 @ (match infusionSetup with
