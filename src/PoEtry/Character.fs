@@ -269,7 +269,7 @@ module Items =
                               "_display_"; "socket"; "local_is_"; "implicit_stat_magnitude"; "soul_core"; "weapon_range"; "reload_speed"
                               "corruption"; "charm"; "flask"; "local_jewel_"; "alternate_tree"; "cannot_be_thrown"; "mod_effect"
                               "hungry_loop"; "mages_legacy"; "synthesised"; "in_breach"; "base_crit_chance_permyriad_override"
-                              "no_physical_damage"; "spirit" ]
+                              "no_physical_damage"; "spirit"; "mod_magnitudes"; "can_be_instilled" ]
                             |> List.exists has
                         if id.EndsWith "_per_rune_or_soul_core" then
                             // "per Socket filled": once per rune, soul core or idol in the item

@@ -348,6 +348,8 @@ The game's standard buffs and debuffs, with the numbers of its keyword text. Sta
 | Herald of Thunder | after an attack kills a shocked enemy, the next N attack hits (`herald_of_thunder_storm_max_hits`) each trigger the "Bolt" stat set | gem description + data | data |
 | Chains | a herald's own hits don't set heralds off | game rule (recollection) | guess |
 | Herald of Ash | a non-herald attack that kills with overkill of at least `herald_of_ash_overkill_threshold_%` (20%) of the enemy's maximum life ignites the living enemies in the "Explosion" stat set's area (around the killed enemy) for `herald_of_ash_burning_%_overkill_damage_per_minute` / 60 of the overkill per second, for the explosion's duration. Overkill is the hit's damage beyond the enemy's remaining life | gem description + data | data; the ignite takes no further modifiers (guess) |
+| Per 100 maximum mana | "increased Spell Damage / Spell Critical Hit Chance per 100 maximum Mana" count the full hundreds of the character's maximum mana | stat descriptions | data |
+| Item modifier magnitudes | "increased Explicit Prefix / Suffix Modifier magnitudes" and "can be Instilled" add nothing: the item's lines already show the changed values | item text as the API gives it | guess |
 | Extra charges | "N% chance to gain an additional Power / Frenzy / Endurance Charge": each gain rolls once for one more. "Gain a Power Charge when you consume an Elemental Infusion". "if you've gained a Power Charge Recently": 4 s after a gain | stat descriptions | data |
 | Herald of Blood, Plague, the Royal Queen | not modelled | - | missing |
 

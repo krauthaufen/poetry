@@ -281,6 +281,11 @@ module StatMap =
             Some(Mods [ for a in [ Ignite; Shock; Bleed; Poison ] -> Mod.inc (AilmentChance a) v |> Mod.whenever (EnemyHas "RareOrUnique") ])
         | "cast_speed_for_cold_skills_+%" -> one (Mod.inc Speed v |> Mod.whenever (SkillIs Spell) |> Mod.whenever (SkillIs(Tag "Cold")))
         | "chance_for_extra_damage_roll_%" -> one (Mod.base' (Named "LuckyDamageChance") v)
+        | "spell_damage_+%_per_100_maximum_mana" -> one (Mod.inc (Damage AllDamage) v |> Mod.whenever (SkillIs Spell) |> Mod.whenever (PerStack("MaxMana100", 1.0)))
+        | "spell_damage_+%_per_100_max_mana_with_non_channelling_skills" ->
+            one (Mod.inc (Damage AllDamage) v |> Mod.whenever (SkillIs Spell) |> Mod.whenever (Not(SkillIs Channelling)) |> Mod.whenever (PerStack("MaxMana100", 1.0)))
+        | "spell_critical_strike_chance_+%_per_100_max_mana_with_non_channelling_skills" ->
+            one (Mod.inc CritChance v |> Mod.whenever (SkillIs Spell) |> Mod.whenever (Not(SkillIs Channelling)) |> Mod.whenever (PerStack("MaxMana100", 1.0)))
         | "critical_strike_multiplier_+_if_gained_power_charge_recently" -> one (Mod.inc CritBonus v |> Mod.whenever (WhileBuff "GainedPowerChargeRecently"))
         | "chance_to_gain_1_more_power_charge_%" -> one (Mod.base' (Named "ExtraChargeChance:PowerCharge") v)
         | "chance_to_gain_1_more_frenzy_charge_%" -> one (Mod.base' (Named "ExtraChargeChance:FrenzyCharge") v)

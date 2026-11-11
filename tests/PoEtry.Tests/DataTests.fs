@@ -155,6 +155,14 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         near 0.0 (Mods.sumBase spell [ CritBonus ] db')
         near 8.0 (Mods.sumBase attack [ Named "LifeLeech" ] db'))
 
+    test "spell damage per 100 maximum mana counts the hundreds of mana" (fun () ->
+        let ms = match StatMap.meaning "spell_damage_+%_per_100_maximum_mana" 3.0 with Mods ms -> ms | m -> failwithf "%A" m
+        let db = ModDb.ofList ms
+        let spell = { Ctx.empty with SkillTags = Set.ofList [ Spell ]; Buffs = Map.ofList [ "MaxMana100", 12 ] }
+        // 1234 mana: 12 hundreds x 3%
+        near 1.36 (Mods.inc spell [ Damage AllDamage ] db)
+        near 1.0 (Mods.inc { spell with SkillTags = Set.ofList [ Attack ] } [ Damage AllDamage ] db))
+
     test "spirit: flat amounts, a sceptre's own value, the better weapon set; minions from what is left" (fun () ->
         let sceptre slot = slot, "Rarity: Rare\nTest Sceptre\n--------\nSpirit: 120\n--------\n30% increased Spirit\n"
         let helmet = item "Helmet" [ "Armour: 100"; "--------"; "+50 to Spirit" ]
