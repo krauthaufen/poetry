@@ -532,6 +532,24 @@ module Behaviours =
                     { Hook = OnHit; Filter = Called skill.Name; Chance = 100.0; Reaction = IfEnemyHas(curseName, TriggerSkill name) })
             | Error _ -> None)
 
+    /// Freezing Mark, Voltaic Mark: "When the Marked target is Frozen, the Mark Activates,
+    /// granting you a Buff which gives extra Cold damage". The buff is given by a hit on a marked
+    /// enemy that is frozen (electrocuted) and lasts the gem's secondary duration. The mark is
+    /// not taken off: while the enemy stays frozen the buff is refreshed (a little generous).
+    let markBuff (db: GameDb) (charMods: ModDb) (setup: GemSetup) (skill: Skill) : Rule list =
+        let raw = Gems.rawStats db charMods { setup with Supports = [] }
+        let pick (ending: string) = raw |> List.tryPick (fun (k, v) -> if k.EndsWith ending && v > 0.0 then Some v else None)
+        let duration = (raw |> List.filter (fun (k, _) -> k = "base_secondary_skill_effect_duration") |> List.sumBy snd) / 1000.0
+        [ "_damage_buff_damage_%_to_gain_as_cold", Cold, "Frozen"
+          "_damage_buff_damage_%_to_gain_as_lightning", Lightning, "Electrocuted" ]
+        |> List.collect (fun (ending, element, state) ->
+            match pick ending with
+            | Some v when duration > 0.0 ->
+                let mods = [ for t in DamageType.all -> Mod.base' (GainAs(t, element)) v |> Mod.from skill.Name ]
+                [ { Hook = OnHit; Filter = AnySkill; Chance = 100.0
+                    Reaction = IfEnemyHas("Mark:" + skill.Name, IfEnemyHas(state, GrantBuff(skill.Name + " activated", duration, 1, mods))) } ]
+            | _ -> [])
+
     /// Skills that empower the attacks that follow:
     /// - Mantra of Destruction: the next attack gains a share of all damage as extra chaos;
     /// - Temper Weapon: every strike of the hammer empowers 3 attacks (12 at most) to Combust

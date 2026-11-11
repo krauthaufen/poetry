@@ -417,6 +417,17 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
             | _ -> failwith "Arc is a projectile"
         | a -> failwithf "%A" a)
 
+    test "Freezing Mark: a hit on the marked, frozen enemy gives 30% of damage as extra cold for 10 s" (fun () ->
+        let setup = { Gem = "Freezing Mark"; Level = 20; Quality = 0; StatSet = 1; Supports = [] }
+        match Gems.skill db.Value ModDb.empty None setup with
+        | Ok (s, _) ->
+            match Behaviours.markBuff db.Value ModDb.empty setup s with
+            | [ { Hook = OnHit; Reaction = IfEnemyHas ("Mark:Freezing Mark", IfEnemyHas ("Frozen", GrantBuff (_, seconds, 1, mods))) } ] ->
+                near 10.0 seconds
+                near 30.0 (Mods.sumBase Ctx.empty [ GainAs(Physical, Cold) ] (ModDb.ofList mods))
+            | r -> failwithf "%A" r
+        | Error e -> failwith e)
+
     test "perfect timing: the perfect hit replaces the normal one; the release follows the channel" (fun () ->
         let flag name (sk: Skill) = Mods.flag { Ctx.empty with SkillName = sk.Name } (Named name) (ModDb.ofList sk.Mods)
         let mace = (Items.parse db.Value "Rarity: Normal\nAkoyan Club\n--------\n").Weapon
