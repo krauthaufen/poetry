@@ -1000,7 +1000,9 @@ module Sim =
         let st = Map.find actor.Name w.Actors
         let target = aimed env w |> Option.map status |> Option.defaultValue Map.empty
         let ctx = Skill.ctx skill false (buffStacks st) target
-        skill.BaseTime / Mods.mult ctx [ Speed ] (skillDb env actor skill st)
+        let db = skillDb env actor skill st
+        // "+1 second to Total Cast Time": added after speed
+        skill.BaseTime / Mods.mult ctx [ Speed ] db + Mods.sumBase ctx [ Named "FixedUseTime" ] db
 
     let private onReadyUnlocked env (rng: Rng) name (w: World) =
         let actor = actorDef env name
@@ -1147,6 +1149,7 @@ module Sim =
     /// Statuses the game tracks for "recently" conditions: (name, seconds).
     let private recently hit crit killed =
         [ if hit then yield "HitRecently", 4.0
+          if hit && not crit then yield "NonCritRecently", 4.0
           if crit then
               yield "CritRecently", 4.0
               yield "CritInPast8Seconds", 8.0
@@ -1220,6 +1223,16 @@ module Sim =
             else
                 let def = defender e
                 let hit = Hit.roll rng ctx mods skill def
+                // more attack damage by distance: Close Combat, full within 1 m, none from 3.5 m;
+                // Longshot, none within 3.5 m, full from 7 m
+                let mult =
+                    let near, far = Mods.sumBase ctx [ Named "CloseCombatMore" ] mods, Mods.sumBase ctx [ Named "FarCombatMore" ] mods
+                    if near = 0.0 && far = 0.0 then mult
+                    else
+                        let d = max 0.0 (Vec.length e.Def.Position - e.Def.Size)
+                        let closeness = max 0.0 (min 1.0 ((35.0 - d) / 25.0))
+                        let farness = max 0.0 (min 1.0 ((d - 35.0) / 35.0))
+                        mult * (1.0 + near * closeness / 100.0) * (1.0 + far * farness / 100.0)
                 let hit =
                     { hit with
                         Unmitigated = Dmg.map (fun _ v -> v * mult) hit.Unmitigated

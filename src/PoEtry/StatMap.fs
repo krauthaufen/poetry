@@ -271,6 +271,32 @@ module StatMap =
         | "dodge_roll_base_travel_distance" -> one (Mod.base' (Named "DodgeRollDistance") v)
         | "charm_charges_gained_+%" -> one (Mod.inc (Named "CharmChargesGained") v)
         | "charm_duration_+%" -> one (Mod.inc (Named "CharmDuration") v)
+        | "active_skill_chill_effect_+%_final" -> one (Mod.more (AilmentMagnitude(Some Chill)) v)
+        | "active_skill_shock_chance_+%_final" -> one (Mod.more (AilmentChance Shock) v)
+        | "active_skill_hit_damage_freeze_multiplier_+%_final" -> one (Mod.more (Buildup Freeze) v)
+        | "never_freeze" -> one (Mod.more (Buildup Freeze) -100.0)
+        | "cannot_inflict_elemental_ailments" ->
+            Some(Mods [ Mod.more (AilmentChance Ignite) -100.0; Mod.more (AilmentChance Shock) -100.0; Mod.more (AilmentMagnitude(Some Chill)) -100.0; Mod.more (Buildup Freeze) -100.0; Mod.more (Buildup Electrocute) -100.0 ])
+        | "ailment_chance_+%_vs_rare_or_unique_enemy" ->
+            Some(Mods [ for a in [ Ignite; Shock; Bleed; Poison ] -> Mod.inc (AilmentChance a) v |> Mod.whenever (EnemyHas "RareOrUnique") ])
+        | "cast_speed_for_cold_skills_+%" -> one (Mod.inc Speed v |> Mod.whenever (SkillIs Spell) |> Mod.whenever (SkillIs(Tag "Cold")))
+        | "chance_for_extra_damage_roll_%" -> one (Mod.base' (Named "LuckyDamageChance") v)
+        | "critical_strike_multiplier_+_if_have_dealt_non_crit_recently" -> one (Mod.inc CritBonus v |> Mod.whenever (WhileBuff "NonCritRecently"))
+        | "damage_+%_if_triggered_skill_recently" -> one (Mod.inc (Damage AllDamage) v |> Mod.whenever (WhileBuff "TriggeredRecently"))
+        | "gain_accuracy_rating_equal_to_intelligence" -> one (Mod.flag (Named "AccuracyFromIntelligence"))
+        | "support_inspiration_cost_+%_final" -> one (Mod.more ManaCost v)
+        | "minions_deal_%_of_physical_damage_as_additional_chaos_damage" -> one (Mod.base' (ForMinions(GainAs(Physical, Chaos))) v)
+        // more attack damage by distance to the target (see Sim.hitEnemy)
+        | "support_close_combat_attack_damage_+%_final_from_distance" -> one (Mod.base' (Named "CloseCombatMore") v |> Mod.whenever (SkillIs Attack))
+        | "support_far_combat_attack_damage_+%_final_from_distance" -> one (Mod.base' (Named "FarCombatMore") v |> Mod.whenever (SkillIs Attack))
+        // seconds added to the use time, not shortened by speed
+        | "total_attack_time_+_ms" | "total_cast_time_+_ms" -> one (Mod.base' (Named "FixedUseTime") (v / 1000.0))
+        // how a skill is aimed and animated, where remnants can be collected, things monsters never do to the player
+        | "action_requires_aiming_stance" | "action_required_target_facing_angle_tolerance_degrees" | "crossbow_barrage_recoil_per_shot"
+        | "crossbow_barrage_total_recoil_buff_count" | "crossbow_barrage_debuff_duration_ms" | "crossbow_barrage_attack_time_ratio_%"
+        | "base_minimum_channel_time_ms" | "base_melee_dash_range" | "base_knockback_distance" | "main_hand_weapon_range_+"
+        | "remnant_pickup_range_+%" | "immune_to_maim" | "immune_to_hinder" | "enemy_extra_damage_rolls_chance_%"
+        | "action_can_be_used_in_upward_aiming_stance" | "projectiles_crossbow_barrage" -> Some Structural
         | "base_maximum_ward" -> one (Mod.base' (Named "Ward") v)
         | "maximum_ward_+%" -> one (Mod.inc (Named "Ward") v)
         | "ward_regeneration_rate_+%" -> one (Mod.inc (Named "WardRegen") v)

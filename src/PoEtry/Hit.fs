@@ -245,7 +245,8 @@ module Hit =
     /// Roll one hit's damage before mitigation.
     let rollUnmitigated (rng: Rng) (ctx: Ctx) mods (skill: Skill) (crit: bool) : Dmg =
         let ctx = { ctx with Crit = crit }
-        let lucky = Mods.flag ctx LuckyDamage mods
+        // lucky: always, or by chance ("X% chance for Damage with Hits to be Lucky")
+        let lucky = Mods.flag ctx LuckyDamage mods || rng.Chance(Mods.sumBase ctx [ Named "LuckyDamageChance" ] mods)
         let critMult = if crit then critMultiplier ctx mods else 1.0
         let doubled = rng.Chance(Mods.sumBase ctx [ DoubleDamageChance ] mods)
         ranges ctx mods skill

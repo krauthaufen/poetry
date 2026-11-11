@@ -188,7 +188,12 @@ module Setup =
         let vitals = Defence.computeWith startResources bases sheet
         // accuracy: 6 per level above the first and 6 per Dexterity (Character.ot, PoB AccuracyPerDexBase)
         let sheet =
-            { sheet with Mods = sheet.Mods @ [ Mod.base' (Named "Accuracy") (6.0 * float (sheet.Level - 1) + 6.0 * vitals.Dex) |> Mod.from "level and Dexterity" ] }
+            { sheet with
+                Mods =
+                    sheet.Mods
+                    @ [ Mod.base' (Named "Accuracy") (6.0 * float (sheet.Level - 1) + 6.0 * vitals.Dex) |> Mod.from "level and Dexterity" ]
+                    // "Gain Accuracy Rating equal to your Intelligence"
+                    @ (if Mods.flag Ctx.empty (Named "AccuracyFromIntelligence") (ModDb.ofList sheet.Mods) then [ Mod.base' (Named "Accuracy") vitals.Int |> Mod.from "Intelligence" ] else []) }
         let periodics = Behaviours.periodics db sheet build o.ChargeGen
         let sheet =
             match o.ChargeSkip with
