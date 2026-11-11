@@ -362,6 +362,18 @@ module Gems =
               ("Primal Strikes", "Spirits"), [ "Vs:Shocked" ]
               ("Snipe", "Icy Blast"), [ "Vs:Frozen!" ]
               ("Snipe", "Explosion"), [ "NotVs:Frozen" ]
+              // attacks chained by using the skill again and again: which uses of the chain
+              // ("steps/length") a stat set is for, and how often it strikes
+              ("Ice Strike", ""), [ "Seq:0,1/3" ]
+              ("Ice Strike", "Third Strike"), [ "Seq:2/3" ]
+              ("Tempest Flurry", ""), [ "Seq:0,1/4" ]
+              ("Tempest Flurry", "Third Strike"), [ "Seq:2/4"; "Hits:3" ]
+              ("Tempest Flurry", "Fourth Strike"), [ "Seq:3/4" ]
+              ("Primal Strikes", ""), [ "Seq:0,1/3" ]
+              ("Primal Strikes", "Final Strike"), [ "Seq:2/3"; "Takes:Shocked" ]
+              ("Shred", ""), [ "Seq:0,1/6" ]
+              ("Shred", "Fast Strikes"), [ "Seq:2,3,4/6" ]
+              ("Shred", "Final Strike"), [ "Seq:5/6"; "Hits:2" ]
               // released with Perfect Timing: the perfect strike takes the place of the normal one
               ("Perfect Strike", ""), [ "NoHit" ]
               ("Gathering Storm", ""), [ "NoHit" ]
@@ -398,7 +410,11 @@ module Gems =
             if c.StartsWith "Vs:" then
                 let states = c.Substring 3
                 if states.EndsWith "!" then [ Mod.flag (Named("OnlyVs:" + states.TrimEnd '!')); Mod.flag (Named "ConsumesVs") ] else [ Mod.flag (Named("OnlyVs:" + states)) ]
-            elif c.StartsWith "NotVs:" then [ Mod.flag (Named c) ]
+            elif c.StartsWith "NotVs:" || c.StartsWith "Takes:" then [ Mod.flag (Named c) ]
+            elif c.StartsWith "Seq:" then
+                let parts = (c.Substring 4).Split '/'
+                [ Mod.flag (Named("SeqSteps:" + parts.[0])); Mod.base' (Named "SeqLength") (float parts.[1]) ]
+            elif c.StartsWith "Hits:" then [ Mod.base' (Named "SeqHits") (float (c.Substring 5)) ]
             elif c = "Charge" then [ Mod.flag (Named "OnlyWithCharge") ]
             elif c.StartsWith "Infused:" then [ Mod.flag (Named("OnlyInfused:" + c.Substring 8)) ]
             elif c.StartsWith "DetonatedBy:" then [ Mod.flag (Named c) ]
@@ -743,6 +759,7 @@ module Gems =
                     |> List.filter (fun s ->
                         s <> set
                         && (isPart s
+                            || (Map.tryFind (data.Name, s.Label) partConditions |> Option.exists (List.exists (fun (c: string) -> c.StartsWith "Seq:")))
                             || (set.Stats |> List.contains "base_deal_no_damage" && not (s.Label.EndsWith "-Infused")
                                 && set.ConstantStats |> List.exists (fun (k, _) -> k = "dps_display_statset_index"))))
                     |> List.map (fun s ->

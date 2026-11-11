@@ -889,6 +889,25 @@ module Sim =
     let private partNamed (p: Skill) (prefix: string) =
         p.Mods |> List.tryPick (fun m -> match m.Stat with Named n when n.StartsWith prefix -> Some(n.Substring prefix.Length) | _ -> None)
 
+    /// Chained attacks (Ice Strike, Tempest Flurry): which use of the chain comes next. Using
+    /// another skill in between starts the chain again.
+    let private seqLength (skill: Skill) =
+        skill.Mods |> List.tryPick (fun m -> match m.Stat, m.Kind with Named "SeqLength", _ -> Some(int m.Value) | _ -> None) |> Option.defaultValue 0
+    let private seqStep (skill: Skill) (st: ActorState) =
+        let n = seqLength skill
+        if n <= 0 then None
+        elif st.LastUsed <> skill.Name then Some 0
+        else Some(int (Map.tryFind ("Seq:" + skill.Name) st.Energy |> Option.defaultValue 0.0) % n)
+    let private inStep (step: int option) (p: Skill) =
+        match step, partNamed p "SeqSteps:" with
+        | Some k, Some steps -> (steps: string).Split ',' |> Array.exists (fun x -> int x = k)
+        | _ -> true
+    /// The stat set a chained skill uses this time (the skill itself, or one of its parts).
+    let private stepSkill (skill: Skill) (st: ActorState) =
+        match seqStep skill st with
+        | None -> skill
+        | step -> (skill :: skill.Parts) |> List.tryFind (fun p -> (partNamed p "SeqSteps:").IsSome && inStep step p) |> Option.defaultValue skill
+
     /// Glory and Combo a skill needs before it can be used: (counter, amount).
     let private requirements (skill: Skill) =
         let own name = skill.Mods |> List.sumBy (fun m -> if m.Stat = Named name && m.Kind = Base then m.Value else 0.0)
@@ -1110,6 +1129,12 @@ module Sim =
                 | [] -> w
                 | reqs -> updateActor actor.Name (fun st -> { st with Energy = reqs |> List.fold (fun e (key, _) -> Map.remove key e) st.Energy }) w
             let w = if skill.Tags.Contains(Tag "Type:TargetsDestructibleCorpses") && w.Kills.Length > w.CorpsesUsed then { w with CorpsesUsed = w.CorpsesUsed + 1 } else w
+            // chained attacks: this use's place in the chain, and the next
+            let step = seqStep skill st
+            let w =
+                match step with
+                | Some k -> updateActor actor.Name (fun st -> { st with Energy = Map.add ("Seq:" + skill.Name) (float (k + 1)) st.Energy }) w
+                | None -> w
             let w = if useTime > 0.0 then updateActor actor.Name (fun st -> { st with LastUsed = skill.Name }) w else w
             let times =
                 pattern |> List.map (fun (timing, mult) ->
@@ -1136,7 +1161,12 @@ module Sim =
                                 match partNamed p "OnlyInfused:" with
                                 | Some infusion -> stacks infusion > 0
                                 | None -> not (hasCharged && charged && p.Name.EndsWith ": Explosion"))
-                        |> List.fold (fun w part -> schedule at (Strike(actor.Name, part.Name, mult, target.Def.Name)) w) w)
+                        |> List.filter (inStep step)
+                        |> List.fold (fun w (part: Skill) ->
+                            // a strike of the chain that hits several times, spread over the use
+                            let n = part.Mods |> List.tryPick (fun m -> if m.Stat = Named "SeqHits" then Some(int m.Value) else None) |> Option.defaultValue 1
+                            [ 1 .. n ] |> List.fold (fun w i ->
+                                schedule (if n = 1 then at else w.Time + (at - w.Time) * float i / float n) (Strike(actor.Name, part.Name, mult, target.Def.Name)) w) w) w)
                     w
             // an infusion a part needed is used up; a part that waits is put down
             let w =
@@ -1213,8 +1243,11 @@ module Sim =
         let target = aimed env w |> Option.map status |> Option.defaultValue Map.empty
         let ctx = Skill.ctx skill false (buffStacks st) target
         let db = skillDb env actor skill st
+        // a chained attack takes the time of the strike that is due (its own speed)
+        let own = stepSkill skill st
+        let speed = if own.Name = skill.Name then Mods.mult ctx [ Speed ] db else Mods.mult (Skill.ctx own false (buffStacks st) target) [ Speed ] (skillDb env actor own st)
         // "+1 second to Total Cast Time": added after speed
-        skill.BaseTime / Mods.mult ctx [ Speed ] db + Mods.sumBase ctx [ Named "FixedUseTime" ] db
+        own.BaseTime / speed + Mods.sumBase ctx [ Named "FixedUseTime" ] db
 
     let private onReadyUnlocked env (rng: Rng) name (w: World) =
         let actor = actorDef env name
@@ -1502,6 +1535,7 @@ module Sim =
             let notVs =
                 skill.Mods |> List.tryPick (fun m -> match m.Stat with Named n when n.StartsWith "NotVs:" -> Some(n.Substring 6) | _ -> None)
                 |> Option.map (fun (st: string) -> st.Split '|' |> List.ofArray) |> Option.defaultValue []
+            let takes = skill.Mods |> List.tryPick (fun m -> match m.Stat with Named n when n.StartsWith "Takes:" -> Some(n.Substring 6) | _ -> None)
             if not states.IsEmpty && not (states |> List.exists enemyStatus.ContainsKey) then w
             elif notVs |> List.exists enemyStatus.ContainsKey then w
             else
@@ -1512,6 +1546,14 @@ module Sim =
                 else w
             if not (rng.Chance hitChance) then
                 { w with Counts = bump ("miss:" + skill.Name) w.Counts }
+            else
+            // a hit that takes a state off the enemy without needing it ("Consumes Shock")
+            let w =
+                match takes with
+                | Some st when enemyStatus.ContainsKey st ->
+                    updateEnemy target (fun en -> { en with Debuffs = Map.remove st en.Debuffs }) w |> fun w -> { w with Counts = bump ("consumed:" + st) w.Counts }
+                | _ -> w
+            if false then w
             else
                 let def = defender e
                 // "Enemies you Curse / Mark take X% increased Damage": additive with what the enemy already takes

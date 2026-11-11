@@ -217,6 +217,18 @@ let main _ =
         let o = Sim.run (duel [ bell; fireSpell 10.0 ] 10.5) 1u
         equal false (o.Counts.ContainsKey "uses:Bell"))
 
+    test "chained attack: every third use is the slower final strike, twice over" (fun () ->
+        // uses at 0 and 1 s are plain; the third (2 s, half speed: until 4 s) hits twice for 300;
+        // then again from 4 s
+        let final =
+            { strike "Jab: Final" 300.0 with
+                Mods = [ Mod.flag (Named "SeqSteps:2"); Mod.base' (Named "SeqHits") 2.0; Mod.more Speed -50.0 |> Mod.whenever (SkillNamed "Jab: Final") ] }
+        let jab = { strike "Jab" 100.0 with Mods = [ Mod.flag (Named "SeqSteps:0,1"); Mod.base' (Named "SeqLength") 3.0 ]; Parts = [ final ] }
+        let o = Sim.run (duel [ jab ] 6.5) 1u
+        equal 6 o.Counts.["uses:Jab"]
+        near 400.0 o.DamageBy.["Jab (hit)"]
+        near 600.0 o.DamageBy.["Jab: Final (hit)"])
+
     test "banner: attack hits build its Glory, then its aura lasts for the duration" (fun () ->
         // 200 Glory at 100% of 20 per hit: placed with the tenth hit (10 s) and the twentieth.
         // 4 s of 100% more damage: the hits at 11, 12 and 13 s are doubled, the one at 14 s is not
