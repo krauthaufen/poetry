@@ -1,70 +1,81 @@
 # PoEtry
 
-An event-driven Path of Exile 2 combat simulator. It plays out a fight hit by hit, with timing, triggers, meta-gem energy, ailment stacks, minions and Monte Carlo variance, instead of averaging everything into one DPS number.
+An event-driven Path of Exile 2 combat simulator. It plays a fight out hit by hit: skill timing, triggers and meta-gem energy, charges and buffs, ailment stacks, minions and totems, monsters hitting back. Many fights with different seeds give a distribution, not one averaged DPS number.
 
-Written in F#: functional, readable, and portable. It runs on .NET and is kept compatible with Fable, so it can compile to JavaScript for the browser. No reflection and no dependencies, and it uses its own deterministic RNG, so the same seed gives the same fight everywhere.
+Nothing about a build is hard-coded. A character is read from the game's own API output (or a PoB build), its items, passives and gems are turned into modifiers from the game's data files, and every mechanic the engine applies is listed in [RULES.md](RULES.md) with its source and how far it is trusted. What the simulator does not understand about a character is printed, never dropped silently.
 
-## Layout
+Written in F#, with no dependencies and no reflection, and its own deterministic RNG: the same seed gives the same fight on .NET and, compiled with Fable, in JavaScript.
 
-| File | What |
-|---|---|
-| `src/PoEtry/Types.fs` | damage types, ranges, skill tags, ailments |
-| `src/PoEtry/Mods.fs` | modifiers (base / increased / more / flag / override), conditions, the stat-indexed `ModDb` |
-| `src/PoEtry/Tables.fs` | GENERATED game tables (monster life/armour/thresholds, GameConstants) |
-| `src/PoEtry/Constants.fs` | named constants with their sources |
-| `src/PoEtry/Hit.fs` | one hit: base, conversion, gain, roll, crit, inc/more, armour, resist, penetration |
-| `src/PoEtry/Ailments.fs` | what a hit inflicts: ignite/bleed/poison, shock/chill, buildup ailments, flat-chance ailments |
-| `src/PoEtry/Sim.fs` | the discrete-event engine: actors, rotations, rules (on use/hit/crit/inflict), buffs, debuffs, meta gems, DoT integration |
-| `src/PoEtry/Summary.fs` | Monte Carlo: TTK / DPS percentiles, damage share, uptimes, event counts |
-| `src/PoEtry/Json.fs`, `Xml.fs` | dependency-free readers (same behaviour on .NET and Fable) |
-| `src/PoEtry/GameData.fs` | typed skills, gems, weapon bases from `data/game` |
-| `src/PoEtry/StatText.fs` | item / passive text → game stat ids, by reversing the game's own stat description templates |
-| `src/PoEtry/StatMap.fs` | game stat id → modifiers. **The simulator's knowledge of what stats mean.** Reads ids word by word; unknown words → Unmapped, never guessed |
-| `src/PoEtry/Gems.fs` | gem + level + quality + supports (+ weapon) → `Skill` |
-| `src/PoEtry/Character.fs` | items (game Ctrl+C or PoB format, local weapon mods) and passive tree → modifiers |
-| `src/PoEtry/Pob.fs` | read a PoB build's inputs (items, tree, gems). Never its computed numbers |
-| `cli/` | `poetry-sim build.xml`: coverage report + simulation of a socket group |
-| `RULES.md` | **every mechanic, its source and how far we trust it** |
-
-## Run
+## Quick start
 
 ```bash
-dotnet run --project tests/PoEtry.Tests          # test suite (.NET)
-dotnet fable tests/PoEtry.Tests -o out/js && node out/js/Tests.js   # same suite in JS (add {"type":"module"} package.json in out/js)
-dotnet run -c Release --project examples/Demo    # illustrative build, 2000 fights
-dotnet run -c Release --project cli -- examples/builds/spark-test.xml --data data/game --hits 3
+dotnet build -c Release cli
+# a character as GET /character/poe2/<name> returns it, a PoB build XML, or a PoB build code
+dotnet cli/bin/Release/net8.0/poetry-sim.dll character.json
+dotnet cli/bin/Release/net8.0/poetry-sim.dll --help
 ```
 
-## Game data
+With only a file it picks the skill that deals the most when pressed, plays everything else by its skill type (buffs kept up, cooldown skills on cooldown, curses kept on the target) and fights a level 83 boss. It prints the character sheet (pools, defences, maximum hit per damage type), what it did not understand, and then clear time and DPS percentiles, damage share, uptimes and event counts.
 
-`data/game/*.json` is exported from PoB-PoE2's *generated* Lua files, which PoB extracts from the game's .dat files: skills and gems per level, item bases, affixes, the passive tree, and the stat description templates. PoB's hand-written parts (its mod parser, stat maps, calc code) are not used.
+Useful options: `--scenario boss|pinnacle|pack|surrounded`, `--life 1e12 --time 30` for sustained DPS, `--group N` or `--rotation "A,B"` to choose what is pressed, `--runs N`.
+
+## A play style is an F# value
+
+How a character is played matters as much as its gear. The priority list is plain F#, with any condition on what the player can see:
+
+```fsharp
+#r "src/PoEtry/bin/Release/net8.0/PoEtry.dll"
+open PoEtry
+
+let read (f: string) = System.IO.File.ReadAllText("data/game/" + f)
+let build, _ = Setup.parseBuild (System.IO.File.ReadAllText "character.json")
+let options = Options.defaults
+let character = Setup.load read build options
+
+let play =
+    [ KeepBuff "Charged Staff"
+      OnCooldown "Frost Bomb"
+      When((fun v -> v.EnemiesAlive > 3), "Spark")
+      Spam "Falling Thunder" ]
+
+let player = Setup.player character options play None
+Setup.fight character options player (Encounter.boss 83 Rarity.defaults 30.0)
+|> Summary.simulate 200 |> Summary.format |> printfn "%s"
+```
+
+`Setup.auto character options "Falling Thunder"` derives such a list from skill types, and `Setup.strongest` finds the gem worth pressing. See `examples/play.fsx`. Actors can also be built by hand from modifiers and skills, without any game data: `examples/Demo`.
+
+## How it knows things
+
+| Step | Where | What |
+|---|---|---|
+| Game data | `tools/export/export.lua` → `data/game/*.json` | skills and gems per level, item bases, affixes, the passive tree, monsters, stat description templates: exported from the data files PoB-PoE2 extracts from the game. PoB's own parser and calculations are not used |
+| Text → stat ids | `StatText.fs` | item and passive text is matched against the game's own description templates, reversed |
+| Stat ids → modifiers | `StatMap.fs` | read word by word; an unknown word makes the stat *unmapped*, never guessed |
+| Gems → skills | `Gems.fs`, `Behaviours.fs` | gem level data, supports, weapon; what a skill does besides hitting (energy, remnants, buffs, curses, totems, ammunition, stages) from its stats |
+| Character | `Api.fs`, `Pob.fs`, `Character.fs`, `Defence.fs` | items, passives, weapon sets, jewels → modifiers; pools and defences |
+| The fight | `Sim.fs`, `Hit.fs`, `Ailments.fs`, `Encounter.fs` | the discrete-event engine, one hit, what a hit inflicts, monsters and geometry |
+| Setup | `Setup.fs` | options, play styles, building the player and the fight |
+| Results | `Summary.fs` | Monte Carlo percentiles, damage share, uptimes, counts |
+
+## How it is checked
 
 ```bash
-# needs a Lua 5.2 interpreter (lua.org source, `make posix`)
-lua tools/export/export.lua <PoB>/src data/game [treeVersion]
-python3 tools/gen_tables.py <PoB>/src/Data/Misc.lua > src/PoEtry/Tables.fs
-dotnet fsi tools/coverage/text.fsx      # how much item / tree text parses
-dotnet fsi tools/coverage/statids.fsx   # how many stat ids have a meaning
+dotnet run -c Release --project tests/PoEtry.Tests                       # engine and data tests
+dotnet fable tests/PoEtry.Tests -o out/js && node out/js/Tests.js        # the engine tests in JavaScript
+dotnet fsi tools/census/census.fsx                                       # what of ALL game data is simulated
+python3 tools/corpus/fetch.py && dotnet fsi --optimize+ tools/corpus/run.fsx   # 131 public characters
 ```
 
-Current coverage: 96.8% of affix lines and ~96% of passive tree lines parse to stat ids. Of the stat ids they produce, ~3,500 occurrences map to modifiers, ~5,100 are understood as non-offensive, ~1,600 are understood but not simulated yet (area, projectiles, curses, charges...), ~1,350 (long tail) are unmapped.
+- **Tests**: every rule that can be stated as a number has one, worked out by hand or read off the raw data.
+- **Census** (`tools/census/census.txt`): every stat on every affix, passive and gem in the game data, classified by whether the engine actually reads what it maps to.
+- **Corpus** (`tools/corpus/report.txt`): public ladder characters of every ascendancy are imported and fought. The report ranks what was not understood by how many builds it affects, and compares our character sheet (life, mana, energy shield, attributes, armour, evasion, resistances) with PoB's for the same character. PoB's defensive numbers are a good reference; its DPS is only used as a hint where to look.
+- `tools/corpus/why.fsx <build> <stat>` shows where a sheet value comes from, `line.fsx "<text>"` how a line of text is read, `one.fsx <build>` one build as the corpus plays it.
 
-## Describing a build
-
-A fight is an enemy, a player `Actor`, and optional minion actors. An actor has:
-
-- `Mods`: the character sheet as modifier lines, e.g. `Mod.inc (Damage(OfType Fire)) 90.0`. Conditions read like the item text: `|> Mod.whenever (EnemyHas "Shocked")`, `Mod.whenever (PerStack("Frenzy", 1.0))`.
-- `Skills`: base damage, crit, use time, cooldown, hit pattern, and the skill's own mods (gem and support stats).
-- `Rotation`: a priority list. The first step whose condition holds and whose skill is off cooldown is used.
-- `Rules`: on use / hit / crit / inflict → grant a buff or charge, apply a debuff, trigger a skill, or feed meta-gem energy.
-- `Metas`: meta gems that trigger a skill when their energy is full.
-
-Minions get the owner's `ForMinions` mods via `Mods.forMinions`.
-
-See `examples/Demo/Program.fs`.
+Corpus characters and your own builds stay out of the repository (`corpus/`, `builds-private/`).
 
 ## Status
 
-- Done: hit pipeline, mitigation, ailments, event engine, triggers, metas, minions, Monte Carlo summary, 24 tests.
-- Done: game data import, item / tree text parsing, stat meanings, gem assembly, PoB build import, CLI.
-- Next: per-skill behaviours (how many projectiles / hits land on one target, combos, stages); keystones and "Grants Skill"; curse / aura / exposure effect; charges; accuracy; buildup decay; resource costs; in-game verification of the "guess" rows in RULES.md.
+Version 1.0 release candidate. Modelled: hit damage, conversion, crits, accuracy, penetration and mitigation; all ailments and buildup; cooldowns with stored uses, charges, rage, infusions and remnants; meta gems and invocations; curses, marks and curse auras; skill damage over time, lingering and staged skills; crossbow ammunition; shield attacks; persistent minions and totems; the player's pools, defences, recovery, flasks, ailments and stuns; keystones; weapon sets; radius jewels.
+
+Not modelled yet, and reported when a build uses it: charms, warcries, temporary minions, companions and spectres missing from the data, heralds' own effects, heavy stun on the player, combo and parry mechanics, and a long tail of unique-specific stats. RULES.md marks every rule that is a guess.
