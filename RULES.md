@@ -156,6 +156,28 @@ Confidence levels:
 | Keystones | handled by name: Chaos Inoculation = maximum life 1, chaos immunity, no life regeneration | game text | data |
 | Not modelled | life flasks and charms, life leech, block, evade-based crit, monster skills and phases, ranged monsters, other keystones | — | missing |
 
+### The character sheet
+
+Checked against PoB's defensive numbers for 131 public characters (`tools/corpus`, see the report's "character sheet differs" section). Where PoB and the game's text disagree, the text wins and the difference is listed below.
+
+| Mechanic | Rule | Source | Confidence |
+|---|---|---|---|
+| Class base attributes | from the tree data, by class or ascendancy name (the API names an ascended character by its ascendancy) | tree.json | data |
+| Elemental resistance penalty | -60% in the endgame (10% per act) | PoB CalcSetup; shown on the game's character sheet | pob |
+| Base evasion | 7 | Character.ot base_evasion_rating | data |
+| Item defences | armour, evasion, energy shield, block and Runic Ward as the item shows them: its own flat and increased lines are already in that number and are not applied again | game item text | data |
+| Slot increases | "increased Evasion Rating from Equipped Body Armour", "increased Energy Shield from Equipped Focus": additive with the global increases, for that item's share | PoB CalcDefence slotCfg | pob |
+| Item-local stats | a weapon's own leech, crit damage bonus, bleed / poison chance, penetration, "always hits": count for attacks with it. Local stats that only change what the item displays are skipped; any other is reported as not simulated | game item text | data |
+| Per socket filled | "+X per Socket filled" counts the runes, soul cores and idols in the item | game item text | data |
+| Reflected ring | "Reflects opposite Ring": the ring is a copy of the other one | Kalandra's Touch | data |
+| Keystone by name | an item line that is just a keystone's name grants that keystone | unique jewels | data |
+| Weapon set passives | passives allocated with weapon set points count only while that set is in use; the sheet is shown for set one | API `specialisations`; PoB counts them differently in some builds | data |
+| Gem quality | only what the API shows; a gem without the property has none | API | data |
+| Doubled chaos resistance, maximum resistance override, life from body armour energy shield, armour from mana / boots energy shield, evasion from helmet energy shield, deflection from armour, "per 10 Intelligence", "per Corrupted Item", Grand Spectrum | as their text says | game text | data |
+| Charms | not simulated: PoB counts a charm's resistance as always on, we count none | - | missing |
+| Block | capped at 50% + maximum block (poe.ninja shows it uncapped) | Character.ot | data |
+| Runic Ward | item values x increases; PoB 0.23 does not know this league's ward items, so it is unchecked | game item text | guess |
+
 ### Incoming damage in detail
 
 | Mechanic | Rule | Source | Confidence |
@@ -230,6 +252,22 @@ Confidence levels:
 | Skills that keep hitting ("Sustained": Orb of Storms, Thunderstorm, Solar Orb...) | one use hits repeatedly: every "..._frequency_ms" / "..._pulse_delay_ms" / "..._every_x_ms", for "..._maximum_number_of_hits" / "..._number_of_pulses" hits or the skill's duration; recast when the effect ends. Extra bolts from other casts (Orb of Storms) and stages are NOT modelled | gem data | data; partial |
 | Shapeshift skills | using one means "while Shapeshifted" conditions hold for the whole fight | | guess |
 
+### Crossbows
+
+| Mechanic | Rule | Source | Confidence |
+|---|---|---|---|
+| Ammunition gems | the gem grants "Load X" and the shot; the shot is the skill, the load its ammunition: bolts per load from `base_number_of_crossbow_bolts` (gem and supports) | gems.json additionalGrantedEffectId1 | data |
+| Reload | after the last bolt: weapon reload time / ((1 + increased attack speed + increased reload speed) x more), or instant by chance | PoB CalcOffence calcCrossbowReloadTime | pob |
+| Cost | paid per load, with the first shot of a new load; a fight starts loaded | game: the Load skill carries the cost | data |
+| Not consuming ammunition | chance while "reloaded recently" (4 s) | stat text | data |
+| Heat, barrage timing, grenades' own rules | not modelled | - | missing |
+
+### Curse auras
+
+| Mechanic | Rule | Source | Confidence |
+|---|---|---|---|
+| Blasphemy | the curses socketed with it are on every enemy for the whole fight, at the gem's less curse effect and the enemy's own curse effect; the aura's area and the curse limit are not checked | gem data `curse_apply_as_aura`, `support_blasphemy_curse_effect_+%_final` | data; area ignored |
+
 ## Resources over time
 
 | Mechanic | Rule | Source | Confidence |
@@ -282,6 +320,10 @@ Confidence levels:
 | Elemental Archon | BuffTemplates ArchonElemental: 25% more elemental damage with spells, 100% more ignite chance / freeze buildup / shock chance with spells; "Archon Buffs also grant ..." mods; all × increased Archon effect. Gained on an ignite by a skill with `gain_archon_elemental_when_you_ignite_enemy_chance_%` (every ignite counts); 10 s × increased duration; 20 s recovery ÷ "expires faster", none with `archon_no_recovery_period` (Dominion anoint: no recovery, −50% effect) | data; durations: poe2db | data + community |
 | Infused stat sets | "X-Infused" sets are alternatives used when an infusion is consumed, never parts of a normal use (infusions not modelled yet) | data | data |
 | Block | shield block (shown on the item) + flat, × increased block, capped at 50 + max block; lucky block rolls twice; blocked hits deal `base_block_%_damage_taken` | data / game text | data + guess (cap) |
+
+| Energy from melee hits / kills | Fire Spell on Hit: per monster power for each melee hit, scaled like crits; Reaper's Invocation: per monster power for each melee kill | gem stats; the scaling is taken to be the same as for crits | guess |
+| Energy from dodge rolls, minion deaths | not modelled (Cast on Dodge, Cast on Minion Death never trigger) | - | missing |
+| Unaffordable skills | a skill that costs more than the whole mana pool is never used | - | data |
 
 ## Runic Ward, remnants, Infernal Flame
 

@@ -355,6 +355,57 @@ let main _ =
         // first hit lands at 1 s; 9.5 s of ticking
         near 950.0 o.DamageBy.["Drain (chaos over time)"])
 
+    test "crossbow: a load of bolts, then a reload" (fun () ->
+        // 2 bolts per load, 0.5 s per shot, 1 s reload: two shots every 2 s
+        let shot = { Skill.make "Shot" [ Attack; Projectile ] with BaseDamage = Map.ofList [ Physical, Range.fixedAt 10.0 ]; BaseTime = 0.5; Clip = 2; ReloadTime = 1.0 }
+        let o = Sim.run (Fight.single (boss 1e9) (Actor.make "Player" [ noIgnite ] [ shot ]) 10.25) 1u
+        // shots start at 0, 0.5 | 2, 2.5 | 4, 4.5 | 6, 6.5 | 8, 8.5 | 10
+        equal 11 o.Counts.["uses:Shot"]
+        equal 5 o.Counts.["reload:Shot"])
+
+    test "crossbow: attack speed and reload speed shorten the reload, the cost is per load" (fun () ->
+        let shot = { Skill.make "Shot" [ Attack; Projectile ] with BaseDamage = Map.ofList [ Physical, Range.fixedAt 10.0 ]; BaseTime = 1.0; Clip = 1; ReloadTime = 3.0; Cost = 40.0 }
+        // 50% increased attack speed and 50% increased reload speed add up: reload 3 / 2 = 1.5 s; a shot takes 1 / 1.5 s
+        let mods = [ noIgnite; Mod.inc Speed 50.0; Mod.inc (Named "ReloadSpeed") 50.0 ]
+        let stats = PlayerStats.basic 100.0 100.0
+        let player = { Actor.make "Player" mods [ shot ] with Vitals = Some stats }
+        let o = Sim.run (Fight.single { boss 1e9 with Attack = None } player 8.0) 1u
+        // the first load is free; shots at 0, 2.1667, 4.3333: two paid loads leave 20 mana, a third can't be paid
+        equal 3 o.Counts.["uses:Shot"]
+        if o.ManaStarved <= 0.0 then failwith "the third load should have waited for mana")
+
+    test "curse aura: every enemy has it for the whole fight, bosses at half effect" (fun () ->
+        let aura = [ "Curse:Flammability", [ Mod.base' (Resist Fire) -40.0 ] ]
+        let plain = { Fight.single (boss 1e9) (Actor.make "Player" [ noIgnite ] [ fireSpell 100.0 ]) 1.5 with EnemyAuras = aura }
+        near 140.0 (Sim.run plain 1u).DamageBy.["Bolt (hit)"]
+        let resistant = { boss 1e9 with Mods = [ Mod.more (Named "CurseEffectOnSelf") -50.0 ] }
+        let halved = { Fight.single resistant (Actor.make "Player" [ noIgnite ] [ fireSpell 100.0 ]) 1.5 with EnemyAuras = aura }
+        near 120.0 (Sim.run halved 1u).DamageBy.["Bolt (hit)"]
+        // mods against cursed enemies count
+        let hunter = Actor.make "Player" [ noIgnite; Mod.more (Damage AllDamage) 50.0 |> Mod.whenever (EnemyHas "Cursed") ] [ fireSpell 100.0 ]
+        near 210.0 (Sim.run { plain with Player = hunter } 1u).DamageBy.["Bolt (hit)"])
+
+    test "a skill that costs more than the whole mana pool is never used" (fun () ->
+        let big = { fireSpell 100.0 with Name = "Big"; Cost = 500.0 }
+        let small = { fireSpell 10.0 with Name = "Small"; Cost = 1.0 }
+        let stats = { PlayerStats.basic 100.0 100.0 with ManaRegen = 10.0 }
+        let player = { Actor.make "Player" [ noIgnite ] [ big; small ] with Vitals = Some stats }
+        let o = Sim.run (Fight.single { boss 1e9 with Attack = None } player 5.5) 1u
+        equal false (o.Counts.ContainsKey "uses:Big")
+        equal 1 o.Counts.["cannot afford:Big"]
+        if o.Counts.["uses:Small"] < 5 then failwith "the affordable skill should have been used instead")
+
+    test "meta energy from melee hits and melee kills" (fun () ->
+        let swing = { Skill.make "Swing" [ Attack; Melee ] with BaseDamage = Map.ofList [ Physical, Range.fixedAt 100.0 ]; BaseCrit = 0.0 }
+        let nova = { fireSpell 1.0 with Name = "Nova" }
+        let onHit = { Meta.simple "On Hit" 1.0 "Nova" with Sources = [ MeleeHits 1.0 ]; EnergyMult = 1e6 }
+        let player = { Actor.make "Player" [ noIgnite ] [ swing; nova ] with Rotation = [ Actor.always "Swing" ]; Metas = [ onHit ] }
+        let o = Sim.run (Fight.single (boss 1e12) player 5.5) 1u
+        equal o.Counts.["hits:Swing"] o.Counts.["trigger:Nova"]
+        // a spell is not a melee hit
+        let caster = { Actor.make "Player" [ noIgnite ] [ fireSpell 100.0; nova ] with Rotation = [ Actor.always "Bolt" ]; Metas = [ onHit ] }
+        equal false ((Sim.run (Fight.single (boss 1e12) caster 5.5) 1u).Counts.ContainsKey "trigger:Nova"))
+
     test "gem stats: a skill's internal name is not read as scope words" (fun () ->
         // Falling Thunder's stats start with "lightning_strike_": neither a lightning nor a Strike restriction
         let ids =

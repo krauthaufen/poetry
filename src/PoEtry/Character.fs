@@ -244,7 +244,23 @@ module Items =
                         elif id = "local_ring_duplicate_other_ring" then ms, c
                         elif shown then ms, c
                         else
-                            match StatMap.meaning (id.Substring 6) v with
+                            // local stats with a name of their own; the rest read like the same stat without "local_"
+                            let known =
+                                match id with
+                                | "local_life_leech_from_physical_damage_permyriad" -> Mods [ Mod.base' (Named "LifeLeech") (v / 100.0) ]
+                                | "local_mana_leech_from_physical_damage_permyriad" -> Mods [ Mod.base' ManaLeech (v / 100.0) ]
+                                | "local_life_gain_per_target" -> Mods [ Mod.base' (Named "LifeOnHit") v ]
+                                | "local_life_and_mana_gain_per_target" -> Mods [ Mod.base' (Named "LifeOnHit") v; Mod.base' (Named "ManaOnHit") v ]
+                                | "local_chance_to_bleed_on_hit_%" -> Mods [ Mod.base' (AilmentChance Bleed) v ]
+                                | "local_chance_to_bleed_on_hit_25%" -> Mods [ Mod.base' (AilmentChance Bleed) 25.0 ]
+                                | "local_chance_to_bleed_on_hit_50%" -> Mods [ Mod.base' (AilmentChance Bleed) 50.0 ]
+                                | "local_bleed_on_hit" -> Mods [ Mod.base' (AilmentChance Bleed) 100.0 ]
+                                | "local_poison_on_hit_%" -> Mods [ Mod.base' (AilmentChance Poison) v ]
+                                | "local_poison_on_hit" -> Mods [ Mod.base' (AilmentChance Poison) 100.0 ]
+                                | "local_chaos_penetration_%" -> Mods [ Mod.base' (Penetration Chaos) v ]
+                                | "local_elemental_penetration_%" -> Mods (DamageType.elemental |> List.map (fun t -> Mod.base' (Penetration t) v))
+                                | _ -> StatMap.meaning (id.Substring 6) v
+                            match known with
                             | Mods found ->
                                 // a weapon's own stats are for attacks with it
                                 ms @ (if baseName.IsSome then found |> List.map (Mod.whenever (SkillIs Attack)) else found), c
