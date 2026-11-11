@@ -259,7 +259,10 @@ module Pob =
         // Radius jewels: "Notable / Small Passive Skills in Radius also grant X" gives X once per
         // allocated passive of that kind within the jewel's radius of its socket.
         let radiusMods, items =
-            let allocated = build.TreeNodes |> List.distinct |> List.choose (fun id -> Map.tryFind id tree)
+            // passives bought with weapon-set points count while that set is in hand
+            let allocatedWith =
+                let nodes cond ids = ids |> List.distinct |> List.choose (fun id -> Map.tryFind id tree) |> List.map (fun n -> n, cond)
+                nodes None build.TreeNodes @ nodes (Some(Not setTwo)) build.TreeNodesSet1 @ nodes (Some setTwo) build.TreeNodesSet2
             items
             |> List.map (fun (slot, text) ->
                 let lines = text.Split('\n') |> List.ofArray
@@ -286,19 +289,19 @@ module Pob =
                     | Some s, Some r ->
                         grants
                         |> List.collect (fun (notable, line) ->
-                            let count =
-                                allocated
-                                |> List.filter (fun n ->
+                            let inRadius =
+                                allocatedWith
+                                |> List.filter (fun (n, _) ->
                                     n.Id <> s.Id && not n.IsKeystone && not n.IsJewelSocket && n.IsNotable = notable
                                     && (n.X <> 0.0 || n.Y <> 0.0)
                                     && sqrt ((n.X - s.X) ** 2.0 + (n.Y - s.Y) ** 2.0) <= r)
-                                |> List.length
-                            if count = 0 then []
+                            if inRadius.IsEmpty then []
                             else
                                 let stats, _ = StatText.parseLines db.Text [ line ]
                                 let ms, _, _ = Items.interpret stats
                                 // once per passive (so "more" mods multiply)
-                                List.replicate count (ms |> List.map (Mod.from (slot + " radius"))) |> List.concat)
+                                inRadius |> List.collect (fun (_, cond) ->
+                                    ms |> List.map (fun m -> (match cond with Some c -> Mod.whenever c m | None -> m) |> Mod.from (slot + " radius"))))
                     | _ -> []
                 mods, (slot, String.concat "\n" rest))
             |> List.unzip

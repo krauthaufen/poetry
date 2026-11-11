@@ -380,6 +380,19 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         equal (box (1.0, Some "FrenzyCharge")) (box (count "Explosive Spear" spear))
         equal (box 0.0) (box (fst (count "Falling Thunder" None))))
 
+    test "a radius jewel also counts passives bought with weapon-set points, while that set is in hand" (fun () ->
+        // socket 21984 (the API's jewel 20); Brain Freeze (24721) and Brain Storm (50498) are notables next to it
+        let jewel = "Jewel 20", "Rarity: Rare\nTest Curio\nTime-Lost Sapphire\n--------\nRadius: Large\n--------\nNotable Passive Skills in Radius also grant +10 to Strength"
+        let str b = (stats b).Str
+        let plain = str blank
+        let withMain = str { blank with Items = [ jewel ]; TreeNodes = [ 21984; 24721; 50498 ] }
+        let withSetOne = str { blank with Items = [ jewel ]; TreeNodes = [ 21984 ]; TreeNodesSet1 = [ 24721; 50498 ] }
+        let withSetTwo = str { blank with Items = [ jewel ]; TreeNodes = [ 21984 ]; TreeNodesSet2 = [ 24721; 50498 ] }
+        near (plain + 20.0) withMain
+        near (plain + 20.0) withSetOne
+        // the sheet is weapon set one's: set two's passives are not in hand
+        near plain withSetTwo)
+
     test "low life only where the build keeps itself there; fewer enemies to be surrounded" (fun () ->
         let bonus = [ "30% increased Damage when on Low Life" ]
         let start b = (Setup.loadWith db.Value treeJson b Options.defaults).Vitals.StartLife
