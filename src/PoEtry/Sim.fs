@@ -64,6 +64,8 @@ type Reaction =
     | SpendStack of buff: string * then': Reaction
     /// Set a buff's stacks (no duration), e.g. "the next 3 attack hits".
     | SetStacks of buff: string * stacks: int
+    /// Only if the enemy concerned has this status (a curse being replaced): do this.
+    | IfEnemyHas of status: string * then': Reaction
     /// A warcry: empowers one attack per `perPower` monster power among the living enemies,
     /// counting up to `cap` power, at least one. The buff's stacks are the attacks left.
     | Empower of buff: string * perPower: float * cap: float
@@ -857,6 +859,10 @@ module Sim =
                           | _ -> w
                       | SetStacks (buff, n) ->
                           updateActor actor.Name (fun st -> { st with Buffs = Map.add buff { Name = buff; Mods = []; Stacks = n; Expires = infinity } st.Buffs }) w
+                      | IfEnemyHas (st, next) ->
+                          match target with
+                          | Some t when w.Enemies.[t].Life > 0.0 && (status w.Enemies.[t]).ContainsKey st -> perform next w
+                          | _ -> w
                       | Empower (buff, perPower, cap) ->
                           let power = alive w |> List.sumBy (fun e -> MonsterPower.ofRarity e.Def.Rarity)
                           let n = max 1 (int (floor (min cap power / max 1.0 perPower)))
@@ -869,7 +875,7 @@ module Sim =
                         | Some t when w.Enemies.[t].Life > 0.0 -> f t
                         | _ -> w
                      match reaction with
-                     | SpendStack _ | SetStacks _ | Empower _ -> w
+                     | SpendStack _ | SetStacks _ | Empower _ | IfEnemyHas _ -> w
                      | GrantBuff (name, duration, maxStacks, mods) ->
                          let w =
                              updateActor actor.Name (fun st ->

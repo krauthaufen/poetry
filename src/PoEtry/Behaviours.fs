@@ -388,6 +388,26 @@ module Behaviours =
             let effect = Mods.mult ctx [ Named(if isCurse then "CurseEffect" else "MarkEffect") ] all
             Some(name, duration, monster |> List.map (Mod.scaled effect), player |> List.map (Mod.scaled effect >> Mod.from skill.Name))
 
+    /// Impending Doom: "trigger an explosion when the curse ends". Recasting a curse on an enemy
+    /// that has it ends the old one, so every cast onto a cursed enemy triggers Doom Blast (the
+    /// support's granted skill, at the curse gem's level, with the group's supports). A curse
+    /// running out on its own is not modelled. Returns the skill and the rule.
+    let impendingDoom (db: GameDb) (charMods: ModDb) (setup: GemSetup) (skill: Skill) (curseName: string) : (Skill * Rule) option =
+        setup.Supports
+        |> List.tryPick (fun (name, _) ->
+            match Gems.data db name, Map.tryFind name db.Gems with
+            | Some sd, Some gd when sd.StatSets |> List.exists (fun st -> st.Stats |> List.contains "trigger_vicious_hex_explosion_when_curse_ends") ->
+                gd.AdditionalEffects |> List.tryPick (fun id -> if Map.containsKey id db.Skills then Some id else None)
+            | _ -> None)
+        |> Option.bind (fun blastId ->
+            match Gems.skill db charMods None { setup with Gem = blastId } with
+            | Ok (s, _) ->
+                let name = skill.Name + ": " + s.Name
+                Some(
+                    { s with Name = name; Tags = s.Tags.Add Triggered; Cost = 0.0; Cooldown = None },
+                    { Hook = OnHit; Filter = Called skill.Name; Chance = 100.0; Reaction = IfEnemyHas(curseName, TriggerSkill name) })
+            | Error _ -> None)
+
     /// Warcries: using one empowers the next attacks, one per `warcry_empowers_per_X_monster_power`
     /// of enemy power, counting up to `..._mp_cap`. What empowered attacks get is on the gem:
     /// Infernal Cry "Empowered Attacks Gain X% of damage as extra Fire damage", Seismic Cry an

@@ -446,6 +446,18 @@ let main _ =
         let o1 = Sim.run (Fight.single normal player 5.75) 1u
         near (200.0 + 4.0 * 100.0) o1.DamageBy.["Swing (hit)"])
 
+    test "a curse recast on a cursed enemy sets off what happens when the curse ends" (fun () ->
+        let hex = { Skill.make "Hex" [ Spell; Curse ] with BaseTime = 1.0 }
+        let blast = { fireSpell 100.0 with Name = "Blast"; Tags = Set.ofList [ Spell; Triggered ] }
+        let rules =
+            [ { Hook = OnHit; Filter = Called "Hex"; Chance = 100.0; Reaction = IfEnemyHas("Curse:Hex", TriggerSkill "Blast") }
+              { Hook = OnHit; Filter = Called "Hex"; Chance = 100.0; Reaction = ApplyCurse("Hex", 30.0, []) } ]
+        let player = { Actor.make "Player" [ noIgnite ] [ hex; blast ] with Rotation = [ Actor.always "Hex" ]; Rules = rules }
+        let o = Sim.run (Fight.single (boss 1e9) player 5.5) 1u
+        // five casts land (at 1 to 5 s); the first finds no curse to end
+        equal 5 o.Counts.["hits:Hex"]
+        equal 4 o.Counts.["trigger:Blast"])
+
     test "crossbow: a load of bolts, then a reload" (fun () ->
         // 2 bolts per load, 0.5 s per shot, 1 s reload: two shots every 2 s
         let shot = { Skill.make "Shot" [ Attack; Projectile ] with BaseDamage = Map.ofList [ Physical, Range.fixedAt 10.0 ]; BaseTime = 0.5; Clip = 2; ReloadTime = 1.0 }

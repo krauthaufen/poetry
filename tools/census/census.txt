@@ -1,30 +1,30 @@
 
 == affix mods: 2724 distinct stats, 9551 occurrences
-  simulated        647 stats   5550 occurrences (58.1%)
+  simulated        650 stats   5562 occurrences (58.2%)
   inert              7 stats      7 occurrences ( 0.1%)
   local            473 stats   1145 occurrences (12.0%)
   not-offensive    108 stats    366 occurrences ( 3.8%)
   structural        25 stats     50 occurrences ( 0.5%)
-  unsimulated      876 stats   1610 occurrences (16.9%)
+  unsimulated      873 stats   1598 occurrences (16.7%)
   unmapped         588 stats    823 occurrences ( 8.6%)
 
 == passive tree: 1392 distinct stats, 5907 occurrences
-  simulated        533 stats   3912 occurrences (66.2%)
+  simulated        536 stats   3953 occurrences (66.9%)
   inert             10 stats     23 occurrences ( 0.4%)
   local              0 stats      0 occurrences ( 0.0%)
   not-offensive     29 stats     74 occurrences ( 1.3%)
   structural        20 stats    327 occurrences ( 5.5%)
-  unsimulated      508 stats   1133 occurrences (19.2%)
+  unsimulated      505 stats   1092 occurrences (18.5%)
   unmapped         292 stats    438 occurrences ( 7.4%)
 
 == skill and support gems: 2476 distinct stats, 9440 occurrences
-  simulated        392 stats   2829 occurrences (30.0%)
+  simulated        397 stats   2840 occurrences (30.1%)
   inert              4 stats      4 occurrences ( 0.0%)
   local              0 stats      0 occurrences ( 0.0%)
   not-offensive     31 stats     68 occurrences ( 0.7%)
   structural       323 stats   3119 occurrences (33.0%)
-  unsimulated      768 stats   2021 occurrences (21.4%)
-  unmapped         958 stats   1399 occurrences (14.8%)
+  unsimulated      765 stats   2012 occurrences (21.3%)
+  unmapped         956 stats   1397 occurrences (14.8%)
 
 text lines with no stat template: 174 (affix + tree)
 
@@ -73,7 +73,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     7  add_frenzy_charge_on_kill_%_chance   [charges]
     7  movement_velocity_+%_when_on_low_life   [movement]
     7  totem_life_+%   [totems]
-    6  warcry_speed_+%   [warcries]
     6  arcane_surge_effect_on_self_+%   [effects on self]
     6  grenade_skill_cooldown_speed_+%   [cooldowns]
     6  base_mana_leech_rate_+%   [mana / recovery]
@@ -96,7 +95,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     5  minimum_physical_damage_to_return_on_block   [defences]
     5  maximum_physical_damage_to_return_on_block   [defences]
     4  base_debuff_slow_magnitude_+%   [slows]
-    4  warcry_cooldown_speed_+%   [warcries]
     4  cast_speed_+%_during_mana_flask_effect   [flasks]
     4  elemental_ailment_types_apply_damage_taken_+%   [damage taken]
     4  projectile_shock_chance_%   [projectile count / speed / chaining]
@@ -260,7 +258,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     2  banner_duration_+%   [durations]
     2  glory_generation_+%_for_banners   [glory]
     2  companion_damage_+%   [companions]
-    2  empowered_attack_damage_+%   [empowered attacks]
     2  minion_additional_physical_damage_reduction_%   [minion stats beyond damage and speed]
     2  offering_life_+%   [life / recovery]
     2  parry_stun_threshold_+%_during_parry   [stun / ailment threshold]
@@ -2117,14 +2114,11 @@ skill types: 183, engine reads 123; unhandled by gem count:
    27  base_movement_velocity_+%   [movement]
    18  companion_damage_+%   [companions]
    17  movement_speed_penalty_+%_while_performing_action   [movement]
-   15  empowered_attack_damage_+%   [empowered attacks]
    15  companion_maximum_life_+%   [companions]
-   14  warcry_speed_+%   [warcries]
    14  base_skill_cost_life_instead_of_mana_%   [life / recovery]
    13  summon_totem_cast_speed_+%   [totems]
    13  glory_generation_+%   [glory]
    13  base_debuff_slow_magnitude_+%   [slows]
-   12  warcry_cooldown_speed_+%   [warcries]
    11  curse_effect_on_self_+%   [curse effect]
    11  thorns_damage_+%   [thorns]
    11  totem_life_+%   [totems]
@@ -3021,8 +3015,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     4  infinite_skill_effect_duration   [durations]
     4  cannot_pierce   [projectile count / speed / chaining]
     4  active_skill_stun_threshold_+%_while_performing_action   [stun / ailment threshold]
-    4  warcry_empowers_per_X_monster_power   [warcries]
-    4  warcry_empowers_per_X_monster_power_mp_cap   [warcries]
     4  active_skill_consumes_a_cold_infusion   [infusions]
     4  active_skill_energy_generated_+%_final   [energy shield / recovery]
     4  modifiers_to_warcry_damage_also_apply_to_this   [warcries]
@@ -3692,7 +3684,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  cast_on_damage_taken_only_tracks_lightning   [damage taken]
     1  should_have_cast_when_damage_taken_charge_buff   [charges]
     1  electrocute_threshold_+%_final   [stun / ailment threshold]
-    1  trigger_vicious_hex_explosion_when_curse_ends   [curse effect]
     1  vine_arrow_area_of_effect_+%_final_when_wet   [area of effect]
     1  channel_end_duration_as_%_of_cast_time   [durations]
     1  triggered_on_voltaic_barrier_boosted_projectile_collision   [projectile count / speed / chaining]
@@ -4202,7 +4193,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  secondary_minimum_base_fire_damage
     1  secondary_maximum_base_fire_damage
     1  infernal_cry_explosion_delay_ms
-    1  infernal_cry_exerted_attack_all_damage_%_to_gain_as_fire_%
     1  breach_flame_chaos_addition_%
     1  warding_steel_maximum_stored_mitigated_physical_damage
     1  warding_steel_gains_%_of_damage_from_mitigated_physical_damage
@@ -4306,7 +4296,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  circle_of_power_minimum_time_between_stage_increases_ms
     1  sanguine_revelry_%_change_to_create_remnant_on_killing_bleeding_enemy
     1  create_furious_remnant_when_hitting_bleeding_enemies_once_every_x_ms
-    1  seismic_cry_slam_skill_additional_aftershocks
     1  seismic_cry_slam_skill_aftershock_damage_+%_final
     1  receive_bleeding_chance_%_when_hit_by_attack
     1  hex_remove_at_effect_variance

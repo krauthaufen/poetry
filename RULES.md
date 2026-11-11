@@ -306,6 +306,13 @@ Checked against PoB's defensive numbers for 131 public characters (`tools/corpus
 | Chains | a herald's own hits don't set heralds off | game rule (recollection) | guess |
 | Herald of Ash (overkill ignite), Blood, Plague, the Royal Queen | not modelled | - | missing |
 
+### Skills granted by supports
+
+| Mechanic | Rule | Source | Confidence |
+|---|---|---|---|
+| Impending Doom | "trigger an explosion when the curse ends": casting the curse on an enemy that already has it ends the old one and triggers Doom Blast (the support's granted skill at the curse gem's level, with the group's supports). A curse running out by itself is not modelled | gem data `trigger_vicious_hex_explosion_when_curse_ends`, additionalGrantedEffectId1 | data; "recast ends the curse" is game knowledge |
+| Other support-granted skills (Doedre's Undoing, ...) | not modelled | - | missing |
+
 ### Curse auras
 
 | Mechanic | Rule | Source | Confidence |

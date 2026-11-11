@@ -243,7 +243,9 @@ module Setup =
           /// The debuff a curse or mark applies ("Curse:Despair").
           Curse: string option
           /// Timed hits of one use (skills that keep hitting), instead of the skill's own.
-          Pattern: (HitTiming * float) list option }
+          Pattern: (HitTiming * float) list option
+          /// Skills its supports grant and trigger (Impending Doom's Doom Blast).
+          Extra: Skill list }
 
     /// The dodge roll as something the player can press (`Spam Setup.dodgeRoll`): it deals
     /// nothing and takes its time; Cast on Dodge gains energy from the distance rolled.
@@ -253,7 +255,7 @@ module Setup =
         if gemName = dodgeRoll then
             Some
                 { Skill = { Skill.make dodgeRoll [ Tag "DodgeRoll" ] with BaseTime = Constants.dodgeRollSeconds; Hits = [] }
-                  Infused = None; GrantsVerisium = 0; Rules = []; Grants = []; Curse = None; Pattern = None }
+                  Infused = None; GrantsVerisium = 0; Rules = []; Grants = []; Curse = None; Pattern = None; Extra = [] }
         else pressedGem c o gemName
 
     and private pressedGem (c: Loaded) (o: Options) (gemName: string) : Pressed option =
@@ -274,9 +276,13 @@ module Setup =
                         if o.Infused then None
                         else Behaviours.infusedCopy db charMods (Gems.chooseWeapon db setup.Gem sheet.Weapons) setup |> Option.map (fun (el, cp) -> s.Name, el, { (Behaviours.applyObserved cp) with Name = s.Name + " infused" })
                     let curse = Behaviours.curseOf db charMods setup s
+                    // a curse that explodes when replaced: the check comes before the new curse lands
+                    let doom = curse |> Option.bind (fun (name, _, _, _) -> Behaviours.impendingDoom db charMods setup s name)
                     let curseRules =
                         match curse with
-                        | Some (name, duration, monster, _) -> [ { Hook = OnHit; Filter = Called s.Name; Chance = 100.0; Reaction = ApplyCurse(name, duration, monster) } ]
+                        | Some (name, duration, monster, _) ->
+                            (doom |> Option.map snd |> Option.toList)
+                            @ [ { Hook = OnHit; Filter = Called s.Name; Chance = 100.0; Reaction = ApplyCurse(name, duration, monster) } ]
                         | None -> []
                     let lasting = Behaviours.sustained db charMods setup s
                     let cryRules, cryGrants = Behaviours.warcry db charMods setup s
@@ -293,7 +299,8 @@ module Setup =
                           Rules = rules
                           Grants = (match curse with Some (_, _, _, player) -> player | None -> []) @ cryGrants
                           Curse = curse |> Option.map (fun (name, _, _, _) -> name)
-                          Pattern = lasting |> Option.map fst }
+                          Pattern = lasting |> Option.map fst
+                          Extra = doom |> Option.map fst |> Option.toList }
                 | _ -> None)
 
     let private gemOf (p: Play) =
@@ -367,7 +374,7 @@ module Setup =
         let resolve g =
             match main with
             | Some (name, s) when name = g ->
-                Some { (pressed c o g |> Option.defaultValue { Skill = s; Infused = None; GrantsVerisium = 0; Rules = []; Grants = []; Curse = None; Pattern = None }) with Skill = s }
+                Some { (pressed c o g |> Option.defaultValue { Skill = s; Infused = None; GrantsVerisium = 0; Rules = []; Grants = []; Curse = None; Pattern = None; Extra = [] }) with Skill = s }
             | _ -> pressed c o g
         let used = play |> List.collect gemOf |> List.distinct |> List.choose (fun g -> resolve g |> Option.map (fun p -> g, p))
         let byGem g = used |> List.tryFind (fun (n, _) -> n = g) |> Option.map snd
@@ -420,7 +427,7 @@ module Setup =
         let infusionSetup =
             if o.Infused then None
             else Behaviours.infusions db sheet c.Build o.Pickup (consumers |> List.map (fun (n, el, cp) -> n, (el, cp.Name)) |> Map.ofList)
-        { Actor.make "Player" (sheet.Mods @ (used |> List.collect (fun (_, p) -> p.Grants))) (pressedSkills @ (metas |> List.collect (fun (_, s, _) -> s)) @ (consumers |> List.map (fun (_, _, cp) -> cp)) @ heraldSkills) with
+        { Actor.make "Player" (sheet.Mods @ (used |> List.collect (fun (_, p) -> p.Grants))) (pressedSkills @ (metas |> List.collect (fun (_, s, _) -> s)) @ (consumers |> List.map (fun (_, _, cp) -> cp)) @ heraldSkills @ (used |> List.collect (fun (_, p) -> p.Extra))) with
             Rotation = steps
             HitPattern = used |> List.choose (fun (_, p) -> p.Pattern |> Option.map (fun pat -> p.Skill.Name, pat)) |> Map.ofList
             Rules = grantRules @ (used |> List.collect (fun (_, p) -> p.Rules)) @ heraldRules
@@ -500,7 +507,8 @@ module Setup =
             let all = pressable c |> List.choose (fun g -> pressed c o g |> Option.map (fun p -> g, p))
             let damaging =
                 all |> List.filter (fun (_, p) ->
-                    p.Curse.IsNone && not p.Skill.Hits.IsEmpty
+                    not p.Extra.IsEmpty
+                    || p.Curse.IsNone && not p.Skill.Hits.IsEmpty
                     && (not p.Skill.BaseDamage.IsEmpty || p.Skill.Tags.Contains Attack || not p.Skill.Dots.IsEmpty || not p.Skill.Parts.IsEmpty))
             let rolls = Behaviours.metas c.Db c.Sheet c.Build o.Infused |> List.exists (fun (m, _, _) -> m.Sources |> List.exists (function DodgeRolls _ -> true | _ -> false))
             ((if damaging.IsEmpty then all else damaging) |> List.map fst) @ (if rolls then [ dodgeRoll ] else [])

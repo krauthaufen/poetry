@@ -1,10 +1,8 @@
-131 builds: 131 ran, 0 failed; 2 with zero damage
+131 builds: 131 ran, 0 failed; 0 with zero damage
 
 == failures
 
 == zero damage (main skill)
-   1  Despair
-   1  Elemental Weakness
 
 == gems not in the data (builds affected)
    5  Spectre: Powered Zealot
@@ -565,7 +563,7 @@
 032-abyssal-lich-ice-nova                            Ice Nova                                        87009 dps (theirs     559628)  0 unknown, 5 unmapped, 23 unsimulated  mana 1073/1040  energy shield 1877/2266  fire res 72/52  cold res 76/56  lightning res 95/75
 033-acolyte-of-chayula-raise-shield                  Raise Shield                                      566 dps (theirs       1791)  0 unknown, 10 unmapped, 35 unsimulated  energy shield 5835/6224  evasion 19375/20846  deflection 20538/22096  block 48/57  fire res 72/79  cold res 90/110  lightning res 57/84  chaos res 62/124
 034-amazon-lightning-spear                           Lightning Spear                               7189502 dps (theirs    2782885)  0 unknown, 14 unmapped, 24 unsimulated  armour 2625/3718  fire res 104/102
-035-blood-mage-dark-consequences                     Despair                                             0 dps (theirs          0)  0 unknown, 4 unmapped, 23 unsimulated
+035-blood-mage-dark-consequences                     Despair                                        296261 dps (theirs          0)  0 unknown, 4 unmapped, 23 unsimulated
 036-chronomancer-glacial-lance                       Glacial Lance                                  599101 dps (theirs     423547)  0 unknown, 20 unmapped, 31 unsimulated  life 3353/3178  mana 832/794  evasion 30156/34649  deflection 23220/26679
 037-deadeye-lightning-arrow                          Lightning Arrow                                521668 dps (theirs    3391171)  0 unknown, 7 unmapped, 21 unsimulated  strength 61/65  intelligence 132/136  evasion 30700/32852  deflection 17806/19054
 038-disciple-of-varashta-ruzhan-s-brand              Kelari, the Tainted Sands                      804276 dps (theirs          0)  0 unknown, 9 unmapped, 15 unsimulated
@@ -642,7 +640,7 @@
 109-abyssal-lich-bonestorm                           Bonestorm (pressed Ball Lightning)              13986 dps (theirs     189824)  0 unknown, 8 unmapped, 34 unsimulated  mana 808/783  energy shield 4589/5277
 110-acolyte-of-chayula-volcano                       Volcano                                           206 dps (theirs         87)  2 unknown, 25 unmapped, 29 unsimulated  energy shield 9864/10248  evasion 34502/32666  deflection 37608/35605
 111-amazon-fragmentation-rounds                      Fragmentation Rounds                           875274 dps (theirs      26215)  0 unknown, 14 unmapped, 20 unsimulated  evasion 11936/13498  deflection 12413/14037
-112-blood-mage-doom-blast                            Elemental Weakness                                  0 dps (theirs          0)  0 unknown, 3 unmapped, 32 unsimulated
+112-blood-mage-doom-blast                            Elemental Weakness                               5005 dps (theirs          0)  0 unknown, 3 unmapped, 32 unsimulated
 113-chronomancer-reap                                Reap                                           835353 dps (theirs    1322925)  0 unknown, 8 unmapped, 22 unsimulated
 114-deadeye-twister                                  Twister                                        121946 dps (theirs     471809)  0 unknown, 21 unmapped, 30 unsimulated  mana 1212/1243  energy shield 957/792  strength 93/103  dexterity 194/189  intelligence 362/377  armour 512/413  evasion 1929/1228
 115-disciple-of-varashta-flame-wall                  Flame Wall (pressed Frost Wall)                   929 dps (theirs       2712)  0 unknown, 13 unmapped, 21 unsimulated  energy shield 8267/9704  fire res 98/82
