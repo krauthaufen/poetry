@@ -272,6 +272,19 @@ let main _ =
         equal 4 o.Counts.["hits:Shot"]
         equal 2 o.Counts.["hits:Frag"])
 
+    test "a part that waits to be set off: the next three attack hits each cause one, the use itself none" (fun () ->
+        let gem = Tag "Gem:Bell"
+        let wave = { strike "Bell: Wave" 30.0 with Tags = Set.ofList [ Attack; gem; Triggered ]; Mods = [ Mod.flag (Named "OnlyTriggered") ] }
+        let bell = { strike "Bell" 50.0 with Tags = Set.ofList [ Attack; gem ]; Cooldown = Some 100.0; Parts = [ wave ] }
+        let f = duel [ bell; strike "Jab" 10.0 ] 5.5
+        let rules =
+            [ { Hook = OnUse; Filter = Called "Bell"; Chance = 100.0; Reaction = SetStacks("Stands", 3) }
+              { Hook = OnHit; Filter = WithTagNot(Attack, gem); Chance = 100.0; Reaction = SpendStack("Stands", TriggerSkill "Bell: Wave") } ]
+        let o = Sim.run { f with Player = { f.Player with Rules = rules } } 1u
+        equal 1 o.Counts.["hits:Bell"]
+        equal 4 o.Counts.["hits:Jab"]
+        equal 3 o.Counts.["hits:Bell: Wave"])
+
     test "banner: attack hits build its Glory, then its aura lasts for the duration" (fun () ->
         // 200 Glory at 100% of 20 per hit: placed with the tenth hit (10 s) and the twentieth.
         // 4 s of 100% more damage: the hits at 11, 12 and 13 s are doubled, the one at 14 s is not

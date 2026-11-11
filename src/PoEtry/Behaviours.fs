@@ -513,6 +513,29 @@ module Behaviours =
                     { Hook = OnHit; Filter = Called skill.Name; Chance = 100.0; Reaction = IfEnemyHas(curseName, TriggerSkill name) })
             | Error _ -> None)
 
+    /// Tempest Bell: "The Bell damages enemies on impact and can be Hit by your skills, creating a
+    /// damaging shockwave". The bell stands for `bell_hit_limit` hits: each attack hit with another
+    /// skill sets off the Shockwave part (at most one per `bell_shockwave_cooldown_ms`), the
+    /// first with the impact. The bell is taken to stand where the attacks land (guess).
+    /// Returns the skill with its shockwave waiting to be set off, and the rules.
+    let tempestBell (db: GameDb) (charMods: ModDb) (setup: GemSetup) (skill: Skill) : (Skill * Rule list) option =
+        let stats = Gems.data db setup.Gem |> Option.map (fun d -> d.StatSets |> List.collect (fun st -> st.ConstantStats)) |> Option.defaultValue []
+        let value id = stats |> List.tryPick (fun (k, v) -> if k = id then Some v else None) |> Option.defaultValue 0.0
+        let limit = value "bell_hit_limit"
+        match skill.Parts |> List.tryFind (fun p -> p.Name.EndsWith ": Shockwave") with
+        | Some wave when limit > 0.0 ->
+            let wave' =
+                { wave with
+                    Cooldown = (match value "bell_shockwave_cooldown_ms" with 0.0 -> None | ms -> Some(ms / 1000.0))
+                    Cost = 0.0
+                    Tags = wave.Tags.Add Triggered
+                    Mods = (Mod.flag (Named "OnlyTriggered") |> Mod.whenever (SkillNamed wave.Name)) :: wave.Mods }
+            Some(
+                { skill with Parts = skill.Parts |> List.map (fun p -> if p.Name = wave.Name then wave' else p) },
+                [ { Hook = OnUse; Filter = Called skill.Name; Chance = 100.0; Reaction = SetStacks("TempestBell", int limit) }
+                  { Hook = OnHit; Filter = WithTagNot(Attack, Tag("Gem:" + setup.Gem)); Chance = 100.0; Reaction = SpendStack("TempestBell", TriggerSkill wave.Name) } ])
+        | _ -> None
+
     /// Ice-Tipped Arrows: "Empowering your next Repeatable Bow or Projectile Spear Attacks to
     /// Convert Physical Damage to Cold Damage and Trigger Ice Fragments on Hit". The gem's second
     /// effect is the fragments: they land around the target and explode after their detonation
@@ -845,7 +868,9 @@ module Behaviours =
                 | [ el ] ->
                     let detonation = sum "base_skill_detonation_time" / 1000.0 * (1.0 + sum "support_fast_forward_detonation_time_+%_final" / 100.0)
                     // a seed (Living Bomb) leaves its remnant when it explodes, not when it is planted
-                    let seed = sum "living_bomb_damage_threshold_%_of_ailment_threshold" > 0.0
+                    // and a skill that only succeeds on an enemy that can be culled (Lightning Warp:
+                    // "Creates a Lightning Infusion on successful use") when it does
+                    let seed = sum "living_bomb_damage_threshold_%_of_ailment_threshold" > 0.0 || raw |> List.exists (fun (k, _) -> k = "active_skill_show_cull_range")
                     [ { Hook = (if seed then OnHit else OnUse); Filter = Called skillName; Chance = 100.0
                         Reaction = DropRemnant(el + "Infusion", detonation + pickupSeconds, sum "chance_%_to_create_additional_remnant") } ]
                 | _ -> []

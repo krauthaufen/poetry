@@ -335,6 +335,10 @@ module Setup =
                         | None -> []
                     let lasting = Behaviours.sustained db charMods setup s
                     let cryRules, cryGrants = Behaviours.warcry db charMods setup s
+                    let s, cryRules =
+                        match Behaviours.tempestBell db charMods setup s with
+                        | Some (s', rs) -> s', cryRules @ rs
+                        | None -> s, cryRules
                     let tipped = Behaviours.iceTipped db charMods (Gems.chooseWeapon db setup.Gem sheet.Weapons) setup s
                     let cryRules = cryRules @ (match tipped with Some (_, rs, _) -> rs | None -> [])
                     let cryGrants = cryGrants @ (match tipped with Some (_, _, ms) -> ms | None -> [])

@@ -1213,6 +1213,8 @@ module Sim =
                         let hasCharged = skill.Parts |> List.exists isCharged
                         (skill :: skill.Parts)
                         |> List.filter (fun p -> not (partFlag p "DetonatedByDamage"))
+                        // a part that only happens when something sets it off (the Bell's shockwave)
+                        |> List.filter (fun p -> p.Name = skill.Name || not (partFlag p "OnlyTriggered"))
                         |> List.filter (fun p ->
                             if isCharged p || partFlag p "OnlyWithCharge" then charged
                             elif (partNamed p "DetonatedBy:").IsSome then false
