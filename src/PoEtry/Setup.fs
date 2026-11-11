@@ -478,7 +478,7 @@ module Setup =
         let curses, curseGrants = Behaviours.curseAuras c.Db c.Sheet c.Build
         let player = if curseGrants.IsEmpty then player else { player with Mods = player.Mods @ curseGrants }
         { Enemies = enemies
-          EnemyAuras = curses @ Behaviours.criticalWeaknessAura c.Sheet
+          EnemyAuras = curses @ Behaviours.criticalWeaknessAura c.Sheet @ Behaviours.witheringPresence c.Db c.Sheet c.Build
           Player = player
           Minions = c.Minions
           Targeting = o.Targeting

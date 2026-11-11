@@ -33,6 +33,13 @@ let runOne (path: string) : Result =
     try
         let text = System.IO.File.ReadAllText path
         let build, _ = Setup.parseBuild text
+        // experiment: POETRY_SWAP_SETS=1 swaps the weapon-set passives
+        let build =
+            match System.Environment.GetEnvironmentVariable "POETRY_SWAP_SETS" with
+            | "1" -> { build with TreeNodesSet1 = build.TreeNodesSet2; TreeNodesSet2 = build.TreeNodesSet1 }
+            | "none" -> { build with TreeNodesSet1 = []; TreeNodesSet2 = [] }
+            | "both" -> { build with TreeNodes = build.TreeNodes @ build.TreeNodesSet1 @ build.TreeNodesSet2; TreeNodesSet1 = []; TreeNodesSet2 = [] }
+            | _ -> build
         let ninja = Json.field "ninja" (Json.parse text)
         let theirs = ninja |> Option.bind (Json.field "defensiveStats")
         let num key = theirs |> Option.bind (Json.field key) |> Option.bind Json.num

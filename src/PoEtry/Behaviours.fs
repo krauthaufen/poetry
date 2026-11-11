@@ -531,6 +531,23 @@ module Behaviours =
         let n = Mods.sumBase Ctx.empty [ Named "CriticalWeaknessAura" ] (ModDb.ofList sheet.Mods)
         if n > 0.0 then [ "CriticalWeakness", min 20 (int n), [] ] else []
 
+    /// Withering Presence: "Withers enemies in your Presence every N seconds" for its duration:
+    /// a steady number of Withered stacks (duration / interval, at most 10) on every enemy.
+    let witheringPresence (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) : (string * int * Mod list) list =
+        let charMods = ModDb.ofList sheet.Mods
+        build.Groups
+        |> List.filter (fun g -> g.Enabled)
+        |> List.collect (fun g -> g.Gems |> List.filter (fun x -> x.Enabled && not x.IsSupport))
+        |> List.tryPick (fun gem ->
+            let raw = Gems.rawStats db charMods { Gem = gem.Name; Level = gem.Level; Quality = gem.Quality; StatSet = 1; Supports = [] }
+            let sum id = raw |> List.filter (fun (k, _) -> k = id) |> List.sumBy snd
+            let every, lasts = sum "skill_withering_presence_frequency_ms", sum "base_skill_effect_duration"
+            if every > 0.0 && lasts > 0.0 then
+                let maxStacks, mods = keywordEffect charMods "Withered"
+                Some [ "Withered", min maxStacks (int (ceil (lasts / every))), mods ]
+            else None)
+        |> Option.defaultValue []
+
     /// Charms from the equipped items (API layout: "Flask: Lasts N Seconds", "Flask: Consumes N
     /// of M Charges on use", "Utility: <effect>", "Used when you ..."). Returns the charms and
     /// the sheet mods their effects are (conditional on the charm's buff).

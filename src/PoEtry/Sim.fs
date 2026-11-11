@@ -902,7 +902,7 @@ module Sim =
                              |> fun w -> { w with Counts = bump ("apply:" + full) w.Counts })
                      | ApplyExposure (dt, amount, duration) ->
                          onTarget (fun t ->
-                             let k = effectOnSelf w.Enemies.[t] "ExposureEffectOnSelf"
+                             let k = effectOnSelf w.Enemies.[t] "ExposureEffectOnSelf" * Mods.inc Ctx.empty [ Named "ExposureEffect" ] (ModDb.ofList actor.Mods)
                              let name = "Exposure:" + DamageType.name dt
                              let current =
                                  Map.tryFind name w.Enemies.[t].Debuffs
@@ -1305,7 +1305,10 @@ module Sim =
             let mods = skillDb env actor skill st
             // Isolated: none of its allies within 6 m (keyword text)
             let isolated = alive w |> List.forall (fun o -> o.Def.Name = e.Def.Name || Vec.dist o.Def.Position e.Def.Position > 60.0)
-            let ctx = Skill.ctx skill false (skillStacks actor skill st) (if isolated then Map.add "Isolated" 1 (status e) else status e)
+            // Close Range: within 2 m of the player (keyword text)
+            let close = Vec.length e.Def.Position - e.Def.Size <= 20.0
+            let enemyStatus = status e |> (fun m -> if isolated then Map.add "Isolated" 1 m else m) |> (fun m -> if close then Map.add "Close" 1 m else m)
+            let ctx = Skill.ctx skill false (skillStacks actor skill st) enemyStatus
             let hitChance =
                 match Mods.override' ctx HitChance mods with
                 | Some v -> v
@@ -1323,6 +1326,11 @@ module Sim =
                 { w with Counts = bump ("miss:" + skill.Name) w.Counts }
             else
                 let def = defender e
+                // "Enemies you Curse / Mark take X% increased Damage": additive with what the enemy already takes
+                let def =
+                    match Mods.sumInc ctx [ Named "EnemyDamageTaken" ] mods with
+                    | 0.0 -> def
+                    | x -> { def with Mods = ModDb.add def.Mods (Mod.inc (DamageTaken AllDamage) x) }
                 let hit = Hit.roll rng ctx mods skill def
                 // Culling Strike: an enemy at or below the threshold for its rarity dies, before the hit's damage
                 let hit =
@@ -1758,7 +1766,9 @@ module Sim =
                                 m |> Map.add from ((Map.tryFind from m |> Option.defaultValue 0.0) - moved)
                                   |> Map.add into ((Map.tryFind into m |> Option.defaultValue 0.0) + moved))
                             atk.Damage
-                    let crit = rng.Chance atk.CritChance
+                    let crit = rng.Chance(atk.CritChance * v.EnemyCritChanceMult)
+                    // "Defend with X% of Armour against Projectile Attacks / Critical Hits"
+                    let armourShare = (if atk.Melee then 1.0 else v.ArmourVsProjectiles) * (if crit then v.ArmourVsCrits else 1.0)
                     let critMult = if crit then 1.0 + Constants.monsterBaseCritBonus / 100.0 * (1.0 - v.LessCritDamageTaken / 100.0) else 1.0
                     let playerSt = Map.find env.Fight.Player.Name w.Actors
                     let shocked =
@@ -1773,12 +1783,12 @@ module Sim =
                                 match t with
                                 | Physical ->
                                     let d = if atk.Melee then max 0.0 (d - v.FlatPhysicalTaken) else d
-                                    d * (1.0 - Vitals.armourReduction v.Armour d / 100.0)
+                                    d * (1.0 - Vitals.armourReduction (v.Armour * armourShare) d / 100.0)
                                 | t ->
                                     let d = d * (1.0 - (Map.tryFind t v.Resist |> Option.defaultValue 0.0) / 100.0)
                                     // "X% of Armour also applies to <type> damage"
                                     match Map.tryFind t v.ArmourAppliesTo with
-                                    | Some pct -> d * (1.0 - Vitals.armourReduction (v.Armour * pct / 100.0) d / 100.0)
+                                    | Some pct -> d * (1.0 - Vitals.armourReduction (v.Armour * armourShare * pct / 100.0) d / 100.0)
                                     | None -> d
                             d * (Map.tryFind t v.TakenMult |> Option.defaultValue 1.0) * (1.0 + shocked / 100.0)
                               * (if blocked then v.BlockedDamageTaken / 100.0 else 1.0))

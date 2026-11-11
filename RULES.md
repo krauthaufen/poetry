@@ -305,6 +305,17 @@ The game's standard buffs and debuffs, with the numbers of its keyword text. Sta
 | Culling Strike | an enemy at or below 35% / 20% / 10% / 5% life (normal / magic / rare / unique; x increased threshold) is killed, checked before the hit's damage | GameConstants, keyword text | data |
 | Not modelled | Impale, Incision, Sundered Armour, Volatility, Consecrated / Jagged Ground, Guard, Ancestral Boost, Decimating Strike | - | missing |
 
+### What the attacker does to the enemy
+
+| Mechanic | Rule | Source | Confidence |
+|---|---|---|---|
+| Resistance lowered by a skill | "Enemies Frozen by this Skill have -X% to Cold Resistance": counted for the attacker's own hits against frozen enemies (it would also help allies; not modelled) | stat text | data |
+| Increased damage taken | "Enemies you Curse / Mark take X% increased Damage": additive with the enemy's other increased damage taken (shock...) | stat text | data |
+| Faster damaging ailments | "deal damage X% faster": that much more per second for that much less time | stat text | data |
+| Exposure effect | "Exposure applied has X% increased effect" scales the exposure the character applies | stat text | data |
+| Withering Presence | Withered on every enemy: duration / interval stacks at any time, at most 10 (presence area ignored) | gem stats | data |
+| Close Range | within 2 m of the player; Isolated: no ally within 6 m | keyword text | data |
+
 ### Warcries
 
 | Mechanic | Rule | Source | Confidence |

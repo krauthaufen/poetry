@@ -79,6 +79,11 @@ type PlayerStats =
       FlatPhysicalTaken: float
       /// Enemy critical hits deal this % less extra damage.
       LessCritDamageTaken: float
+      /// Multiplier on monsters' chance to crit you; share of armour (1 = all) that defends
+      /// against projectile attacks and against critical hits.
+      EnemyCritChanceMult: float
+      ArmourVsProjectiles: float
+      ArmourVsCrits: float
       StunThreshold: float
       AilmentThreshold: float
       FreezeThreshold: float
@@ -119,7 +124,7 @@ module PlayerStats =
           LifeRegen = 0.0; ManaRegen = 0.0; EnergyShieldRecharge = 0.0; Block = 0.0; LuckyBlock = false
           BlockedDamageTaken = 0.0; Ward = 0.0; WardRegen = 0.0; WardOnBlock = 0.0; CostsInfernalFlame = false; TakenAs = []
           ESRechargeDelay = 4.0; ESRegen = 0.0; ManaBeforeLife = 0.0; BypassES = 0.0; ArmourAppliesTo = Map.empty
-          TakenMult = Map.empty; FlatPhysicalTaken = 0.0; LessCritDamageTaken = 0.0; StunThreshold = life
+          TakenMult = Map.empty; FlatPhysicalTaken = 0.0; LessCritDamageTaken = 0.0; EnemyCritChanceMult = 1.0; ArmourVsProjectiles = 1.0; ArmourVsCrits = 1.0; StunThreshold = life
           AilmentThreshold = life / 2.0; FreezeThreshold = life / 2.0; AvoidStun = 0.0; Avoid = Map.empty
           SelfEffect = Map.empty; SelfDuration = Map.empty; LifeOnKill = 0.0; ESOnKill = 0.0; LifeOnBlock = 0.0
           ManaOnBlock = 0.0; Recoup = []; RecoupSeconds = 4.0; LifeRecoveryRate = 1.0; ManaRecoveryRate = 1.0

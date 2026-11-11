@@ -265,7 +265,8 @@ module Hit =
         let maxRes =
             min Constants.resistCeiling (Constants.enemyBaseMaxResist + Mods.sumBase dctx [ MaxResist t ] defender.Mods)
         let res =
-            Mods.sumBase dctx [ Resist t ] defender.Mods
+            // "Enemies Frozen by this Skill have -X% to Cold Resistance": lowered by the attacker, for its hits
+            Mods.sumBase dctx [ Resist t ] defender.Mods + Mods.sumBase attackerCtx [ Named("EnemyResist:" + DamageType.name t) ] attackerMods
             |> min maxRes
             |> max Constants.resistFloor
         let pen = Mods.sumBase attackerCtx [ Penetration t ] attackerMods

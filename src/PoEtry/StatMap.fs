@@ -292,7 +292,7 @@ module StatMap =
         // seconds added to the use time, not shortened by speed
         | "total_attack_time_+_ms" | "total_cast_time_+_ms" -> one (Mod.base' (Named "FixedUseTime") (v / 1000.0))
         // how a skill is aimed and animated, where remnants can be collected, things monsters never do to the player
-        | "herald_of_thunder_storm_max_hits" | "action_requires_aiming_stance" | "action_required_target_facing_angle_tolerance_degrees" | "crossbow_barrage_recoil_per_shot"
+        | "skill_withering_presence_frequency_ms" | "herald_of_thunder_storm_max_hits" | "action_requires_aiming_stance" | "action_required_target_facing_angle_tolerance_degrees" | "crossbow_barrage_recoil_per_shot"
         | "crossbow_barrage_total_recoil_buff_count" | "crossbow_barrage_debuff_duration_ms" | "crossbow_barrage_attack_time_ratio_%"
         | "base_minimum_channel_time_ms" | "base_melee_dash_range" | "base_knockback_distance" | "main_hand_weapon_range_+"
         | "remnant_pickup_range_+%" | "immune_to_maim" | "immune_to_hinder" | "enemy_extra_damage_rolls_chance_%"
@@ -396,6 +396,22 @@ module StatMap =
         | "culling_strike_threshold_+%" -> one (Mod.inc (Named "CullingThreshold") v)
         | "culling_strike_threshold_+%_vs_rare_or_unique_monsters" -> one (Mod.inc (Named "CullingThreshold") v |> Mod.whenever (EnemyHas "RareOrUnique"))
         | "culling_strike_threshold_+%_vs_immobilised_enemies" -> one (Mod.inc (Named "CullingThreshold") v |> Mod.whenever (EnemyHas "Immobilised"))
+        // what the attacker does to the enemy's resistance and damage taken (see Hit / Sim.hitEnemy)
+        | "freeze_applies_cold_resistance_+" -> one (Mod.base' (Named "EnemyResist:Cold") v |> Mod.whenever (EnemyHas "Frozen"))
+        | "enemies_damage_taken_+%_while_cursed" -> one (Mod.inc (Named "EnemyDamageTaken") v |> Mod.whenever (EnemyHas "Cursed"))
+        | "marked_enemy_damage_taken_+%" -> one (Mod.inc (Named "EnemyDamageTaken") v |> Mod.whenever (EnemyHas "Marked"))
+        | "damaging_ailments_deal_damage_+%_faster" -> one (Mod.inc (Named "FasterAilments") v)
+        | "faster_burn_%" -> one (Mod.inc (Named "FasterIgnite") v)
+        | "exposure_effect_+%" -> one (Mod.inc (Named "ExposureEffect") v)
+        | "hit_damage_stun_multiplier_+%_vs_enemies_at_close_range" -> one (Mod.inc (Buildup HeavyStun) v |> Mod.whenever (EnemyHas "Close"))
+        | "passive_overwhelming_strike_hit_damage_stun_multiplier_+%_final_with_crits" -> one (Mod.more (Buildup HeavyStun) v |> Mod.whenever IsCrit)
+        | "non_damaging_ailment_effect_+%_on_self" -> Some(Mods [ Mod.inc (Named "SelfEffect:Chill") v; Mod.inc (Named "SelfEffect:Shock") v ])
+        | "base_enemy_critical_strike_chance_+%_against_self" -> one (Mod.inc (Named "EnemyCritChanceAgainstSelf") v)
+        | "defend_with_%_armour_against_ranged_attacks" -> one (Mod.base' (Named "DefendWithArmourVsProjectiles") v)
+        | "defend_with_%_armour_against_critical_strikes" -> one (Mod.base' (Named "DefendWithArmourVsCrits") v)
+        | "mark_use_speed_+%" -> one (Mod.inc Speed v |> Mod.whenever (SkillIs(Tag "Type:Mark")))
+        | "base_mana_cost_efficiency_+%_of_mark_skills" -> one (Mod.inc ManaCostEfficiency v |> Mod.whenever (SkillIs(Tag "Type:Mark")))
+        | "summon_totem_cast_speed_+%" -> one (Mod.inc Speed v |> Mod.whenever (SkillIs(Tag "Type:SummonsTotem")))
         | "base_maximum_ward" -> one (Mod.base' (Named "Ward") v)
         | "maximum_ward_+%" -> one (Mod.inc (Named "Ward") v)
         | "ward_regeneration_rate_+%" -> one (Mod.inc (Named "WardRegen") v)

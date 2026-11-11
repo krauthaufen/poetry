@@ -483,6 +483,26 @@ let main _ =
         // Critical Weakness: +0.5% crit chance per stack on the enemy
         near 5.0 (Mods.sumBase { Ctx.empty with EnemyStatus = Map.ofList [ "CriticalWeakness", 10 ] } [ CritChance ] (ModDb.ofList um)))
 
+    test "what the attacker does to the enemy: lowered resistance, increased damage taken, faster ailments" (fun () ->
+        let frozenRes = Mod.base' (Named "EnemyResist:Cold") -20.0 |> Mod.whenever (EnemyHas "Frozen")
+        let cold = { Skill.make "Shard" [ Spell ] with BaseDamage = Map.ofList [ Cold, Range.fixedAt 100.0 ]; BaseCrit = 0.0 }
+        let c = { Skill.ctx cold false Map.empty (Map.ofList [ "Frozen", 1 ]) with Crit = false }
+        near -20.0 (Hit.effectiveResist c (ModDb.ofList [ frozenRes ]) (enemy []) Cold)
+        near 0.0 (Hit.effectiveResist { c with EnemyStatus = Map.empty } (ModDb.ofList [ frozenRes ]) (enemy []) Cold)
+        // "Enemies you Curse take 20% increased Damage" adds to a 30% curse-borne increase: x1.5, not x1.56
+        let aura = [ "Curse:Hex", 1, [ Mod.inc (DamageTaken AllDamage) 30.0 ] ]
+        let mods = [ noIgnite; Mod.inc (Named "EnemyDamageTaken") 20.0 |> Mod.whenever (EnemyHas "Cursed") ]
+        let f = { Fight.single (boss 1e9) (Actor.make "Player" mods [ fireSpell 100.0 ]) 1.5 with EnemyAuras = aura }
+        near 150.0 (Sim.run f 1u).DamageBy.["Bolt (hit)"]
+        // ignite dealing damage 100% faster: twice the damage per second for half the time
+        let rng = Rng(1u)
+        let hit = { Crit = false; Unmitigated = Map.ofList [ Fire, 1000.0 ]; Dealt = Map.ofList [ Fire, 1000.0 ] }
+        let ignite m = Ailments.fromHit rng ctx (ModDb.ofList (Mod.base' (AilmentChance Ignite) 100.0 :: m)) (enemy []) hit |> List.pick (function Dot (Ignite, _, dps, dur, _) -> Some(dps, dur) | _ -> None)
+        let dps, dur = ignite []
+        let dps2, dur2 = ignite [ Mod.inc (Named "FasterAilments") 100.0 ]
+        near (2.0 * dps) dps2
+        near (dur / 2.0) dur2)
+
     test "crossbow: a load of bolts, then a reload" (fun () ->
         // 2 bolts per load, 0.5 s per shot, 1 s reload: two shots every 2 s
         let shot = { Skill.make "Shot" [ Attack; Projectile ] with BaseDamage = Map.ofList [ Physical, Range.fixedAt 10.0 ]; BaseTime = 0.5; Clip = 2; ReloadTime = 1.0 }
