@@ -233,6 +233,15 @@ module Pob =
     /// Character mods from equipped items and allocated passives.
     let character (db: GameDb) (tree: Map<int, TreeNode>) (jewelSlots: int list) (build: PobBuild) : CharacterSheet =
         let items = build.Items |> List.filter (fst >> alwaysOn) |> List.map (fun (slot, text) -> slot, resolveBonded build slot text)
+        // Kalandra's Touch: "Reflects opposite Ring" - the ring is a copy of the other one
+        let items =
+            let ring n = items |> List.tryFind (fun (slot, _) -> slot = n) |> Option.map snd
+            let reflects (t: string) = t.Contains "Reflects opposite Ring" || t.Contains "Reflects your other Ring"
+            items |> List.map (fun (slot, text) ->
+                let other = if slot = "Ring 1" then ring "Ring 2" elif slot = "Ring 2" then ring "Ring 1" else None
+                match other with
+                | Some o when reflects text && not (reflects o) -> slot, o
+                | _ -> slot, text)
         let extraNodes = allocatedByItems tree (List.map snd items)
         let build = { build with TreeNodes = build.TreeNodes @ extraNodes }
         // Radius jewels: "Notable / Small Passive Skills in Radius also grant X" gives X once per
@@ -304,6 +313,8 @@ module Pob =
                     lines |> List.choose (fun l ->
                         let t = l.Trim()
                         match t.IndexOf ": " with
+                        // "Armour: 1842" is the item's own armour, not a rune line for armour pieces
+                        | k when k > 0 && System.Char.IsDigit t.[k + 2] && t.Substring(k + 2) |> Seq.forall (fun ch -> System.Char.IsDigit ch || ch = '.') -> Some l
                         | k when k > 0 ->
                             match fits (t.Substring(0, k)) with
                             | Some true -> Some(t.Substring(k + 2))
@@ -326,7 +337,8 @@ module Pob =
             parsed |> List.tryFind (fun (slot, _) -> slot = "Weapon 1 Swap") |> Option.bind (fun (_, p) -> p.Weapon)
             |> Option.map (fun w -> { w with Tags = Tag "WeaponSet2" :: w.Tags })
         // A weapon's local mods are already in its Weapon; only its global mods go to the sheet.
-        let itemMods = parsed |> List.collect (fun (slot, p) -> p.Mods |> List.map (slotCondition slot))
+        let sourced (source: string) (m: Mod) = if m.Source = "" then Mod.from source m else m
+        let itemMods = parsed |> List.collect (fun (slot, p) -> p.Mods |> List.map (slotCondition slot >> sourced (slot + ": " + p.Name)))
         let itemCov =
             parsed
             |> List.map (fun (slot, p) -> { p.Coverage with UnknownText = p.Coverage.UnknownText |> List.map (fun l -> slot + ": " + l) })
@@ -343,7 +355,7 @@ module Pob =
                 pick p |> Option.map (fun f ->
                     let inc = text.Split('\n') |> Array.tryPick (fun l -> if l.Contains "increased Charges gained" then (match System.Double.TryParse(l.Trim().Split('%').[0]) with | true, v -> Some v | _ -> None) else None)
                     f, inc |> Option.defaultValue 0.0))
-        { Mods = itemMods @ legacies @ radiusMods @ treeMods @ extraMods
+        { Mods = itemMods @ legacies @ radiusMods @ treeMods @ (extraMods |> List.map (sourced "quest"))
           MainHand = mainHand
           Weapons = Option.toList mainHand @ Option.toList swapHand
           ItemDefences = parsed |> List.filter (fun (slot, _) -> not (slot.Contains "Swap")) |> List.collect (fun (slot, p) -> p.Defences |> List.map (fun (st, v) -> slot, st, v))

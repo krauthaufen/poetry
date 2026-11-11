@@ -128,7 +128,7 @@ let section title (rows: (string * int * (string * string)) list) kinds =
         rows |> List.filter (fun (_, _, (c, _)) -> c = k) |> List.sortByDescending (fun (_, n, _) -> n)
         |> List.iter (fun (id, n, (_, note)) -> details.AppendLine(sprintf "%5d  %s%s" n id (if note = "" then "" else "   [" + note + "]")) |> ignore)
 for title, rows in [ "affix mods", affix; "passive tree", tree; "gems", gemT ] do
-    section title rows [ "inert"; "unsimulated"; "unmapped"; "not-offensive" ]
+    section title rows [ "inert"; "unsimulated"; "unmapped"; "not-offensive"; "local" ]
 details.AppendLine "\n## text lines with no stat template" |> ignore
 unknownText |> List.iter (fun l -> details.AppendLine("  " + l) |> ignore)
 System.IO.File.WriteAllText(__SOURCE_DIRECTORY__ + "/census.txt", out.ToString() + "\n" + details.ToString())

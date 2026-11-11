@@ -43,7 +43,7 @@ module Items =
               "Unique ID:"; "League:"; "Rune:"; "LevelReq:"; "Implicits:"; "Prefix:"; "Suffix:"; "Variant:"
               "Selected Variant:"; "Has Alt Variant"; "Selected Alt Variant"; "Allow Duplicate Variants:"; "Crafted:"
               "Unreleased:"; "Catalyst:"; "CatalystQuality:"; "Talisman Tier:"; "Evasion:"; "Ward:"; "ArmourBasePercentile:"
-              "EvasionBasePercentile:"; "EnergyShieldBasePercentile:"; "Cluster Jewel"; "Flask: "; "Runic Ward:" ]
+              "EvasionBasePercentile:"; "EnergyShieldBasePercentile:"; "Cluster Jewel"; "Flask: "; "Runic Ward:"; "Sockets filled:" ]
         prefixes |> List.exists (fun p -> line.StartsWith p)
 
     /// Lines that describe the item itself or character-building, with no effect in a fight.
@@ -200,6 +200,39 @@ module Items =
         let context = if baseName.IsSome || hasLocalDefences then StatText.ItemLocal else StatText.Global
         let stats, unknown = StatText.parseLinesIn context db.Text candidates
         let mods, locals, cov = interpret stats
+        // Other item-local stats. Some only change what the item already displays (its
+        // defences, requirements, sockets, quality) or how it can be crafted: nothing to add.
+        // The rest act when the item is used: a weapon's ("Leeches 8% of Physical Damage as
+        // Life", "+25% to Critical Damage Bonus") count for attacks with it, read like the
+        // same stat without "local_". What that doesn't explain is reported.
+        let socketsFilled = lines |> List.tryPick (fun l -> if l.StartsWith "Sockets filled:" then Some(float (l.Substring(15).Trim())) else None) |> Option.defaultValue 0.0
+        let localMods, localCov =
+            locals
+            |> List.fold
+                (fun (ms, c: Coverage) (l, v) ->
+                    match l with
+                    | LocalOther id ->
+                        let has (w: string) = id.Contains w
+                        let shown =
+                            [ "armour"; "evasion"; "energy_shield"; "ward"; "block_chance"; "requirement"; "prefixes"; "suffixes"; "quality"
+                              "_display_"; "socket"; "local_is_"; "implicit_stat_magnitude"; "soul_core"; "weapon_range"; "reload_speed"
+                              "corruption"; "charm"; "flask"; "local_jewel_"; "alternate_tree"; "cannot_be_thrown"; "mod_effect"
+                              "hungry_loop"; "mages_legacy"; "synthesised"; "in_breach"; "base_crit_chance_permyriad_override"
+                              "no_physical_damage"; "spirit" ]
+                            |> List.exists has
+                        if id = "local_resist_all_elements_+%_per_rune_or_soul_core" then
+                            ms @ (Mod.resistAllElemental (v * socketsFilled)), c
+                        elif id = "local_ring_duplicate_other_ring" then ms, c
+                        elif shown then ms, c
+                        else
+                            match StatMap.meaning (id.Substring 6) v with
+                            | Mods found ->
+                                // a weapon's own stats are for attacks with it
+                                ms @ (if baseName.IsSome then found |> List.map (Mod.whenever (SkillIs Attack)) else found), c
+                            | _ -> ms, { c with Unsimulated = c.Unsimulated @ [ id, "item-local" ] }
+                    | _ -> ms, c)
+                ([], Coverage.empty)
+        let mods, cov = mods @ localMods, Coverage.merge cov localCov
         // Lines before the first understood stat are usually the name block; don't report them.
         let unknown = unknown |> List.filter (fun l -> l.Contains " " && not (Some l = baseName))
         let defences =
@@ -313,7 +346,7 @@ module Tree =
                         keystoneLines |> List.collect (fun (k, start, ms) -> if k = node.Name && l.StartsWith start then ms |> List.map (Mod.from node.Name) else []))
                 let stats, unknown = StatText.parseLines db.Text relevant
                 let ms, _, c = Items.interpret stats
-                let ms = ms @ lineMods
+                let ms = (ms @ lineMods) |> List.map (fun m -> if m.Source = "" then Mod.from ("tree: " + node.Name) m else m)
                 let unknown = unknown |> List.map (fun l -> sprintf "%s: %s" node.Name l)
                 mods @ ms, Coverage.merge cov { c with UnknownText = c.UnknownText @ unknown })
             ([], Coverage.empty)

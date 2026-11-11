@@ -164,7 +164,14 @@ module Setup =
             [ for c, name in named do
                 if count c >= 10 then yield "Supports10:" + name
                 if most > 0 && count c = most then yield "SupportsMajority:" + name ]
-        let maxResources = (Pob.maxResources sheet @ moteMax @ o.MaxOverrides @ ((equipmentFlags @ supportFlags) |> List.map (fun f -> f, 1))) |> Map.ofList
+        // "for each Corrupted Item Equipped"
+        let corrupted =
+            build.Items
+            |> List.filter (fun (slot, text) -> not (slot.StartsWith "Flask" || slot.StartsWith "Charm" || slot.StartsWith "Jewel" || slot.Contains "Swap") && text.Split('\n') |> Array.exists (fun l -> l.Trim() = "Corrupted"))
+            |> List.length
+        let maxResources =
+            (Pob.maxResources sheet @ moteMax @ o.MaxOverrides @ ((equipmentFlags @ supportFlags) |> List.map (fun f -> f, 1)) @ (if corrupted > 0 then [ "CorruptedItems", corrupted ] else []))
+            |> Map.ofList
         let startResources =
             maxResources
             |> Map.map (fun k n ->

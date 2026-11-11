@@ -131,7 +131,13 @@ module Api =
                     if filled.StartsWith "Recovers" || filled.StartsWith "Consumes" then Some("Flask: " + filled) else None
                 | _ -> None)
         let radius = property "Radius" item |> Option.map (fun r -> "Radius: " + r) |> Option.toList
-        [ "Rarity: " + get "rarity"; get "name"; get "typeLine"; "--------" ] @ quality @ defences @ templated @ radius @ [ "--------" ] @ modLines item
+        // runes, soul cores, idols in the item's sockets ("per Socket filled")
+        let filled =
+            Json.list (Json.field "socketedItems" item)
+            |> List.filter (fun s -> Json.field "support" s |> Option.isNone && (Json.strField "frameTypeId" s <> Some "Gem") && not (Json.list (Json.field "properties" s) |> List.exists (fun p -> Json.strField "name" p = Some "Level")))
+            |> List.length
+        let sockets = (if filled > 0 then [ sprintf "Sockets filled: %d" filled ] else []) @ (if Json.field "corrupted" item = Some(JBool true) then [ "Corrupted" ] else [])
+        [ "Rarity: " + get "rarity"; get "name"; get "typeLine"; "--------" ] @ quality @ defences @ templated @ radius @ sockets @ [ "--------" ] @ modLines item
         |> String.concat "\n"
 
     let private gemLevel (gem: Json) =

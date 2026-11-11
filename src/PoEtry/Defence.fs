@@ -1,15 +1,17 @@
 namespace PoEtry
 
 module Defence =
-    /// Class base attributes from tree.json ("classes": name, base_str, base_dex, base_int).
+    /// Class base attributes from tree.json ("classes": name, base_str, base_dex, base_int),
+    /// also under each ascendancy's name (the API names an ascended character by it).
     let classBases (treeJson: string) =
         Json.list (Json.field "classes" (Json.parse treeJson))
-        |> List.choose (fun c ->
+        |> List.collect (fun c ->
             match Json.strField "name" c with
             | Some n ->
                 let g k = Json.numField k c |> Option.defaultValue 0.0
-                Some(n, (g "base_str", g "base_dex", g "base_int"))
-            | None -> None)
+                let b = g "base_str", g "base_dex", g "base_int"
+                (n, b) :: (Json.list (Json.field "ascendancies" c) |> List.choose (Json.strField "name") |> List.map (fun a -> a, b))
+            | None -> [])
         |> Map.ofList
 
     /// "Mercenary3" (API class id) -> "Mercenary".
@@ -54,6 +56,8 @@ module Defence =
         let bStr, bDex, bInt = Map.tryFind (baseClass sheet.ClassName) bases |> Option.defaultValue (0.0, 0.0, 0.0)
         let attr k b = (b + Mods.sumBase c [ Attribute k ] db) * Mods.mult c [ Attribute k ] db |> floor
         let str, dex, int' = attr "Str" bStr, attr "Dex" bDex, attr "Int" bInt
+        // "per 10 Intelligence", "per Dexterity": attributes as stack counts
+        let c = { c with Buffs = c.Buffs |> Map.add "Str" (int str) |> Map.add "Dex" (int dex) |> Map.add "Int" (int int') }
         let level = float sheet.Level
         // item values; the body armour's own values can have their own increases
         let bodyInc stat =
@@ -81,7 +85,8 @@ module Defence =
         let flag n = Mods.flag c (Named n) db
         // Giant's Blood halves the life Strength gives
         let lifePerStr = if flag "HalfLifeFromStrength" then 1.0 else 2.0
-        let lifeFull = pool MaxLife (baseLife + lifePerLevel * level + lifePerStr * str)
+        let bodyES = itemValue MaxEnergyShield ((=) "Body Armour")
+        let lifeFull = pool MaxLife (baseLife + lifePerLevel * level + lifePerStr * str + bodyES * Mods.sumBase c [ Named "LifeFromBodyES" ] db / 100.0)
         // "X% of maximum Life converted to / gained as Energy Shield"
         let converted = lifeFull * min 100.0 (Mods.sumBase c [ Named "LifeConvertedToES" ] db) / 100.0
         let gainedAsES = lifeFull * Mods.sumBase c [ Named "LifeGainedAsES" ] db / 100.0
@@ -94,29 +99,40 @@ module Defence =
         let es = esFull - esToMana
         let onlyLeech = flag "OnlyLeechRecoversLife"
         let lifeRecharges = flag "LifeRechargesInsteadOfES"
+        let armour = pool Armour (fromItems Armour) + mana * Mods.sumBase c [ Named "ManaGainedAsArmour" ] db / 100.0
+        // Character.ot base_evasion_rating = 7
+        let evasion = pool Evasion (fromItems Evasion + 7.0 + itemValue MaxEnergyShield ((=) "Helmet") * Mods.sumBase c [ Named "EvasionPerHelmetES" ] db)
+        // Iron Reflexes: all evasion becomes armour
+        let armour, evasion = if Mods.flag c (Named "EvasionToArmour") db then armour + evasion, 0.0 else armour, evasion
         let named n = Mods.sumBase c [ Named n ] db
         let ailments = [ "Ignite"; "Chill"; "Freeze"; "Shock"; "Bleed"; "Poison" ]
         // stun threshold: maximum life (before Chaos Inoculation), ailment threshold: half of it
         let stunThreshold = (lifeFull + named "StunThreshold" + es * named "StunThresholdFromES" / 100.0) * Mods.mult c [ Named "StunThreshold" ] db
         let ailmentThreshold =
-            (lifeFull * Map.find "PlayerAilmentThresholdLifeFactor" Tables.gameConstants + named "PlayerAilmentThreshold" + es * named "AilmentThresholdFromES" / 100.0)
+            (lifeFull * Map.find "PlayerAilmentThresholdLifeFactor" Tables.gameConstants + named "PlayerAilmentThreshold" + es * named "AilmentThresholdFromES" / 100.0
+             + evasion * named "AilmentThresholdFromEvasion" / 100.0)
             * Mods.mult c [ Named "PlayerAilmentThreshold" ] db
         let lifeRecovery = Mods.mult c [ Named "LifeRecoveryRate" ] db
         let manaRecovery = Mods.mult c [ Named "ManaRecoveryRate" ] db
         let esRecovery = Mods.mult c [ Named "ESRecoveryRate" ] db
         let regenToES = Mods.flag c (Named "RegenESInsteadOfLife") db
         let lifeRegen = (Mods.sumBase c [ LifeRegen ] db + life * Mods.sumBase c [ LifeRegenPercent ] db / 100.0) * Mods.mult c [ LifeRegen ] db
-        let armour = pool Armour (fromItems Armour)
-        let evasion = pool Evasion (fromItems Evasion)
-        // Iron Reflexes: all evasion becomes armour
-        let armour, evasion = if Mods.flag c (Named "EvasionToArmour") db then armour + evasion, 0.0 else armour, evasion
-        let deflection = evasion * Mods.sumBase c [ Named "DeflectionPercentOfEvasion" ] db / 100.0 + Mods.sumBase c [ Deflection ] db
+        let deflection =
+            evasion * Mods.sumBase c [ Named "DeflectionPercentOfEvasion" ] db / 100.0
+            + armour * Mods.sumBase c [ Named "DeflectionPercentOfArmour" ] db / 100.0
+            + Mods.sumBase c [ Deflection ] db
         let resist t =
             // Chaos Inoculation: immune to chaos damage
             if t = Chaos && ci then t, 100.0
             else
-                let cap = min playerResistCap (playerMaxResist + Mods.sumBase c [ MaxResist t ] db)
-                t, min cap (Mods.sumBase c [ Resist t ] db)
+                let cap =
+                    match Mods.override' c (Named "MaxResistOverride") db with
+                    | Some v -> v
+                    | None -> min playerResistCap (playerMaxResist + Mods.sumBase c [ MaxResist t ] db)
+                // the campaign's elemental resistance penalty, complete in the endgame
+                let penalty = if DamageType.isElemental t then Constants.endgameResistPenalty else 0.0
+                let doubled = if t = Chaos && Mods.flag c (Named "ChaosResistDoubled") db then 2.0 else 1.0
+                t, min cap (Mods.sumBase c [ Resist t ] db * doubled + penalty)
         { Str = str
           Dex = dex
           Int = int'
@@ -128,7 +144,9 @@ module Defence =
           Deflection = deflection
           Resist = DamageType.all |> List.filter ((<>) Physical) |> List.map resist |> Map.ofList
           LifeRegen = if ci || regenToES || onlyLeech then 0.0 else lifeRegen * lifeRecovery
-          ManaRegen = mana * manaRegenPercent / 100.0 * Mods.mult c [ ManaRegen ] db * manaRecovery
+          ManaRegen =
+            ((if flag "NoInherentManaRegen" then 0.0 else mana * manaRegenPercent / 100.0) + life * named "ManaRegenPercentOfLife" / 100.0)
+            * Mods.mult c [ ManaRegen ] db * manaRecovery
           EnergyShieldRecharge =
             if flag "NoESRecharge" || lifeRecharges then 0.0
             else es * esRechargePercent / 100.0 * Mods.mult c [ Named "ESRechargeRate" ] db * esRecovery

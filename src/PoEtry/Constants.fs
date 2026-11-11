@@ -10,6 +10,9 @@ module Constants =
         table.[(max 1 (min level table.Length)) - 1]
 
     // ---- crit ----
+    /// Elemental resistances are lowered by 10% per act of the campaign: -60% in the endgame
+    /// (PoB CalcSetup resistancePenalty "Endgame (-60%)"; shown in game on the character sheet).
+    let endgameResistPenalty = -60.0
     /// Character.ot base_critical_hit_damage_bonus
     let playerBaseCritBonus = 100.0
     let monsterBaseCritBonus = mc "base_critical_hit_damage_bonus"

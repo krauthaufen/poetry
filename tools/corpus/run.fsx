@@ -2,8 +2,8 @@
 // simulator doesn't understand, ranked by how many builds it affects.
 //   dotnet fsi --optimize+ tools/corpus/run.fsx [corpus dir]
 // Writes tools/corpus/report.txt (no character data, only aggregate stat ids and counts).
-#r "../../src/PoEsie/bin/Release/net8.0/PoEsie.dll"
-open PoEsie
+#r "../../src/PoEtry/bin/Release/net8.0/PoEtry.dll"
+open PoEtry
 
 let root = __SOURCE_DIRECTORY__ + "/../../"
 let read (f: string) = System.IO.File.ReadAllText(root + "data/game/" + f)
@@ -21,13 +21,21 @@ type Result =
       Unmapped: string list
       Unsimulated: string list
       MissingGems: string list
-      Notes: string list }
+      Notes: string list
+      /// Character-sheet values against the ones poe.ninja stores: (stat, ours, theirs).
+      Sheet: (string * float * float) list
+      /// poe.ninja's (PoB's) DPS for the main skill: a lead, never the truth.
+      TheirDps: float }
 
 let runOne (path: string) : Result =
     let file = System.IO.Path.GetFileNameWithoutExtension path
-    let blank = { File = file; Error = None; Main = ""; Dps = 0.0; Unknown = []; Unmapped = []; Unsimulated = []; MissingGems = []; Notes = [] }
+    let blank = { File = file; Error = None; Main = ""; Dps = 0.0; Unknown = []; Unmapped = []; Unsimulated = []; MissingGems = []; Notes = []; Sheet = []; TheirDps = 0.0 }
     try
-        let build, _ = Setup.parseBuild (System.IO.File.ReadAllText path)
+        let text = System.IO.File.ReadAllText path
+        let build, _ = Setup.parseBuild text
+        let ninja = Json.field "ninja" (Json.parse text)
+        let theirs = ninja |> Option.bind (Json.field "defensiveStats")
+        let num key = theirs |> Option.bind (Json.field key) |> Option.bind Json.num
         let o = { Options.defaults with MaxTime = 20.0 }
         let c = Setup.loadWith db treeJson build o
         let actives =
@@ -43,6 +51,27 @@ let runOne (path: string) : Result =
         let main =
             actives |> List.filter (fun (n, _, _) -> wanted.EndsWith(slug n)) |> List.sortByDescending (fun (n, _, _) -> n.Length) |> List.tryHead
             |> Option.orElse (actives |> List.filter (fun (n, _, _) -> usable n) |> List.sortByDescending (fun (_, k, _) -> k) |> List.tryHead)
+        let sheet =
+            let v = c.Vitals
+            // uncapped, so a missing source shows as its exact value
+            let sheetDb = ModDb.ofList c.Sheet.Mods
+            let res t = Mods.sumBase Ctx.empty [ Resist t ] sheetDb + (if DamageType.isElemental t then Constants.endgameResistPenalty else 0.0)
+            let num key =
+                match key with
+                | "fireResistance" | "coldResistance" | "lightningResistance" | "chaosResistance" -> num key |> Option.map (fun r -> r + (num (key + "OverCap") |> Option.defaultValue 0.0))
+                | _ -> num key
+            [ "life", v.Life, "life"; "mana", v.Mana, "mana"; "energy shield", v.EnergyShield, "energyShield"
+              "strength", v.Str, "strength"; "dexterity", v.Dex, "dexterity"; "intelligence", v.Int, "intelligence"
+              "armour", v.Armour, "armour"; "evasion", v.Evasion, "evasionRating"; "deflection", v.Deflection, "deflectionRating"
+              "block", v.Block, "blockChance"; "ward", v.Ward, "ward"
+              "fire res", res Fire, "fireResistance"; "cold res", res Cold, "coldResistance"
+              "lightning res", res Lightning, "lightningResistance"; "chaos res", res Chaos, "chaosResistance" ]
+            |> List.choose (fun (name, ours, key) -> num key |> Option.map (fun t -> name, ours, t))
+        let dpsOf (gem: string) =
+            ninja |> Option.map (fun n -> Json.list (Json.field "skillDps" n)) |> Option.defaultValue []
+            |> List.tryPick (fun j -> if Json.strField "name" j = Some gem then Json.field "dps" j |> Option.bind Json.num |> Option.map (fun d -> d + (Json.field "dotDps" j |> Option.bind Json.num |> Option.defaultValue 0.0)) else None)
+            |> Option.defaultValue 0.0
+        let blank = { blank with Sheet = sheet }
         match main with
         | None -> { blank with Error = Some "no active skill"; MissingGems = missing }
         | Some (mainGem, _, group) ->
@@ -73,6 +102,7 @@ let runOne (path: string) : Result =
                 { blank with
                     Main = (if pg = mainGem then pg elif pg = "" then mainGem + " (minions only)" else sprintf "%s (pressed %s)" mainGem pg)
                     Dps = sum.Dps.Mean
+                    TheirDps = dpsOf mainGem
                     Unknown = cov.UnknownText |> List.map (fun l -> let k = l.IndexOf(": ") in if k > 0 then l.Substring(k + 2) else l) |> List.distinct
                     Unmapped = (cov.Unmapped |> List.map fst) @ (sk.Unmapped |> List.map (fun (s, _) -> "skill: " + s)) |> List.distinct
                     Unsimulated = (cov.Unsimulated |> List.map (fun (s, m) -> sprintf "%s [%s]" s m)) @ (sk.Unsimulated |> List.map (fun (s, m) -> sprintf "skill: %s [%s]" s m)) |> List.distinct
@@ -82,7 +112,7 @@ let runOne (path: string) : Result =
         // the innermost exception and where it was thrown
         let rec inner (x: exn) = if isNull x.InnerException then x else inner x.InnerException
         let x = inner e
-        let at = (string x.StackTrace).Split('\n') |> Array.tryFind (fun l -> l.Contains "PoEsie.") |> Option.map (fun l -> l.Trim()) |> Option.defaultValue ""
+        let at = (string x.StackTrace).Split('\n') |> Array.tryFind (fun l -> l.Contains "PoEtry.") |> Option.map (fun l -> l.Trim()) |> Option.defaultValue ""
         { blank with Error = Some(sprintf "%s: %s %s" (x.GetType().Name) (x.Message.Split('\n').[0]) at) }
 
 let files = System.IO.Directory.GetFiles(dir, "*.json") |> Array.filter (fun f -> System.Char.IsDigit (System.IO.Path.GetFileName f).[0]) |> Array.sort
@@ -112,8 +142,18 @@ ranked "skills that could not be built" (fun r -> r.Notes) 100
 ranked "text lines not understood" (fun r -> r.Unknown) 150
 ranked "unmapped stats" (fun r -> r.Unmapped) 200
 ranked "unsimulated stats" (fun r -> r.Unsimulated) 200
+// character sheet against poe.ninja's: a value is off when it differs by more than 2% and 2 points
+let off (_, ours: float, theirs: float) = abs (ours - theirs) > 2.0 && abs (ours - theirs) > 0.02 * max (abs ours) (abs theirs)
+say "\n== character sheet differs from poe.ninja's (builds affected, of those that ran)"
+results |> List.collect (fun r -> r.Sheet |> List.filter off |> List.map (fun (n, _, _) -> n)) |> List.countBy id |> List.sortByDescending snd
+|> List.iter (fun (s, k) -> say (sprintf "%4d  %s" k s))
+say "\n== DPS against poe.ninja's (a lead, not the truth): ours / theirs"
+let ratios = results |> List.filter (fun r -> r.Error.IsNone && r.TheirDps > 0.0) |> List.map (fun r -> r.Dps / r.TheirDps)
+for lo, hi, label in [ 0.0, 0.01, "under 1%"; 0.01, 0.1, "1% to 10%"; 0.1, 0.5, "10% to 50%"; 0.5, 2.0, "50% to 200%"; 2.0, 10.0, "2x to 10x"; 10.0, infinity, "over 10x" ] do
+    say (sprintf "%4d  %s" (ratios |> List.filter (fun x -> x >= lo && x < hi) |> List.length) label)
 say "\n== per build"
 results |> List.iter (fun r ->
-    say (sprintf "%-52s %-40s %s" r.File r.Main (match r.Error with Some e -> "ERROR " + e | None -> sprintf "%12.0f dps  %d unknown, %d unmapped, %d unsimulated" r.Dps r.Unknown.Length r.Unmapped.Length r.Unsimulated.Length)))
+    say (sprintf "%-52s %-40s %s" r.File r.Main (match r.Error with Some e -> "ERROR " + e | None -> sprintf "%12.0f dps (theirs %10.0f)  %d unknown, %d unmapped, %d unsimulated%s" r.Dps r.TheirDps r.Unknown.Length r.Unmapped.Length r.Unsimulated.Length
+                                                                                                             (r.Sheet |> List.filter off |> List.map (fun (n, a, b) -> sprintf "  %s %.0f/%.0f" n a b) |> String.concat ""))))
 System.IO.File.WriteAllText(__SOURCE_DIRECTORY__ + "/report.txt", out.ToString())
 printfn "%s" (out.ToString().Split('\n') |> Array.truncate 60 |> String.concat "\n")
