@@ -224,8 +224,10 @@ module Gems =
 
     /// Accents in names differ between sources ("Oisín's Oath" / "Oisin's Oath").
     let private plain (name: string) =
-        name.Normalize(System.Text.NormalizationForm.FormD)
-        |> String.filter (fun ch -> System.Globalization.CharUnicodeInfo.GetUnicodeCategory ch <> System.Globalization.UnicodeCategory.NonSpacingMark)
+        // a plain table instead of Unicode normalisation, which Fable doesn't have
+        let from = "áàâäãåéèêëíìîïóòôöõúùûüýñçÁÀÂÄÃÅÉÈÊËÍÌÎÏÓÒÔÖÕÚÙÛÜÝÑÇ"
+        let into = "aaaaaaeeeeiiiiooooouuuuyncAAAAAAEEEEIIIIOOOOOUUUUYNC"
+        name |> String.map (fun ch -> match from.IndexOf ch with | -1 -> ch | k -> into.[k])
 
     let private skillOfGem (db: GameDb) (name: string) =
         let find n =
