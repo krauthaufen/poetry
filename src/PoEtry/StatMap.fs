@@ -340,6 +340,7 @@ module StatMap =
         | "active_skill_required_number_of_combo_stacks" | "support_combo_finisher_required_number_of_combo_stacks" -> one (Mod.base' (Named "Requires:Combo") v)
         | "support_combo_finisher_damage_+%_final" -> one (Mod.more (Damage AllDamage) v)
         | "additional_combo_gain_chance_%" -> one (Mod.base' (Named "ComboExtraChance") v)
+        | "living_bomb_damage_threshold_%_of_ailment_threshold" -> one (Mod.base' (Named "DetonatedByDamage") v)
         | "banner_aura_effect_+%" -> one (Mod.inc (Named "BannerEffect") v)
         | "attacks_roll_crits_twice" -> one (Mod.flag (Named "BifurcateCrits") |> Mod.whenever (SkillIs Attack))
         | "oracle_hits_eventually_crit_with_critical_strike_multiplier_+%_final_per_failed_roll" -> one (Mod.flag (Named "InevitableCrits"))

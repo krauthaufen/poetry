@@ -810,7 +810,9 @@ module Behaviours =
                 match elements with
                 | [ el ] ->
                     let detonation = sum "base_skill_detonation_time" / 1000.0 * (1.0 + sum "support_fast_forward_detonation_time_+%_final" / 100.0)
-                    [ { Hook = OnUse; Filter = Called skillName; Chance = 100.0
+                    // a seed (Living Bomb) leaves its remnant when it explodes, not when it is planted
+                    let seed = sum "living_bomb_damage_threshold_%_of_ailment_threshold" > 0.0
+                    [ { Hook = (if seed then OnHit else OnUse); Filter = Called skillName; Chance = 100.0
                         Reaction = DropRemnant(el + "Infusion", detonation + pickupSeconds, sum "chance_%_to_create_additional_remnant") } ]
                 | _ -> []
             | _ -> []

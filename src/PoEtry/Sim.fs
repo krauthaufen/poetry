@@ -479,7 +479,10 @@ module Sim =
           Uptime: Map<string, float>
           Kills: (string * Rarity * float) list
           /// Corpses already used up by corpse skills (every kill leaves one).
-          CorpsesUsed: int }
+          CorpsesUsed: int
+          /// Seeds planted in enemies (Living Bomb): owner, skill, enemy, the enemy's life when
+          /// planted, the damage it takes to set the seed off, when it fizzles.
+          Bombs: (string * string * string * float * float * float) list }
 
     /// Fixed for the whole fight: mod dbs built once, buffs layered on per event.
     type private Env =
@@ -1154,6 +1157,7 @@ module Sim =
                         let isCharged (p: Skill) = p.Name.EndsWith "-Charged"
                         let hasCharged = skill.Parts |> List.exists isCharged
                         (skill :: skill.Parts)
+                        |> List.filter (fun p -> not (partFlag p "DetonatedByDamage"))
                         |> List.filter (fun p ->
                             if isCharged p || partFlag p "OnlyWithCharge" then charged
                             elif (partNamed p "DetonatedBy:").IsSome then false
@@ -1168,6 +1172,17 @@ module Sim =
                             [ 1 .. n ] |> List.fold (fun w i ->
                                 schedule (if n = 1 then at else w.Time + (at - w.Time) * float i / float n) (Strike(actor.Name, part.Name, mult, target.Def.Name)) w) w) w)
                     w
+            // a seed planted in the target (Living Bomb): it explodes once the enemy has taken
+            // enough damage from then on; a new seed replaces the old one
+            let w =
+                match skill.Mods |> List.tryPick (fun m -> if m.Stat = Named "DetonatedByDamage" then Some m.Value else None) with
+                | Some pct ->
+                    let needed = pct / 100.0 * max 1.0 (Ailments.threshold (defender target))
+                    let lasts = if skill.Duration > 0.0 then skill.Duration * Mods.mult ctx [ SkillDuration ] mods else 1e9
+                    { w with
+                        Bombs = (actor.Name, skill.Name, target.Def.Name, target.Life, needed, w.Time + useTime + lasts) :: (w.Bombs |> List.filter (fun (a, s, _, _, _, _) -> not (a = actor.Name && s = skill.Name)))
+                        Counts = bump ("planted:" + skill.Name) w.Counts }
+                | None -> w
             // an infusion a part needed is used up; a part that waits is put down
             let w =
                 skill.Parts |> List.fold (fun w p ->
@@ -1282,7 +1297,9 @@ module Sim =
             let usable =
                 actor.Rotation |> List.filter (fun step ->
                     let s = skillOf actor step.Use
-                    step.When v && ready st w.Time s && (corpses > 0 || not (needsCorpse s)) && built st s)
+                    step.When v && ready st w.Time s && (corpses > 0 || not (needsCorpse s)) && built st s
+                    // a seed still in an enemy is not planted over
+                    && not (w.Bombs |> List.exists (fun (a, b, _, _, _, _) -> a = actor.Name && b = s.Name)))
             usable |> List.tryFind (fun step -> affordable (skillOf actor step.Use)) |> Option.orElse (List.tryHead usable)
         match choice with
         | Some step ->
@@ -2293,6 +2310,22 @@ module Sim =
             w
         else
             let w = prune w
+            // seeds: set off by the damage their enemy has taken (or its death: the blast then
+            // strikes the enemy aimed at), gone when their time is up
+            let w =
+                if w.Bombs.IsEmpty then w
+                else
+                    w.Bombs |> List.fold (fun w ((owner, skill, enemy, mark, needed, until) as bomb) ->
+                        let drop w = { w with Bombs = w.Bombs |> List.filter (fun b -> b <> bomb) }
+                        match Map.tryFind enemy w.Enemies with
+                        | Some e when e.Life > 0.0 && mark - e.Life >= needed ->
+                            drop w |> schedule w.Time (Strike(owner, skill, 1.0, enemy))
+                        | Some e when e.Life > 0.0 ->
+                            if w.Time >= until then { drop w with Counts = bump ("fizzled:" + skill) w.Counts } else w
+                        | _ ->
+                            match aimed env w with
+                            | Some other -> drop w |> schedule w.Time (Strike(owner, skill, 1.0, other.Def.Name))
+                            | None -> drop w) w
             // rage: regenerated all the time, lost once none has been gained for a while
             let w =
                 let regen, loss, delay, _, _ = env.Rage
@@ -2571,7 +2604,8 @@ module Sim =
               Counts = Map.empty
               Uptime = Map.empty
               Kills = []
-              CorpsesUsed = 0 }
+              CorpsesUsed = 0
+              Bombs = [] }
             |> fun w -> actors |> List.fold (fun w a -> schedule 0.0 (Ready a.Name) w) w
             |> fun w -> actors |> List.fold (fun w a -> a.Cycles |> List.fold (fun w c -> schedule 0.0 (CycleTick(a.Name, c.Name)) w) w) w
             |> fun w -> actors |> List.fold scheduleResourceTimers w

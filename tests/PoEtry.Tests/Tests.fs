@@ -229,6 +229,19 @@ let main _ =
         near 400.0 o.DamageBy.["Jab (hit)"]
         near 600.0 o.DamageBy.["Jab: Final (hit)"])
 
+    test "seed: planted once, it explodes when the enemy has taken enough damage since" (fun () ->
+        // the seed needs 100% of the ailment threshold in damage; Bolt deals a quarter of it per hit
+        let b = boss 1e12
+        let threshold = Ailments.threshold { Level = b.Level; Mods = ModDb.ofList b.Mods }
+        let bomb = { fireSpell 5000.0 with Name = "Bomb"; Mods = [ Mod.base' (Named "DetonatedByDamage") 100.0 ] }
+        let bolt = fireSpell (threshold / 4.0)
+        let f = { Fight.single b (Actor.make "Player" [ noIgnite ] [ bomb; bolt ]) 9.5 with MaxTime = 9.5 }
+        let o = Sim.run f 1u
+        // Bomb at 0 s, Bolts land at 2, 3, 4, 5 s: it explodes at 5 s and is planted again
+        equal 2 o.Counts.["planted:Bomb"]
+        equal 1 o.Counts.["hits:Bomb"]
+        near 5000.0 o.DamageBy.["Bomb (hit)"])
+
     test "banner: attack hits build its Glory, then its aura lasts for the duration" (fun () ->
         // 200 Glory at 100% of 20 per hit: placed with the tenth hit (10 s) and the twentieth.
         // 4 s of 100% more damage: the hits at 11, 12 and 13 s are doubled, the one at 14 s is not
