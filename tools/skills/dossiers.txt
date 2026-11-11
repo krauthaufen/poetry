@@ -94,8 +94,9 @@
   set Arc              arc_damage_+%_final_from_infusion_consumption=200 arc_chains_gained_from_infusion_consumption=6 shock_effect_+%=50  | spell_minimum_base_lightning_damage spell_maximum_base_lightning_damage number_of_chains base_is_projectile disable_visual_hit_effect can_perform_skill_while_moving precise_cursor_targeting_uses_contact_point_height_offset active_skill_consumes_a_lightning_infusion
   play: spam Arc
   built Arc                                x1.00, 1.10s, cd None x1, cost 81 +0/s, hits [(1.0, 1.0)], 1 projectiles, pierce 0, chain 9
-  fight: 152 dps; Arc (hit) 100%
-         crits:Arc 3, hits:Arc 13, uses:Arc 14
+  built Arc infused                        x1.00, 1.10s, cd None x1, cost 81 +0/s, hits [(1.0, 1.0)], 1 projectiles, pierce 0, chain 15
+  fight: 208 dps; Arc infused (hit) 73%, Arc (hit) 27%
+         crits:Arc 1, crits:Arc infused 1, hits:Arc 7, hits:Arc infused 5, infused:Arc 5, uninfused:Arc 7, uses:Arc 13
 
 #### Archmage   [AttackInPlace Buff HasReservation Lightning OngoingSkill Persistent]
   While active, causes your Non-Channelling Spells to cost additional mana and deal extra Lightning damage, both based on your maximum Mana.
@@ -2940,10 +2941,10 @@ Purple Flames of Chayula for a duration.
   Place a Sigil on the ground, providing a powerful Spell Damage Buff to you and Allies while standing in it. The Buff becomes more powerful the more mana you spend while standing in the Sigil.
   level 20: cost Some 0.0 (per minute None), cooldown Some 10.0 xSome 1.0, multiplier None, crit None
   set Sigil of Power   circle_of_power_max_stages=4 base_number_of_sigil_of_power_allowed=1 base_circle_of_power_mana_%_spend_per_upgrade=50 active_skill_base_area_of_effect_radius=30  | circle_of_power_spell_damage_+%_final_per_stage base_skill_effect_duration can_perform_skill_while_moving
-  play: cd Sigil of Power; spam Sigil of Power
+  play: buff Sigil of Power
   built Sigil of Power                     x1.00, 0.60s, cd Some 10.0 x1, cost 0 +0/s, hits [], area 30
   fight: 0 dps; 
-         uses:Sigil of Power 3
+         uses:Sigil of Power 2
 
 #### Siphon Elements   [AttackInPlace Buff Cold Fire GeneratesInfusion GeneratesRemnants HasReservation Lightning OngoingSkill Persistent TotemCastsAlone]
   While active, has a chance to create an Infusion Remnant when you Freeze, Shock or Ignite a target.
@@ -3469,8 +3470,9 @@ Purple Flames of Chayula for a duration.
   Channel to temper your main hand Melee Martial Weapon. Each hit of the hammer against the anvil Empowers subsequent Attacks to Combust when Hitting enemies.
   level 20: cost None (per minute Some 1179.0), cooldown Some 5.0 xSome 1.0, multiplier None, crit None
   set Temper Weapon    imbue_weapon_max_exerts=12 channel_skill_end_animation_duration_override_ms=83 temper_weapon_empowers_per_strike=3  | base_deal_no_damage no_cost
-  play: cd Temper Weapon; spam Temper Weapon
+  play: buff Temper Weapon
   built Temper Weapon                      x1.00, 1.12s, cd Some 5.0 x1, cost 0 +20/s, hits [], single
+  built Temper Weapon: Combust             x3.62, 0.77s, cd None x1, cost 0 +0/s, hits [(1.0, 1.0)], area 30
   fight: 0 dps; 
          uses:Temper Weapon 5
   types without a model: EmpowersOtherSkill
