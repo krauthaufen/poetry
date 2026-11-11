@@ -332,6 +332,7 @@ module Geometry =
     /// All projectile flights of one use.
     let paths (rng: Rng) (walls: Wall list) (p: ProjectileShape) (reach: float) (primary: EnemyDef) (alive: EnemyDef list) =
         let origin = if p.FromImpact then impactPoint reach primary else Vec.zero
+        let alive = if p.SkipPrimary then alive |> List.filter (fun e -> e.Name <> primary.Name) else alive
         angles p (Vec.angle primary.Position)
         |> List.map (fun a ->
             let dir = Vec.ofAngle a

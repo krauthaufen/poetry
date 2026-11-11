@@ -18,6 +18,8 @@ type ProjectileShape =
       PerCharge: (string * int) option
       /// Projectiles start where the skill lands (on the aimed enemy), not at the player.
       FromImpact: bool
+      /// Shards that spring from the enemy that was hit and fly on: they cannot hit it.
+      SkipPrimary: bool
       /// Chance (%) to bounce off a wall once ("chain 1 extra time from terrain").
       TerrainChain: float
       /// Projectiles appear this far from their origin, along their direction (game units).
@@ -45,6 +47,7 @@ module ProjectileShape =
           Explosion = None
           PerCharge = None
           FromImpact = false
+          SkipPrimary = false
           TerrainChain = 0.0
           StartOffset = 0.0 }
 

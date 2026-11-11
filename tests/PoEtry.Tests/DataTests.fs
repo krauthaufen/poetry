@@ -373,6 +373,22 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
             equal 7 pattern.Length
         | Error e -> failwith e)
 
+    test "Ice Shot: the shards spring from the enemy hit and cannot hit it" (fun () ->
+        let bow = (Items.parse db.Value "Rarity: Normal\nWarmonger Bow\n--------\n").Weapon
+        match Gems.skill db.Value ModDb.empty bow { Gem = "Ice Shot"; Level = 20; Quality = 0; StatSet = 1; Supports = [] } with
+        | Ok (s, _) ->
+            let shards = s.Parts |> List.find (fun p -> p.Name.EndsWith "Shards")
+            match shards.Delivery with
+            | Projectiles p ->
+                equal (box true) (box (p.SkipPrimary && p.FromImpact))
+                // a lone enemy is hit by the arrow only; one standing behind it gets shards
+                let at x = { EnemyDef.atLevel 83 1e6 with Name = sprintf "e%.0f" x; Position = Vec.make x 0.0; Size = 4.0 }
+                let hit alive = Geometry.targetsFrom (Rng 1u) [] 100.0 shards.Delivery 1.0 (at 30.0) alive
+                equal 0 (hit [ at 30.0 ]).Length
+                equal (box true) (box (hit [ at 30.0; at 45.0 ] |> List.forall ((=) "e45") && not (hit [ at 30.0; at 45.0 ]).IsEmpty))
+            | _ -> failwith "shards are projectiles"
+        | Error e -> failwith e)
+
     test "perfect timing: the perfect hit replaces the normal one; the release follows the channel" (fun () ->
         let flag name (sk: Skill) = Mods.flag { Ctx.empty with SkillName = sk.Name } (Named name) (ModDb.ofList sk.Mods)
         let mace = (Items.parse db.Value "Rarity: Normal\nAkoyan Club\n--------\n").Weapon

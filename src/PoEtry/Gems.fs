@@ -374,6 +374,8 @@ module Gems =
               ("Shred", ""), [ "Seq:0,1/6" ]
               ("Shred", "Fast Strikes"), [ "Seq:2,3,4/6" ]
               ("Shred", "Final Strike"), [ "Seq:5/6"; "Hits:2" ]
+              // "sprays a cone of ice shards when it hits a target": on from that target
+              ("Ice Shot", "Shards"), [ "Behind" ]
               // one use, several strikes: five stabs before the final one; both gouges hit
               ("Rapid Assault", ""), [ "Hits:5" ]
               ("Cross Slash", ""), [ "Hits:2" ]
@@ -583,6 +585,8 @@ module Gems =
         let isProjectileSet = List.contains "base_is_projectile" set.Stats
         let delivery =
             if isProjectileSet then
+                // shards sprayed on from the enemy the projectile hit
+                let behind = Map.tryFind (data.Name, set.Label) partConditions |> Option.exists (List.contains "Behind")
                 let count = statOf "base_number_of_projectiles" |> Option.map int |> Option.defaultValue (if perCharge.IsSome then 0 else 1)
                 Projectiles
                     { ProjectileShape.make count with
@@ -598,7 +602,8 @@ module Gems =
                             // Spiral Volley: "Each target can only be Hit once"
                             && not (data.Description.Contains "Each target can only be Hit once")
                         PerCharge = perCharge
-                        FromImpact = data.Types.Contains "ProjectilesNotFromUser"
+                        FromImpact = data.Types.Contains "ProjectilesNotFromUser" || behind
+                        SkipPrimary = behind
                         Explosion = if data.Types.Contains "Area" && not (List.contains "is_area_damage" set.Stats) then radius else None }
             else
                 match radius with
