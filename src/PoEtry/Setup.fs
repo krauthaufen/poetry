@@ -125,6 +125,8 @@ module Setup =
         // charms: their effects are sheet mods that hold while the charm lasts
         let charms, charmMods = Behaviours.charms db sheet build
         let sheet = { sheet with Mods = sheet.Mods @ charmMods }
+        // named effects the character has outright, and what their stacks add
+        let sheet = { sheet with Mods = sheet.Mods @ Behaviours.keywordMods sheet }
         let bases = Defence.classBases treeJson
         // motes: base maximum from the mote-granting gem's description stat
         let moteBase =
@@ -430,7 +432,7 @@ module Setup =
         { Actor.make "Player" (sheet.Mods @ (used |> List.collect (fun (_, p) -> p.Grants))) (pressedSkills @ (metas |> List.collect (fun (_, s, _) -> s)) @ (consumers |> List.map (fun (_, _, cp) -> cp)) @ heraldSkills @ (used |> List.collect (fun (_, p) -> p.Extra))) with
             Rotation = steps
             HitPattern = used |> List.choose (fun (_, p) -> p.Pattern |> Option.map (fun pat -> p.Skill.Name, pat)) |> Map.ofList
-            Rules = grantRules @ (used |> List.collect (fun (_, p) -> p.Rules)) @ heraldRules
+            Rules = grantRules @ (used |> List.collect (fun (_, p) -> p.Rules)) @ heraldRules @ Behaviours.keywordRules sheet pressedSkills
             Metas = metas |> List.map (fun (m, _, _) -> m)
             Infusions = infusionSetup
             // infusions start full (kept up while clearing), scaled like invocations
@@ -476,7 +478,7 @@ module Setup =
         let curses, curseGrants = Behaviours.curseAuras c.Db c.Sheet c.Build
         let player = if curseGrants.IsEmpty then player else { player with Mods = player.Mods @ curseGrants }
         { Enemies = enemies
-          EnemyAuras = curses
+          EnemyAuras = curses @ Behaviours.criticalWeaknessAura c.Sheet
           Player = player
           Minions = c.Minions
           Targeting = o.Targeting

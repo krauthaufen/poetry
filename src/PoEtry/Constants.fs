@@ -14,6 +14,14 @@ module Constants =
     /// (GameConstants BaseRageLossPerMinute, BaseRageLossDelayMs).
     let rageLossPerSecond = Map.find "BaseRageLossPerMinute" Tables.gameConstants / 60.0
     let rageLossDelay = Map.find "BaseRageLossDelayMs" Tables.gameConstants / 1000.0
+    /// Culling Strike: enemies at or below this share of life (%) are killed, checked before
+    /// the hit's damage (GameConstants CullingStrike<Rarity>Threshold; keyword text).
+    let cullingThreshold (rarity: string) =
+        match rarity with
+        | "magic" -> gc "CullingStrikeMagicThreshold"
+        | "rare" -> gc "CullingStrikeRareThreshold"
+        | "unique" -> gc "CullingStrikeUniqueThreshold"
+        | _ -> gc "CullingStrikeNormalThreshold"
     /// Armour Break (game keyword text): armour at zero is Fully Broken for 12 seconds, and the
     /// enemy takes 20% increased physical damage from hits.
     /// A leech instance is recovered over this many seconds (keyword text).

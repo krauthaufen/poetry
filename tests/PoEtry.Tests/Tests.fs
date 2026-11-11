@@ -455,6 +455,34 @@ let main _ =
         equal 5 o.Counts.["hits:Hex"]
         equal 4 o.Counts.["trigger:Blast"])
 
+    test "culling strike kills at the threshold for the monster's rarity, before the hit" (fun () ->
+        // a unique at 5% life or less dies to any culling hit; a normal monster already at 35%
+        let cull = [ noIgnite; Mod.flag (Named "CullingStrike") ]
+        let unique = { EnemyDef.make Rarity.defaults 83 Unique "Boss" (Vec.make 10.0 0.0) with Life = 1000.0; Mods = []; Attack = None }
+        let o = Sim.run (Fight.single unique (Actor.make "Player" cull [ fireSpell 100.0 ]) 30.0) 1u
+        // 9 hits leave 100 (10%); the 10th leaves 0 anyway: with culling the 10th would be needed only above 5%
+        equal (Some 10.0) o.Ttk
+        let normal = { unique with Rarity = Normal }
+        // 7 hits leave 300 (30% <= 35%): the 8th culls
+        equal (Some 8.0) (Sim.run (Fight.single normal (Actor.make "Player" cull [ fireSpell 100.0 ]) 30.0) 1u).Ttk
+        equal (Some 10.0) (Sim.run (Fight.single normal (Actor.make "Player" [ noIgnite ] [ fireSpell 100.0 ]) 30.0) 1u).Ttk)
+
+    test "named effects: stats grant them by rule, with the game's numbers" (fun () ->
+        let sheet (mods: Mod list) : CharacterSheet =
+            { Mods = mods; MainHand = None; Weapons = []; ItemDefences = []; Level = 1; ClassName = ""; ManaFlask = None; LifeFlask = None; Coverage = Coverage.empty }
+        // Withered on hit: 5% increased chaos damage taken per stack, up to 10
+        let chaos = { Skill.make "Bolt" [ Spell; Tag "Chaos" ] with BaseDamage = Map.ofList [ Chaos, Range.fixedAt 100.0 ]; BaseCrit = 0.0 }
+        let rules = Behaviours.keywordRules (sheet [ Mod.base' (Named "Rule:OnHit:Withered:4") 100.0 ]) [ chaos ]
+        equal 1 rules.Length
+        let o = Sim.run (Fight.single (boss 1e9) { Actor.make "Player" [] [ chaos ] with Rules = rules } 12.5) 1u
+        // hits at 1..12 s with 0, 1, ... 10, 10 stacks
+        near (100.0 * (12.0 + 0.05 * (0.0 + 1.0 + 2.0 + 3.0 + 4.0 + 5.0 + 6.0 + 7.0 + 8.0 + 9.0 + 10.0 + 10.0))) o.DamageBy.["Bolt (hit)"]
+        // "You have Unholy Might": 30% of damage as extra chaos
+        let um = Behaviours.keywordMods (sheet [ Mod.flag (Named "Has:UnholyMight") ])
+        near 30.0 (Mods.sumBase Ctx.empty [ GainAs(Fire, Chaos) ] (ModDb.ofList um))
+        // Critical Weakness: +0.5% crit chance per stack on the enemy
+        near 5.0 (Mods.sumBase { Ctx.empty with EnemyStatus = Map.ofList [ "CriticalWeakness", 10 ] } [ CritChance ] (ModDb.ofList um)))
+
     test "crossbow: a load of bolts, then a reload" (fun () ->
         // 2 bolts per load, 0.5 s per shot, 1 s reload: two shots every 2 s
         let shot = { Skill.make "Shot" [ Attack; Projectile ] with BaseDamage = Map.ofList [ Physical, Range.fixedAt 10.0 ]; BaseTime = 0.5; Clip = 2; ReloadTime = 1.0 }
@@ -475,7 +503,7 @@ let main _ =
         if o.ManaStarved <= 0.0 then failwith "the third load should have waited for mana")
 
     test "curse aura: every enemy has it for the whole fight, bosses at half effect" (fun () ->
-        let aura = [ "Curse:Flammability", [ Mod.base' (Resist Fire) -40.0 ] ]
+        let aura = [ "Curse:Flammability", 1, [ Mod.base' (Resist Fire) -40.0 ] ]
         let plain = { Fight.single (boss 1e9) (Actor.make "Player" [ noIgnite ] [ fireSpell 100.0 ]) 1.5 with EnemyAuras = aura }
         near 140.0 (Sim.run plain 1u).DamageBy.["Bolt (hit)"]
         let resistant = { boss 1e9 with Mods = [ Mod.more (Named "CurseEffectOnSelf") -50.0 ] }

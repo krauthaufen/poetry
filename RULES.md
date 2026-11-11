@@ -290,6 +290,21 @@ Checked against PoB's defensive numbers for 131 public characters (`tools/corpus
 | Base damage | skills that hit with the shield (Resonating Shield, Shield Charge, Raise Shield, Parry) use `off_hand_weapon_minimum/maximum_physical_damage` plus `off_hand_..._added_physical_damage_per_N_shield_armour` (or evasion) x the shield's own armour / N | gem stats | data |
 | Active block, retaliation, parry | not modelled | - | missing |
 
+### Named effects
+
+The game's standard buffs and debuffs, with the numbers of its keyword text. Stats grant them on hit, crit, kill or use ("X% chance to gain Arcane Surge when you deal a Critical Hit"), on the character for any skill and on a gem for its skill.
+
+| Effect | Rule | Source | Confidence |
+|---|---|---|---|
+| Onslaught | 20% increased skill speed (x Onslaught effect) | keyword text | data |
+| Arcane Surge | 15% increased cast speed (x effect); its 20% more mana regeneration is not applied; 4 s | keyword text; duration is a guess | data / guess |
+| Unholy Might | 30% of damage gained as extra chaos (x magnitude); "You have Unholy Might", also "while not on Low Mana" and "while you have no Energy Shield"; minions likewise | keyword text | data |
+| Tailwind | per stack 2% increased skill speed and 10% increased evasion, up to 10; a stack per skill use, all lost when hit; it does not expire by itself (guess) | keyword text | data / guess |
+| Withered | 5% increased chaos damage taken per stack, up to 10 (x magnitude), for the stated seconds (4 if none) | keyword text | data |
+| Critical Weakness | +0.5% crit chance against the enemy per stack, up to 20; "every second in your Presence for N seconds" is a steady N stacks on every enemy | keyword text; presence area ignored | data |
+| Culling Strike | an enemy at or below 35% / 20% / 10% / 5% life (normal / magic / rare / unique; x increased threshold) is killed, checked before the hit's damage | GameConstants, keyword text | data |
+| Not modelled | Impale, Incision, Sundered Armour, Volatility, Consecrated / Jagged Ground, Guard, Ancestral Boost, Decimating Strike | - | missing |
+
 ### Warcries
 
 | Mechanic | Rule | Source | Confidence |

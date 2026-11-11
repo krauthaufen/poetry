@@ -33,6 +33,8 @@ type Hook =
     | OnHit
     | OnCrit
     | OnKill
+    /// The player is hit by a monster.
+    | WhenHit
     /// Killing an enemy that had this status ("Frozen", "Shocked"), with a skill that isn't a herald's own.
     | OnKillOf of status: string
     | OnInflict of Ailment
@@ -273,9 +275,9 @@ type Fight =
       /// Invocations start with this fraction of their maximum energy (banked while
       /// clearing before the fight; 0 = empty).
       BankedInvocations: float
-      /// Debuffs every enemy has for the whole fight (curses applied as an aura): name and
-      /// monster-side mods; curses are scaled by the enemy's "curse effect on self".
-      EnemyAuras: (string * Mod list) list
+      /// Debuffs every enemy has for the whole fight (curses applied as an aura): name, stacks
+      /// and monster-side mods per stack; curses are scaled by the enemy's "curse effect on self".
+      EnemyAuras: (string * int * Mod list) list
       MaxTime: float }
 
 module Fight =
@@ -1322,6 +1324,13 @@ module Sim =
             else
                 let def = defender e
                 let hit = Hit.roll rng ctx mods skill def
+                // Culling Strike: an enemy at or below the threshold for its rarity dies, before the hit's damage
+                let hit =
+                    let cctx = { ctx with Crit = hit.Crit }
+                    if Mods.flag cctx (Named "CullingStrike") mods
+                       && e.Life <= e.Def.Life * Constants.cullingThreshold (Rarity.name e.Def.Rarity) / 100.0 * Mods.inc cctx [ Named "CullingThreshold" ] mods then
+                        { hit with Dealt = Dmg.map (fun _ v -> v + e.Life) hit.Dealt }
+                    else hit
                 // more attack damage by distance: Close Combat, full within 1 m, none from 3.5 m;
                 // Longshot, none within 3.5 m, full from 7 m
                 let mult =
@@ -1775,6 +1784,7 @@ module Sim =
                               * (if blocked then v.BlockedDamageTaken / 100.0 else 1.0))
                     let w = takeDamage pools taken { w with Player = Some p } |> fun w -> { w with Player = w.Player |> Option.map (fun p -> { p with LastHit = w.Time }) }
                     let w = (let _, _, _, whenHit, _ = env.Rage in gainRage env whenHit w)
+                    let w = (match env.Fight.Player.Skills |> List.tryHead with Some any -> react env rng env.Fight.Player WhenHit any (Some name) w | None -> w)
                     // "Rage loss is paused for 4 seconds upon gaining Rage, or after taking damage"
                     let w = updateActor env.Fight.Player.Name (fun st -> { st with RageAt = w.Time }) w
                     // charms used when a hit of their damage type is taken (they help from the next hit on)
@@ -2133,9 +2143,9 @@ module Sim =
                       Life = d.Life
                       Debuffs =
                         fight.EnemyAuras
-                        |> List.map (fun (name, mods) ->
+                        |> List.map (fun (name, stacks, mods) ->
                             let k = if name.StartsWith "Curse:" then Mods.more Ctx.empty [ Named "CurseEffectOnSelf" ] (ModDb.ofList d.Mods) else 1.0
-                            name, { Name = name; Mods = mods |> List.map (Mod.scaled k); Stacks = 1; Expires = infinity })
+                            name, { Name = name; Mods = mods |> List.map (Mod.scaled k); Stacks = stacks; Expires = infinity })
                         |> Map.ofList
                       Dots = []
                       Buildup = Map.empty

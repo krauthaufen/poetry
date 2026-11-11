@@ -471,6 +471,66 @@ module Behaviours =
         |> List.unzip
         |> fun (skills, rules) -> skills, List.concat rules
 
+    /// The game's standard named effects, with the numbers of its keyword text:
+    /// Onslaught 20% increased skill speed; Arcane Surge 15% increased cast speed (its mana
+    /// regeneration is not applied); Unholy Might 30% of damage gained as extra chaos; Tailwind
+    /// 2% increased skill speed and 10% increased evasion per stack, up to 10; Withered 5%
+    /// increased chaos damage taken per stack, up to 10. Each x its effect / magnitude modifiers.
+    let private keywordEffect (sheetDb: ModDb) (name: string) : int * Mod list =
+        let c = Ctx.empty
+        let eff stat = Mods.inc c [ Named stat ] sheetDb
+        match name with
+        | "Onslaught" -> 1, [ Mod.inc Speed (20.0 * eff "OnslaughtEffect") ]
+        | "ArcaneSurge" -> 1, [ Mod.inc Speed (15.0 * eff "ArcaneSurgeEffect") |> Mod.whenever (SkillIs Spell) ]
+        | "UnholyMight" -> 1, [ for t in DamageType.all -> Mod.base' (GainAs(t, Chaos)) (30.0 * eff "UnholyMightMagnitude") ]
+        | "Tailwind" -> 10, [ Mod.inc Speed (2.0 * eff "TailwindEffect") ]
+        | "Withered" -> 10, [ Mod.inc (DamageTaken(OfType Chaos)) (5.0 * eff "WitheredMagnitude") ]
+        | _ -> 1, []
+        |> fun (n, ms) -> n, ms |> List.map (Mod.from name)
+
+    /// Sheet mods for named effects the character simply has ("You have Unholy Might", also
+    /// conditionally), and what they add for effects whose stacks sit on the player (Tailwind's
+    /// evasion) or on the enemy (Critical Weakness: +0.5% crit chance per stack).
+    let keywordMods (sheet: CharacterSheet) : Mod list =
+        let db = ModDb.ofList sheet.Mods
+        let has =
+            sheet.Mods
+            |> List.filter (fun m -> m.Stat = Named "Has:UnholyMight")
+            |> List.collect (fun m -> snd (keywordEffect db "UnholyMight") |> List.map (fun k -> { k with Conds = m.Conds @ k.Conds }))
+        has
+        @ [ Mod.inc Evasion (10.0 * Mods.inc Ctx.empty [ Named "TailwindEffect" ] db) |> Mod.whenever (PerStack("Tailwind", 1.0)) |> Mod.from "Tailwind"
+            Mod.base' CritChance 0.5 |> Mod.whenever (PerEnemyStack("CriticalWeakness", 1.0)) |> Mod.from "Critical Weakness" ]
+
+    /// Rules from "Rule:<hook>:<effect>:<seconds>" stats on the character (any skill, or the
+    /// kind its condition names) and on a skill's own gems (that skill only).
+    let keywordRules (sheet: CharacterSheet) (skills: Skill list) : Rule list =
+        let db = ModDb.ofList sheet.Mods
+        let ruleOf (filter: SkillFilter) (m: Mod) =
+            match m.Stat with
+            | Named n when n.StartsWith "Rule:" && m.Value > 0.0 ->
+                match n.Split(':') with
+                | [| _; hook; effect; seconds |] ->
+                    let hook = match hook with "OnCrit" -> Some OnCrit | "OnHit" -> Some OnHit | "OnKill" -> Some OnKill | "OnUse" -> Some OnUse | "WhenHit" -> Some WhenHit | _ -> None
+                    let secs = float seconds
+                    let filter = m.Conds |> List.tryPick (function SkillIs t -> Some(WithTag t) | _ -> None) |> Option.defaultValue filter
+                    hook |> Option.map (fun h ->
+                        let reaction =
+                            if effect.StartsWith "-" then RemoveBuff(effect.Substring 1)
+                            else
+                                let maxStacks, mods = keywordEffect db effect
+                                if effect = "Withered" then ApplyDebuff(effect, secs, maxStacks, mods) else GrantBuff(effect, secs, maxStacks, mods)
+                        { Hook = h; Filter = filter; Chance = min 100.0 m.Value; Reaction = reaction })
+                | _ -> None
+            | _ -> None
+        (sheet.Mods |> List.choose (ruleOf AnySkill))
+        @ (skills |> List.collect (fun s -> s.Mods |> List.choose (ruleOf (Called s.Name))))
+
+    /// Critical Weakness inflicted on enemies in your presence every second for N seconds: a
+    /// steady N stacks (at most 20) on every enemy.
+    let criticalWeaknessAura (sheet: CharacterSheet) : (string * int * Mod list) list =
+        let n = Mods.sumBase Ctx.empty [ Named "CriticalWeaknessAura" ] (ModDb.ofList sheet.Mods)
+        if n > 0.0 then [ "CriticalWeakness", min 20 (int n), [] ] else []
+
     /// Charms from the equipped items (API layout: "Flask: Lasts N Seconds", "Flask: Consumes N
     /// of M Charges on use", "Utility: <effect>", "Used when you ..."). Returns the charms and
     /// the sheet mods their effects are (conditional on the charm's buff).
@@ -529,7 +589,7 @@ module Behaviours =
     /// (the aura's area is not simulated), with the gem's less curse effect
     /// ("support_blasphemy_curse_effect_+%_final" of the support Blasphemy grants) and the
     /// group's supports. Returns the debuffs and the mods the curses give the player.
-    let curseAuras (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) : (string * Mod list) list * Mod list =
+    let curseAuras (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) : (string * int * Mod list) list * Mod list =
         let charMods = ModDb.ofList sheet.Mods
         build.Groups
         |> List.filter (fun g -> g.Enabled)
@@ -556,7 +616,7 @@ module Behaviours =
                         curseOf db charMods setup s
                         |> Option.map (fun (name, _, monster, player) ->
                             let k = 1.0 + less / 100.0
-                            (name, monster |> List.map (Mod.scaled k)), player |> List.map (Mod.scaled k))
+                            (name, 1, monster |> List.map (Mod.scaled k)), player |> List.map (Mod.scaled k))
                     | Error _ -> None))
         |> List.unzip
         |> fun (auras, grants) -> auras, List.concat grants

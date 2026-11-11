@@ -210,7 +210,7 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         let b = { blank with Groups = [ group ] }
         let sheet = sheetOf b
         match Behaviours.curseAuras db.Value sheet b with
-        | [ name, [ m ] ], _ ->
+        | [ name, _, [ m ] ], _ ->
             equal (box "Curse:Despair") (box name)
             equal (box (Resist Chaos)) (box m.Stat)
             // Despair alone, for comparison: the aura has 41% less effect at level 20
