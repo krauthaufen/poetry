@@ -173,3 +173,7 @@ module Constants =
 
     /// "Skills take 5% longer to perform for each time they Repeat" (keyword text, Repeating Skills).
     let longerPerRepeat = 0.05
+
+    /// Seconds between the pulses of a Frost Bomb (its exposure grows with each): not in the
+    /// data; 0.25 s lets one bomb reach its cap just as it detonates. A guess.
+    let orbPulseInterval = 0.25

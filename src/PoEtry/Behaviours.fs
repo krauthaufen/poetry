@@ -975,8 +975,16 @@ module Behaviours =
             else
                 let amount = m * (1.0 + sum "exposure_effect_+%" / 100.0)
                 let duration = sum "base_secondary_skill_effect_duration" / 1000.0
-                [ for dt in [ Fire; Cold; Lightning ] ->
-                    { Hook = OnUse; Filter = Called skillName; Chance = 100.0; Reaction = ApplyExposure(dt, amount, duration) } ]
+                // "Initially applies X% Elemental Exposure and Y% Exposure per pulse, up to a maximum of Z%"
+                let scale = 1.0 + sum "exposure_effect_+%" / 100.0
+                let perPulse, cap = sum "active_skill_all_elemental_exposure_compounding_magnitude" * scale, sum "active_skill_all_elemental_exposure_compounding_magnitude_cap" * scale
+                let detonation = sum "base_skill_detonation_time" / 1000.0 * (1.0 + sum "support_fast_forward_detonation_time_+%_final" / 100.0)
+                let pulses = int (detonation / Constants.orbPulseInterval + 1e-9)
+                [ for dt in [ Fire; Cold; Lightning ] do
+                    yield { Hook = OnUse; Filter = Called skillName; Chance = 100.0; Reaction = ApplyExposure(dt, amount, duration) }
+                    if perPulse > 0.0 && cap > amount && pulses > 0 then
+                        yield { Hook = OnUse; Filter = Called skillName; Chance = 100.0
+                                Reaction = GrowExposure(dt, amount, perPulse, cap, Constants.orbPulseInterval, pulses, duration) } ]
         let remnant =
             match Gems.data db setup.Gem with
             | Some d when d.Types.Contains "GeneratesInfusion" && d.Types.Contains "GeneratesRemnants" && not (d.Types.Contains "Persistent") ->

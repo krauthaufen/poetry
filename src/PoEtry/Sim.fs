@@ -48,6 +48,9 @@ type Reaction =
     | ApplyCurse of name: string * duration: float * mods: Mod list
     /// Exposure: lowers one resistance, strongest applies, scaled by exposure effect.
     | ApplyExposure of damageType: DamageType * amount: float * duration: float
+    /// Exposure that grows with every pulse of an orb (Frost Bomb): `perPulse` more each
+    /// `every` seconds for `pulses` pulses, up to `cap`.
+    | GrowExposure of damageType: DamageType * start: float * perPulse: float * cap: float * every: float * pulses: int * duration: float
     /// Use a skill immediately, without spending the actor's time. Respects cooldown.
     | TriggerSkill of name: string
     /// Feed a meta gem.
@@ -399,6 +402,7 @@ module Sim =
         | ManaArrives of amount: float
         /// Stacks of a resource arrive (picked-up infusion remnants, Verisium).
         | GainStacks of actor: string * resource: string * count: int
+        | Expose of actor: string * target: string * damageType: DamageType * amount: float * duration: float
         /// One stack of a buff is used up (an empowered attack has landed).
         | SpendBuff of actor: string * buff: string
         /// A meta gem gains energy (at the end of a dodge roll).
@@ -902,6 +906,20 @@ module Sim =
     let private partNamed (p: Skill) (prefix: string) =
         p.Mods |> List.tryPick (fun m -> match m.Stat with Named n when n.StartsWith prefix -> Some(n.Substring prefix.Length) | _ -> None)
 
+    /// Exposure on an enemy: the strongest applies, scaled by exposure effect.
+    let private expose (actor: Actor) (t: string) (dt: DamageType) amount duration (w: World) =
+        match Map.tryFind t w.Enemies with
+        | Some e when e.Life > 0.0 ->
+            let k = effectOnSelf e "ExposureEffectOnSelf" * Mods.inc Ctx.empty [ Named "ExposureEffect" ] (ModDb.ofList actor.Mods)
+            let name = "Exposure:" + DamageType.name dt
+            let current =
+                Map.tryFind name e.Debuffs
+                |> Option.filter (fun x -> x.Expires > w.Time)
+                |> Option.map (fun x -> x.Mods |> List.sumBy (fun m -> -m.Value))
+                |> Option.defaultValue 0.0
+            if amount * k >= current then addDebuff t name duration 1 [ Mod.base' (Resist dt) (-amount * k) ] w else w
+        | _ -> w
+
     /// Mana spent while a Sigil of Power stands: a Stage for every share of maximum mana, at
     /// most one a second, up to its maximum.
     let private sigilSpend (name: string) (spent: float) (maxMana: float) (w: World) =
@@ -1038,17 +1056,11 @@ module Sim =
                              let w = updateEnemy t (fun e -> { e with Debuffs = drop |> List.fold (fun d n -> Map.remove n d) e.Debuffs }) w
                              addDebuff t full duration 1 (mods |> List.map (Mod.scaled k)) w
                              |> fun w -> { w with Counts = bump ("apply:" + full) w.Counts })
-                     | ApplyExposure (dt, amount, duration) ->
+                     | ApplyExposure (dt, amount, duration) -> onTarget (fun t -> expose actor t dt amount duration w)
+                     | GrowExposure (dt, start, perPulse, cap, every, pulses, duration) ->
                          onTarget (fun t ->
-                             let k = effectOnSelf w.Enemies.[t] "ExposureEffectOnSelf" * Mods.inc Ctx.empty [ Named "ExposureEffect" ] (ModDb.ofList actor.Mods)
-                             let name = "Exposure:" + DamageType.name dt
-                             let current =
-                                 Map.tryFind name w.Enemies.[t].Debuffs
-                                 |> Option.filter (fun x -> x.Expires > w.Time)
-                                 |> Option.map (fun x -> x.Mods |> List.sumBy (fun m -> -m.Value))
-                                 |> Option.defaultValue 0.0
-                             if amount * k >= current then addDebuff t name duration 1 [ Mod.base' (Resist dt) (-amount * k) ] w
-                             else w)
+                             [ 1 .. pulses ] |> List.fold (fun w k ->
+                                 schedule (w.Time + every * float k) (Expose(actor.Name, t, dt, min cap (start + perPulse * float k), duration)) w) w)
                      | TriggerSkill name -> trigger env rng actor name w
                      | GainEnergy (meta, amount) -> gainEnergy env rng actor meta amount w
                      | GainResource (r, n) -> schedule w.Time (GainStacks(actor.Name, r, n)) w
@@ -2660,6 +2672,7 @@ module Sim =
                             | Some e when count > 0 && e.Stacks > count -> { st with Buffs = Map.add charge { e with Stacks = e.Stacks - count } st.Buffs }
                             | _ -> { st with Buffs = Map.remove charge st.Buffs }) w
                         |> fun w -> { w with Counts = bump ("consumed:" + charge) w.Counts }
+            | Expose (name, target, dt, amount, duration) -> expose (actorDef env name) target dt amount duration w
             | GainStacks (name, r, n) ->
                 let actor = actorDef env name
                 let st = Map.find name w.Actors

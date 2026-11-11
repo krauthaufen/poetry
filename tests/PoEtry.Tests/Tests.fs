@@ -718,6 +718,19 @@ let main _ =
         near 660.0 o.DamageBy.["Slam: Enraged (hit)"]
         equal 2 o.Counts.["hits:Slam"])
 
+    test "exposure that grows with every pulse, up to its cap" (fun () ->
+        // an orb: 20% exposure at once, 10% more every second for 4 pulses, at most 50%.
+        // The boss has no resistance: a hit of 100 deals 100 x (1 + exposure)
+        let orb = { Skill.make "Orb" [ Spell ] with Hits = []; Cooldown = Some 100.0 }
+        let player =
+            { Actor.make "Player" [ noIgnite ] [ orb; fireSpell 100.0 ] with
+                Rules =
+                    [ { Hook = OnUse; Filter = Called "Orb"; Chance = 100.0; Reaction = ApplyExposure(Fire, 20.0, 60.0) }
+                      { Hook = OnUse; Filter = Called "Orb"; Chance = 100.0; Reaction = GrowExposure(Fire, 20.0, 10.0, 50.0, 1.0, 4, 60.0) } ] }
+        let o = Sim.run { Fight.single (boss 1e12) player 6.5 with MaxTime = 6.5 } 1u
+        // Bolts land at 2 .. 6 s: 40% exposure at 2 s, 50% from 3 s
+        near (140.0 + 4.0 * 150.0) o.DamageBy.["Bolt (hit)"])
+
     test "berserk: life is lost for every Rage held while Rage is not being lost" (fun () ->
         // 20 Rage kept up by regeneration, 6% of life per minute per Rage: 2% of life a second
         let jab = { Skill.make "Jab" [ Attack; Melee ] with BaseDamage = Map.ofList [ Physical, Range.fixedAt 1.0 ]; BaseCrit = 0.0 }
