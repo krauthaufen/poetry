@@ -374,6 +374,9 @@ module Gems =
               ("Shred", ""), [ "Seq:0,1/6" ]
               ("Shred", "Fast Strikes"), [ "Seq:2,3,4/6" ]
               ("Shred", "Final Strike"), [ "Seq:5/6"; "Hits:2" ]
+              // one use, several strikes: five stabs before the final one; both gouges hit
+              ("Rapid Assault", ""), [ "Hits:5" ]
+              ("Cross Slash", ""), [ "Hits:2" ]
               // released with Perfect Timing: the perfect strike takes the place of the normal one
               ("Perfect Strike", ""), [ "NoHit" ]
               ("Gathering Storm", ""), [ "NoHit" ]
