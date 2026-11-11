@@ -61,6 +61,8 @@ ex(`function dumpSkill()
       pcall(runCallback, "OnFrame")
       local o = build.calcsTab.mainOutput
       res[#res+1] = "group " .. i .. ": " .. table.concat(nm, " + ")
+      local wd = build.calcsTab.mainEnv.player.weaponData1
+      if wd then for _, k in ipairs({"type","PhysicalMin","PhysicalMax","FireMin","FireMax","ColdMin","ColdMax","LightningMin","LightningMax","ChaosMin","ChaosMax","CritChance","AttackRate"}) do if wd[k] then res[#res+1] = "  weapon." .. k .. " = " .. tostring(wd[k]) end end end
       for _, hand in ipairs({"MainHand", "OffHand"}) do
         local h = o[hand]
         if type(h) == "table" then

@@ -357,7 +357,11 @@ module Setup =
             |> List.choose (fun x ->
                 match Gems.data c.Db x.Name, pressed c o x.Name with
                 | Some d, Some p ->
-                    let skip = [ "Travel"; "Minion"; "ModifiesNextSkill"; "Persistent" ] |> List.exists d.Types.Contains
+                    // a weapon's default attack (Grenade, Bow Shot) is what one presses for want of a
+                    // skill, never something kept on cooldown beside the main skill
+                    let isDefaultAttack =
+                        Map.tryFind x.Name c.Db.GemVariants |> Option.defaultValue [] |> List.exists (fun g -> g.GameId.Contains "PlayerDefault")
+                    let skip = isDefaultAttack || ([ "Travel"; "Minion"; "ModifiesNextSkill"; "Persistent" ] |> List.exists d.Types.Contains)
                     let empowers = p.Rules |> List.exists (fun r -> match r.Reaction with Empower _ -> true | _ -> false)
                     let grantsBuff = p.Rules |> List.exists (fun r -> match r.Reaction with ChargeBuff _ | GrantBuff _ -> true | _ -> false)
                     let cooldown = p.Skill.Cooldown |> Option.defaultValue 0.0

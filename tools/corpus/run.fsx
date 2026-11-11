@@ -25,11 +25,13 @@ type Result =
       /// Character-sheet values against the ones poe.ninja stores: (stat, ours, theirs).
       Sheet: (string * float * float) list
       /// poe.ninja's (PoB's) DPS for the main skill: a lead, never the truth.
-      TheirDps: float }
+      TheirDps: float
+      /// One fight in numbers (a JSON line): uses, hits, crits and damage per source, for tools/corpus/parity.py.
+      Detail: string }
 
 let runOne (path: string) : Result =
     let file = System.IO.Path.GetFileNameWithoutExtension path
-    let blank = { File = file; Error = None; Main = ""; Dps = 0.0; Unknown = []; Unmapped = []; Unsimulated = []; MissingGems = []; Notes = []; Sheet = []; TheirDps = 0.0 }
+    let blank = { File = file; Error = None; Main = ""; Dps = 0.0; Unknown = []; Unmapped = []; Unsimulated = []; MissingGems = []; Notes = []; Sheet = []; TheirDps = 0.0; Detail = "" }
     try
         let text = System.IO.File.ReadAllText path
         let build, _ = Setup.parseBuild text
@@ -127,10 +129,23 @@ let runOne (path: string) : Result =
                     | None -> None
                 let player = Setup.player c o play None
                 let sum = Setup.fight c o player boss |> Summary.simulate 3
+                let detail =
+                    let out = Sim.run (Setup.fight c o player boss) 1u
+                    let esc (x: string) = x.Replace("\\", "\\\\").Replace("\"", "\\\"")
+                    let obj (m: (string * string) list) = "{" + (m |> List.map (fun (k, v) -> sprintf "\"%s\":%s" (esc k) v) |> String.concat ",") + "}"
+                    let str (x: string) = "\"" + esc x + "\""
+                    let pressedSkill = player.Skills |> List.tryFind (fun sk -> sk.Name = pg)
+                    obj [ "file", str file; "main", str mainGem; "pressed", str pg; "duration", sprintf "%.3f" out.Duration
+                          "baseTime", (match pressedSkill with Some sk -> sprintf "%.4f" sk.BaseTime | None -> "0")
+                          "play", str (play |> List.map (function Spam g -> "spam " + g | OnCooldown g -> "cd " + g | KeepBuff g -> "buff " + g | KeepCurse g -> "curse " + g | _ -> "?") |> String.concat "; ")
+                          "startsWith", obj ((Setup.fight c o player boss).Player.Resources |> List.filter (fun (k, n) -> n > 0 && (k.EndsWith "Charge" || k = "Rage")) |> List.map (fun (k, n) -> k, string n))
+                          "damage", obj (out.DamageBy |> Map.toList |> List.map (fun (k, v) -> k, sprintf "%.0f" v))
+                          "counts", obj (out.Counts |> Map.toList |> List.map (fun (k, v) -> k, string v)) ]
                 let cov = c.Sheet.Coverage
                 let sk = skillCov |> Option.defaultValue Coverage.empty
                 { blank with
                     Main = (if pg = mainGem then pg elif pg = "" then mainGem + " (minions only)" else sprintf "%s (pressed %s)" mainGem pg)
+                    Detail = detail
                     Dps = sum.Dps.Mean
                     TheirDps = dpsOf mainGem
                     Unknown = cov.UnknownText |> List.map (fun l -> let k = l.IndexOf(": ") in if k > 0 then l.Substring(k + 2) else l) |> List.distinct
@@ -186,4 +201,6 @@ results |> List.iter (fun r ->
     say (sprintf "%-52s %-40s %s" r.File r.Main (match r.Error with Some e -> "ERROR " + e | None -> sprintf "%12.0f dps (theirs %10.0f)  %d unknown, %d unmapped, %d unsimulated%s" r.Dps r.TheirDps r.Unknown.Length r.Unmapped.Length r.Unsimulated.Length
                                                                                                              (r.Sheet |> List.filter off |> List.map (fun (n, a, b) -> sprintf "  %s %.0f/%.0f" n a b) |> String.concat ""))))
 System.IO.File.WriteAllText(__SOURCE_DIRECTORY__ + "/report.txt", out.ToString())
+// per-fight numbers stay with the corpus (gitignored): they name characters
+System.IO.File.WriteAllLines(dir + "/ours-skills.jsonl", results |> List.map (fun r -> r.Detail) |> List.filter (fun d -> d <> ""))
 printfn "%s" (out.ToString().Split('\n') |> Array.truncate 60 |> String.concat "\n")

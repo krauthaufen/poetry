@@ -255,8 +255,14 @@ module Gems =
     let chooseWeapon (db: GameDb) (name: string) (weapons: Weapon list) : Weapon option =
         let variants = Map.tryFind name db.GemVariants |> Option.orElse (Map.tryFind (plain name) db.GemVariants) |> Option.defaultValue []
         let reqs = variants |> List.collect (fun g -> g.WeaponRequirements)
+        // both weapon sets can hold a weapon the skill may use (a utility spear and the real
+        // one): the API does not say which set a gem is bound to, so the stronger weapon is taken
+        let strength (w: Weapon) = (w.Damage |> Map.toList |> List.sumBy (fun (_, r) -> (r.Min + r.Max) / 2.0)) * w.AttacksPerSecond
         if reqs.IsEmpty then List.tryHead weapons
-        else weapons |> List.tryFind (fun w -> weaponMatches reqs (Some w)) |> Option.orElse (if weaponMatches reqs None then None else List.tryHead weapons)
+        else
+            match weapons |> List.filter (fun w -> weaponMatches reqs (Some w)) with
+            | [] -> if weaponMatches reqs None then None else List.tryHead weapons
+            | fitting -> Some(fitting |> List.maxBy strength)
 
     /// Skill data for a gem with this weapon: gems with one entry per weapon type
     /// (Mace Strike) resolve to the matching one.
