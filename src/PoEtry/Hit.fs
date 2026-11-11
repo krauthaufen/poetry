@@ -309,9 +309,24 @@ module Hit =
 
     /// Full hit: crit roll, damage roll, mitigation.
     let roll (rng: Rng) (ctx: Ctx) mods (skill: Skill) (defender: Defender) =
-        let crit = rng.Chance(critChance ctx mods skill)
+        let chance = critChance ctx mods skill
+        let first = rng.Chance chance
+        // Inevitable Critical Hits: a hit that does not roll a critical hit rolls again until it
+        // does, with 30% less critical damage bonus for each re-roll (none left after four)
+        let rerolls =
+            if first || chance <= 0.0 || not (Mods.flag ctx (Named "InevitableCrits") mods) then 0
+            else
+                let rec go n = if n >= 4 || rng.Chance chance then n else go (n + 1)
+                go 1
+        let crit = first || rerolls > 0
         let ctx = { ctx with Crit = crit }
         let unmitigated = rollUnmitigated rng ctx mods skill crit
+        let unmitigated =
+            if rerolls = 0 then unmitigated
+            else
+                let full = critMultiplier ctx mods
+                let kept = max 0.0 (1.0 - Constants.inevitableCritLessPerReroll * float rerolls)
+                Dmg.map (fun _ v -> v * (1.0 + (full - 1.0) * kept) / full) unmitigated
         { Crit = crit
           Unmitigated = unmitigated
           Dealt = mitigateWith (rng.Chance(Mods.sumBase ctx [ Named "NegateEnemyResistChance" ] mods)) ctx mods defender unmitigated }

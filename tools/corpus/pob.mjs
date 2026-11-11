@@ -2,6 +2,7 @@
 // Runs the PoB-PoE2 engine of a local pob-web checkout in Node (paths below); a development
 // aid, not part of the simulator, and PoB stays a reference for defences only.
 //   node tools/corpus/pob.mjs <nnn> <ModName>...              modifiers of the player (Life, Armour, FireResist, Spirit, ...)
+//   node tools/corpus/pob.mjs <nnn> out <Lua pattern>         outputs of the character whose name matches (Life, Reserv, Mana)
 //   node tools/corpus/pob.mjs <nnn> skill <Gem name>          the output PoB computes for that gem's group
 //   node tools/corpus/pob.mjs <nnn> skillmods <Gem> <ModName>...   modifiers in that skill's context
 // Lines starting with [Lua] are PoB's log: pipe through  grep -v "^\\[Lua\\]"
@@ -109,6 +110,19 @@ ex(`function dumpSkillMods()
 end`);
 const r = call("pobWebLoadBuild", JSON.stringify({ xml, name: "x" }));
 if (!/success/.test(r)) console.log("load:", r.slice(0, 300));
+if (process.argv[3] === "out") {
+  ex("OUT_PAT = " + JSON.stringify(process.argv[4]));
+  ex(`function dumpOut()
+    local res = {}
+    local o = build.calcsTab.mainOutput
+    local keys = {}
+    for k, v in pairs(o) do if type(v) ~= "table" and tostring(k):match(OUT_PAT) then keys[#keys+1] = k end end
+    table.sort(keys)
+    for _, k in ipairs(keys) do res[#res+1] = string.format("  %-36s %s", k, tostring(o[k])) end
+    return require("dkjson").encode(res)
+  end`);
+  for (const l of JSON.parse(call("dumpOut", "{}"))) console.log(l); process.exit(0);
+}
 if (process.argv[3] === "skillmods") { ex("DUMP_SKILL = " + JSON.stringify(process.argv[4])); ex("DUMP_NAMES = {" + process.argv.slice(5).map(n => JSON.stringify(n)).join(",") + "}"); for (const l of JSON.parse(call("dumpSkillMods", "{}"))) console.log(l); process.exit(0); }
 if (process.argv[3] === "skill") { ex("DUMP_SKILL = " + JSON.stringify(process.argv.slice(4).join(" "))); for (const l of JSON.parse(call("dumpSkill", "{}"))) console.log(l); process.exit(0); }
 ex("DUMP_NAMES = {" + process.argv.slice(3).map(n => JSON.stringify(n)).join(",") + "}");

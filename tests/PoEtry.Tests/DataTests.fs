@@ -344,6 +344,23 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
             near 2.0 r.PercentOfMaxMana
         | None -> failwith "no mana remnants")
 
+    test "a persistent skill that reserves life instead of spirit puts the character on low life" (fun () ->
+        let gem name support = { Name = name; Level = 20; Quality = 0; Enabled = true; IsSupport = support; StatSet = 1 }
+        let group gems = { Label = ""; Slot = ""; Enabled = true; Gems = gems }
+        // Wind Dancer 30 Spirit, Vitality II 40, Direstrike I 20, Cannibalism I 15: 105 Spirit; Atziri's
+        // Communion: 0.66% of life per point instead -> 69.3% of life
+        let b = { blank with Groups = [ group [ gem "Wind Dancer" false; gem "Vitality II" true; gem "Direstrike I" true; gem "Cannibalism I" true; gem "Atziri's Communion" true ] ] }
+        let uses = Behaviours.spiritUses db.Value (sheetOf b) b
+        near 0.0 (uses |> List.sumBy (fun u -> u.Flat))
+        near 69.3 (uses |> List.sumBy (fun u -> u.LifePercent))
+        let c = Setup.loadWith db.Value treeJson b Options.defaults
+        near 0.693 c.Vitals.LifeReserved
+        near (1.0 - 0.693) c.Vitals.StartLife
+        // without the support it costs Spirit and no life
+        let plain = { blank with Groups = [ group [ gem "Wind Dancer" false; gem "Vitality II" true ] ] }
+        near 70.0 (Behaviours.spiritUses db.Value (sheetOf plain) plain |> List.sumBy (fun u -> u.Flat))
+        near 1.0 (Setup.loadWith db.Value treeJson plain Options.defaults).Vitals.StartLife)
+
     test "low life only where the build keeps itself there; fewer enemies to be surrounded" (fun () ->
         let bonus = [ "30% increased Damage when on Low Life" ]
         let start b = (Setup.loadWith db.Value treeJson b Options.defaults).Vitals.StartLife

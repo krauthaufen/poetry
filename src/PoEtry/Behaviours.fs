@@ -787,7 +787,9 @@ module Behaviours =
           /// Spirit for the gem itself (0 for minion gems), per minion, and minions that cost nothing.
           Flat: float
           PerMinion: float
-          FreeMinions: int }
+          FreeMinions: int
+          /// Percent of maximum life reserved instead ("Reserve Life instead of Spirit").
+          LifePercent: float }
 
     /// Equipped corrupted items ("for each Corrupted Item Equipped"): not flasks, charms,
     /// jewels or the weapon set not in use.
@@ -879,8 +881,15 @@ module Behaviours =
                     let curses = enabled |> List.filter (fun x -> not x.IsSupport && x.Name <> gem.Name) |> List.length
                     let perCurse = stat "blasphemy_base_spirit_reservation_per_socketed_curse" * float curses
                     let isMinion = d.Types.Contains "Minion" || not d.MinionList.IsEmpty
-                    if isMinion then Some { Gem = gem.Name; Flat = 0.0; PerMinion = (own + supports) / eff; FreeMinions = int (stat "first_X_minions_have_0_base_spirit_reservation") }
-                    elif own + supports + perCurse > 0.0 then Some { Gem = gem.Name; Flat = (own + supports + perCurse) / eff; PerMinion = 0.0; FreeMinions = 0 }
+                    // Atziri's Communion: "Reserve Life instead of Spirit", so many hundredths of a
+                    // percent of life per point of Spirit
+                    let lifePerSpirit =
+                        Gems.rawStats db charMods { Gem = gem.Name; Level = gem.Level; Quality = gem.Quality; StatSet = 1; Supports = supportGems |> List.map (fun x -> x.Name, x.Level) }
+                        |> List.filter (fun (k, _) -> k = "skill_reserves_X_life_permyriad_per_spirit_instead_of_spirit") |> List.sumBy snd
+                    if isMinion then Some { Gem = gem.Name; Flat = 0.0; PerMinion = (own + supports) / eff; FreeMinions = int (stat "first_X_minions_have_0_base_spirit_reservation"); LifePercent = 0.0 }
+                    elif own + supports + perCurse > 0.0 && lifePerSpirit > 0.0 then
+                        Some { Gem = gem.Name; Flat = 0.0; PerMinion = 0.0; FreeMinions = 0; LifePercent = (own + supports + perCurse) / eff * lifePerSpirit / 100.0 }
+                    elif own + supports + perCurse > 0.0 then Some { Gem = gem.Name; Flat = (own + supports + perCurse) / eff; PerMinion = 0.0; FreeMinions = 0; LifePercent = 0.0 }
                     else None
                 | _ -> None))
 

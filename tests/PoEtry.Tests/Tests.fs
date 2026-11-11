@@ -46,6 +46,18 @@ let main _ =
         near 20.0 r.[Cold].Max
         near 60.0 r.[Fire].Max)
 
+    test "inevitable critical hits: every hit crits, with 30% less bonus per re-roll" (fun () ->
+        // 50% crit chance, +100% bonus on top of the base: a first-roll crit deals x3
+        let skill = { fireSpell 100.0 with BaseCrit = 50.0 }
+        let mods = ModDb.ofList [ Mod.flag (Named "InevitableCrits"); Mod.base' CritBonus 100.0 ]
+        let rng = Rng 7u
+        let hits = [ for _ in 1 .. 4000 -> Hit.roll rng ctx mods skill (enemy []) ]
+        equal true (hits |> List.forall (fun h -> h.Crit))
+        // expected bonus share: 0.5 x 1 + 0.25 x 0.7 + 0.125 x 0.4 + 0.0625 x 0.1 (then nothing) = 0.73125
+        let mean = hits |> List.averageBy (fun h -> h.Unmitigated |> Map.toList |> List.sumBy snd)
+        let expected = 100.0 * (1.0 + 2.0 * 0.73125)
+        if abs (mean - expected) > 0.03 * expected then failwithf "mean %.1f, expected %.1f" mean expected)
+
     test "conversion over 100% is scaled down" (fun () ->
         let mods = [ Mod.base' (Convert(Physical, Fire)) 80.0; Mod.base' (Convert(Physical, Cold)) 40.0 ]
         let r = Hit.convert ctx (ModDb.ofList mods) (Map.ofList [ Physical, Range.fixedAt 120.0 ])

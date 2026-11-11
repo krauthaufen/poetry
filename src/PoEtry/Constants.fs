@@ -156,3 +156,6 @@ module Constants =
 
     /// Server tick, PoB data.misc.ServerTickTime.
     let serverTick = 0.033
+
+    /// Inevitable Critical Hits: "30% less Critical Damage Bonus for each time Critical Hit chance was re-rolled" (keyword text).
+    let inevitableCritLessPerReroll = 0.3

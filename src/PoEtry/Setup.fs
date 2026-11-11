@@ -216,6 +216,11 @@ module Setup =
         let maxResources, startResources = Map.add "Spirit" spirit maxResources, Map.add "Spirit" spirit startResources
         let vitals = Defence.computeWith (if o.SheetSetTwo then Map.add "WeaponSetTwo" 1 startResources else startResources) bases sheet
         let vitals = if o.LowLife && vitals.Life > 1.0 then { vitals with StartLife = 0.35 } else vitals
+        // life reserved by skills ("Reserve Life instead of Spirit") and by stats: what is left is all
+        // the life there is, so a character with 65% or more reserved is on low life for good
+        let vitals =
+            let reserved = min 0.99 (vitals.LifeReserved + (Behaviours.spiritUses db sheet build |> List.sumBy (fun u -> u.LifePercent)) / 100.0)
+            if reserved > 0.0 && vitals.Life > 1.0 then { vitals with LifeReserved = reserved; StartLife = min vitals.StartLife (1.0 - reserved) } else vitals
         // accuracy: 6 per level above the first and 6 per Dexterity (Character.ot, PoB AccuracyPerDexBase)
         let sheet =
             { sheet with

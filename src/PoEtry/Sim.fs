@@ -2077,6 +2077,9 @@ module Sim =
                 match env.Fight.Player.Vitals, w.Player with
                 | Some v, Some p when v.LifeFrozenWithES && p.EnergyShield > 0.0 && p.Life > v.StartLife * v.Life ->
                     { w with Player = Some { p with Life = v.StartLife * v.Life } }
+                // reserved life: what is left is the most there can be
+                | Some v, Some p when v.LifeReserved > 0.0 && p.Life > (1.0 - v.LifeReserved) * v.Life ->
+                    { w with Player = Some { p with Life = (1.0 - v.LifeReserved) * v.Life } }
                 | _ -> w
             let w =
                 match env.Fight.Player.Vitals, w.Player with

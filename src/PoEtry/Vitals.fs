@@ -58,6 +58,8 @@ type PlayerStats =
       BlockedDamageTaken: float
       /// Life the fight starts with, as a share of the maximum (a build that sits on low life).
       StartLife: float
+      /// Share of maximum life that is reserved (0..1): life never rises above the rest.
+      LifeReserved: float
       /// "Your Life cannot change while you have Energy Shield".
       LifeFrozenWithES: bool
       /// Enemies needed nearby to count as Surrounded (5, less with "require N fewer enemies").
@@ -135,7 +137,7 @@ module PlayerStats =
           SelfEffect = Map.empty; SelfDuration = Map.empty; LifeOnKill = 0.0; ESOnKill = 0.0; LifeOnBlock = 0.0
           ManaOnBlock = 0.0; Recoup = []; RecoupSeconds = 4.0; LifeRecoveryRate = 1.0; ManaRecoveryRate = 1.0
           ESRecoveryRate = 1.0; LifeFlask = None; CostsLife = false; LifeRecharge = 0.0; UnluckyEvade = false
-          LuckyDeflect = false; LifeLeechRate = 1.0; DeflectEffect = 40.0; StartLife = 1.0; LifeFrozenWithES = false; SurroundedAt = 5 }
+          LuckyDeflect = false; LifeLeechRate = 1.0; DeflectEffect = 40.0; StartLife = 1.0; LifeReserved = 0.0; LifeFrozenWithES = false; SurroundedAt = 5 }
 
 /// Hit resolution against the player (formulas: PoB CalcDefence, constants: game data).
 module Vitals =

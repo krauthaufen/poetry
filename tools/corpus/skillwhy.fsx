@@ -17,6 +17,19 @@ match player.Skills |> List.tryFind (fun s -> s.Name = gem) with
 | Some s ->
     printfn "%s: tags %A" s.Name (s.Tags |> Set.toList)
     printfn "  base %s x%.2f, crit %.2f%%, %.3fs, hits %A, %A" (s.BaseDamage |> Map.toList |> List.map (fun (t, r) -> sprintf "%s %.0f-%.0f" (DamageType.name t) r.Min r.Max) |> String.concat " ") s.BaseMultiplier s.BaseCrit s.BaseTime s.Hits s.Delivery
+    // what one hit is before the enemy: non-crit average per type, crit chance and multiplier, with
+    // what the fight starts with (charges, flags) and nothing on the enemy
+    let fight = Setup.fight c o player (Encounter.boss 83 Rarity.defaults 30.0)
+    let ctx = { Ctx.empty with SkillTags = s.Tags; SkillName = s.Name; Buffs = Map.ofList fight.Player.Resources }
+    let expected (sk: Skill) =
+        let db = ModDb.ofList (fight.Player.Mods @ sk.Mods)
+        let rng = Rng 1u
+        let n = 3000
+        let sums = [ for _ in 1 .. n -> Hit.rollUnmitigated rng ctx db sk false ] |> List.collect Map.toList |> List.groupBy fst |> List.map (fun (t, l) -> t, (l |> List.sumBy snd) / float n)
+        printfn "  %s: non-crit %s = %.0f; crit %.1f%% x%.2f" sk.Name (sums |> List.map (fun (t, v) -> sprintf "%s %.0f" (DamageType.name t) v) |> String.concat " ") (sums |> List.sumBy snd)
+            (Hit.critChance ctx db sk) (Hit.critMultiplier { ctx with Crit = true } db)
+    expected s
+    for p in s.Parts do expected p
     let show (source: string) (ms: Mod list) =
         for m in ms do
             let st = (sprintf "%A" m.Stat).Replace("\n", " ")

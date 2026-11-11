@@ -287,6 +287,8 @@ module Defence =
                  && not (sheet.Mods |> List.exists (fun m ->
                      m.Value > 0.0 && (match m.Stat with Named("LifeLeech" | "LifeOnHit" | "LifeOnKill" | "LifeOnBlock") | LifeRegen | LifeRegenPercent -> true | _ -> false)))
              if not ci && life > 1.0 && wantsLowLife && (frozen || noRecovery) then 0.35 else 1.0)
+          // "Reserves 25% of Life"; Setup adds what skills reserve
+          LifeReserved = min 1.0 (named "LifeReservedPercent" / 100.0)
           LifeFrozenWithES = flag "LifeFrozenWithES"
           SurroundedAt = 5 + int (named "SurroundedOffset") }
 

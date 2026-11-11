@@ -300,6 +300,11 @@ module StatMap =
         // Mana Remnants' own numbers: read by Behaviours.manaRemnants
         | "mana_remnants_mana_gain_per_globe" | "mana_remnants_spawn_remnant_on_crit_vs_elemental_ailment_enemy_every_X_ms"
         | "mana_remnants_chance_to_spawn_orb_on_killing_enemy_with_elemental_ailment_%" -> Some Structural
+        | "oracle_hits_eventually_crit_with_critical_strike_multiplier_+%_final_per_failed_roll" -> one (Mod.flag (Named "InevitableCrits"))
+        // Direstrike: "increased Attack Damage while on Low Life while a Supported Skill is active"
+        | "support_attack_damage_spirit_cost_attack_damage_+%_on_low_life" ->
+            one (Mod.inc (Damage AllDamage) v |> Mod.whenever (SkillIs Attack) |> Mod.whenever (WhileBuff "LowLife"))
+        | "life_reserved_by_stat_only_for_midnight_bargain_and_infernalist_%" -> one (Mod.base' (Named "LifeReservedPercent") v)
         | "armour_+_per_1_spirit" -> one (Mod.base' Armour v |> Mod.whenever (PerStack("Spirit", 1.0)))
         | "double_evasion_rating_from_gloves_helmets_boots" -> one (Mod.flag (Named "DoubleEvasionHelmetGlovesBoots"))
         | "halve_evasion_rating_from_body" -> one (Mod.flag (Named "HalveEvasionBodyArmour"))
