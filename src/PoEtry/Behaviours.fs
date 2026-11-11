@@ -536,6 +536,28 @@ module Behaviours =
                     { Hook = OnHit; Filter = Called skill.Name; Chance = 100.0; Reaction = IfEnemyHas(curseName, TriggerSkill name) })
             | Error _ -> None)
 
+    /// Pain Offering: while its spike stands, minions deal increased damage and attack and cast
+    /// faster. The skeleton it takes is not removed. Returns the rules (a marker buff on the
+    /// player keeps it from being recast while it lasts).
+    let offering (db: GameDb) (charMods: ModDb) (setup: GemSetup) (skill: Skill) : Rule list =
+        let raw = Gems.rawStats db charMods { setup with Supports = [] }
+        let sum id = raw |> List.filter (fun (k, _) -> k = id) |> List.sumBy snd
+        let damage, speed = sum "pain_offering_damage_+%", sum "pain_offering_attack_and_cast_speed_+%"
+        let spell = sum "power_offering_buff_spell_damage_+%"
+        if spell > 0.0 then
+            // Soul Offering: increased spell damage for the player while it stands
+            let ctx = { Ctx.empty with SkillTags = skill.Tags; SkillName = skill.Name }
+            let duration = sum "base_skill_effect_duration" / 1000.0 * Mods.mult ctx [ SkillDuration ] (ModDb.ofList (ModDb.toList charMods @ skill.Mods))
+            [ { Hook = OnUse; Filter = Called skill.Name; Chance = 100.0
+                Reaction = GrantBuff(skill.Name + " buff", duration, 1, [ Mod.inc (Damage AllDamage) spell |> Mod.whenever (SkillIs Spell) |> Mod.from skill.Name ]) } ]
+        elif damage = 0.0 && speed = 0.0 then []
+        else
+            let ctx = { Ctx.empty with SkillTags = skill.Tags; SkillName = skill.Name }
+            let duration = sum "base_skill_effect_duration" / 1000.0 * Mods.mult ctx [ SkillDuration ] (ModDb.ofList (ModDb.toList charMods @ skill.Mods))
+            let mods = [ Mod.inc (Damage AllDamage) damage; Mod.inc Speed speed ] |> List.map (Mod.from skill.Name)
+            [ { Hook = OnUse; Filter = Called skill.Name; Chance = 100.0; Reaction = GrantMinionBuff(skill.Name, duration, mods) }
+              { Hook = OnUse; Filter = Called skill.Name; Chance = 100.0; Reaction = GrantBuff(skill.Name + " buff", duration, 1, []) } ]
+
     /// Freezing Mark, Voltaic Mark: "When the Marked target is Frozen, the Mark Activates,
     /// granting you a Buff which gives extra Cold damage". The buff is given by a hit on a marked
     /// enemy that is frozen (electrocuted) and lasts the gem's secondary duration. The mark is

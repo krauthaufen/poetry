@@ -56,6 +56,8 @@ type Reaction =
     /// Feed a meta gem.
     | GainEnergy of meta: string * amount: float
     | RemoveBuff of name: string
+    /// A buff on every minion (an offering).
+    | GrantMinionBuff of name: string * duration: float * mods: Mod list
     /// Take a debuff off the enemy concerned (a mark that has been activated).
     | RemoveDebuff of name: string
     /// Stacks of a resource (infusions from Powered by Verisium), capped at its maximum.
@@ -1040,6 +1042,13 @@ module Sim =
                          schedule (w.Time + duration) Expire w
                      | RemoveBuff name ->
                          updateActor actor.Name (fun st -> { st with Buffs = Map.remove name st.Buffs }) w
+                     | GrantMinionBuff (name, duration, mods) ->
+                         env.Fight.Minions
+                         |> List.fold (fun w (m: Actor) ->
+                             if Map.containsKey m.Name w.Actors then
+                                 updateActor m.Name (fun st -> { st with Buffs = Map.add name { Name = name; Mods = mods; Stacks = 1; Expires = w.Time + duration } st.Buffs }) w
+                             else w) w
+                         |> schedule (w.Time + duration) Expire
                      | ApplyDebuff (name, duration, maxStacks, mods) ->
                          onTarget (fun t -> addDebuff t name duration maxStacks mods w)
                      | ApplyCurse (name, duration, mods) ->

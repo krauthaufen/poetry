@@ -731,6 +731,18 @@ let main _ =
         // Bolts land at 2 .. 6 s: 40% exposure at 2 s, 50% from 3 s
         near (140.0 + 4.0 * 150.0) o.DamageBy.["Bolt (hit)"])
 
+    test "an offering: the player's skill buffs the minions for its duration" (fun () ->
+        // the minion hits for 100 every second; the offering at 0 s gives 50% increased damage for 3 s
+        let off = { Skill.make "Offering" [ Spell ] with Hits = []; Cooldown = Some 100.0 }
+        let player =
+            { Actor.make "Player" [ noIgnite ] [ off ] with
+                Rules = [ { Hook = OnUse; Filter = Called "Offering"; Chance = 100.0; Reaction = GrantMinionBuff("Offering", 3.0, [ Mod.inc (Damage AllDamage) 50.0 ]) } ] }
+        let minion = Actor.make "Skeleton" [ noIgnite; sure ] [ strike "Bite" 100.0 ]
+        let f = { Fight.single (boss 1e12) player 5.5 with MaxTime = 5.5; Minions = [ minion ] }
+        let o = Sim.run f 1u
+        // bites land at 1 .. 5 s: those at 1 and 2 s are within the three seconds
+        near (2.0 * 150.0 + 3.0 * 100.0) o.DamageBy.["Bite (hit)"])
+
     test "berserk: life is lost for every Rage held while Rage is not being lost" (fun () ->
         // 20 Rage kept up by regeneration, 6% of life per minute per Rage: 2% of life a second
         let jab = { Skill.make "Jab" [ Attack; Melee ] with BaseDamage = Map.ofList [ Physical, Range.fixedAt 1.0 ]; BaseCrit = 0.0 }

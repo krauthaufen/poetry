@@ -343,7 +343,7 @@ module Setup =
                         match Behaviours.demonForm db charMods setup s with
                         | Some (s', rs, ms) -> s', cryRules @ rs, cryGrants @ ms
                         | None -> s, cryRules, cryGrants
-                    let cryRules = cryRules @ Behaviours.sigilOfPower db charMods setup s @ Behaviours.markBuff db charMods setup s
+                    let cryRules = cryRules @ Behaviours.sigilOfPower db charMods setup s @ Behaviours.markBuff db charMods setup s @ Behaviours.offering db charMods setup s
                     // parts that happen when the skill kills (Crushing Fear's shockwave)
                     let cryRules =
                         cryRules
@@ -402,7 +402,9 @@ module Setup =
                     // skill, never something kept on cooldown beside the main skill
                     let isDefaultAttack =
                         Map.tryFind x.Name c.Db.GemVariants |> Option.defaultValue [] |> List.exists (fun g -> g.GameId.Contains "PlayerDefault")
-                    let skip = isDefaultAttack || ([ "Travel"; "Minion"; "ModifiesNextSkill"; "Persistent" ] |> List.exists d.Types.Contains)
+                    // (an offering is a minion skill, but one to press)
+                    let offering = d.Types.Contains "Offering" && not p.Rules.IsEmpty
+                    let skip = isDefaultAttack || (not offering && ([ "Travel"; "Minion"; "ModifiesNextSkill"; "Persistent" ] |> List.exists d.Types.Contains))
                     let empowers = p.Rules |> List.exists (fun r -> match r.Reaction with Empower _ -> true | _ -> false)
                     let grantsBuff = p.Rules |> List.exists (fun r -> match r.Reaction with ChargeBuff _ | GrantBuff _ -> true | _ -> false)
                     let cooldown = p.Skill.Cooldown |> Option.defaultValue 0.0
