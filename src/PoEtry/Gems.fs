@@ -376,6 +376,32 @@ module Gems =
               ("Shred", "Final Strike"), [ "Seq:5/6"; "Hits:2" ]
               // "Simultaneously fires a Physical Projectile and a Chaos Projectile"
               ("Coiling Bolts", "Chaos"), [ "Part" ]
+              // what springs from the enemy hit and goes for others: beams "at nearby enemies",
+              // bolts "at multiple other enemies", shrapnel "in a cone behind it"
+              ("Lightning Arrow", "Beam"), [ "Part"; "Behind" ]
+              ("Lightning Spear", "Lightning Bolts"), [ "Part"; "Behind" ]
+              ("Molten Blast", "Shrapnel"), [ "Part"; "Behind" ]
+              // more of the same use
+              ("Detonating Arrow", "Explosion"), [ "Part" ]
+              ("Shield Charge", "Collision"), [ "Part" ]
+              ("Molten Crash", ""), [ "Hits:2" ]
+              ("Molten Crash", "Fissures"), [ "Part" ]
+              ("Starborn Onslaught", "Star Fall"), [ "Part" ]
+              ("Wind Serpent's Fury", "Serpent"), [ "Part"; "Charge" ]
+              ("Earthshatter", "Explosion"), [ "Part"; "DetonatedBy:Warcry" ]
+              ("Detonate Living", "Explosion"), [ "Part"; "Vs:Cullable" ]
+              // an explosion for each ailment consumed
+              ("Elemental Sundering", "Cold"), [ "Part"; "Vs:Frozen!" ]
+              ("Elemental Sundering", "Fire"), [ "Part"; "Vs:Ignited!" ]
+              ("Elemental Sundering", "Lightning"), [ "Part"; "Vs:Shocked!" ]
+              ("Snap", ""), [ "Vs:Frozen!" ]
+              ("Snap", "Lightning"), [ "Part"; "Vs:Shocked!" ]
+              ("Snap", "Fire"), [ "Part"; "Vs:Ignited!" ]
+              ("Acidic Concoction", "Acidic Burst"), [ "Part"; "Vs:Poisoned!" ]
+              ("Frost Darts", "Ice Chunk"), [ "Part"; "Vs:Chilled|Frozen" ]
+              ("Frost Darts", "Explosion"), [ "Part"; "Infused:ColdInfusion" ]
+              ("Fireball", "Firebolts"), [ "Part"; "Infused:FireInfusion"; "Behind" ]
+              ("Ember Fusillade", "Beam"), [ "Part"; "Infused:LightningInfusion" ]
               // the spears a standing enemy touches explode at once (four of them: guess)
               // and, set off within half a second of appearing, deal 80% less
               ("Spearfield", "Explosion"), [ "Part"; "Hits:4"; "Less:80" ]

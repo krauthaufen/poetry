@@ -437,6 +437,22 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
             equal true (boom.Mods |> List.exists (fun m -> m.Stat = Damage AllDamage && m.Kind = More && m.Value = -80.0))
         | Error e -> failwith e)
 
+    test "parts with their conditions: beams for other enemies, an explosion per ailment, a spike for a warcry" (fun () ->
+        let flag name (sk: Skill) = sk.Mods |> List.exists (fun m -> m.Stat = Named name)
+        let part gem weaponText (label: string) =
+            let weapon = weaponText |> Option.bind (fun t -> (Items.parse db.Value t).Weapon)
+            match Gems.skill db.Value ModDb.empty weapon { Gem = gem; Level = 20; Quality = 0; StatSet = 1; Supports = [] } with
+            | Ok (s, _) -> s.Parts |> List.find (fun p -> p.Name.EndsWith label)
+            | Error e -> failwith e
+        let bow, mace, spear = Some "Rarity: Normal\nWarmonger Bow\n--------\n", Some "Rarity: Normal\nAkoyan Club\n--------\n", Some "Rarity: Normal\nHardwood Spear\n--------\n"
+        match (part "Lightning Arrow" bow "Beam").Delivery with
+        | Projectiles p -> equal true p.SkipPrimary
+        | d -> failwithf "%A" d
+        equal true (flag "DetonatedBy:Warcry" (part "Earthshatter" mace "Explosion"))
+        let cold = part "Elemental Sundering" spear "Cold"
+        equal true (flag "OnlyVs:Frozen" cold && flag "ConsumesVs" cold)
+        equal true (flag "OnlyInfused:FireInfusion" (part "Fireball" None "Firebolts")))
+
     test "perfect timing: the perfect hit replaces the normal one; the release follows the channel" (fun () ->
         let flag name (sk: Skill) = Mods.flag { Ctx.empty with SkillName = sk.Name } (Named name) (ModDb.ofList sk.Mods)
         let mace = (Items.parse db.Value "Rarity: Normal\nAkoyan Club\n--------\n").Weapon
