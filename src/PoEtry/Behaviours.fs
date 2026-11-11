@@ -291,6 +291,46 @@ module Behaviours =
                               Delay = pickupSeconds + sum "remnant_delay_X_ms" / 1000.0
                               Overflow = 2.0 }))
 
+    /// Banners (War, Defiance, Dread): the gem reserves Spirit and grants the banner skill, which
+    /// needs Glory from attack hits and then gives its aura for a duration. Only what the engine
+    /// uses of the aura is taken: attack damage, attack speed, accuracy.
+    let banners (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) : Banner list =
+        let charMods = ModDb.ofList sheet.Mods
+        build.Groups |> List.filter (fun g -> g.Enabled)
+        |> List.collect (fun g ->
+            let enabled = g.Gems |> List.filter (fun x -> x.Enabled)
+            let supportStats =
+                enabled |> List.filter (fun x -> x.IsSupport) |> List.collect (fun x ->
+                    match Gems.data db x.Name with
+                    | Some s when s.Support -> s.StatSets |> List.tryHead |> Option.map (fun set -> Gems.stats s set x.Level 0) |> Option.defaultValue []
+                    | _ -> [])
+            enabled |> List.filter (fun x -> not x.IsSupport) |> List.collect (fun gem ->
+                Map.tryFind gem.Name db.Gems |> Option.map (fun g -> g.AdditionalEffects) |> Option.defaultValue []
+                |> List.choose (fun id -> Map.tryFind id db.Skills)
+                |> List.choose (fun d ->
+                    match d.StatSets |> List.tryHead with
+                    | Some set when d.Types.Contains "Banner" ->
+                        let stats = Gems.stats d set gem.Level gem.Quality @ supportStats
+                        let sum id = stats |> List.filter (fun (k, _) -> k = id) |> List.sumBy snd
+                        let effect = 1.0 + (Mods.sumInc Ctx.empty [ Named "BannerEffect" ] charMods) / 100.0
+                        let glory = sum "active_skill_requires_X_glory" * (1.0 + sum "support_glory_required_+%_final" / 100.0)
+                        if glory <= 0.0 then None
+                        else
+                            Some
+                                { Banner.Name = gem.Name
+                                  Glory = glory
+                                  PerAttackHit = sum "active_skill_generates_mp_%_glory_per_attack_hit"
+                                  Duration = sum "base_skill_effect_duration" / 1000.0 * Mods.mult Ctx.empty [ SkillDuration ] charMods
+                                  Mods =
+                                    [ if sum "base_skill_buff_attack_damage_+%_final_to_apply" <> 0.0 then
+                                          yield Mod.more (Damage AllDamage) (sum "base_skill_buff_attack_damage_+%_final_to_apply" * effect) |> Mod.whenever (SkillIs Attack)
+                                      if sum "base_skill_buff_banner_attack_speed_+%_to_apply" <> 0.0 then
+                                          yield Mod.inc Speed (sum "base_skill_buff_banner_attack_speed_+%_to_apply" * effect) |> Mod.whenever (SkillIs Attack)
+                                      if sum "base_skill_buff_banner_accuracy_+%_to_apply" <> 0.0 then
+                                          yield Mod.inc (Named "Accuracy") (sum "base_skill_buff_banner_accuracy_+%_to_apply" * effect) ]
+                                    |> List.map (Mod.from ("banner:" + gem.Name)) }
+                    | _ -> None)))
+
     /// The elemental (and Verisium) infusions: maximum 3 each (BaseMaximumInfusionCount, plus
     /// "maximum X infusion stacks"), 20 s (BaseInfusionDurationMs, "infusion duration").
     let infusionResources = [ "FireInfusion"; "ColdInfusion"; "LightningInfusion"; "VerisiumInfusion" ]

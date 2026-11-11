@@ -387,7 +387,10 @@ module Setup =
                     let empowers = p.Rules |> List.exists (fun r -> match r.Reaction with Empower _ -> true | _ -> false)
                     let grantsBuff = p.Rules |> List.exists (fun r -> match r.Reaction with ChargeBuff _ | GrantBuff _ -> true | _ -> false)
                     let cooldown = p.Skill.Cooldown |> Option.defaultValue 0.0
+                    let needsBuilding = p.Skill.Mods |> List.exists (fun m -> match m.Stat with Named n -> n.StartsWith "Requires:" && m.Value > 0.0 | _ -> false)
                     if skip then None
+                    // a skill that needs Glory or Combo is used whenever it has enough
+                    elif needsBuilding then Some(OnCooldown x.Name)
                     // a warcry is worth pressing when it empowers attacks
                     elif d.Types.Contains "Warcry" then (if empowers then Some(OnCooldown x.Name) else None)
                     elif p.Curse.IsSome then (if p.Rules |> List.exists (fun r -> match r.Reaction with ApplyCurse (_, _, ms) -> not ms.IsEmpty | _ -> false) || not p.Grants.IsEmpty then Some(KeepCurse x.Name) else None)
@@ -420,6 +423,13 @@ module Setup =
         // a main skill with a cooldown of its own goes first whenever it is ready: otherwise the
         // other cooldown skills would fill every gap and it would never be used
         match pressed c o mainGem with
+        | Some p when p.Skill.Mods |> List.exists (fun m -> match m.Stat with Named n -> n.StartsWith "Requires:" && m.Value > 0.0 | _ -> false) ->
+            // the main skill needs Glory or Combo: it is used when it has enough, and the weapon's
+            // plain attack (if the character has it) builds in between
+            let filler =
+                c.Build.Groups |> List.filter (fun g -> g.Enabled) |> List.collect (fun g -> g.Gems) |> List.filter (fun x -> x.Enabled && not x.IsSupport && x.Name <> mainGem)
+                |> List.tryFind (fun x -> (Map.tryFind x.Name c.Db.GemVariants |> Option.defaultValue [] |> List.exists (fun g -> g.GameId.Contains "PlayerDefault")) && (pressed c o x.Name).IsSome)
+            OnCooldown mainGem :: others @ (filler |> Option.map (fun x -> Spam x.Name) |> Option.toList)
         | Some p when p.Skill.Cooldown.IsSome && (match main with Spam _ -> true | _ -> false) -> OnCooldown mainGem :: others @ [ main ]
         | _ -> others @ [ main ]
 
@@ -535,6 +545,7 @@ module Setup =
             ParallelUses = not o.SequentialUses
             WardRemnants = Behaviours.wardRemnants db sheet c.Build o.Pickup
             ManaRemnants = Behaviours.manaRemnants db sheet c.Build o.Pickup
+            Banners = Behaviours.banners db sheet c.Build
             Archons = [ Behaviours.elementalArchon sheet ]
             Charms = (if o.Immortal || o.NoFlask then [] else c.Charms)
             ManaFlask =

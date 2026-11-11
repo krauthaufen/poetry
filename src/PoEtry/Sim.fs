@@ -212,6 +212,15 @@ type ManaRemnants =
       /// Mana can overflow to this multiple of its maximum.
       Overflow: float }
 
+/// A banner: attacking builds its Glory (a share of the monster's power per attack hit); at
+/// the full amount it is placed and its aura lasts for the duration.
+type Banner =
+    { Name: string
+      Glory: float
+      PerAttackHit: float
+      Duration: float
+      Mods: Mod list }
+
 type Periodic =
     { Name: string
       Every: float
@@ -259,6 +268,7 @@ type Actor =
       ParallelUses: bool
       WardRemnants: WardRemnants option
       ManaRemnants: ManaRemnants option
+      Banners: Banner list
       /// The actor only acts while the player has this buff (a totem while it stands).
       ActiveWhile: string option
       Infusions: Infusions option
@@ -287,6 +297,7 @@ module Actor =
           ParallelUses = false
           WardRemnants = None
           ManaRemnants = None
+          Banners = []
           ActiveWhile = None
           Infusions = None
           Archons = []
@@ -878,6 +889,15 @@ module Sim =
     let private partNamed (p: Skill) (prefix: string) =
         p.Mods |> List.tryPick (fun m -> match m.Stat with Named n when n.StartsWith prefix -> Some(n.Substring prefix.Length) | _ -> None)
 
+    /// Glory and Combo a skill needs before it can be used: (counter, amount).
+    let private requirements (skill: Skill) =
+        let own name = skill.Mods |> List.sumBy (fun m -> if m.Stat = Named name && m.Kind = Base then m.Value else 0.0)
+        [ "Glory:" + skill.Name, own "Requires:Glory" * (1.0 + own "GloryRequiredMore" / 100.0)
+          "Combo:" + skill.Name, own "Requires:Combo" ]
+        |> List.filter (fun (_, n) -> n > 0.0)
+    let private built (st: ActorState) (skill: Skill) =
+        requirements skill |> List.forall (fun (key, n) -> (Map.tryFind key st.Energy |> Option.defaultValue 0.0) >= n - 1e-9)
+
     let private ready (st: ActorState) now (skill: Skill) =
         Map.tryFind skill.Name st.Cooldowns |> Option.forall (fun t -> t <= now)
 
@@ -1084,6 +1104,11 @@ module Sim =
                     let k = 1.0 + sealOwn "SealRepeatDamage" / 100.0
                     pattern @ [ for i in 1 .. repeats do for (_, mult) in pattern -> After(useTime + 0.1 * float i), mult * k ]
             let w = { w with Counts = bump ("uses:" + skill.Name) w.Counts }
+            // the Glory or Combo the skill needed is spent
+            let w =
+                match requirements skill with
+                | [] -> w
+                | reqs -> updateActor actor.Name (fun st -> { st with Energy = reqs |> List.fold (fun e (key, _) -> Map.remove key e) st.Energy }) w
             let w = if skill.Tags.Contains(Tag "Type:TargetsDestructibleCorpses") && w.Kills.Length > w.CorpsesUsed then { w with CorpsesUsed = w.CorpsesUsed + 1 } else w
             let w = if useTime > 0.0 then updateActor actor.Name (fun st -> { st with LastUsed = skill.Name }) w else w
             let times =
@@ -1224,7 +1249,7 @@ module Sim =
             let usable =
                 actor.Rotation |> List.filter (fun step ->
                     let s = skillOf actor step.Use
-                    step.When v && ready st w.Time s && (corpses > 0 || not (needsCorpse s)))
+                    step.When v && ready st w.Time s && (corpses > 0 || not (needsCorpse s)) && built st s)
             usable |> List.tryFind (fun step -> affordable (skillOf actor step.Use)) |> Option.orElse (List.tryHead usable)
         match choice with
         | Some step ->
@@ -1669,6 +1694,57 @@ module Sim =
                             w
                 // meta gem energy: crits and newly inflicted freeze / shock / ignite, scaled by
                 // monster power and by the share of the ailment threshold the hit deals
+                // Glory and Combo: skills that can only be used once enough has been built, count up here
+                let w =
+                    let needs (s: Skill) = s.Mods |> List.exists (fun m -> match m.Stat with Named n -> n.StartsWith "Requires:" | _ -> false)
+                    match actor.Skills |> List.filter needs with
+                    | [] -> w
+                    | builders ->
+                        let power = MonsterPower.ofRarity e.Def.Rarity
+                        let before = status e
+                        let after = if dead then Map.empty else status w.Enemies.[target]
+                        let newly (st: string) = not dead && not (before.ContainsKey st) && after.ContainsKey st
+                        let dealt types = Dmg.sumOf types hit.Dealt > 0.0
+                        builders |> List.fold (fun w (s: Skill) ->
+                            let own name = s.Mods |> List.sumBy (fun m -> if m.Stat = Named name && m.Kind = Base then m.Value else 0.0)
+                            let ownHit = skill.Name = s.Name || s.Parts |> List.exists (fun p -> p.Name = skill.Name)
+                            let glory =
+                                if own "Requires:Glory" <= 0.0 || ownHit then 0.0
+                                else
+                                    power / 100.0
+                                    * ((if skill.Tags.Contains Attack then own "Builds:Glory:AttackHit" else 0.0)
+                                       + (if dealt DamageType.elemental then own "Builds:Glory:ElementalHit" else 0.0)
+                                       + (if dealt [ Chaos ] then own "Builds:Glory:ChaosHit" else 0.0)
+                                       + ([ "HeavilyStunned"; "Frozen"; "Ignited" ] |> List.sumBy (fun st -> if newly st then own ("Builds:Glory:" + st) else 0.0)))
+                                    + ([ "Ignited"; "Shocked" ] |> List.sumBy (fun st -> if newly st then own ("Builds:GloryFlat:" + st) else 0.0))
+                            // Combo: from melee attack hits with other skills
+                            let combo =
+                                if own "Requires:Combo" <= 0.0 || ownHit || not (skill.Tags.Contains Attack) || not (skill.Tags.Contains(Tag "Type:Melee")) then 0.0
+                                else 1.0 + (if rng.Chance(own "ComboExtraChance") then 1.0 else 0.0)
+                            let add key amount cap (w: World) =
+                                if amount <= 0.0 then w
+                                else updateActor actor.Name (fun st -> { st with Energy = Map.add key (min cap ((Map.tryFind key st.Energy |> Option.defaultValue 0.0) + amount)) st.Energy }) w
+                            w
+                            |> add ("Glory:" + s.Name) glory (own "Requires:Glory" * (1.0 + own "GloryRequiredMore" / 100.0))
+                            |> add ("Combo:" + s.Name) combo (own "Requires:Combo")) w
+                // Banners: attack hits build Glory; a full banner is placed at once
+                let w =
+                    if actor.Banners.IsEmpty || not (skill.Tags.Contains Attack) then w
+                    else
+                        let power = MonsterPower.ofRarity e.Def.Rarity
+                        actor.Banners |> List.fold (fun w b ->
+                            let key = "Glory:" + b.Name
+                            let have = (Map.tryFind key (Map.find actor.Name w.Actors).Energy |> Option.defaultValue 0.0) + power * b.PerAttackHit / 100.0
+                            let up = (Map.find actor.Name w.Actors).Buffs |> Map.tryFind ("Banner:" + b.Name) |> Option.exists (fun x -> x.Expires > w.Time)
+                            if up then updateActor actor.Name (fun st -> { st with Energy = Map.add key (min b.Glory have) st.Energy }) w
+                            elif have >= b.Glory then
+                                updateActor actor.Name (fun st ->
+                                    { st with
+                                        Energy = Map.add key 0.0 st.Energy
+                                        Buffs = Map.add ("Banner:" + b.Name) { Name = "Banner:" + b.Name; Mods = b.Mods; Stacks = 1; Expires = w.Time + b.Duration } st.Buffs }) w
+                                |> schedule (w.Time + b.Duration) Expire
+                                |> fun w -> { w with Counts = bump ("banner:" + b.Name) w.Counts }
+                            else updateActor actor.Name (fun st -> { st with Energy = Map.add key have st.Energy }) w) w
                 // "Energy cannot be gained from direct effects of Triggered Skills" (poe2wiki, poe2db)
                 let w =
                     if actor.Metas.IsEmpty || skill.Tags.Contains Triggered then w

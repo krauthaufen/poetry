@@ -186,6 +186,47 @@ let main _ =
         // hits land at the end of a use: six by 6.5 s, and the three repeats of the first two breaks
         near (6.0 * 100.0 + 3.0 * 50.0) o.DamageBy.["Bolt (hit)"])
 
+    // an attack that always hits, 1 s per use, and the mods a skill gets from its Glory / Combo stats
+    let strike name dmg = { Skill.make name [ Attack; Tag "Type:Melee" ] with BaseDamage = Map.ofList [ Physical, Range.fixedAt dmg ]; BaseCrit = 0.0 }
+    let sure = Mod.base' (Named "Accuracy") 1e12
+    let needs name stat v = Mod.base' (Named stat) v |> Mod.whenever (SkillNamed name)
+    let duel skills time = { Fight.single (boss 1e12) (Actor.make "Player" [ noIgnite; sure ] skills) time with MaxTime = time }
+
+    test "glory: a skill that needs it waits until attack hits have built it, then spends it" (fun () ->
+        // 100 Glory, 50% of the monster's power (20 for a boss) per attack hit: ten hits of the
+        // other skill. Its own hits build nothing.
+        let slam = { strike "Slam" 1000.0 with Mods = [ needs "Slam" "Requires:Glory" 100.0; needs "Slam" "Builds:Glory:AttackHit" 50.0 ] }
+        let o = Sim.run (duel [ slam; strike "Jab" 10.0 ] 22.5) 1u
+        // Jab at 0 .. 9 s, Slam at 10 s, Jab at 11 .. 20 s, Slam at 21 s, Jab at 22 s
+        equal 21 o.Counts.["uses:Jab"]
+        equal 2 o.Counts.["uses:Slam"])
+
+    test "glory: less Glory required shortens the wait" (fun () ->
+        let slam = { strike "Slam" 1000.0 with Mods = [ needs "Slam" "Requires:Glory" 100.0; needs "Slam" "Builds:Glory:AttackHit" 50.0; needs "Slam" "GloryRequiredMore" -50.0 ] }
+        let o = Sim.run (duel [ slam; strike "Jab" 10.0 ] 12.5) 1u
+        equal 2 o.Counts.["uses:Slam"]
+        equal 11 o.Counts.["uses:Jab"])
+
+    test "combo: one per melee attack hit with another skill, spent on use" (fun () ->
+        let bell = { strike "Bell" 1000.0 with Mods = [ needs "Bell" "Requires:Combo" 4.0 ] }
+        let o = Sim.run (duel [ bell; strike "Jab" 10.0 ] 10.5) 1u
+        // Jab at 0 .. 3 s, Bell at 4 s, Jab at 5 .. 8 s, Bell at 9 s, Jab at 10 s
+        equal 9 o.Counts.["uses:Jab"]
+        equal 2 o.Counts.["uses:Bell"]
+        // a spell builds no Combo
+        let o = Sim.run (duel [ bell; fireSpell 10.0 ] 10.5) 1u
+        equal false (o.Counts.ContainsKey "uses:Bell"))
+
+    test "banner: attack hits build its Glory, then its aura lasts for the duration" (fun () ->
+        // 200 Glory at 100% of 20 per hit: placed with the tenth hit (10 s) and the twentieth.
+        // 4 s of 100% more damage: the hits at 11, 12 and 13 s are doubled, the one at 14 s is not
+        let banner = { Banner.Name = "War Banner"; Glory = 200.0; PerAttackHit = 100.0; Duration = 4.0; Mods = [ Mod.more (Damage AllDamage) 100.0 ] }
+        let f = duel [ strike "Jab" 100.0 ] 20.5
+        let f = { f with Player = { f.Player with Banners = [ banner ] } }
+        let o = Sim.run f 1u
+        equal 2 o.Counts.["banner:War Banner"]
+        near 2300.0 o.DamageBy.["Jab (hit)"])
+
     test "sim: speed shortens the cadence" (fun () ->
         let f = fight (fireSpell 100.0) 1000.0
         let f = { f with Player = { f.Player with Mods = Mod.inc Speed 100.0 :: f.Player.Mods } }
