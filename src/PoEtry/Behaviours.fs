@@ -513,6 +513,40 @@ module Behaviours =
                     { Hook = OnHit; Filter = Called skill.Name; Chance = 100.0; Reaction = IfEnemyHas(curseName, TriggerSkill name) })
             | Error _ -> None)
 
+    /// Ice-Tipped Arrows: "Empowering your next Repeatable Bow or Projectile Spear Attacks to
+    /// Convert Physical Damage to Cold Damage and Trigger Ice Fragments on Hit". The gem's second
+    /// effect is the fragments: they land around the target and explode after their detonation
+    /// time; four of the five are taken to reach a boss-sized target (guess).
+    /// Returns the fragment skill, the rules and the mods for the empowered attacks.
+    let iceTipped (db: GameDb) (charMods: ModDb) (weapon: Weapon option) (setup: GemSetup) (skill: Skill) : (Skill * Rule list * Mod list) option =
+        let raw = Gems.rawStats db charMods { setup with Supports = [] }
+        let sum id = raw |> List.filter (fun (k, _) -> k = id) |> List.sumBy snd
+        let n = sum "shearing_bolts_number_of_empowered_attacks"
+        if n <= 0.0 then None
+        else
+            let buff = "EmpoweredRepeatable:" + skill.Name
+            let repeatable = Tag "Type:Barrageable"
+            Map.tryFind setup.Gem db.Gems |> Option.map (fun g -> g.AdditionalEffects) |> Option.defaultValue []
+            |> List.tryPick (fun id ->
+                match Gems.skill db charMods weapon { setup with Gem = id } with
+                | Ok (s, _) -> Some(id, s)
+                | Error _ -> None)
+            |> Option.map (fun (id, s) ->
+                let fragRaw = Gems.rawStats db charMods { setup with Gem = id; Supports = [] }
+                let fsum k = fragRaw |> List.filter (fun (x, _) -> x = k) |> List.sumBy snd
+                let reach = max 1 (int (System.Math.Round(fsum "base_number_of_projectiles" * 0.8)))
+                let name = skill.Name + ": " + s.Name
+                { s with
+                    Name = name; Tags = s.Tags.Add Triggered; Cost = 0.0
+                    HitDelay = fsum "base_skill_detonation_time" / 1000.0
+                    // each fragment that lands near enough is one explosion at the target
+                    Delivery = AreaAtTarget(fsum "active_skill_base_area_of_effect_radius")
+                    Hits = [ for _ in 1 .. reach -> 1.0, 1.0 ] },
+                [ { Hook = OnUse; Filter = Called skill.Name; Chance = 100.0; Reaction = SetStacks(buff, int n) }
+                  { Hook = OnHit; Filter = WithTag repeatable; Chance = 100.0; Reaction = IfBuff(buff, TriggerSkill name) } ],
+                [ Mod.base' (Convert(Physical, Cold)) (sum "shearing_bolts_non_skill_base_physical_damage_%_to_convert_to_cold")
+                  |> Mod.whenever (SkillIs repeatable) |> Mod.whenever (WhileBuff buff) |> Mod.from skill.Name ])
+
     /// Warcries: using one empowers the next attacks, one per `warcry_empowers_per_X_monster_power`
     /// of enemy power, counting up to `..._mp_cap`. What empowered attacks get is on the gem:
     /// Infernal Cry "Empowered Attacks Gain X% of damage as extra Fire damage", Seismic Cry an

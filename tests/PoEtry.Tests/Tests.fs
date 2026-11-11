@@ -256,6 +256,22 @@ let main _ =
         equal 2 o.Counts.["barraged:Shot"]
         near (2.0 * 200.0 + 5.0 * 100.0) o.DamageBy.["Shot (hit)"])
 
+    test "empowered repeatable attacks: the next two trigger a skill on hit, the third does not" (fun () ->
+        let buff = "EmpoweredRepeatable:Tip"
+        let tip = { Skill.make "Tip" [ Spell ] with Hits = []; Cooldown = Some 100.0 }
+        let shot = { strike "Shot" 100.0 with Tags = Set.ofList [ Attack; Tag "Type:Barrageable" ] }
+        let frag = { fireSpell 30.0 with Name = "Frag"; Tags = Set.ofList [ Spell; Triggered ] }
+        let f = duel [ tip; shot; frag ] 5.5
+        let player =
+            { f.Player with
+                Rotation = f.Player.Rotation |> List.filter (fun st -> st.Use <> "Frag")
+                Rules =
+                    [ { Hook = OnUse; Filter = Called "Tip"; Chance = 100.0; Reaction = SetStacks(buff, 2) }
+                      { Hook = OnHit; Filter = WithTag(Tag "Type:Barrageable"); Chance = 100.0; Reaction = IfBuff(buff, TriggerSkill "Frag") } ] }
+        let o = Sim.run { f with Player = player } 1u
+        equal 4 o.Counts.["hits:Shot"]
+        equal 2 o.Counts.["hits:Frag"])
+
     test "banner: attack hits build its Glory, then its aura lasts for the duration" (fun () ->
         // 200 Glory at 100% of 20 per hit: placed with the tenth hit (10 s) and the twentieth.
         // 4 s of 100% more damage: the hits at 11, 12 and 13 s are doubled, the one at 14 s is not

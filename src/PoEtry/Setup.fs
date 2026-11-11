@@ -335,6 +335,9 @@ module Setup =
                         | None -> []
                     let lasting = Behaviours.sustained db charMods setup s
                     let cryRules, cryGrants = Behaviours.warcry db charMods setup s
+                    let tipped = Behaviours.iceTipped db charMods (Gems.chooseWeapon db setup.Gem sheet.Weapons) setup s
+                    let cryRules = cryRules @ (match tipped with Some (_, rs, _) -> rs | None -> [])
+                    let cryGrants = cryGrants @ (match tipped with Some (_, _, ms) -> ms | None -> [])
                     let rules = cryRules @ (match lasting with Some (_, rs) -> rs | None -> []) @ Behaviours.useRules db charMods setup s.Name o.Pickup @ Behaviours.buffRules db charMods setup s @ Behaviours.totemPlacement db charMods setup s @ curseRules
                     let grants = Behaviours.verisiumGrant db charMods setup
                     let s = Behaviours.applyObserved s
@@ -349,7 +352,7 @@ module Setup =
                           Grants = (match curse with Some (_, _, _, player) -> player | None -> []) @ cryGrants
                           Curse = curse |> Option.map (fun (name, _, _, _) -> name)
                           Pattern = lasting |> Option.map fst
-                          Extra = doom |> Option.map fst |> Option.toList }
+                          Extra = (doom |> Option.map fst |> Option.toList) @ (match tipped with Some (f, _, _) -> [ f ] | None -> []) }
                 | _ -> None)
 
     let private gemOf (p: Play) =
@@ -391,7 +394,8 @@ module Setup =
                     // Barrage is readied whenever it can be, for a main skill it can repeat
                     let barrage = p.Skill.Mods |> List.exists (fun m -> m.Stat = Named "BarrageRepeats" && m.Value > 0.0)
                     let mainRepeats = Gems.data c.Db mainGem |> Option.exists (fun m -> m.Types.Contains "Barrageable")
-                    if barrage then (if mainRepeats then Some(OnCooldown x.Name) else None)
+                    let tipped = p.Rules |> List.exists (fun r -> match r.Reaction with SetStacks (b, _) -> b.StartsWith "EmpoweredRepeatable:" | _ -> false)
+                    if barrage || tipped then (if mainRepeats then Some(OnCooldown x.Name) else None)
                     elif skip then None
                     // a skill that needs Glory or Combo is used whenever it has enough
                     elif needsBuilding then Some(OnCooldown x.Name)

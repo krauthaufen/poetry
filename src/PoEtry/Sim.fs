@@ -68,6 +68,8 @@ type Reaction =
     | SetStacks of buff: string * stacks: int
     /// Only if the enemy concerned has this status (a curse being replaced): do this.
     | IfEnemyHas of status: string * then': Reaction
+    /// Only while the actor has a stack of the buff: do this.
+    | IfBuff of buff: string * then': Reaction
     /// A warcry: empowers one attack per `perPower` monster power among the living enemies,
     /// counting up to `cap` power, at least one. The buff's stacks are the attacks left.
     | Empower of buff: string * perPower: float * cap: float
@@ -953,6 +955,10 @@ module Sim =
                           | _ -> w
                       | SetStacks (buff, n) ->
                           updateActor actor.Name (fun st -> { st with Buffs = Map.add buff { Name = buff; Mods = []; Stacks = n; Expires = infinity } st.Buffs }) w
+                      | IfBuff (buff, next) ->
+                          match Map.tryFind buff (Map.find actor.Name w.Actors).Buffs with
+                          | Some e when e.Stacks > 0 && e.Expires > w.Time -> perform next w
+                          | _ -> w
                       | IfEnemyHas (st, next) ->
                           match target with
                           | Some t when w.Enemies.[t].Life > 0.0 && (status w.Enemies.[t]).ContainsKey st -> perform next w
@@ -969,7 +975,7 @@ module Sim =
                         | Some t when w.Enemies.[t].Life > 0.0 -> f t
                         | _ -> w
                      match reaction with
-                     | SpendStack _ | SetStacks _ | Empower _ | IfEnemyHas _ -> w
+                     | SpendStack _ | SetStacks _ | Empower _ | IfEnemyHas _ | IfBuff _ -> w
                      | GrantBuff (name, duration, maxStacks, mods) ->
                          let w =
                              updateActor actor.Name (fun st ->
@@ -1260,6 +1266,13 @@ module Sim =
                 if useTime > 0.0 && skill.Tags.Contains Attack && not (skill.Tags.Contains Warcry) && st.Buffs.ContainsKey "EmpoweredAttacks" then
                     let last = times |> List.map fst |> List.fold max w.Time
                     schedule (last + 1e-9) (SpendBuff(actor.Name, "EmpoweredAttacks")) w
+                else w
+            // and a Repeatable attack one of those readied for it (Ice-Tipped Arrows)
+            let w =
+                if useTime > 0.0 && skill.Tags.Contains Attack && skill.Tags.Contains(Tag "Type:Barrageable") then
+                    let last = times |> List.map fst |> List.fold max w.Time
+                    st.Buffs |> Map.toList |> List.filter (fun (k, _) -> k.StartsWith "EmpoweredRepeatable:")
+                    |> List.fold (fun w (k, _) -> schedule (last + 1e-9) (SpendBuff(actor.Name, k)) w) w
                 else w
             let w =
                 match skill.Consumes with
