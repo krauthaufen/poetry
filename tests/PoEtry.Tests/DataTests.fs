@@ -267,8 +267,11 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         | Ok (s, _) ->
             let burst = s.Parts |> List.find (fun p -> p.Name.EndsWith "Poison Burst")
             let pdb = ModDb.ofList burst.Mods
-            equal (box true) (box (Mods.flag Ctx.empty (Named "NoHitDamage") pdb))
-            near 100.0 (Mods.sumBase Ctx.empty [ AilmentChance Poison ] pdb)
+            // for the burst's own hits only
+            let own = { Ctx.empty with SkillName = burst.Name }
+            equal (box true) (box (Mods.flag own (Named "NoHitDamage") pdb))
+            equal (box false) (box (Mods.flag Ctx.empty (Named "NoHitDamage") pdb))
+            near 100.0 (Mods.sumBase own [ AilmentChance Poison ] pdb)
             // "Poison duration is 3 seconds"
             near 3.0 (Ailments.duration Ctx.empty pdb Poison)
             // the arrow itself is an ordinary hit
@@ -364,7 +367,7 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
     test "parts for one state of the enemy; how many charges a skill consumes" (fun () ->
         let crossbow = (Items.parse db.Value "Rarity: Normal\nAlloy Crossbow\n--------\n").Weapon
         let spear = (Items.parse db.Value "Rarity: Normal\nHardwood Spear\n--------\n").Weapon
-        let flag name (sk: Skill) = Mods.flag Ctx.empty (Named name) (ModDb.ofList sk.Mods)
+        let flag name (sk: Skill) = Mods.flag { Ctx.empty with SkillName = sk.Name } (Named name) (ModDb.ofList sk.Mods)
         match Gems.skill db.Value ModDb.empty crossbow { Gem = "Fragmentation Rounds"; Level = 20; Quality = 0; StatSet = 1; Supports = [] } with
         | Ok (s, _) ->
             // the "Vs Frozen" explosion only happens against a frozen enemy, and takes the freeze
@@ -421,6 +424,40 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         equal (box true) (box (moving bonus "Lightning Arrow"))
         equal (box false) (box (moving [] "Lightning Arrow"))
         equal (box false) (box (moving bonus "Comet")))
+
+    test "parts of a skill that need something: a state of the enemy, a charge, an infusion, a detonator, a corpse" (fun () ->
+        let built gem weapon =
+            match Gems.skill db.Value ModDb.empty weapon { Gem = gem; Level = 20; Quality = 0; StatSet = 1; Supports = [] } with
+            | Ok (s, _) -> s
+            | Error e -> failwith e
+        let has (sk: Skill) name = sk.Mods |> List.exists (fun m -> m.Stat = Named name)
+        let part (sk: Skill) (label: string) = sk.Parts |> List.find (fun p -> p.Name.EndsWith label)
+        let staff = (Items.parse db.Value "Rarity: Normal\nAegis Quarterstaff\n--------\n").Weapon
+        let mace = (Items.parse db.Value "Rarity: Normal\nAnvil Maul\n--------\n").Weapon
+        let crossbow = (Items.parse db.Value "Rarity: Normal\nAlloy Crossbow\n--------\n").Weapon
+        let spear = (Items.parse db.Value "Rarity: Normal\nAkoyan Spear\n--------\n").Weapon
+        // Siphoning Strike's shockwave needs a shocked enemy and takes the shock
+        let siphon = part (built "Siphoning Strike" staff) "Shockwave"
+        equal (box true) (box (has siphon "OnlyVs:Shocked" && has siphon "ConsumesVs"))
+        // Boneshatter's shockwave needs the heavy stun
+        equal (box true) (box (has (part (built "Boneshatter" mace) "Shockwave") "OnlyVs:HeavilyStunned"))
+        // Stormblast Bolts wait for a detonator; Spear Throw's explosion needs a frenzy charge
+        equal (box true) (box (has (part (built "Stormblast Bolts" crossbow) "Explosion") "DetonatedBy:Type:Detonator"))
+        equal (box true) (box (has (part (built "Spear Throw" spear) "Explosion") "OnlyWithCharge"))
+        // Firestorm's ice bolts need a cold infusion; Lightning Warp only does something in culling range
+        equal (box true) (box (has (part (built "Firestorm" None) "Ice Bolts") "OnlyInfused:ColdInfusion"))
+        equal (box true) (box (has (built "Lightning Warp" None) "OnlyVs:Cullable"))
+        // in a fight against a lone boss: no shock, no charge, no corpse
+        let gem name = { Name = name; Level = 20; Quality = 0; Enabled = true; IsSupport = false; StatSet = 1 }
+        let run name items =
+            let b = { blank with Items = items; Groups = [ { Label = ""; Slot = ""; Enabled = true; Gems = [ gem name ] } ]; ExtraLines = [ "+5000 to maximum Mana"; "+5000 to Accuracy Rating" ] }
+            let o = { Options.defaults with MaxTime = 10.0; Immortal = true }
+            let c = Setup.loadWith db.Value treeJson b o
+            Sim.run (Setup.fight c o (Setup.player c o [ Spam name ] None) (Encounter.boss 83 Rarity.defaults 30.0 |> List.map (fun e -> { e with Life = 1e13 }))) 1u
+        let boneshatter = run "Boneshatter" [ "Weapon 1", "Rarity: Normal\nAnvil Maul\n--------\n" ]
+        equal (box true) (box (boneshatter.Counts.ContainsKey "hits:Boneshatter" && not (boneshatter.Counts.ContainsKey "hits:Boneshatter: Shockwave")))
+        // Detonate Dead needs a corpse: none beside a living boss
+        equal (box false) (box ((run "Detonate Dead" []).Counts.ContainsKey "uses:Detonate Dead")))
 
     test "low life only where the build keeps itself there; fewer enemies to be surrounded" (fun () ->
         let bonus = [ "30% increased Damage when on Low Life" ]

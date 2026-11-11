@@ -405,7 +405,10 @@ module Sim =
           LoadDue: Set<string>
           /// Rage: when some was last gained, and the fraction of a point regenerated or lost so far.
           RageAt: float
-          RageCarry: float }
+          RageCarry: float
+          /// Parts of skills that wait to be set off by another skill (bolts in the ground until a
+          /// detonator is used): part name -> how many wait.
+          Pending: Map<string, int> }
 
     type private EnemyState =
         { Def: EnemyDef
@@ -463,7 +466,9 @@ module Sim =
           DamageBy: Map<string, float>
           Counts: Map<string, int>
           Uptime: Map<string, float>
-          Kills: (string * Rarity * float) list }
+          Kills: (string * Rarity * float) list
+          /// Corpses already used up by corpse skills (every kill leaves one).
+          CorpsesUsed: int }
 
     /// Fixed for the whole fight: mod dbs built once, buffs layered on per event.
     type private Env =
@@ -513,6 +518,8 @@ module Sim =
         let ailing = withDots |> Map.exists (fun k _ -> allAilments |> List.exists (fun a -> Ailment.status a = k))
         withDots
         |> fun m -> if e.Def.Moving then Map.add "Moving" 1 m else m
+        // within Culling Strike range for its rarity
+        |> fun m -> if e.Life <= e.Def.Life * Constants.cullingThreshold (Rarity.name e.Def.Rarity) / 100.0 then Map.add "Cullable" 1 m else m
         |> fun m -> if ailing then Map.add "AnyAilment" 1 m else m
         |> fun m -> if e.Debuffs |> Map.exists (fun k _ -> k.StartsWith "Curse:") then Map.add "Cursed" 1 m else m
         |> fun m -> if e.Debuffs |> Map.exists (fun k _ -> k.StartsWith "Mark:") then Map.add "Marked" 1 m else m
@@ -866,6 +873,11 @@ module Sim =
     let private skillOf (actor: Actor) name =
         allSkills actor |> List.find (fun s -> s.Name = name)
 
+    let private partFlag (p: Skill) (name: string) = p.Mods |> List.exists (fun m -> m.Stat = Named name)
+    /// The rest of a part's flag that starts with this ("OnlyInfused:ColdInfusion" -> "ColdInfusion").
+    let private partNamed (p: Skill) (prefix: string) =
+        p.Mods |> List.tryPick (fun m -> match m.Stat with Named n when n.StartsWith prefix -> Some(n.Substring prefix.Length) | _ -> None)
+
     let private ready (st: ActorState) now (skill: Skill) =
         Map.tryFind skill.Name st.Cooldowns |> Option.forall (fun t -> t <= now)
 
@@ -1072,6 +1084,7 @@ module Sim =
                     let k = 1.0 + sealOwn "SealRepeatDamage" / 100.0
                     pattern @ [ for i in 1 .. repeats do for (_, mult) in pattern -> After(useTime + 0.1 * float i), mult * k ]
             let w = { w with Counts = bump ("uses:" + skill.Name) w.Counts }
+            let w = if skill.Tags.Contains(Tag "Type:TargetsDestructibleCorpses") && w.Kills.Length > w.CorpsesUsed then { w with CorpsesUsed = w.CorpsesUsed + 1 } else w
             let w = if useTime > 0.0 then updateActor actor.Name (fun st -> { st with LastUsed = skill.Name }) w else w
             let times =
                 pattern |> List.map (fun (timing, mult) ->
@@ -1084,14 +1097,45 @@ module Sim =
                     (fun w (at, mult) ->
                         // every part of the skill strikes together
                         // a "Frenzy-Charged" part happens only when the use has a charge to consume,
-                        // and then in place of the plain explosion
-                        let charged = match skill.Consumes with Some charge -> (Map.tryFind charge st.Buffs |> Option.map (fun e -> e.Stacks) |> Option.defaultValue 0) > 0 | None -> false
+                        // and then in place of the plain explosion; other parts need a charge, an
+                        // infusion, or wait for another skill to set them off
+                        let stacks name = Map.tryFind name st.Buffs |> Option.map (fun e -> e.Stacks) |> Option.defaultValue 0
+                        let charged = match skill.Consumes with Some charge -> stacks charge > 0 | None -> false
                         let isCharged (p: Skill) = p.Name.EndsWith "-Charged"
                         let hasCharged = skill.Parts |> List.exists isCharged
                         (skill :: skill.Parts)
-                        |> List.filter (fun p -> if isCharged p then charged else not (hasCharged && charged && p.Name.EndsWith ": Explosion"))
+                        |> List.filter (fun p ->
+                            if isCharged p || partFlag p "OnlyWithCharge" then charged
+                            elif (partNamed p "DetonatedBy:").IsSome then false
+                            else
+                                match partNamed p "OnlyInfused:" with
+                                | Some infusion -> stacks infusion > 0
+                                | None -> not (hasCharged && charged && p.Name.EndsWith ": Explosion"))
                         |> List.fold (fun w part -> schedule at (Strike(actor.Name, part.Name, mult, target.Def.Name)) w) w)
                     w
+            // an infusion a part needed is used up; a part that waits is put down
+            let w =
+                skill.Parts |> List.fold (fun w p ->
+                    match partNamed p "OnlyInfused:", partNamed p "DetonatedBy:" with
+                    | Some infusion, _ when (Map.tryFind infusion st.Buffs |> Option.map (fun e -> e.Stacks) |> Option.defaultValue 0) > 0 ->
+                        updateActor actor.Name (fun st ->
+                            match Map.tryFind infusion st.Buffs with
+                            | Some e when e.Stacks > 1 -> { st with Buffs = Map.add infusion { e with Stacks = e.Stacks - 1 } st.Buffs }
+                            | _ -> { st with Buffs = Map.remove infusion st.Buffs }) w
+                    | _, Some _ -> updateActor actor.Name (fun st -> { st with Pending = Map.add p.Name (min 20 ((Map.tryFind p.Name st.Pending |> Option.defaultValue 0) + 1)) st.Pending }) w
+                    | _ -> w) w
+            // a detonator (or a warcry) sets off everything of that kind that waits
+            let w =
+                let st = Map.find actor.Name w.Actors
+                actor.Skills |> List.collect (fun s -> s.Parts) |> List.fold (fun w p ->
+                    match partNamed p "DetonatedBy:", Map.tryFind p.Name st.Pending with
+                    | Some by, Some n when n > 0 && not (skill.Parts |> List.exists (fun q -> q.Name = p.Name))
+                                           && ((by = "Warcry" && skill.Tags.Contains Warcry) || skill.Tags.Contains(Tag by)) ->
+                        let last = times |> List.map fst |> List.fold max w.Time
+                        let w = updateActor actor.Name (fun st -> { st with Pending = Map.remove p.Name st.Pending }) w
+                        [ 1 .. n ] |> List.fold (fun w _ -> schedule (last + 1e-6) (Strike(actor.Name, p.Name, 1.0, target.Def.Name)) w) w
+                        |> fun w -> { w with Counts = bump ("detonated:" + p.Name) w.Counts }
+                    | _ -> w) w
             // an attack the player makes while empowered by a warcry uses one empowerment up
             let w =
                 if useTime > 0.0 && skill.Tags.Contains Attack && not (skill.Tags.Contains Warcry) && st.Buffs.ContainsKey "EmpoweredAttacks" then
@@ -1174,7 +1218,13 @@ module Sim =
             | _ -> true
         // the first step that is ready and can be paid for; if none can be paid, wait for the first
         let choice =
-            let usable = actor.Rotation |> List.filter (fun step -> step.When v && ready st w.Time (skillOf actor step.Use))
+            // a skill that works on a corpse needs one: every kill leaves a corpse, each use takes one
+            let corpses = w.Kills.Length - w.CorpsesUsed
+            let needsCorpse (s: Skill) = s.Tags.Contains(Tag "Type:TargetsDestructibleCorpses") && not (s.Tags.Contains(Tag "Type:SkillConsumesPowerChargesOnUse"))
+            let usable =
+                actor.Rotation |> List.filter (fun step ->
+                    let s = skillOf actor step.Use
+                    step.When v && ready st w.Time s && (corpses > 0 || not (needsCorpse s)))
             usable |> List.tryFind (fun step -> affordable (skillOf actor step.Use)) |> Option.orElse (List.tryHead usable)
         match choice with
         | Some step ->
@@ -1422,12 +1472,14 @@ module Sim =
             // one that consumes the state takes it off
             let onlyVs = skill.Mods |> List.tryPick (fun m -> match m.Stat with Named n when n.StartsWith "OnlyVs:" -> Some(n.Substring 7) | _ -> None)
             let consumesVs = skill.Mods |> List.exists (fun m -> m.Stat = Named "ConsumesVs")
-            if (match onlyVs with Some st -> not (enemyStatus.ContainsKey st) | None -> false) then w
+            let states = onlyVs |> Option.map (fun (st: string) -> st.Split '|' |> List.ofArray) |> Option.defaultValue []
+            if not states.IsEmpty && not (states |> List.exists enemyStatus.ContainsKey) then w
             else
             let w =
-                match onlyVs with
-                | Some st when consumesVs -> updateEnemy target (fun en -> { en with Debuffs = Map.remove st en.Debuffs }) w |> fun w -> { w with Counts = bump ("consumed:" + st) w.Counts }
-                | _ -> w
+                if consumesVs && not states.IsEmpty then
+                    let st = states |> List.find enemyStatus.ContainsKey
+                    updateEnemy target (fun en -> { en with Debuffs = Map.remove st en.Debuffs }) w |> fun w -> { w with Counts = bump ("consumed:" + st) w.Counts }
+                else w
             if not (rng.Chance hitChance) then
                 { w with Counts = bump ("miss:" + skill.Name) w.Counts }
             else
@@ -2301,7 +2353,8 @@ module Sim =
               Ammo = Map.empty
               LoadDue = Set.empty
               RageAt = 0.0
-              RageCarry = 0.0 }
+              RageCarry = 0.0
+              Pending = Map.empty }
         let w0 =
             { Player =
                 fight.Player.Vitals
@@ -2394,7 +2447,8 @@ module Sim =
               DamageBy = Map.empty
               Counts = Map.empty
               Uptime = Map.empty
-              Kills = [] }
+              Kills = []
+              CorpsesUsed = 0 }
             |> fun w -> actors |> List.fold (fun w a -> schedule 0.0 (Ready a.Name) w) w
             |> fun w -> actors |> List.fold (fun w a -> a.Cycles |> List.fold (fun w c -> schedule 0.0 (CycleTick(a.Name, c.Name)) w) w) w
             |> fun w -> actors |> List.fold scheduleResourceTimers w

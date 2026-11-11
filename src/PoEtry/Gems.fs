@@ -348,6 +348,59 @@ module Gems =
     let private isPart (set: StatSetData) =
         set.Stats |> List.contains "display_statset_hide_usage_stats" && not (set.Label.EndsWith "-Infused")
 
+    /// What a part of a skill needs before it happens, where the skill's data has no flag for it
+    /// and only the description says so: (skill, stat set label or "" for the skill itself) ->
+    /// conditions. "Vs:A|B" needs the enemy in one of these states ("!" at the end: the state is
+    /// consumed); "Charge": a charge to consume; "Infused:X": an infusion of that kind, consumed;
+    /// "DetonatedBy:T": it waits until a skill of type T (or a warcry) is used; "NoHit": it
+    /// deals no hit damage of its own; "Ignites": it always ignites.
+    let private partConditions : Map<string * string, string list> =
+        Map.ofList
+            [ ("Siphoning Strike", "Shockwave"), [ "Vs:Shocked!" ]
+              ("Shockburst Rounds", "Pulse"), [ "Vs:Shocked|Electrocuted" ]
+              ("Shockchain Arrow", "Shockwave"), [ "Vs:Shocked|Electrocuted" ]
+              ("Primal Strikes", "Spirits"), [ "Vs:Shocked" ]
+              ("Snipe", "Icy Blast"), [ "Vs:Frozen!" ]
+              ("Icestorm", "Improved Bolt"), [ "Vs:Chilled|Frozen!" ]
+              ("Frostflame Nova", "Volatile Ice"), [ "Vs:Ignited" ]
+              ("Disengage", "Shockwave"), [ "Vs:Parried!" ]
+              ("Fangs of Frost", "Explosion"), [ "Vs:Parried!" ]
+              ("Boneshatter", "Shockwave"), [ "Vs:HeavilyStunned" ]
+              ("Wing Blast", "Shockwave"), [ "Vs:HeavilyStunned" ]
+              ("Blood Hunt", "Explosion"), [ "Vs:Bleeding!" ]
+              ("Gas Arrow", "Explosion"), [ "Vs:Ignited" ]
+              ("Gas Grenade", "Explosion"), [ "Vs:Ignited" ]
+              ("Stormblast Bolts", "Explosion"), [ "DetonatedBy:Type:Detonator" ]
+              ("Rapid Assault", "Explosion"), [ "DetonatedBy:Type:Detonator" ]
+              ("Storm Lance", "Detonation"), [ "DetonatedBy:Type:Detonator" ]
+              ("Forge Hammer", "Fissures"), [ "DetonatedBy:Warcry" ]
+              ("Glacial Lance", "Explosion"), [ "Charge" ]
+              ("Spear Throw", "Explosion"), [ "Charge" ]
+              ("Firestorm", "Ice Bolts"), [ "Infused:ColdInfusion" ]
+              ("Firestorm", "Lightning Bolts"), [ "Infused:LightningInfusion" ]
+              ("Incinerate", "Ignited Ground"), [ "Infused:FireInfusion"; "NoHit" ]
+              ("Solar Orb", "Ignite"), [ "NoHit"; "Ignites" ]
+              ("Flame Wall", "Projectile Damage"), [ "NoHit" ]
+              ("Gathering Storm", "Tempest Shockwave"), [ "Vs:TempestBell" ]
+              ("Lightning Warp", ""), [ "Vs:Cullable" ]
+              ("His Vile Intrusion", ""), [ "Vs:Cullable" ]
+              ("Detonate Living", ""), [ "Vs:Cullable" ]
+              ("Power Siphon", ""), [ "Vs:Cullable" ] ]
+
+    let private conditionMods (skill: string) (label: string) (isMain: bool) : Mod list =
+        (Map.tryFind (skill, label) partConditions |> Option.defaultValue [])
+        @ (if isMain then Map.tryFind (skill, "") partConditions |> Option.defaultValue [] else [])
+        |> List.collect (fun c ->
+            if c.StartsWith "Vs:" then
+                let states = c.Substring 3
+                if states.EndsWith "!" then [ Mod.flag (Named("OnlyVs:" + states.TrimEnd '!')); Mod.flag (Named "ConsumesVs") ] else [ Mod.flag (Named("OnlyVs:" + states)) ]
+            elif c = "Charge" then [ Mod.flag (Named "OnlyWithCharge") ]
+            elif c.StartsWith "Infused:" then [ Mod.flag (Named("OnlyInfused:" + c.Substring 8)) ]
+            elif c.StartsWith "DetonatedBy:" then [ Mod.flag (Named c) ]
+            elif c = "NoHit" then [ Mod.flag (Named "NoHitDamage") ]
+            elif c = "Ignites" then [ Mod.base' (AilmentChance Ignite) 100.0 ]
+            else [])
+
     /// One stat set of a skill as a simulator Skill.
     /// Does a type expression (postfix: types, "AND", "OR", "NOT") hold for a skill's types?
     let private typesMatch (expr: string list) (types: Set<string>) =
@@ -396,8 +449,25 @@ module Gems =
             let hi = sum ((=) "off_hand_weapon_maximum_physical_damage") + per "maximum"
             if hi > 0.0 then Some(Map.ofList [ Physical, { Min = lo; Max = hi } ]) else None
         let weapon = if shieldDamage.IsSome then None else weapon
+        // An attack that brings its own damage ("main_hand_weapon_minimum_fire_damage": thrown
+        // flasks, runes, a herald's explosion): those numbers stand in for the weapon's, with the
+        // skill's own attack time and critical hit chance.
+        let ownWeaponDamage =
+            let pick (bound: string) =
+                ownStats |> List.choose (fun (id, v) ->
+                    let prefix = "main_hand_weapon_" + bound + "_"
+                    if id.StartsWith prefix && id.EndsWith "_damage" then
+                        DamageType.all |> List.tryFind (fun t -> (DamageType.name t).ToLowerInvariant() = id.Substring(prefix.Length, id.Length - prefix.Length - 7)) |> Option.map (fun t -> t, v)
+                    else None)
+            let lo, hi = pick "minimum", pick "maximum"
+            hi |> List.filter (fun (_, v) -> v > 0.0)
+            |> List.map (fun (t, v) -> t, { Min = lo |> List.sumBy (fun (t2, x) -> if t2 = t then x else 0.0); Max = hi |> List.sumBy (fun (t2, x) -> if t2 = t then x else 0.0) })
+            |> Map.ofList
+        let ownWeapon = isAttack && not ownWeaponDamage.IsEmpty
+        let weapon = if ownWeapon then None else weapon
         let baseDamage =
             if shieldDamage.IsSome then shieldDamage.Value
+            elif ownWeapon then ownWeaponDamage
             elif isAttack then
                 weapon |> Option.map (fun w -> w.Damage) |> Option.defaultValue Map.empty
             else
@@ -416,14 +486,17 @@ module Gems =
             |> Option.orElse (gemLevel |> Option.bind (fun l -> l.BaseMultiplier))
             |> Option.defaultValue 1.0
         let crit =
-            if isAttack then weapon |> Option.map (fun w -> w.CritChance) |> Option.defaultValue 5.0
+            if isAttack && not ownWeapon then weapon |> Option.map (fun w -> w.CritChance) |> Option.defaultValue 5.0
             else
                 setLevel |> Option.bind (fun l -> l.CritChance)
                 |> Option.orElse (gemLevel |> Option.bind (fun l -> l.CritChance))
                 |> Option.defaultValue 0.0
         let time =
             if isAttack then
-                let aps = weapon |> Option.map (fun w -> w.AttacksPerSecond) |> Option.defaultValue 1.0
+                let aps =
+                    match ownStats |> List.tryPick (fun (id, v) -> if id = "main_hand_base_weapon_attack_duration_ms" then Some v else None) with
+                    | Some ms when ownWeapon && ms > 0.0 -> 1000.0 / ms
+                    | _ -> weapon |> Option.map (fun w -> w.AttacksPerSecond) |> Option.defaultValue 1.0
                 let speedMult = 1.0 + (gemLevel |> Option.bind (fun l -> l.AttackSpeedMultiplier) |> Option.defaultValue 0.0) / 100.0
                 match gemLevel |> Option.bind (fun l -> l.AttackTime) with
                 | Some t -> t / 1000.0
@@ -488,7 +561,10 @@ module Gems =
                         Chains = int (statOf "number_of_chains" |> Option.defaultValue 0.0)
                         // projectiles that drop on their targets, one each, in a number the skill
                         // sets itself (Dark Effigy's "one per afflicted enemy, up to 100"): never two on one enemy
-                        CanShotgun = not (data.Types.Contains "ProjectileNoCollision" && data.Types.Contains "ProjectilesNumberModifiersNotApplied")
+                        CanShotgun =
+                            not (data.Types.Contains "ProjectileNoCollision" && data.Types.Contains "ProjectilesNumberModifiersNotApplied")
+                            // Spiral Volley: "Each target can only be Hit once"
+                            && not (data.Description.Contains "Each target can only be Hit once")
                         PerCharge = perCharge
                         FromImpact = data.Types.Contains "ProjectilesNotFromUser"
                         Explosion = if data.Types.Contains "Area" && not (List.contains "is_area_damage" set.Stats) then radius else None }
@@ -518,8 +594,13 @@ module Gems =
              let burstDuration = (statOf "base_skill_effect_duration" |> Option.defaultValue 0.0) / 1000.0
              mods
              @ (if has "display_statset_no_hit_damage" && has "display_skill_poisons_without_hit" then
-                    [ Mod.flag (Named "NoHitDamage"); Mod.base' (AilmentChance Poison) 100.0 ]
+                    [ Mod.flag (Named "NoHitDamage") |> Mod.whenever (SkillNamed name); Mod.base' (AilmentChance Poison) 100.0 |> Mod.whenever (SkillNamed name) ]
                 else [])
+             // (all only for this part's own hits: a buff gem's modifiers go to the character)
+             @ (conditionMods data.Name set.Label (List.tryHead data.StatSets = Some set) |> List.map (Mod.whenever (SkillNamed name)))
+             // a set that says it deals no damage ("base_deal_no_damage") beside sets that do
+             @ (if has "base_deal_no_damage" && data.StatSets.Length > 1 && not (data.Types.Contains "Buff") && not (data.Types.Contains "Meta")
+                then [ Mod.flag (Named "NoHitDamage") |> Mod.whenever (SkillNamed name) ] else [])
              // "Consumes a Frenzy Charge if possible": one charge per use; "Consume 3 Endurance
              // Charges": three; "Consumes your Power Charges", "Consume all": every one held
              @ (let words = data.Description.Split([| ' '; ','; '.' |], System.StringSplitOptions.RemoveEmptyEntries) |> List.ofArray
@@ -644,7 +725,13 @@ module Gems =
                 let main, cov = buildSet alt data set data.Name tags level quality supportStats weapon shield
                 let parts, partCov =
                     data.StatSets
-                    |> List.filter (fun s -> s <> set && isPart s)
+                    // a set shown with the main one, or the one that does the damage when the main
+                    // set deals none ("dps_display_statset_index": Conductive Runes' explosion)
+                    |> List.filter (fun s ->
+                        s <> set
+                        && (isPart s
+                            || (set.Stats |> List.contains "base_deal_no_damage" && not (s.Label.EndsWith "-Infused")
+                                && set.ConstantStats |> List.exists (fun (k, _) -> k = "dps_display_statset_index"))))
                     |> List.map (fun s ->
                         let p, c = buildSet alt data s (data.Name + ": " + s.Label) tags level quality supportStats weapon shield
                         { p with Consumes = None }, c)

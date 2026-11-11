@@ -575,7 +575,17 @@ module Setup =
         { Enemies = enemies
           EnemyAuras = curses @ Behaviours.criticalWeaknessAura c.Sheet @ Behaviours.witheringPresence c.Db c.Sheet c.Build
           Player = player
-          Minions = c.Minions
+          // a totem uses its skill with the character's modifiers, so it also counts with the
+          // character's numbers ("per 100 maximum Mana", "per 15 Strength", socketed gem colours)
+          Minions =
+            (let carried =
+                player.Resources |> List.filter (fun (k, _) ->
+                    List.contains k [ "MaxMana100"; "Str"; "Dex"; "Int"; "Spirit"; "BlockChance"; "LowestAttribute"; "GrandSpectrum"; "CorruptedItems" ]
+                    || k.StartsWith "Supports" || k.StartsWith "AffectedBy" || k.StartsWith "Constant")
+             c.Minions |> List.map (fun m ->
+                 if m.ActiveWhile.IsSome && m.Resources.IsEmpty then
+                     { m with Resources = carried; MaxResources = carried |> List.fold (fun acc (k, n) -> Map.add k n acc) m.MaxResources }
+                 else m))
           Targeting = o.Targeting
           Reach = (if o.CastOnSelf then 0.0 else o.Reach)
           CascadeSpacing = o.CascadeSpacing
