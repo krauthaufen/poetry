@@ -344,6 +344,11 @@ module Setup =
                         | Some (s', rs, ms) -> s', cryRules @ rs, cryGrants @ ms
                         | None -> s, cryRules, cryGrants
                     let cryRules = cryRules @ Behaviours.sigilOfPower db charMods setup s @ Behaviours.markBuff db charMods setup s
+                    // parts that happen when the skill kills (Crushing Fear's shockwave)
+                    let cryRules =
+                        cryRules
+                        @ (s.Parts |> List.filter (fun p -> p.Mods |> List.exists (fun m -> m.Stat = Named "TriggeredOnKill"))
+                           |> List.map (fun p -> { Hook = OnKill; Filter = Called s.Name; Chance = 100.0; Reaction = TriggerSkill p.Name }))
                     let empowered, empRules, empGrants = Behaviours.empowerNext db charMods (Gems.chooseWeapon db setup.Gem sheet.Weapons) setup s
                     let cryRules, cryGrants = cryRules @ empRules, cryGrants @ empGrants
                     let tipped = Behaviours.iceTipped db charMods (Gems.chooseWeapon db setup.Gem sheet.Weapons) setup s

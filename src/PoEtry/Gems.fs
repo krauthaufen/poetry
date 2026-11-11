@@ -402,6 +402,8 @@ module Gems =
               ("Frost Darts", "Explosion"), [ "Part"; "Infused:ColdInfusion" ]
               ("Fireball", "Firebolts"), [ "Part"; "Infused:FireInfusion"; "Behind" ]
               ("Ember Fusillade", "Beam"), [ "Part"; "Infused:LightningInfusion" ]
+              // "When this skill kills an enemy ... crushing them to create a shockwave"
+              ("Crushing Fear", "Shockwave"), [ "Part"; "OnKill" ]
               // the form a skill takes when it has something to spend, in place of the plain one
               ("Rend", ""), [ "NotWithCharge" ]
               ("Rend", "Lightning-Charged"), [ "Part" ]
@@ -461,6 +463,7 @@ module Gems =
             elif c.StartsWith "Less:" then [ Mod.more (Damage AllDamage) (-(float (c.Substring 5))) ]
             elif c = "NotWithCharge" || c = "NotEnraged" then [ Mod.flag (Named c) ]
             elif c.StartsWith "SpendsRage:" then [ Mod.base' (Named "SpendsRage") (float (c.Substring 11)) ]
+            elif c = "OnKill" then [ Mod.flag (Named "OnlyTriggered"); Mod.flag (Named "TriggeredOnKill") ]
             elif c = "Once" then [ Mod.flag (Named "OncePerUse") ]
             elif c.StartsWith "Hits:" then [ Mod.base' (Named "SeqHits") (float (c.Substring 5)) ]
             elif c = "Charge" then [ Mod.flag (Named "OnlyWithCharge") ]
