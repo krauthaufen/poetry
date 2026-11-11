@@ -975,9 +975,26 @@ module Sim =
         let actor = actorDef env name
         let st = Map.find name w.Actors
         let v = view env w st
+        // what a use of the skill costs now: base x increased cost / (1 + cost efficiency)
+        let costOf (skill: Skill) =
+            let db = skillDb env actor skill st
+            let costCtx = { Ctx.empty with SkillTags = skill.Tags; SkillName = skill.Name }
+            let extraCost =
+                match actor.Vitals with
+                | Some pools -> pools.Mana * Mods.sumBase costCtx [ Named "ExtraCostPercentOfMaxMana" ] db / 100.0
+                | None -> 0.0
+            let ownCost = if skill.Clip > 0 && not (st.LoadDue.Contains skill.Name) then 0.0 else skill.Cost
+            (ownCost + extraCost) * Mods.mult costCtx [ ManaCost ] db / Mods.inc costCtx [ ManaCostEfficiency ] db
+        let affordable (skill: Skill) =
+            match actor.Vitals, w.Player with
+            | Some pools, Some p when pools.CostsInfernalFlame -> true
+            | Some pools, Some p when pools.CostsLife -> (let c = costOf skill in c <= 0.0 || p.Life - c >= 1.0)
+            | Some _, Some p -> p.Mana >= costOf skill
+            | _ -> true
+        // the first step that is ready and can be paid for; if none can be paid, wait for the first
         let choice =
-            actor.Rotation
-            |> List.tryFind (fun step -> step.When v && ready st w.Time (skillOf actor step.Use))
+            let usable = actor.Rotation |> List.filter (fun step -> step.When v && ready st w.Time (skillOf actor step.Use))
+            usable |> List.tryFind (fun step -> affordable (skillOf actor step.Use)) |> Option.orElse (List.tryHead usable)
         match choice with
         | Some step ->
             let skill = skillOf actor step.Use

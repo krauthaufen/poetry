@@ -284,11 +284,17 @@ module Setup =
     /// (remnants, exposure, infusions) are used on cooldown, the main skill is spammed.
     /// Marks, warcries, travel skills and anything else stay unpressed.
     let auto (c: Loaded) (o: Options) (mainGem: string) : Play list =
+        let inOwnGroup =
+            c.Build.Groups
+            |> List.filter (fun g -> g.Enabled && not (g.Gems |> List.exists (fun x -> x.Enabled && not x.IsSupport && Gems.isMeta c.Db x.Name)))
+            |> List.collect (fun g -> g.Gems |> List.map (fun x -> x.Name))
         let others =
             c.Build.Groups
             |> List.filter (fun g -> g.Enabled)
             |> List.collect (fun g -> g.Gems |> List.filter (fun x -> x.Enabled && not x.IsSupport))
             |> List.filter (fun x -> x.Name <> mainGem && not (Gems.isMeta c.Db x.Name) && not (Gems.isPersistentBuff c.Db x.Name))
+            // a gem socketed in a trigger or aura gem is used by that gem, not pressed
+            |> List.filter (fun x -> List.contains x.Name inOwnGroup)
             |> List.distinctBy (fun x -> x.Name)
             |> List.choose (fun x ->
                 match Gems.data c.Db x.Name, pressed c o x.Name with

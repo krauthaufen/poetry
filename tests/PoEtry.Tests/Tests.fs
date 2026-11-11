@@ -392,8 +392,21 @@ let main _ =
         let player = { Actor.make "Player" [ noIgnite ] [ big; small ] with Vitals = Some stats }
         let o = Sim.run (Fight.single { boss 1e9 with Attack = None } player 5.5) 1u
         equal false (o.Counts.ContainsKey "uses:Big")
-        equal 1 o.Counts.["cannot afford:Big"]
-        if o.Counts.["uses:Small"] < 5 then failwith "the affordable skill should have been used instead")
+        if o.Counts.["uses:Small"] < 5 then failwith "the affordable skill should have been used instead"
+        // alone, it is given up on instead of waited for
+        let only = { Actor.make "Player" [ noIgnite ] [ big ] with Vitals = Some stats }
+        equal 1 (Sim.run (Fight.single { boss 1e9 with Attack = None } only 5.5) 1u).Counts.["cannot afford:Big"])
+
+    test "a skill that can't be paid for yet doesn't block the next one" (fun () ->
+        let dear = { fireSpell 100.0 with Name = "Dear"; Cost = 80.0 }
+        let cheap = { fireSpell 10.0 with Name = "Cheap"; Cost = 0.0 }
+        let stats = { PlayerStats.basic 100.0 100.0 with ManaRegen = 10.0 }
+        let player = { Actor.make "Player" [ noIgnite ] [ dear; cheap ] with Vitals = Some stats }
+        let o = Sim.run (Fight.single { boss 1e9 with Attack = None } player 20.5) 1u
+        // 100 mana + 10 per second over 20 s pays for three casts of Dear; Cheap fills the rest
+        equal 3 o.Counts.["uses:Dear"]
+        equal 18 o.Counts.["uses:Cheap"]
+        near 0.0 o.ManaStarved)
 
     test "meta energy from melee hits and melee kills" (fun () ->
         let swing = { Skill.make "Swing" [ Attack; Melee ] with BaseDamage = Map.ofList [ Physical, Range.fixedAt 100.0 ]; BaseCrit = 0.0 }
