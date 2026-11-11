@@ -23,6 +23,8 @@ type View =
 type SkillFilter =
     | AnySkill
     | WithTag of SkillTag
+    /// Has the first tag but not the second (attacks that aren't a herald's own).
+    | WithTagNot of has: SkillTag * hasNot: SkillTag
     | Called of string
 
 type Hook =
@@ -31,6 +33,8 @@ type Hook =
     | OnHit
     | OnCrit
     | OnKill
+    /// Killing an enemy that had this status ("Frozen", "Shocked"), with a skill that isn't a herald's own.
+    | OnKillOf of status: string
     | OnInflict of Ailment
 
 type Reaction =
@@ -56,6 +60,10 @@ type Reaction =
     /// (`doubleChance` % for twice as many), `perStack` mods and seconds per stack. A new
     /// one replaces the old.
     | ChargeBuff of name: string * charge: string * perStack: Mod list * secondsPerStack: float * doubleChance: float
+    /// If the actor has a stack of the buff: spend one and do this.
+    | SpendStack of buff: string * then': Reaction
+    /// Set a buff's stacks (no duration), e.g. "the next 3 attack hits".
+    | SetStacks of buff: string * stacks: int
 
 type Rule =
     { Hook: Hook
@@ -528,6 +536,7 @@ module Sim =
         match filter with
         | AnySkill -> true
         | WithTag t -> Set.contains t skill.Tags
+        | WithTagNot (t, n) -> Set.contains t skill.Tags && not (Set.contains n skill.Tags)
         | Called n -> skill.Name = n
 
     // ---- time passing ----
@@ -816,60 +825,79 @@ module Sim =
                         match target with
                         | Some t when w.Enemies.[t].Life > 0.0 -> f t
                         | _ -> w
-                    match r.Reaction with
-                    | GrantBuff (name, duration, maxStacks, mods) ->
-                        let w =
-                            updateActor actor.Name (fun st ->
-                                let e = stackEffect w.Time (Map.tryFind name st.Buffs) name duration maxStacks mods
-                                { st with Buffs = Map.add name e st.Buffs }) w
-                        schedule (w.Time + duration) Expire w
-                    | RemoveBuff name ->
-                        updateActor actor.Name (fun st -> { st with Buffs = Map.remove name st.Buffs }) w
-                    | ApplyDebuff (name, duration, maxStacks, mods) ->
-                        onTarget (fun t -> addDebuff t name duration maxStacks mods w)
-                    | ApplyCurse (name, duration, mods) ->
-                        onTarget (fun t ->
-                            let k = effectOnSelf w.Enemies.[t] "CurseEffectOnSelf"
-                            // "Curse:X" / "Mark:X" keep their prefix; plain names are curses
-                            let full = if name.StartsWith "Curse:" || name.StartsWith "Mark:" then name else "Curse:" + name
-                            let prefix = full.Substring(0, full.IndexOf ':' + 1)
-                            // one curse (plus "additional curses"), one mark: the oldest gives way
-                            let limit = if prefix = "Mark:" then 1 else 1 + int (Mods.sumBase Ctx.empty [ Named "MaxCurses" ] (ModDb.ofList actor.Mods))
-                            let others =
-                                w.Enemies.[t].Debuffs |> Map.toList
-                                |> List.filter (fun (n, x) -> n.StartsWith prefix && n <> full && x.Expires > w.Time)
-                                |> List.sortBy (fun (_, x) -> x.Expires)
-                            let drop = others |> List.truncate (max 0 (others.Length + 1 - limit)) |> List.map fst
-                            let w = updateEnemy t (fun e -> { e with Debuffs = drop |> List.fold (fun d n -> Map.remove n d) e.Debuffs }) w
-                            addDebuff t full duration 1 (mods |> List.map (Mod.scaled k)) w
-                            |> fun w -> { w with Counts = bump ("apply:" + full) w.Counts })
-                    | ApplyExposure (dt, amount, duration) ->
-                        onTarget (fun t ->
-                            let k = effectOnSelf w.Enemies.[t] "ExposureEffectOnSelf"
-                            let name = "Exposure:" + DamageType.name dt
-                            let current =
-                                Map.tryFind name w.Enemies.[t].Debuffs
-                                |> Option.filter (fun x -> x.Expires > w.Time)
-                                |> Option.map (fun x -> x.Mods |> List.sumBy (fun m -> -m.Value))
-                                |> Option.defaultValue 0.0
-                            if amount * k >= current then addDebuff t name duration 1 [ Mod.base' (Resist dt) (-amount * k) ] w
-                            else w)
-                    | TriggerSkill name -> trigger env rng actor name w
-                    | GainEnergy (meta, amount) -> gainEnergy env rng actor meta amount w
-                    | GainResource (r, n) -> schedule w.Time (GainStacks(actor.Name, r, n)) w
-                    | ChargeBuff (name, charge, perStack, seconds, doubleChance) ->
-                        let held = Map.tryFind charge (Map.find actor.Name w.Actors).Buffs |> Option.map (fun e -> e.Stacks) |> Option.defaultValue 0
-                        if held = 0 then w
-                        else
-                            let stacks = if rng.Chance doubleChance then 2 * held else held
-                            // mods are per stack: the buff's stacks scale them
-                            let e = { Name = name; Mods = perStack; Stacks = stacks; Expires = w.Time + seconds * float stacks }
-                            updateActor actor.Name (fun st -> { st with Buffs = Map.add name e st.Buffs }) w
-                            |> schedule e.Expires Expire
-                            |> fun w -> { w with Counts = bump ("buff:" + name) w.Counts }
-                    | DropRemnant (r, delay, extra) ->
-                        let n = if rng.Chance extra then 2 else 1
-                        { w with Counts = bump ("remnant:" + r) w.Counts } |> schedule (w.Time + delay) (GainStacks(actor.Name, r, n)))
+                    let rec perform reaction (w: World) =
+                      match reaction with
+                      | SpendStack (buff, next) ->
+                          let st = Map.find actor.Name w.Actors
+                          match Map.tryFind buff st.Buffs with
+                          | Some e when e.Stacks > 0 && e.Expires > w.Time ->
+                              let st' = if e.Stacks = 1 then { st with Buffs = Map.remove buff st.Buffs } else { st with Buffs = Map.add buff { e with Stacks = e.Stacks - 1 } st.Buffs }
+                              perform next { w with Actors = Map.add actor.Name st' w.Actors }
+                          | _ -> w
+                      | SetStacks (buff, n) ->
+                          updateActor actor.Name (fun st -> { st with Buffs = Map.add buff { Name = buff; Mods = []; Stacks = n; Expires = infinity } st.Buffs }) w
+                      | other -> performSimple other w
+                    and performSimple reaction (w: World) =
+                     let onTarget f =
+                        match target with
+                        | Some t when w.Enemies.[t].Life > 0.0 -> f t
+                        | _ -> w
+                     match reaction with
+                     | SpendStack _ | SetStacks _ -> w
+                     | GrantBuff (name, duration, maxStacks, mods) ->
+                         let w =
+                             updateActor actor.Name (fun st ->
+                                 let e = stackEffect w.Time (Map.tryFind name st.Buffs) name duration maxStacks mods
+                                 { st with Buffs = Map.add name e st.Buffs }) w
+                         schedule (w.Time + duration) Expire w
+                     | RemoveBuff name ->
+                         updateActor actor.Name (fun st -> { st with Buffs = Map.remove name st.Buffs }) w
+                     | ApplyDebuff (name, duration, maxStacks, mods) ->
+                         onTarget (fun t -> addDebuff t name duration maxStacks mods w)
+                     | ApplyCurse (name, duration, mods) ->
+                         onTarget (fun t ->
+                             let k = effectOnSelf w.Enemies.[t] "CurseEffectOnSelf"
+                             // "Curse:X" / "Mark:X" keep their prefix; plain names are curses
+                             let full = if name.StartsWith "Curse:" || name.StartsWith "Mark:" then name else "Curse:" + name
+                             let prefix = full.Substring(0, full.IndexOf ':' + 1)
+                             // one curse (plus "additional curses"), one mark: the oldest gives way
+                             let limit = if prefix = "Mark:" then 1 else 1 + int (Mods.sumBase Ctx.empty [ Named "MaxCurses" ] (ModDb.ofList actor.Mods))
+                             let others =
+                                 w.Enemies.[t].Debuffs |> Map.toList
+                                 |> List.filter (fun (n, x) -> n.StartsWith prefix && n <> full && x.Expires > w.Time)
+                                 |> List.sortBy (fun (_, x) -> x.Expires)
+                             let drop = others |> List.truncate (max 0 (others.Length + 1 - limit)) |> List.map fst
+                             let w = updateEnemy t (fun e -> { e with Debuffs = drop |> List.fold (fun d n -> Map.remove n d) e.Debuffs }) w
+                             addDebuff t full duration 1 (mods |> List.map (Mod.scaled k)) w
+                             |> fun w -> { w with Counts = bump ("apply:" + full) w.Counts })
+                     | ApplyExposure (dt, amount, duration) ->
+                         onTarget (fun t ->
+                             let k = effectOnSelf w.Enemies.[t] "ExposureEffectOnSelf"
+                             let name = "Exposure:" + DamageType.name dt
+                             let current =
+                                 Map.tryFind name w.Enemies.[t].Debuffs
+                                 |> Option.filter (fun x -> x.Expires > w.Time)
+                                 |> Option.map (fun x -> x.Mods |> List.sumBy (fun m -> -m.Value))
+                                 |> Option.defaultValue 0.0
+                             if amount * k >= current then addDebuff t name duration 1 [ Mod.base' (Resist dt) (-amount * k) ] w
+                             else w)
+                     | TriggerSkill name -> trigger env rng actor name w
+                     | GainEnergy (meta, amount) -> gainEnergy env rng actor meta amount w
+                     | GainResource (r, n) -> schedule w.Time (GainStacks(actor.Name, r, n)) w
+                     | ChargeBuff (name, charge, perStack, seconds, doubleChance) ->
+                         let held = Map.tryFind charge (Map.find actor.Name w.Actors).Buffs |> Option.map (fun e -> e.Stacks) |> Option.defaultValue 0
+                         if held = 0 then w
+                         else
+                             let stacks = if rng.Chance doubleChance then 2 * held else held
+                             // mods are per stack: the buff's stacks scale them
+                             let e = { Name = name; Mods = perStack; Stacks = stacks; Expires = w.Time + seconds * float stacks }
+                             updateActor actor.Name (fun st -> { st with Buffs = Map.add name e st.Buffs }) w
+                             |> schedule e.Expires Expire
+                             |> fun w -> { w with Counts = bump ("buff:" + name) w.Counts }
+                     | DropRemnant (r, delay, extra) ->
+                         let n = if rng.Chance extra then 2 else 1
+                         { w with Counts = bump ("remnant:" + r) w.Counts } |> schedule (w.Time + delay) (GainStacks(actor.Name, r, n))
+                    perform r.Reaction w)
             w
 
     and private gainEnergy env rng (actor: Actor) metaName amount w =
@@ -1309,7 +1337,9 @@ module Sim =
                 // only their damage over time on the dead monster is dropped
                 let w =
                     if dead then
-                        react env rng actor OnKill skill None w
+                        let w = react env rng actor OnKill skill None w
+                        // what the killed enemy was (frozen, shocked...) can set things off
+                        status e |> Map.fold (fun w k _ -> react env rng actor (OnKillOf k) skill None w) w
                     else
                         inflicted
                         |> List.fold

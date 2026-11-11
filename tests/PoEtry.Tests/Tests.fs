@@ -372,6 +372,23 @@ let main _ =
         if not (o.Counts.ContainsKey "player:Frozen") then failwith "out of charges, the next freeze should land"
         if o.Counts.["player:Frozen"] >= bare.Counts.["player:Frozen"] then failwith "the charm made no difference")
 
+    test "kills of enemies with a status set things off; stacks are spent one per hit" (fun () ->
+        // an attack that kills a marked enemy grants 2 stacks; the next 2 attack hits each trigger a bolt
+        let swing = { Skill.make "Swing" [ Attack; Melee ] with BaseDamage = Map.ofList [ Physical, Range.fixedAt 100.0 ]; BaseCrit = 0.0 }
+        let bolt = { Skill.make "Bolt" [ Attack; Herald; Triggered ] with BaseDamage = Map.ofList [ Lightning, Range.fixedAt 5.0 ]; BaseCrit = 0.0 }
+        let attack = WithTagNot(Attack, Herald)
+        let rules =
+            [ { Hook = OnUse; Filter = Called "Swing"; Chance = 100.0; Reaction = ApplyDebuff("Doomed", 100.0, 1, []) }
+              { Hook = OnKillOf "Doomed"; Filter = attack; Chance = 100.0; Reaction = SetStacks("Bolts", 2) }
+              { Hook = OnHit; Filter = attack; Chance = 100.0; Reaction = SpendStack("Bolts", TriggerSkill "Bolt") } ]
+        let player = { Actor.make "Player" [] [ swing; bolt ] with Rotation = [ Actor.always "Swing" ]; Rules = rules }
+        let weak = { dummy "weak" 10.0 0.0 with Life = 150.0 }
+        let tough = { dummy "tough" 12.0 0.0 with Life = 1e9 }
+        let o = Sim.run { Fight.single weak player 8.5 with Enemies = [ weak; tough ]; Targeting = Nearest } 1u
+        // the second swing kills the weak one; the bolts ride on the next two swings, and their own hits spend nothing
+        equal 2 o.Counts.["trigger:Bolt"]
+        equal 2 o.Counts.["hits:Bolt"])
+
     test "crossbow: a load of bolts, then a reload" (fun () ->
         // 2 bolts per load, 0.5 s per shot, 1 s reload: two shots every 2 s
         let shot = { Skill.make "Shot" [ Attack; Projectile ] with BaseDamage = Map.ofList [ Physical, Range.fixedAt 10.0 ]; BaseTime = 0.5; Clip = 2; ReloadTime = 1.0 }

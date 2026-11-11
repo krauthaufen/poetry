@@ -292,7 +292,7 @@ module StatMap =
         // seconds added to the use time, not shortened by speed
         | "total_attack_time_+_ms" | "total_cast_time_+_ms" -> one (Mod.base' (Named "FixedUseTime") (v / 1000.0))
         // how a skill is aimed and animated, where remnants can be collected, things monsters never do to the player
-        | "action_requires_aiming_stance" | "action_required_target_facing_angle_tolerance_degrees" | "crossbow_barrage_recoil_per_shot"
+        | "herald_of_thunder_storm_max_hits" | "action_requires_aiming_stance" | "action_required_target_facing_angle_tolerance_degrees" | "crossbow_barrage_recoil_per_shot"
         | "crossbow_barrage_total_recoil_buff_count" | "crossbow_barrage_debuff_duration_ms" | "crossbow_barrage_attack_time_ratio_%"
         | "base_minimum_channel_time_ms" | "base_melee_dash_range" | "base_knockback_distance" | "main_hand_weapon_range_+"
         | "remnant_pickup_range_+%" | "immune_to_maim" | "immune_to_hinder" | "enemy_extra_damage_rolls_chance_%"

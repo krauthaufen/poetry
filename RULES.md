@@ -276,6 +276,16 @@ Checked against PoB's defensive numbers for 131 public characters (`tools/corpus
 | Base damage | skills that hit with the shield (Resonating Shield, Shield Charge, Raise Shield, Parry) use `off_hand_weapon_minimum/maximum_physical_damage` plus `off_hand_..._added_physical_damage_per_N_shield_armour` (or evasion) x the shield's own armour / N | gem stats | data |
 | Active block, retaliation, parry | not modelled | - | missing |
 
+### Heralds
+
+| Mechanic | Rule | Source | Confidence |
+|---|---|---|---|
+| Herald buffs | the gem's granted stats are on the character while reserved | gem data | data |
+| Herald of Ice | an attack that kills a frozen enemy triggers the gem's "Explosion" stat set (weapon damage as cold, area), centred on the enemy aimed at rather than the corpse | gem description + data | data; centre is a simplification |
+| Herald of Thunder | after an attack kills a shocked enemy, the next N attack hits (`herald_of_thunder_storm_max_hits`) each trigger the "Bolt" stat set | gem description + data | data |
+| Chains | a herald's own hits don't set heralds off | game rule (recollection) | guess |
+| Herald of Ash (overkill ignite), Blood, Plague, the Royal Queen | not modelled | - | missing |
+
 ### Curse auras
 
 | Mechanic | Rule | Source | Confidence |

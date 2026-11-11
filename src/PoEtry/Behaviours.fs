@@ -388,6 +388,47 @@ module Behaviours =
             let effect = Mods.mult ctx [ Named(if isCurse then "CurseEffect" else "MarkEffect") ] all
             Some(name, duration, monster |> List.map (Mod.scaled effect), player |> List.map (Mod.scaled effect >> Mod.from skill.Name))
 
+    /// What heralds do themselves (their buff's mods are on the character already). The rule is
+    /// the gem's description, the damage its second stat set:
+    /// - Herald of Ice: an attack that kills a frozen enemy makes it explode ("Explosion").
+    /// - Herald of Thunder: after an attack kills a shocked enemy, lightning bolts strike the
+    ///   targets of the next N attack hits ("Bolt", N = `herald_of_thunder_storm_max_hits`).
+    /// The explosion is centred on the enemy aimed at, not on the corpse. A herald's own hits
+    /// don't set heralds off. Herald of Ash, Blood, Plague: not modelled.
+    let heralds (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) : Skill list * Rule list =
+        let charMods = ModDb.ofList sheet.Mods
+        let attack = WithTagNot(Attack, Herald)
+        build.Groups
+        |> List.filter (fun g -> g.Enabled)
+        |> List.collect (fun g ->
+            let enabled = g.Gems |> List.filter (fun x -> x.Enabled)
+            let supports = enabled |> List.filter (fun x -> x.IsSupport) |> List.map (fun x -> x.Name, x.Level)
+            enabled
+            |> List.filter (fun x -> not x.IsSupport && (x.Name = "Herald of Ice" || x.Name = "Herald of Thunder"))
+            |> List.choose (fun gem ->
+                let label = if gem.Name = "Herald of Ice" then "Explosion" else "Bolt"
+                Gems.data db gem.Name
+                |> Option.bind (fun d -> d.StatSets |> List.tryFindIndex (fun s -> s.Label = label))
+                |> Option.bind (fun i ->
+                    let setup = { Gem = gem.Name; Level = gem.Level; Quality = gem.Quality; StatSet = i + 1; Supports = supports }
+                    match Gems.skill db charMods (Gems.chooseWeapon db gem.Name sheet.Weapons) setup with
+                    | Ok (s, _) ->
+                        let name = gem.Name + ": " + label
+                        let skill = { s with Name = name; Tags = s.Tags.Add(Triggered).Add(Herald); Parts = []; Cost = 0.0; Cooldown = None }
+                        let rules =
+                            if gem.Name = "Herald of Ice" then
+                                [ { Hook = OnKillOf "Frozen"; Filter = attack; Chance = 100.0; Reaction = TriggerSkill name } ]
+                            else
+                                let bolts =
+                                    Gems.rawStats db charMods { setup with StatSet = 1 }
+                                    |> List.filter (fun (k, _) -> k = "herald_of_thunder_storm_max_hits") |> List.sumBy snd |> int |> max 1
+                                [ { Hook = OnKillOf "Shocked"; Filter = attack; Chance = 100.0; Reaction = SetStacks("Herald of Thunder bolts", bolts) }
+                                  { Hook = OnHit; Filter = attack; Chance = 100.0; Reaction = SpendStack("Herald of Thunder bolts", TriggerSkill name) } ]
+                        Some(skill, rules)
+                    | Error _ -> None)))
+        |> List.unzip
+        |> fun (skills, rules) -> skills, List.concat rules
+
     /// Charms from the equipped items (API layout: "Flask: Lasts N Seconds", "Flask: Consumes N
     /// of M Charges on use", "Utility: <effect>", "Used when you ..."). Returns the charms and
     /// the sheet mods their effects are (conditional on the charm's buff).
