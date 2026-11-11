@@ -343,6 +343,7 @@ module Setup =
                         match Behaviours.demonForm db charMods setup s with
                         | Some (s', rs, ms) -> s', cryRules @ rs, cryGrants @ ms
                         | None -> s, cryRules, cryGrants
+                    let cryRules = cryRules @ Behaviours.sigilOfPower db charMods setup s
                     let tipped = Behaviours.iceTipped db charMods (Gems.chooseWeapon db setup.Gem sheet.Weapons) setup s
                     let cryRules = cryRules @ (match tipped with Some (_, rs, _) -> rs | None -> [])
                     let cryGrants = cryGrants @ (match tipped with Some (_, _, ms) -> ms | None -> [])

@@ -894,6 +894,25 @@ module Sim =
     let private partNamed (p: Skill) (prefix: string) =
         p.Mods |> List.tryPick (fun m -> match m.Stat with Named n when n.StartsWith prefix -> Some(n.Substring prefix.Length) | _ -> None)
 
+    /// Mana spent while a Sigil of Power stands: a Stage for every share of maximum mana, at
+    /// most one a second, up to its maximum.
+    let private sigilSpend (name: string) (spent: float) (maxMana: float) (w: World) =
+        let st = Map.find name w.Actors
+        match st.Buffs |> Map.toList |> List.tryFind (fun (_, e) -> e.Mods |> List.exists (fun m -> m.Stat = Named "SigilMaxStages")) with
+        | Some (key, sigil) when sigil.Expires > w.Time && spent > 0.0 && maxMana > 0.0 ->
+            let value stat = sigil.Mods |> List.sumBy (fun m -> if m.Stat = Named stat then m.Value else 0.0)
+            let need = value "SigilManaPercentPerStage" / 100.0 * maxMana
+            let total = (Map.tryFind "SigilSpent" st.Energy |> Option.defaultValue 0.0) + spent
+            let last = Map.tryFind "SigilStageAt" st.Energy |> Option.defaultValue -1.0
+            if need > 0.0 && total >= need && sigil.Stacks < int (value "SigilMaxStages") && w.Time - last >= 1.0 then
+                { w with Counts = bump "sigil stage" w.Counts }
+                |> updateActor name (fun st ->
+                    { st with
+                        Buffs = Map.add key { sigil with Stacks = sigil.Stacks + 1 } st.Buffs
+                        Energy = st.Energy |> Map.add "SigilSpent" (total - need) |> Map.add "SigilStageAt" w.Time })
+            else updateActor name (fun st -> { st with Energy = Map.add "SigilSpent" total st.Energy }) w
+        | _ -> w
+
     /// "Can also be used on Ball Lightning Projectiles": the skill a warp can go into, and
     /// whether one of its projectiles is still on its way (it has strikes to come).
     let private warpsInto (skill: Skill) = partNamed skill "WarpsInto:"
@@ -1496,8 +1515,8 @@ module Sim =
                     + (if w.Time < p.FlaskUntil then p.FlaskRate else 0.0)
                 let wait = max Constants.serverTick (if rate > 0.0 then (cost - p.Mana) / rate else 1.0)
                 { w with Player = Some { p with Starved = p.Starved + wait } } |> schedule (w.Time + wait) (Ready name)
-            | Some _, Some p ->
-                { w with Player = Some { p with Mana = p.Mana - cost } } |> go
+            | Some v, Some p ->
+                { w with Player = Some { p with Mana = p.Mana - cost } } |> sigilSpend name cost v.Mana |> go
             | _ -> go w
         | None ->
             // Nothing usable: wait for the next cooldown, or a server tick.

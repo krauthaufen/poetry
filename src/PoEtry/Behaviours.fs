@@ -532,6 +532,27 @@ module Behaviours =
                     { Hook = OnHit; Filter = Called skill.Name; Chance = 100.0; Reaction = IfEnemyHas(curseName, TriggerSkill name) })
             | Error _ -> None)
 
+    /// Sigil of Power: a sigil for its duration whose buff grants more spell damage per Stage;
+    /// "Gains a Stage when you Spend a total of X% of your Maximum Mana while in Area",
+    /// "Minimum 1 second between gaining Stages". The player is taken to stand in it; it starts
+    /// with one Stage (guess). The engine counts the mana spent (Sim.sigilSpend).
+    let sigilOfPower (db: GameDb) (charMods: ModDb) (setup: GemSetup) (skill: Skill) : Rule list =
+        let raw = Gems.rawStats db charMods { setup with Supports = [] }
+        let sum id = raw |> List.filter (fun (k, _) -> k = id) |> List.sumBy snd
+        let perStage = sum "circle_of_power_spell_damage_+%_final_per_stage"
+        if perStage = 0.0 then []
+        else
+            let ctx = { Ctx.empty with SkillTags = skill.Tags; SkillName = skill.Name }
+            let duration = sum "base_skill_effect_duration" / 1000.0 * Mods.mult ctx [ SkillDuration ] (ModDb.ofList (ModDb.toList charMods @ skill.Mods))
+            let buff = skill.Name + " buff"
+            let mods =
+                [ Mod.more (Damage AllDamage) perStage |> Mod.whenever (SkillIs Spell)
+                  Mod.base' (Named "SigilMaxStages") (sum "circle_of_power_max_stages")
+                  Mod.base' (Named "SigilManaPercentPerStage") (sum "base_circle_of_power_mana_%_spend_per_upgrade") ]
+                |> List.map (Mod.from skill.Name)
+            [ { Hook = OnUse; Filter = Called skill.Name; Chance = 100.0; Reaction = RemoveBuff buff }
+              { Hook = OnUse; Filter = Called skill.Name; Chance = 100.0; Reaction = GrantBuff(buff, duration, 1, mods) } ]
+
     /// Demon Form: "You gain Demonflame every second you remain in demon form, causing your
     /// Life to be lost at an ever-increasing rate. Maximum 10 Demonflame. Revert to human form
     /// if you reach 1 Life". Cast speed while in the form, more spell damage per Demonflame.

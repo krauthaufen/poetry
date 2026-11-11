@@ -330,6 +330,19 @@ let main _ =
         near 100.0 o.DamageBy.["Vent (hit)"]
         near 40.0 o.DamageBy.["Vent: Spray (hit)"])
 
+    test "sigil: a stage for every half of maximum mana spent while it stands, up to its maximum" (fun () ->
+        // 100 mana (plenty of regeneration), a Bolt costs 30: stages at the 2nd and 4th Bolt
+        let sigil = { Skill.make "Sigil" [ Spell ] with Hits = []; Cooldown = Some 100.0 }
+        let mods = [ Mod.more (Damage AllDamage) 10.0; Mod.base' (Named "SigilMaxStages") 3.0; Mod.base' (Named "SigilManaPercentPerStage") 50.0 ]
+        let player =
+            { Actor.make "Player" [ noIgnite ] [ sigil; { fireSpell 100.0 with Cost = 30.0 } ] with
+                Vitals = Some { PlayerStats.basic 1000.0 100.0 with ManaRegen = 100.0 }
+                Rules = [ { Hook = OnUse; Filter = Called "Sigil"; Chance = 100.0; Reaction = GrantBuff("Sigil buff", 60.0, 1, mods) } ] }
+        let o = Sim.run { Fight.single (boss 1e12) player 7.5 with MaxTime = 7.5 } 1u
+        equal 2 o.Counts.["sigil stage"]
+        // hits at 2 s with one stage, at 3 and 4 s with two, at 5, 6 and 7 s with three
+        near (110.0 + 2.0 * 120.0 + 3.0 * 130.0) o.DamageBy.["Bolt (hit)"])
+
     test "banner: attack hits build its Glory, then its aura lasts for the duration" (fun () ->
         // 200 Glory at 100% of 20 per hit: placed with the tenth hit (10 s) and the twentieth.
         // 4 s of 100% more damage: the hits at 11, 12 and 13 s are doubled, the one at 14 s is not
