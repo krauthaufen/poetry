@@ -333,6 +333,29 @@ module StatMap =
         | "critical_strike_multiplier_with_dagger_+" -> one (Mod.inc CritBonus v |> Mod.whenever (SkillIs Dagger))
         | "invocation_spell_damage_+%" -> one (Mod.inc (Damage AllDamage) v |> Mod.whenever (SkillIs Spell) |> Mod.whenever (SkillIs Triggered))
         | "cannot_be_blinded" | "you_cannot_be_hindered" | "weapon_swap_speed_+%" -> Some Structural
+        | "active_skill_ignite_chance_+%_final" -> one (Mod.more (AilmentChance Ignite) v)
+        | "active_skill_ignite_effect_+%_final" -> one (Mod.more (AilmentMagnitude(Some Ignite)) v)
+        | "never_shock" -> one (Mod.more (AilmentChance Shock) -100.0)
+        | "never_ignite" -> one (Mod.more (AilmentChance Ignite) -100.0)
+        | "global_poison_on_hit" -> one (Mod.base' (AilmentChance Poison) 100.0)
+        | "global_maim_on_hit" -> one (Mod.base' (AilmentChance Maim) 100.0)
+        | "base_lightning_damage_can_electrocute" -> one (Mod.flag (Named "CanElectrocute"))
+        | "active_skill_electrocutes_as_though_dealt_damage_+%_final" -> one (Mod.more (Buildup Electrocute) v)
+        | "active_skill_reload_speed_+%_final" -> one (Mod.more (Named "ReloadSpeed") v)
+        // read by the skill builder itself (base damage, damage over time, bolts), or about how
+        // the skill is aimed, animated and interrupted
+        | "action_attack_or_cast_time_uses_animation_length" | "spell_maximum_action_distance_+%" | "attack_maximum_action_distance_+"
+        | "melee_range_+" | "skill_can_fire_wand_projectiles" | "base_skill_can_be_blocked" | "projectiles_not_offset"
+        | "skill_does_not_pathfind" | "skill_disabled_unless_cloned" | "projectiles_fire_at_ground" | "skill_cannot_be_stunned"
+        | "skill_cannot_be_knocked_back" | "skill_cannot_be_frozen" | "skill_cannot_be_electrocuted" | "skill_cannot_be_interrupted"
+        | "base_skill_is_totemified" | "skill_is_deploy_skill" | "skill_is_command" | "minions_do_not_move_to_skill_target"
+        | "melee_defer_damage_prediction" | "action_do_not_face_target" | "usable_with_talisman" | "ignores_proximity_shield"
+        | "disable_quadruped_head_control" | "global_knockback" | "ballistic_projectiles_always_bounce" | "range_backflip_conditional_distance"
+        | "channel_start_lock_cancelling_of_attack_time_%" | "base_skill_enabled_while_mounted" | "support_double_barrel_number_of_crossbow_bolts_+"
+        | "base_number_of_crossbow_bolts" | "number_of_projectiles_cannot_be_modified" -> Some Structural
+        | id when id.StartsWith "triggered_by_" || id.StartsWith "generic_knockback_" || id.StartsWith "monster_"
+                  || ((id.StartsWith "spell_minimum_base_" || id.StartsWith "spell_maximum_base_") && id.EndsWith "_damage")
+                  || (id.StartsWith "base_" && id.EndsWith "_damage_to_deal_per_minute") -> Some Structural
         | "base_maximum_ward" -> one (Mod.base' (Named "Ward") v)
         | "maximum_ward_+%" -> one (Mod.inc (Named "Ward") v)
         | "ward_regeneration_rate_+%" -> one (Mod.inc (Named "WardRegen") v)

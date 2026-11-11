@@ -1,30 +1,30 @@
 
 == affix mods: 2724 distinct stats, 9551 occurrences
-  simulated        646 stats   5549 occurrences (58.1%)
+  simulated        647 stats   5550 occurrences (58.1%)
   inert              7 stats      7 occurrences ( 0.1%)
   local            473 stats   1145 occurrences (12.0%)
   not-offensive    108 stats    366 occurrences ( 3.8%)
-  structural        24 stats     47 occurrences ( 0.5%)
+  structural        25 stats     50 occurrences ( 0.5%)
   unsimulated      876 stats   1610 occurrences (16.9%)
-  unmapped         590 stats    827 occurrences ( 8.7%)
+  unmapped         588 stats    823 occurrences ( 8.6%)
 
 == passive tree: 1392 distinct stats, 5907 occurrences
   simulated        533 stats   3912 occurrences (66.2%)
   inert             10 stats     23 occurrences ( 0.4%)
   local              0 stats      0 occurrences ( 0.0%)
   not-offensive     29 stats     74 occurrences ( 1.3%)
-  structural        19 stats    325 occurrences ( 5.5%)
+  structural        20 stats    327 occurrences ( 5.5%)
   unsimulated      508 stats   1133 occurrences (19.2%)
-  unmapped         293 stats    440 occurrences ( 7.4%)
+  unmapped         292 stats    438 occurrences ( 7.4%)
 
 == skill and support gems: 2476 distinct stats, 9440 occurrences
-  simulated        383 stats   2745 occurrences (29.1%)
+  simulated        392 stats   2829 occurrences (30.0%)
   inert              4 stats      4 occurrences ( 0.0%)
   local              0 stats      0 occurrences ( 0.0%)
-  not-offensive     33 stats     70 occurrences ( 0.7%)
-  structural       221 stats   1940 occurrences (20.6%)
-  unsimulated      772 stats   2101 occurrences (22.3%)
-  unmapped        1063 stats   2580 occurrences (27.3%)
+  not-offensive     31 stats     68 occurrences ( 0.7%)
+  structural       323 stats   3119 occurrences (33.0%)
+  unsimulated      768 stats   2021 occurrences (21.4%)
+  unmapped         958 stats   1399 occurrences (14.8%)
 
 text lines with no stat template: 174 (affix + tree)
 
@@ -957,7 +957,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     3  enemy_knockback_direction_is_reversed
     3  frozen_monsters_take_increased_damage
     3  volatility_on_kill_%_chance
-    3  melee_range_+
     3  map_num_extra_stone_circles
     3  lightning_ailment_effect_+%
     3  mine_laying_speed_+%
@@ -1434,7 +1433,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  keystone_iron_grip
     1  required_enemies_to_be_considered_surrounded_offset
     1  avoid_lightning_damage_%
-    1  base_lightning_damage_can_electrocute
     1  minimum_added_lightning_damage_to_attacks_per_20_intelligence
     1  maximum_added_lightning_damage_to_attacks_per_20_intelligence
     1  all_lightning_damage_to_bleeding_enemies_can_electrocute
@@ -2662,7 +2660,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     2  spells_chance_to_hinder_on_hit_%
     2  invocation_spell_critical_strike_multiplier_+
     2  elemental_ailment_chance_+%_if_youve_shapeshifted_to_animal_recently
-    2  melee_range_+
     2  invocation_spell_critical_strike_chance_+%
     2  non_damaging_ailment_effect_+%_with_critical_strikes
     2  shapeshift_slam_skill_aftershock_chance_%
@@ -2962,7 +2959,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
   184  movement_speed_+%_final_while_performing_action   [movement]
   184  movement_speed_acceleration_+%_per_second_while_performing_action   [movement]
   172  movement_speed_while_performing_action_locked_duration_%   [durations]
-   77  monster_projectile_variation   [projectile count / speed / chaining]
    68  active_skill_base_secondary_area_of_effect_radius   [area of effect]
    36  projectile_spread_radius   [projectile count / speed / chaining]
    32  projectile_ballistic_angle_from_reference_event   [projectile count / speed / chaining]
@@ -3517,7 +3513,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  warcry_echo_delay_ms_from_support   [warcries]
     1  base_warcry_echo_X_times   [warcries]
     1  warcry_echo_area_of_effect_+%_final_per_repeat   [area of effect]
-    1  support_echoing_cry_warcry_monster_power_+%_final   [warcries]
     1  can_only_damage_low_life_enemies   [life / recovery]
     1  minion_elemental_resistance_%   [minion stats beyond damage and speed]
     1  support_empowered_culling_strike   [empowered attacks]
@@ -3675,11 +3670,9 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  support_burning_runes_base_fire_damage_equal_to_%_maximum_mana   [mana / recovery]
     1  chance_to_trigger_shocked_ground_on_mark_activated_%   [mark effect]
     1  support_creeping_chill_cold_damage_equal_to_%_ice_crystal_maximum_life   [life / recovery]
-    1  triggered_by_curse_zones_are_hazards_%   [curse effect]
     1  curse_zone_explosion_apply_supported_curse_for_base_ms_on_hit   [curse effect]
     1  dangerous_resolve_attack_damage_+1%_final_per_X_armour   [defences]
     1  corpse_explosion_monster_life_%   [life / recovery]
-    1  triggered_by_mana_flare_support_%   [mana / recovery]
     1  support_mana_flare_%_of_current_mana_consumed   [mana / recovery]
     1  morrigan_ward_thorns_minimum_base_cold_damage   [thorns]
     1  morrigan_ward_thorns_maximum_base_cold_damage   [thorns]
@@ -3733,92 +3726,34 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  skill_can_be_queued_on_cooldown   [cooldowns]
 
 ### unmapped
-  153  action_attack_or_cast_time_uses_animation_length
-   78  spell_maximum_action_distance_+%
-   57  spell_minimum_base_lightning_damage
-   57  spell_maximum_base_lightning_damage
-   56  spell_minimum_base_physical_damage
-   56  spell_maximum_base_physical_damage
-   54  spell_maximum_base_fire_damage
-   41  spell_minimum_base_cold_damage
-   41  spell_maximum_base_cold_damage
-   40  attack_maximum_action_distance_+
-   28  melee_range_+
-   27  skill_can_fire_wand_projectiles
-   25  base_skill_can_be_blocked
-   19  global_knockback
-   18  spell_minimum_base_chaos_damage
-   18  spell_maximum_base_chaos_damage
-   18  ballistic_projectiles_always_bounce
-   17  projectiles_not_offset
-   16  monster_penalty_against_minions_damage_+%_final_vs_player_minions
-   16  active_skill_ignite_chance_+%_final
-   16  never_shock
-   16  triggered_by_generic_ongoing_trigger
-   15  skill_does_not_pathfind
-   12  base_physical_damage_to_deal_per_minute
-   12  global_poison_on_hit
-   11  skill_disabled_unless_cloned
-   11  projectiles_fire_at_ground
-   11  skill_cannot_be_stunned
-   10  skill_cannot_be_knocked_back
    10  projectiles_cannot_fork
    10  voll_slam_damage_+%_final_at_centre
     9  number_of_projectiles_override
-    9  never_ignite
     8  main_hand_weapon_minimum_physical_damage
     8  main_hand_weapon_maximum_physical_damage
-    8  base_skill_is_totemified
-    8  number_of_projectiles_cannot_be_modified
-    8  generic_knockback_distance_limit
     8  skeletal_graft_buff_effect_magnitude
     7  secondary_skill_triggered_by_primary_skill_of_gem
-    7  skill_is_deploy_skill
-    7  minions_do_not_move_to_skill_target
-    7  skill_is_command
-    7  generic_knockback_+%_final_at_min_distance
-    7  generic_knockback_+%_final_at_max_distance
-    7  base_lightning_damage_can_electrocute
-    7  active_skill_ignite_effect_+%_final
-    7  ignores_proximity_shield
     7  base_combo_stacks_decay_delay_ms
     6  active_skill_has_%_standard_scaling_attack_damage
-    6  global_maim_on_hit
     6  crushing_blow
-    6  skill_cannot_be_frozen
-    6  skill_cannot_be_electrocuted
-    6  active_skill_reload_speed_+%_final
     6  base_maximum_seals_for_skill
     6  skill_triggered_by_support_which_grants_it
-    5  melee_defer_damage_prediction
-    5  action_do_not_face_target
-    5  usable_with_talisman
     5  number_of_marks_allowed_per_type
-    5  base_fire_damage_to_deal_per_minute
-    5  range_backflip_conditional_distance
-    5  active_skill_electrocutes_as_though_dealt_damage_+%_final
     5  explosion_delay_ms
-    5  triggered_by_primary_skill
-    5  channel_start_lock_cancelling_of_attack_time_%
     5  can_create_jagged_ground
     5  ballistic_ice_chunk_cone_angle
     5  ice_fragment_min_chunk_distance
     5  ice_fragment_max_chunk_distance
     5  wall_maximum_length
     5  perfect_timing_window_ms_+%
-    5  disable_quadruped_head_control
     5  number_of_branching_fissures
-    5  monster_reverse_point_blank_damage_-%_at_minimum_range
     5  generic_ongoing_triggerer_is_invocation_skill
-    5  support_double_barrel_number_of_crossbow_bolts_+
     5  base_skill_is_sealed_skill
     4  cascade_aftershock_additional_offset_distance
     4  main_hand_base_maximum_attack_distance
     4  attack_speed_modifiers_apply_to_over_time_cost
     4  base_chance_to_not_consume_corpse_%
-    4  base_skill_enabled_while_mounted
     4  apply_X_stacks_of_critical_weakness_on_hit
-    4  skill_cannot_be_interrupted
     4  melee_dash_placement_added_range
     4  leap_slam_minimum_distance
     4  rain_hit_delay_ms
@@ -3835,7 +3770,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     4  no_cost
     3  maximum_number_of_instilling_stacks
     3  base_skill_summons_totems
-    3  triggered_by_unleash_the_elements
     3  base_all_damage_can_pin
     3  base_skill_is_ballistified
     3  base_cannot_be_blocked
@@ -3898,7 +3832,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     2  base_temporal_chains_other_buff_time_passed_+%_to_apply
     2  use_time_+_ms_if_shapeshift_required
     2  volatile_dead_base_number_of_corpses_to_consume
-    2  base_cold_damage_to_deal_per_minute
     2  spell_cast_time_cannot_be_modified
     2  always_ignite
     2  base_aggravate_bleeding_on_attack_hit_chance_%
@@ -3947,7 +3880,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     2  chance_to_poison_on_hit_with_attacks_%
     2  active_skill_required_number_of_combo_stacks
     2  combo_only_stacks_from_hits_with_weapon_restriction
-    2  triggered_by_lingering_mirage
     2  number_of_monsters_to_summon
     2  summoned_monsters_are_minions
     2  projectiles_return
@@ -3966,7 +3898,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     2  storm_skills_spawn_at_initiator_location
     2  support_ancestral_call_strike_is_ancestral_boosted
     2  support_arms_length_knockback_distance_+%_final
-    2  support_executioner_gain_two_rare_monster_mod_on_kill_ms
     2  support_active_skill_consume_enemy_freeze_to_gain_damage_+%_final
     2  support_biting_frost_damage_+%_final_vs_frozen_unique_enemies
     2  apply_X_incision_on_hit
@@ -4024,20 +3955,16 @@ skill types: 183, engine reads 123; unhandled by gem count:
     2  wall_is_created_in_a_circle_instead
     2  support_window_of_opportunity_perfect_timing_damage_+%_final
     2  generic_skill_trigger_skills_with_id
-    2  triggered_by_walking_calamity
     2  walking_calamity_spawn_meteor_every_ms
     2  walking_calamity_large_meteor_every
     2  walking_calamity_meteor_frequency_+%_per_enemy_in_walking_calamity_radius
     2  walking_calamity_meteor_frequency_+%_cap
     2  walking_calamity_ignore_first_x_enemies_for_frequency_increase
-    2  triggered_by_support_explosive_growth_%
     2  support_explosive_growth_explosion_delay_X_ms
-    2  triggered_by_support_fan_the_flames_%
     2  chance_to_trigger_living_lightning_on_lightning_damage_%
     2  base_number_of_living_lightning_allowed
     2  living_lightning_maximum_number_of_attacks
     2  living_lightning_beam_attack_time_ms
-    2  triggered_by_support_hatching_elementals_%
     2  support_hatching_elementals_number_of_elementals_per_hatch
     2  maximum_hatching_elementals_allowed
     2  sandstorm_swipe_storm_radius_+_per_stage
@@ -4107,14 +4034,11 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  base_briarpatch_ground_limit
     1  briarpatch_maximum_stored_physical_damage
     1  spells_chance_to_hinder_on_hit_%
-    1  base_lightning_damage_to_deal_per_minute
-    1  triggered_by_chaos_frog_explosion_chance_%
     1  chance_to_be_triggered_by_chaos_spear_%
     1  charged_staff_attack_minimum_added_lightning_damage_per_stack
     1  charged_staff_attack_maximum_added_lightning_damage_per_stack
     1  charged_staff_cone_angle
     1  charged_staff_bonus_width
-    1  triggered_by_charged_staff
     1  chaining_range_+%
     1  modifiers_to_number_of_projectiles_instead_apply_to_splitting
     1  command_location_placement_variance
@@ -4163,7 +4087,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  entangle_vines_maximum_number_of_vines_allowed
     1  entangle_vines_additional_number_of_vines_allowed_when_wet
     1  skill_additional_fissure_chance_%
-    1  triggered_by_escape_shot_%
     1  skill_eternal_march_maximum_ward_cost
     1  trigger_toad_spawn_chance_%
     1  explosive_concoction_number_of_secondary_projectiles
@@ -4278,7 +4201,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  infernal_cry_explosion_fire_damage_+%_final_per_corpse_power
     1  secondary_minimum_base_fire_damage
     1  secondary_maximum_base_fire_damage
-    1  triggered_by_infernal_cry
     1  infernal_cry_explosion_delay_ms
     1  infernal_cry_exerted_attack_all_damage_%_to_gain_as_fire_%
     1  breach_flame_chaos_addition_%
@@ -4297,10 +4219,7 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  lightning_rod_%_chance_for_additional_burst_on_landing
     1  lightning_spear_additional_number_to_split_when_charged
     1  projectiles_can_split_from_terrain
-    1  triggered_by_lingering_illusion
     1  main_hand_local_chance_to_bleed_on_hit_%
-    1  monster_mortar_bounce_angle_variance
-    1  monster_breaks_brequel_npc_concentration
     1  projectiles_travel_at_fixed_height
     1  igneous_shield_explosion_angle_degrees
     1  off_hand_weapon_minimum_fire_damage
@@ -4338,7 +4257,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  orb_of_storms_base_bolt_frequency_ms
     1  base_number_of_pain_offerings_allowed
     1  pain_offering_damage_+%
-    1  monster_skill_triggered_by_geal
     1  active_skill_ignite_proliferation_radius
     1  active_skill_poisons_are_not_stored_by_plague_bearer
     1  plague_bearer_gains_%_of_damage_from_inflicted_poisons
@@ -4394,7 +4312,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  hex_remove_at_effect_variance
     1  main_hand_weapon_minimum_cold_damage
     1  main_hand_weapon_maximum_cold_damage
-    1  triggered_by_freezing_word_bomb
     1  damage_per_bloodstone_lance_+%_final
     1  active_skill_damaging_ailment_effect_+%_final
     1  cannot_inflict_bloodstone_lance
@@ -4428,7 +4345,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  skill_unusable
     1  ballistic_bounce_behavior_variation
     1  consecrated_ground_effect_+%
-    1  triggered_by_staggering_palm_on_hit_with_other_skill
     1  empyrean_descent_number_of_explosions
     1  empyrean_descent_secondary_explosions_initial_delay_ms
     1  empyrean_descent_secondary_explosions_delay_ms
@@ -4466,7 +4382,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  support_debilitate_hit_damage_max_poison_stacks
     1  support_astral_projection_aoe_+%_final
     1  nova_skills_cast_at_target_location
-    1  support_executioner_gain_one_rare_monster_mod_on_kill_ms
     1  support_active_skill_consume_enemy_freeze_to_apply_chill
     1  support_blazing_crits_gain_%_fire_damage_with_attacks_on_critical_hit
     1  support_unseen_critical_damage_multiplier_+%_final_vs_blinded_enemies
@@ -4538,7 +4453,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  remove_freeze_on_ignite
     1  trigger_ballistic_ice_chunks_on_killing_frozen_enemy
     1  supported_offerings_grant_you_a_powercharge_every_x_ms
-    1  triggered_by_hand_of_chayula
     1  support_hardy_totems_trigger_splinter_explosion_on_death_chance_%
     1  trigger_from_hayhoxis_binding_after_x_ms
     1  support_healing_runes_maximum_ward_spent_per_pulse_%
@@ -4612,7 +4526,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  support_elemental_damage_+%_final_per_different_elemental_skill_used_recently
     1  support_thrill_of_the_kill_buff_shock_chance_+%
     1  skill_used_by_fractured_mimic_spell_damage_+%_final
-    1  triggered_by_hayhoxis_binding_%
     1  annihilation_hit_intervals
     1  skill_gain_seal_every_x_hits_blocked
     1  skill_echoes_per_seal_broken
@@ -4632,7 +4545,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  gain_X_wildshard_stacks_on_cast
     1  spell_skill_%_chance_to_fire_8_additional_projectiles_in_nova_per_wildshard_stack
     1  wither_on_hit_chance_rollovercapped
-    1  triggered_by_cross_slash
     1  support_vaal_lineage_trigger_detonate_on_landing
     1  base_chaos_damage_can_ignite
     1  tame_beast_hinder_%
@@ -4657,26 +4569,15 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  tornado_pull_strength_%
     1  tornado_pull_interval_ms
     1  tornado_pushiness
-    1  active_skill_base_elemental_damage_to_deal_per_minute
     1  base_number_of_tornado_shots_allowed
     1  tornado_shot_number_of_hits_allowed
     1  toxic_domain_healing_per_minute_+
     1  toxic_domain_pustule_chance_%
     1  number_of_poisonbloom_arrow_bloom_allowed
-    1  triggered_by_lich_consuming_power
     1  damage_+%_final_from_lich_apparition_cloned_skill
     1  skill_is_not_considered_a_skill
-    1  triggered_by_battershout_support_%
-    1  triggered_by_bone_shrapnel_support_%
-    1  triggered_by_briarpatch_support_on_slam_%
     1  briarpatches_arming_time_ms
-    1  triggered_by_burning_runes_support_%
-    1  triggered_by_caltrops_support_%
-    1  triggered_by_catalysing_elements
-    1  triggered_by_fissure_on_landing_support_%
     1  support_fissure_on_landing_maximum_fissure_count
-    1  triggered_by_support_creeping_chill_%
-    1  triggered_by_deadly_current_support
     1  dangerous_resolve_explosion_on_receive_hit_chance_%
     1  dangerous_resolve_cone_angle
     1  spell_minimum_base_fire_damage_as_%_of_intelligence
@@ -4685,28 +4586,19 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  spell_maximum_base_cold_damage_as_%_of_intelligence
     1  spell_minimum_base_lightning_damage_as_%_of_intelligence
     1  spell_maximum_base_lightning_damage_as_%_of_intelligence
-    1  triggered_by_supported_spell_consuming_ignite_freeze_shock_on_hit
     1  elemental_discharge_no_physical_chaos_damage
     1  base_ward_cost_efficiency_+%
     1  triggered_fan_the_flames_spread_ignite_to_hit_enemies
-    1  triggered_by_fiery_death_support_%
-    1  triggered_by_fist_of_kalguur_support_%
-    1  triggered_by_flame_pillar_support_%
     1  support_flame_pillar_fire_damage_equal_to_%_of_remaining_ignite_damage
     1  pillar_of_flame_creation_radius
     1  support_tricksters_shard_maximum_active_mimics
-    1  triggered_by_flame_pillar_unique_%
     1  unique_flame_pillar_fire_damage_equal_to_%_of_remaining_ignite_damage
     1  unique_pillar_of_flame_creation_radius
-    1  triggered_by_support_electrocute_lineage_%
     1  cannot_electrocute
     1  base_number_of_verisium_runes_allowed
     1  skill_has_trigger_from_unique_item
     1  morrigan_ward_gain_X_guard
     1  triggered_pustule_from_poison_spores_on_hit_chance_%
-    1  triggered_by_spiked_gauntlets_support_%
-    1  triggered_by_support_rune_forged_blades_%
-    1  triggered_by_shocking_rift_support_%
     1  number_of_shocking_rifts_allowed
     1  shocking_rift_number_of_pulses
     1  shocking_rift_pulse_interval_ms
@@ -4714,17 +4606,14 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  shocking_rift_speed_+%_per_shock_consumed
     1  shocking_rift_hinder_ms
     1  triggered_on_death_%
-    1  triggered_by_grounding_shocks_support_on_shock_%
     1  maximum_grounding_shocks_allowed
     1  grounding_shocks_pulse_delay_ms
-    1  triggered_by_frozen_spite_support_%
     1  ice_fragment_auto_aim_roll_fudge
     1  caltrops_only_spawn_laterally
     1  maximum_caltrops_allowed
     1  chance_to_trigger_volcanic_eruption
     1  wind_dancer_damage_+%_final_per_stage
     1  wind_dancer_knockback_+%_final_per_stage
-    1  triggered_by_vaal_lineage_detonate_on_landing_support_%_chance
     1  detonate_on_landing_maximum_number_of_corpses_to_detonate
     1  trinity_%_physical_damage_to_convert_to_random_element_granted
     1  number_of_triskelion_cascades_for_next_skill
@@ -4754,7 +4643,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  vivid_stag_cascade_number_of_damaging_areas
     1  vivid_stag_spacing
     1  skill_triggered_on_hit_while_have_vivid_stag_wisps
-    1  triggered_by_void_illusion
     1  volcano_fires_projectiles_every_x_ms
     1  volcano_maximum_number_of_stages
     1  volcano_initial_explosion_damage_+%_final_per_additional_stage
@@ -4817,10 +4705,8 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  summoned_monsters_no_drops_or_experience
     1  multishot_empowered_projectile_speed_+%
     1  skill_raging_spirit_per_x_radius
-    1  monster_no_drops_or_experience
     1  active_block_light_stun_threshold_+%_final
     1  spirit_vessel_damage_+%_final_per_skill_socketed_in_meta_gem
-    1  monster_no_life_es_scaling_from_rarity
     1  first_X_minions_have_0_base_spirit_reservation
     1  skill_reserves_X_life_permyriad_per_spirit_instead_of_spirit
     1  support_ignite_protection_spirit_cost_ignite_duration_on_self_+%_final

@@ -512,7 +512,7 @@ module Gems =
                     let supportBolts =
                         setup.Supports |> List.sumBy (fun (name, lvl) ->
                             match skillOfGem db name with
-                            | Some sd when sd.Support -> sd.StatSets |> List.tryHead |> Option.map (fun set -> stats sd set lvl 0 |> List.sumBy (fun (id, v) -> if id = "base_number_of_crossbow_bolts" then v else 0.0)) |> Option.defaultValue 0.0
+                            | Some sd when sd.Support -> sd.StatSets |> List.tryHead |> Option.map (fun set -> stats sd set lvl 0 |> List.sumBy (fun (id, v) -> if id.Contains "number_of_crossbow_bolts" then v else 0.0)) |> Option.defaultValue 0.0
                             | _ -> 0.0)
                     let bolts =
                         ammo.StatSets |> List.tryHead
