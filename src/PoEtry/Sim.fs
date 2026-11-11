@@ -1300,6 +1300,32 @@ module Sim =
                         DamageBy = addf (skill.Name + " (hit)") (min dealt e.Life) w.DamageBy
                         Counts = w.Counts |> bump ("hits:" + skill.Name) |> (if hit.Crit then bump ("crits:" + skill.Name) else id)
                         Kills = if dead then (target, e.Def.Rarity, w.Time) :: w.Kills else w.Kills }
+                // Armour Break: the hit breaks armour by a share of the damage it dealt; armour at
+                // zero is Fully Broken: the enemy takes increased physical damage from hits
+                let w =
+                    let share =
+                        Dmg.get Physical hit.Dealt * Mods.sumBase ctx [ Named "ArmourBreakOfPhysical" ] mods / 100.0
+                        + Dmg.get Fire hit.Dealt * Mods.sumBase ctx [ Named "ArmourBreakOfFire" ] mods / 100.0
+                        + dealt * Mods.sumBase ctx [ Named "ArmourBreakOfDamage" ] mods / 100.0
+                        + Mods.sumBase ctx [ Named "ArmourBreakFlat" ] mods
+                    let broken = share * Mods.mult ctx [ Named "ArmourBreakAmount" ] mods
+                    if dead || broken <= 0.0 then w
+                    else
+                        let baseArmour = max 0.0 (Mods.total Ctx.empty [ Armour ] e.Db)
+                        let before = Map.tryFind "ArmourBreak" e.Debuffs |> Option.filter (fun x -> x.Expires > w.Time) |> Option.map (fun x -> -(x.Mods |> List.sumBy (fun m -> m.Value))) |> Option.defaultValue 0.0
+                        let total = min baseArmour (before + broken)
+                        let seconds = Constants.armourBreakDuration * Mods.inc ctx [ Named "ArmourBreakDuration" ] mods
+                        let w = addDebuff target "ArmourBreak" seconds 1 [ Mod.base' Armour -total |> Mod.from "Armour Break" ] w
+                        if total >= baseArmour then
+                            let taken = Constants.fullyBrokenArmourTaken * Mods.inc ctx [ Named "FullyBrokenArmourEffect" ] mods
+                            let scopes =
+                                if Mods.flag ctx (Named "BrokenArmourAllDamage") mods then [ AllDamage ]
+                                else
+                                    [ OfType Physical ]
+                                    @ (if Mods.flag ctx (Named "BrokenArmourFire") mods then [ OfType Fire ] else [])
+                                    @ (if Mods.flag ctx (Named "BrokenArmourColdLightning") mods then [ OfType Cold; OfType Lightning ] else [])
+                            addDebuff target "FullyBrokenArmour" seconds 1 (scopes |> List.map (fun sc -> Mod.inc (DamageTaken sc) taken |> Mod.from "Fully Broken Armour")) w
+                        else w
                 // mana leech from physical attack damage dealt, recovered over time
                 let w =
                     match actor.Vitals, w.Player with

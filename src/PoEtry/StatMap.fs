@@ -297,6 +297,21 @@ module StatMap =
         | "base_minimum_channel_time_ms" | "base_melee_dash_range" | "base_knockback_distance" | "main_hand_weapon_range_+"
         | "remnant_pickup_range_+%" | "immune_to_maim" | "immune_to_hinder" | "enemy_extra_damage_rolls_chance_%"
         | "action_can_be_used_in_upward_aiming_stance" | "projectiles_crossbow_barrage" -> Some Structural
+        // armour break (see Sim.hitEnemy)
+        | "armour_break_physical_damage_%_dealt_as_armour_break" -> one (Mod.base' (Named "ArmourBreakOfPhysical") v)
+        | "armour_break_equal_to_%_physical_damage_dealt_spells" -> one (Mod.base' (Named "ArmourBreakOfPhysical") v |> Mod.whenever (SkillIs Spell))
+        | "armour_break_fire_damage_%_dealt_as_armour_break" -> one (Mod.base' (Named "ArmourBreakOfFire") v)
+        | "armour_break_damage_%_dealt_as_armour_break" -> one (Mod.base' (Named "ArmourBreakOfDamage") v)
+        | "apply_X_armour_break_on_hit" -> one (Mod.base' (Named "ArmourBreakFlat") v)
+        | "armour_break_amount_+%" -> one (Mod.inc (Named "ArmourBreakAmount") v)
+        | "armour_break_amount_+%_vs_enemies_affected_by_ailments" -> one (Mod.inc (Named "ArmourBreakAmount") v |> Mod.whenever (EnemyHas "AnyAilment"))
+        | "support_increased_armour_break_armour_break_amount_+%_final" -> one (Mod.more (Named "ArmourBreakAmount") v)
+        | "armour_break_and_sundered_armour_duration_+%" -> one (Mod.inc (Named "ArmourBreakDuration") v)
+        | "broken_armour_and_sundered_armour_debuff_effect_+%" -> one (Mod.inc (Named "FullyBrokenArmourEffect") v)
+        | "damage_+%_against_enemies_with_fully_broken_armour" -> one (Mod.inc (Damage AllDamage) v |> Mod.whenever (EnemyHas "FullyBrokenArmour"))
+        | "fully_broken_armour_and_sundered_armour_you_inflict_applies_to_all_damage" -> one (Mod.flag (Named "BrokenArmourAllDamage"))
+        | "fully_broken_armour_and_sundered_armour_you_inflict_also_applies_to_fire_damage" -> one (Mod.flag (Named "BrokenArmourFire"))
+        | "fully_broken_armour_and_sundered_armour_you_inflict_also_applies_to_cold_and_lightning_damage" -> one (Mod.flag (Named "BrokenArmourColdLightning"))
         | "base_maximum_ward" -> one (Mod.base' (Named "Ward") v)
         | "maximum_ward_+%" -> one (Mod.inc (Named "Ward") v)
         | "ward_regeneration_rate_+%" -> one (Mod.inc (Named "WardRegen") v)

@@ -399,6 +399,22 @@ let main _ =
         equal 2 o.Counts.["trigger:Bolt"]
         equal 2 o.Counts.["hits:Bolt"])
 
+    test "armour break: hits strip armour; fully broken armour takes 20% increased physical damage" (fun () ->
+        let swing = { Skill.make "Swing" [ Attack; Melee ] with BaseDamage = Map.ofList [ Physical, Range.fixedAt 1000.0 ]; BaseCrit = 0.0 }
+        // 10000 armour against 1000 damage: 50% less. Breaking 400% of the damage dealt: 2000 after the first hit
+        let armoured = { boss 1e9 with Mods = [ Mod.base' Armour 10000.0 ] }
+        let run mods = Sim.run (Fight.single armoured (Actor.make "Player" mods [ swing ]) 3.5) 1u
+        near 1500.0 (run []).DamageBy.["Swing (hit)"]
+        let o = run [ Mod.base' (Named "ArmourBreakOfPhysical") 400.0 ]
+        // hit 1: 500 dealt, breaks 2000 -> armour 8000: 1000 x (1 - 8000/18000) = 555.6, breaks 2222 -> 5778:
+        // 1000 x (1 - 5778/15778) = 633.8
+        near (500.0 + 1000.0 * (1.0 - 8000.0 / 18000.0) + 1000.0 * (1.0 - (8000.0 - 4000.0 / 1.8) / (18000.0 - 4000.0 / 1.8))) o.DamageBy.["Swing (hit)"]
+        // an enemy without armour to speak of is fully broken at once: +20% from the second hit on
+        let bare = { boss 1e9 with Mods = [ Mod.base' Armour 1.0 ] }
+        let broken = Sim.run (Fight.single bare (Actor.make "Player" [ Mod.base' (Named "ArmourBreakOfPhysical") 100.0 ] [ swing ]) 3.5) 1u
+        let first = 1000.0 * (1.0 - 1.0 / 10001.0)
+        near (first + 2.0 * 1200.0) broken.DamageBy.["Swing (hit)"])
+
     test "crossbow: a load of bolts, then a reload" (fun () ->
         // 2 bolts per load, 0.5 s per shot, 1 s reload: two shots every 2 s
         let shot = { Skill.make "Shot" [ Attack; Projectile ] with BaseDamage = Map.ofList [ Physical, Range.fixedAt 10.0 ]; BaseTime = 0.5; Clip = 2; ReloadTime = 1.0 }

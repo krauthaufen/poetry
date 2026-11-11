@@ -47,6 +47,15 @@ Confidence levels:
 | Damage taken | (1 + Σinc taken) × Π more taken; scopes as for damage | CalcOffence.lua ~4060 | pob |
 | Hit chance | 100% unless a `HitChance` override is given. Accuracy vs evasion is not modelled yet. | — | guess |
 
+### Armour Break
+
+| Mechanic | Rule | Source | Confidence |
+|---|---|---|---|
+| Breaking | a hit breaks armour by its share of the damage it dealt ("Break Armour equal to X% of Physical / Fire / Hit Damage dealt", flat amounts), x increased armour break; the monster's armour is lower by the total, up to all of it | stat text | data |
+| Duration | broken armour comes back 12 s after the last break (x duration modifiers) | - | guess |
+| Fully Broken Armour | at zero armour the enemy takes 20% increased physical damage from hits (x effect), or more types with "also applies to ..." | PoB CalcPerform | pob |
+| Not modelled | armour break taken modifiers, breaking below zero, consuming broken armour, sundering | - | missing |
+
 ## Ailments
 
 | Mechanic | Rule | Source | Confidence |

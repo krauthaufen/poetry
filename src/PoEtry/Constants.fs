@@ -10,6 +10,11 @@ module Constants =
         table.[(max 1 (min level table.Length)) - 1]
 
     // ---- crit ----
+    /// Armour Break: broken armour comes back after this many seconds without more being broken,
+    /// and an enemy whose armour is fully broken takes this much increased physical damage from
+    /// hits (PoB CalcPerform: 20%). The duration is a GUESS (12 s).
+    let armourBreakDuration = 12.0
+    let fullyBrokenArmourTaken = 20.0
     /// Dodge roll: distance in game units and seconds it takes. GUESS (about 3.7 m in 0.55 s);
     /// the game's values are not in the exported data.
     let dodgeRollDistance = 37.0
