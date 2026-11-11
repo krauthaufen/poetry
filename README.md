@@ -72,6 +72,8 @@ python3 tools/corpus/fetch.py && dotnet fsi --optimize+ tools/corpus/run.fsx   #
 - **Corpus** (`tools/corpus/report.txt`): public ladder characters of every ascendancy are imported and fought. The report ranks what was not understood by how many builds it affects, and compares our character sheet (life, mana, energy shield, attributes, armour, evasion, resistances) with PoB's for the same character. PoB's defensive numbers are a good reference; its DPS is only used as a hint where to look. The sheet is compared on PoB's own inputs (its quest rewards, the weapon set it had in hand, no alternative attribute nodes), so a difference is about arithmetic, not about PoB lagging behind the game.
 - `tools/corpus/pob.mjs <nnn> <ModName>` lists PoB's own modifiers for a stat on a corpus character (needs a local pob-web checkout), to find the source a value differs by. `tools/corpus/why.fsx <build> <stat>` shows where a sheet value comes from, `line.fsx "<text>"` how a line of text is read, `one.fsx <build>` one build as the corpus plays it.
 
+- **Parity** (`tools/corpus/parity.py`): our fight against PoB's own breakdown of the same skill, character by character: hits per second, crit chance, average hit, and how long the character waits for mana. `pob-all.mjs` dumps PoB's side, `skillwhy.fsx <build> "<gem>" <stat>` shows the modifiers and the expected hit on ours. PoB's damage is no truth; the table is there so every difference gets an explanation (a gap of ours, or something PoB assumes: full stacks, no mana, no reload, one hit per use).
+
 Corpus characters and your own builds stay out of the repository (`corpus/`, `builds-private/`).
 
 ## Status
