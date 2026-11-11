@@ -453,6 +453,16 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         equal true (flag "OnlyVs:Frozen" cold && flag "ConsumesVs" cold)
         equal true (flag "OnlyInfused:FireInfusion" (part "Fireball" None "Firebolts")))
 
+    test "Sniper's Mark: the next crit on the marked enemy takes the mark and gives a Frenzy Charge" (fun () ->
+        let setup = { Gem = "Sniper's Mark"; Level = 20; Quality = 0; StatSet = 1; Supports = [] }
+        match Gems.skill db.Value ModDb.empty None setup with
+        | Ok (s, _) ->
+            match Behaviours.markBuff db.Value ModDb.empty setup s with
+            | [ { Hook = OnCrit; Reaction = IfEnemyHas ("Mark:Sniper's Mark", GainResource ("FrenzyCharge", 1)) }
+                { Hook = OnCrit; Reaction = IfEnemyHas ("Mark:Sniper's Mark", RemoveDebuff "Mark:Sniper's Mark") } ] -> ()
+            | r -> failwithf "%A" r
+        | Error e -> failwith e)
+
     test "perfect timing: the perfect hit replaces the normal one; the release follows the channel" (fun () ->
         let flag name (sk: Skill) = Mods.flag { Ctx.empty with SkillName = sk.Name } (Named name) (ModDb.ofList sk.Mods)
         let mace = (Items.parse db.Value "Rarity: Normal\nAkoyan Club\n--------\n").Weapon

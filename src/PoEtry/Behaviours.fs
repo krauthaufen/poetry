@@ -544,15 +544,28 @@ module Behaviours =
         let raw = Gems.rawStats db charMods { setup with Supports = [] }
         let pick (ending: string) = raw |> List.tryPick (fun (k, v) -> if k.EndsWith ending && v > 0.0 then Some v else None)
         let duration = (raw |> List.filter (fun (k, _) -> k = "base_secondary_skill_effect_duration") |> List.sumBy snd) / 1000.0
-        [ "_damage_buff_damage_%_to_gain_as_cold", Cold, "Frozen"
-          "_damage_buff_damage_%_to_gain_as_lightning", Lightning, "Electrocuted" ]
+        // Sniper's Mark: "The next Critical Hit the target receives Activates the Mark, Consuming
+        // it to deal extra damage and grant you a Frenzy Charge"
+        let sniper =
+            let consumedByCrit = Gems.data db setup.Gem |> Option.exists (fun d -> d.Types.Contains "Mark" && d.Description.Contains "next Critical Hit")
+            if not consumedByCrit then []
+            else
+                let mark = "Mark:" + skill.Name
+                [ if (Gems.data db setup.Gem).Value.Description.Contains "Frenzy Charge" then
+                      yield { Hook = OnCrit; Filter = AnySkill; Chance = 100.0; Reaction = IfEnemyHas(mark, GainResource("FrenzyCharge", 1)) }
+                  yield { Hook = OnCrit; Filter = AnySkill; Chance = 100.0; Reaction = IfEnemyHas(mark, RemoveDebuff mark) } ]
+        let activated =
+            [ "_damage_buff_damage_%_to_gain_as_cold", Cold, "Frozen"
+              "_damage_buff_damage_%_to_gain_as_lightning", Lightning, "Electrocuted" ]
+        sniper
+        @ (activated
         |> List.collect (fun (ending, element, state) ->
             match pick ending with
             | Some v when duration > 0.0 ->
                 let mods = [ for t in DamageType.all -> Mod.base' (GainAs(t, element)) v |> Mod.from skill.Name ]
                 [ { Hook = OnHit; Filter = AnySkill; Chance = 100.0
                     Reaction = IfEnemyHas("Mark:" + skill.Name, IfEnemyHas(state, GrantBuff(skill.Name + " activated", duration, 1, mods))) } ]
-            | _ -> [])
+            | _ -> []))
 
     /// Skills that empower the attacks that follow:
     /// - Mantra of Destruction: the next attack gains a share of all damage as extra chaos;

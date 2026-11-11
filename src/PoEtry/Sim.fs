@@ -56,6 +56,8 @@ type Reaction =
     /// Feed a meta gem.
     | GainEnergy of meta: string * amount: float
     | RemoveBuff of name: string
+    /// Take a debuff off the enemy concerned (a mark that has been activated).
+    | RemoveDebuff of name: string
     /// Stacks of a resource (infusions from Powered by Verisium), capped at its maximum.
     | GainResource of resource: string * count: int
     /// A remnant of the resource that arrives after `delay` (detonation + pickup);
@@ -1061,6 +1063,7 @@ module Sim =
                          onTarget (fun t ->
                              [ 1 .. pulses ] |> List.fold (fun w k ->
                                  schedule (w.Time + every * float k) (Expose(actor.Name, t, dt, min cap (start + perPulse * float k), duration)) w) w)
+                     | RemoveDebuff name -> onTarget (fun t -> updateEnemy t (fun en -> { en with Debuffs = Map.remove name en.Debuffs }) w)
                      | TriggerSkill name -> trigger env rng actor name w
                      | GainEnergy (meta, amount) -> gainEnergy env rng actor meta amount w
                      | GainResource (r, n) -> schedule w.Time (GainStacks(actor.Name, r, n)) w
