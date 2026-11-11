@@ -70,7 +70,7 @@ python3 tools/corpus/fetch.py && dotnet fsi --optimize+ tools/corpus/run.fsx   #
 - **Tests**: every rule that can be stated as a number has one, worked out by hand or read off the raw data.
 - **Census** (`tools/census/census.txt`): every stat on every affix, passive and gem in the game data, classified by whether the engine actually reads what it maps to.
 - **Corpus** (`tools/corpus/report.txt`): public ladder characters of every ascendancy are imported and fought. The report ranks what was not understood by how many builds it affects, and compares our character sheet (life, mana, energy shield, attributes, armour, evasion, resistances) with PoB's for the same character. PoB's defensive numbers are a good reference; its DPS is only used as a hint where to look. The sheet is compared on PoB's own inputs (its quest rewards, the weapon set it had in hand, no alternative attribute nodes), so a difference is about arithmetic, not about PoB lagging behind the game.
-- `tools/corpus/why.fsx <build> <stat>` shows where a sheet value comes from, `line.fsx "<text>"` how a line of text is read, `one.fsx <build>` one build as the corpus plays it.
+- `tools/corpus/pob.mjs <nnn> <ModName>` lists PoB's own modifiers for a stat on a corpus character (needs a local pob-web checkout), to find the source a value differs by. `tools/corpus/why.fsx <build> <stat>` shows where a sheet value comes from, `line.fsx "<text>"` how a line of text is read, `one.fsx <build>` one build as the corpus plays it.
 
 Corpus characters and your own builds stay out of the repository (`corpus/`, `builds-private/`).
 
