@@ -214,7 +214,15 @@ module Setup =
         // total Spirit as a stack count, for "per 1 Spirit"
         let spirit = int (Behaviours.spiritTotal sheet build)
         let maxResources, startResources = Map.add "Spirit" spirit maxResources, Map.add "Spirit" spirit startResources
-        let vitals = Defence.computeWith (if o.SheetSetTwo then Map.add "WeaponSetTwo" 1 startResources else startResources) bases sheet
+        // The character sheet is the one of the weapon set the character fights with: set two when
+        // its weapon is the stronger one (the API does not say which set is in hand).
+        let sheetSetTwo =
+            o.SheetSetTwo
+            || (let strength (w: Weapon) = (w.Damage |> Map.toList |> List.sumBy (fun (_, r) -> (r.Min + r.Max) / 2.0)) * w.AttacksPerSecond
+                let one = sheet.Weapons |> List.filter (fun w -> not (List.contains (Tag "WeaponSet2") w.Tags)) |> List.sumBy strength
+                let two = sheet.Weapons |> List.filter (fun w -> List.contains (Tag "WeaponSet2") w.Tags) |> List.sumBy strength
+                two > one)
+        let vitals = Defence.computeWith (if sheetSetTwo then Map.add "WeaponSetTwo" 1 startResources else startResources) bases sheet
         let vitals = if o.LowLife && vitals.Life > 1.0 then { vitals with StartLife = 0.35 } else vitals
         // life reserved by skills ("Reserve Life instead of Spirit") and by stats: what is left is all
         // the life there is, so a character with 65% or more reserved is on low life for good
@@ -255,8 +263,8 @@ module Setup =
           Bases = bases
           // "per 100 maximum mana" (Archmage) reads this permanent stack count
           // the character's own numbers as stacks, for "per 100 maximum Mana", "per 15 Strength"
-          MaxResources = maxResources |> Map.add "MaxMana100" (int (vitals.Mana / 100.0)) |> Map.add "Str" (int vitals.Str) |> Map.add "Dex" (int vitals.Dex) |> Map.add "Int" (int vitals.Int)
-          Resources = (startResources |> Map.toList) @ [ "MaxMana100", int (vitals.Mana / 100.0); "Str", int vitals.Str; "Dex", int vitals.Dex; "Int", int vitals.Int ]
+          MaxResources = maxResources |> Map.add "MaxMana100" (int (vitals.Mana / 100.0)) |> Map.add "BlockChance" (int vitals.Block) |> Map.add "LowestAttribute" (int (min vitals.Str (min vitals.Dex vitals.Int))) |> Map.add "Str" (int vitals.Str) |> Map.add "Dex" (int vitals.Dex) |> Map.add "Int" (int vitals.Int)
+          Resources = (startResources |> Map.toList) @ [ "MaxMana100", int (vitals.Mana / 100.0); "BlockChance", int vitals.Block; "LowestAttribute", int (min vitals.Str (min vitals.Dex vitals.Int)); "Str", int vitals.Str; "Dex", int vitals.Dex; "Int", int vitals.Int ]
           Vitals = vitals
           Periodics = periodics
           Cycles = cycles

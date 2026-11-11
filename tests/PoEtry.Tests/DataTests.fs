@@ -393,6 +393,22 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         // the sheet is weapon set one's: set two's passives are not in hand
         near plain withSetTwo)
 
+    test "damage per block chance and per lowest attribute read the sheet; the sheet follows the stronger weapon set" (fun () ->
+        let c = Setup.loadWith db.Value treeJson { blank with ExtraLines = [ "+30 to Strength"; "+20 to Dexterity"; "+40 to Intelligence" ] } Options.defaults
+        let v = c.Vitals
+        equal (box (int (min v.Str (min v.Dex v.Int)))) (box (c.Resources |> List.pick (fun (k, n) -> if k = "LowestAttribute" then Some n else None)))
+        match StatMap.meaning "damage_+%_per_5_of_your_lowest_attribute" 2.0, StatMap.meaning "damage_+%_per_1%_block_chance" 1.0 with
+        | Mods [ a ], Mods [ b ] ->
+            equal (box [ PerStack("LowestAttribute", 5.0) ]) (box a.Conds)
+            equal (box [ PerStack("BlockChance", 1.0) ]) (box b.Conds)
+        | m -> failwithf "%A" m
+        // a bare spear in set one and a much better one in set two: the sheet is set two's
+        let weak = "Weapon 1", "Rarity: Normal\nHardwood Spear\n--------\n+10 to Strength"
+        let strong = "Weapon 1 Swap", "Rarity: Rare\nTest Spear\nHardwood Spear\n--------\n300% increased Physical Damage\n+50 to Strength"
+        let both = Setup.loadWith db.Value treeJson { blank with Items = [ weak; strong ] } Options.defaults
+        let plain = Setup.loadWith db.Value treeJson blank Options.defaults
+        near (plain.Vitals.Str + 50.0) both.Vitals.Str)
+
     test "low life only where the build keeps itself there; fewer enemies to be surrounded" (fun () ->
         let bonus = [ "30% increased Damage when on Low Life" ]
         let start b = (Setup.loadWith db.Value treeJson b Options.defaults).Vitals.StartLife

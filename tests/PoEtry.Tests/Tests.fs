@@ -67,6 +67,15 @@ let main _ =
         let expected = 100.0 * (1.0 + 2.0 * 0.73125)
         if abs (mean - expected) > 0.03 * expected then failwithf "mean %.1f, expected %.1f" mean expected)
 
+    test "hits ignore the elemental resistances of frozen enemies, where they are positive" (fun () ->
+        let mods = ModDb.ofList [ Mod.flag (Named "IgnoreElementalResist") |> Mod.whenever (EnemyHas "Frozen") ]
+        let dmg = Map.ofList [ Cold, 100.0 ]
+        let frozen = { ctx with EnemyStatus = Map.ofList [ "Frozen", 1 ] }
+        near 60.0 (Hit.mitigate ctx mods (enemy [ Mod.base' (Resist Cold) 40.0 ]) dmg).[Cold]
+        near 100.0 (Hit.mitigate frozen mods (enemy [ Mod.base' (Resist Cold) 40.0 ]) dmg).[Cold]
+        // a negative resistance stays
+        near 120.0 (Hit.mitigate frozen mods (enemy [ Mod.base' (Resist Cold) -20.0 ]) dmg).[Cold])
+
     test "bifurcating critical hits: two rolls, the bonus twice when both succeed" (fun () ->
         // 50% chance, bonus 200%: 25% no crit (100), 50% one crit (300), 25% both (500)
         let skill = { fireSpell 100.0 with BaseCrit = 50.0 }

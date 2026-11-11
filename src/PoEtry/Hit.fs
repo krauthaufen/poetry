@@ -302,7 +302,15 @@ module Hit =
                 | Physical -> physicalReduction defender v
                 | _ ->
                     let r = effectiveResist ctx mods defender t
-                    if negate && DamageType.isElemental t && r > 0.0 then -r else r
+                    // "Hits ignore non-negative Elemental Resistances of Frozen Enemies", "Critical
+                    // Hits ignore non-negative Enemy Monster Elemental Resistances": none where positive
+                    let ignored =
+                        r > 0.0
+                        && ((DamageType.isElemental t && Mods.flag ctx (Named "IgnoreElementalResist") mods)
+                            || Mods.flag ctx (Named("IgnoreResist:" + DamageType.name t)) mods)
+                    if ignored then 0.0
+                    elif negate && DamageType.isElemental t && r > 0.0 then -r
+                    else r
             v * (1.0 - reduction / 100.0) * damageTakenMult defender t)
 
     let mitigate ctx mods defender unmitigated = mitigateWith false ctx mods defender unmitigated

@@ -312,6 +312,19 @@ module StatMap =
         | "skill_rapid_fire_repeats_per_broken_seal" -> one (Mod.base' (Named "SealRepeats") v)
         | "support_spell_rapid_fire_repeat_use_damage_+%_final" -> one (Mod.base' (Named "SealRepeatDamage") v)
         | "base_skill_is_sealed_skill" -> Some Structural
+        // "N% increased Damage per 1% Chance to Block": the sheet's block chance as stacks
+        | "damage_+%_per_1%_block_chance" -> one (Mod.inc (Damage AllDamage) v |> Mod.whenever (PerStack("BlockChance", 1.0)))
+        // Magma Barrier: "increased Block chance" while it is active
+        | "skill_igneous_shield_grants_block_chance_+%" -> one (Mod.inc (Named "Block") v)
+        | "hits_ignore_elemental_resistances_vs_frozen_enemies" -> one (Mod.flag (Named "IgnoreElementalResist") |> Mod.whenever (EnemyHas "Frozen"))
+        | "critical_strikes_ignore_positive_elemental_resistances" -> one (Mod.flag (Named "IgnoreElementalResist") |> Mod.whenever IsCrit)
+        | "critical_strikes_ignore_lightning_resistance" -> one (Mod.flag (Named "IgnoreResist:Lightning") |> Mod.whenever IsCrit)
+        // Amazon: "Reveal Weaknesses against Rare and Unique enemies", "more damage / Skill Speed against
+        // enemies with an Open Weakness" (the engine opens the weakness for a share of the hits)
+        | "unique_reveal_weakness" -> one (Mod.flag (Named "RevealWeakness"))
+        | "damage_+%_final_against_bloodlusting_enemies" -> Some(Mods [ Mod.more (Damage AllDamage) v |> Mod.whenever (EnemyHas "OpenWeakness"); Mod.base' (Named "OpenWeaknessMore") v ])
+        | "skill_speed_+%_against_bloodlusting_enemies" -> one (Mod.inc Speed v |> Mod.whenever (WhileBuff "OpenWeaknessInPresence"))
+        | "damage_+%_per_5_of_your_lowest_attribute" -> one (Mod.inc (Damage AllDamage) v |> Mod.whenever (PerStack("LowestAttribute", 5.0)))
         | "attacks_roll_crits_twice" -> one (Mod.flag (Named "BifurcateCrits") |> Mod.whenever (SkillIs Attack))
         | "oracle_hits_eventually_crit_with_critical_strike_multiplier_+%_final_per_failed_roll" -> one (Mod.flag (Named "InevitableCrits"))
         // Direstrike: "increased Attack Damage while on Low Life while a Supported Skill is active"

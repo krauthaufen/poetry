@@ -159,3 +159,6 @@ module Constants =
 
     /// Inevitable Critical Hits: "30% less Critical Damage Bonus for each time Critical Hit chance was re-rolled" (keyword text).
     let inevitableCritLessPerReroll = 0.3
+
+    /// Revealing Weaknesses: "occupy a total of 45% of their maximum Life" (keyword text).
+    let revealedWeaknessLifeShare = 0.45

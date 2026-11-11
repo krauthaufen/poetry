@@ -142,7 +142,11 @@ let runOne (path: string) : Result =
                           (match pressedSkill with
                            | Some sk ->
                                let f = Setup.fight c o player boss
-                               let buffs = Map.ofList f.Player.Resources |> fun m -> if c.Vitals.StartLife <= 0.35 then Map.add "LowLife" 1 m else Map.add "FullLife" 1 m
+                               let buffs =
+                                   Map.ofList f.Player.Resources
+                                   |> fun m -> if c.Vitals.StartLife <= 0.35 then Map.add "LowLife" 1 m else Map.add "FullLife" 1 m
+                                   // one enemy is enough to be surrounded with "require 4 fewer enemies"
+                                   |> fun m -> if c.Vitals.SurroundedAt <= 1 then Map.add "Surrounded" 1 m else m
                                let ctx = { Ctx.empty with SkillTags = sk.Tags; SkillName = sk.Name; Buffs = buffs }
                                let mdb = ModDb.ofList (f.Player.Mods @ sk.Mods)
                                let rng = Rng 1u

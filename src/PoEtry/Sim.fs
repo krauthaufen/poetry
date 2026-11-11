@@ -1395,6 +1395,15 @@ module Sim =
             // Close Range: within 2 m of the player (keyword text)
             let close = Vec.length e.Def.Position - e.Def.Size <= 20.0
             let enemyStatus = status e |> (fun m -> if isolated then Map.add "Isolated" 1 m else m) |> (fun m -> if close then Map.add "Close" 1 m else m)
+            // Revealed Weaknesses cover 45% of a rare or unique enemy's life in random segments, and
+            // it has an Open Weakness while its life is inside one. Over a kill that is the share of
+            // the time spent in those segments, where damage is higher: (c / m) / (1 - c + c / m).
+            let enemyStatus =
+                let more = Mods.sumBase Ctx.empty [ Named "OpenWeaknessMore" ] mods
+                if e.Def.Rarity <> Normal && e.Def.Rarity <> Magic && Mods.flag Ctx.empty (Named "RevealWeakness") mods then
+                    let c, m = Constants.revealedWeaknessLifeShare, 1.0 + more / 100.0
+                    if rng.Float() < (c / m) / (1.0 - c + c / m) then Map.add "OpenWeakness" 1 enemyStatus else enemyStatus
+                else enemyStatus
             let ctx = Skill.ctx skill false (skillStacks actor skill st) enemyStatus
             let hitChance =
                 match Mods.override' ctx HitChance mods with
