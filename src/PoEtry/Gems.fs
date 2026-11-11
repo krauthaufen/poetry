@@ -673,7 +673,11 @@ module Gems =
           BaseTime = time
           Cooldown = gemLevel |> Option.bind (fun l -> l.Cooldown)
           StoredUses = gemLevel |> Option.bind (fun l -> l.StoredUses) |> Option.map int |> Option.defaultValue 1
-          Hits = heldHits
+          // a skill that comes down in several volleys (Death From Above: six) hits with each
+          Hits =
+            (match ownStats |> List.tryPick (fun (id, v) -> if id.EndsWith "_number_of_volleys" && v > 1.0 then Some(int v) else None) with
+             | Some n when not held -> [ for k in 1 .. n -> float k / float n, 1.0 ]
+             | _ -> heldHits)
           Delivery = delivery
           // A part that only poisons ("display_statset_no_hit_damage", "skill poisons without
           // hit": Poisonburst Arrow's burst): it deals no hit damage, always poisons for what
