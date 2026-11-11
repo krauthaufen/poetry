@@ -320,7 +320,6 @@ Checked against PoB's defensive numbers for 131 public characters (`tools/corpus
 | Elemental Archon | BuffTemplates ArchonElemental: 25% more elemental damage with spells, 100% more ignite chance / freeze buildup / shock chance with spells; "Archon Buffs also grant ..." mods; all × increased Archon effect. Gained on an ignite by a skill with `gain_archon_elemental_when_you_ignite_enemy_chance_%` (every ignite counts); 10 s × increased duration; 20 s recovery ÷ "expires faster", none with `archon_no_recovery_period` (Dominion anoint: no recovery, −50% effect) | data; durations: poe2db | data + community |
 | Infused stat sets | "X-Infused" sets are alternatives used when an infusion is consumed, never parts of a normal use (infusions not modelled yet) | data | data |
 | Block | shield block (shown on the item) + flat, × increased block, capped at 50 + max block; lucky block rolls twice; blocked hits deal `base_block_%_damage_taken` | data / game text | data + guess (cap) |
-
 | Energy from melee hits / kills | Fire Spell on Hit: per monster power for each melee hit, scaled like crits; Reaper's Invocation: per monster power for each melee kill | gem stats; the scaling is taken to be the same as for crits | guess |
 | Energy from dodge rolls, minion deaths | not modelled (Cast on Dodge, Cast on Minion Death never trigger) | - | missing |
 | Unaffordable skills | a skill that costs more than the whole mana pool is never used | - | data |
