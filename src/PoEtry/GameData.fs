@@ -30,7 +30,9 @@ type SkillLevel =
       /// Base mana cost per use.
       ManaCost: float option
       /// Support gems: cost multiplier in percent more (30 = ×1.3).
-      ManaMultiplier: float option }
+      ManaMultiplier: float option
+      /// Spirit reserved while the skill is active (per minion for minion gems; supports add theirs).
+      SpiritReservation: float option }
 
 type SkillData =
     { Id: string
@@ -121,7 +123,8 @@ module GameData =
           AttackTime = Json.numField "attackTime" j
           StoredUses = Json.numField "storedUses" j
           ManaCost = Json.field "cost" j |> Option.bind (Json.numField "Mana")
-          ManaMultiplier = Json.numField "manaMultiplier" j }
+          ManaMultiplier = Json.numField "manaMultiplier" j
+          SpiritReservation = Json.numField "spiritReservationFlat" j }
 
     let private skill id j =
         { Id = id

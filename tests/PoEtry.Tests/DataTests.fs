@@ -155,6 +155,24 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         near 0.0 (Mods.sumBase spell [ CritBonus ] db')
         near 8.0 (Mods.sumBase attack [ Named "LifeLeech" ] db'))
 
+    test "spirit: flat amounts, a sceptre's own value, the better weapon set; minions from what is left" (fun () ->
+        let sceptre slot = slot, "Rarity: Rare\nTest Sceptre\n--------\nSpirit: 120\n--------\n30% increased Spirit\n"
+        let helmet = item "Helmet" [ "Armour: 100"; "--------"; "+50 to Spirit" ]
+        let quest = [ "+100 to Spirit" ]
+        // the sceptre's own "30% increased Spirit" is already in the 120 it shows
+        near 270.0 (Behaviours.spiritTotal (sheetOf { blank with Items = [ sceptre "Weapon 2"; helmet ]; ExtraLines = quest }))
+        // a sceptre in weapon set two counts when it gives more than set one's
+        near 270.0 (Behaviours.spiritTotal (sheetOf { blank with Items = [ sceptre "Weapon 2 Swap"; helmet ]; ExtraLines = quest }))
+        near 150.0 (Behaviours.spiritTotal (sheetOf { blank with Items = [ helmet ]; ExtraLines = quest }))
+        // Skeletal Warriors: 20 Spirit each at level 20, the first two free; Herald of Thunder 30
+        let gem name = { Name = name; Level = 20; Quality = 0; Enabled = true; IsSupport = false; StatSet = 1 }
+        let group name = { Label = ""; Slot = ""; Enabled = true; Gems = [ gem name ] }
+        let b = { blank with Items = [ helmet ]; ExtraLines = quest; Groups = [ group "Skeletal Warrior"; group "Herald of Thunder" ] }
+        let uses = Behaviours.spiritUses db.Value (sheetOf b) b
+        let counts = Behaviours.minionCounts 150.0 uses
+        // 150 - 30 = 120 spare: 6 paid minions and 2 free
+        equal (box 8) (box counts.["Skeletal Warrior"]))
+
     test "api: gem quality only when shown, weapon set passives" (fun () ->
         let json =
             """{"character":{"level":5,"class":"Witch","equipment":[],"jewels":[],

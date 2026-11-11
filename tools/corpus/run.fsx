@@ -70,7 +70,7 @@ let runOne (path: string) : Result =
             [ "life", v.Life, "life"; "mana", v.Mana, "mana"; "energy shield", v.EnergyShield, "energyShield"
               "strength", v.Str, "strength"; "dexterity", v.Dex, "dexterity"; "intelligence", v.Int, "intelligence"
               "armour", v.Armour, "armour"; "evasion", v.Evasion, "evasionRating"; "deflection", v.Deflection, "deflectionRating"
-              "block", v.Block, "blockChance"; "ward", v.Ward, "ward"
+              "block", v.Block, "blockChance"; "ward", v.Ward, "ward"; "spirit", c.Spirit, "spirit"
               "fire res", res Fire, "fireResistance"; "cold res", res Cold, "coldResistance"
               "lightning res", res Lightning, "lightningResistance"; "chaos res", res Chaos, "chaosResistance" ]
             |> List.choose (fun (name, ours, key) -> num key |> Option.map (fun t -> name, ours, t))

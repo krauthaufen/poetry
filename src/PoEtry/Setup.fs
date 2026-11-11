@@ -93,6 +93,9 @@ type Loaded =
       Cycles: Cycle list
       MoteMaxima: (string * int) list
       Charms: Charm list
+      /// Spirit: the total, and what each persistent gem reserves (minion gems: per minion).
+      Spirit: float
+      SpiritUses: Behaviours.SpiritUse list
       /// Persistent minions, and notes on minion skills left out.
       Minions: Actor list
       MinionNotes: string list }
@@ -228,6 +231,8 @@ module Setup =
           Cycles = cycles
           MoteMaxima = moteMax
           Charms = charms
+          Spirit = Behaviours.spiritTotal sheet
+          SpiritUses = Behaviours.spiritUses db sheet build
           Minions = fst minionActors
           MinionNotes = snd minionActors }
 

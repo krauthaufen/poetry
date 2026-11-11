@@ -239,7 +239,7 @@ module Items =
                 && not (inertLine l))
         // armour pieces and weapons carry local stats; jewellery, jewels and charms don't
         let hasLocalDefences =
-            lines |> List.exists (fun l -> l.StartsWith "Armour:" || l.StartsWith "Evasion" || l.StartsWith "Energy Shield:" || l.StartsWith "Runic Ward:" || l.StartsWith "Block chance:")
+            lines |> List.exists (fun l -> l.StartsWith "Armour:" || l.StartsWith "Evasion" || l.StartsWith "Energy Shield:" || l.StartsWith "Runic Ward:" || l.StartsWith "Block chance:" || l.StartsWith "Spirit:")
         let showsWard = lines |> List.exists (fun l -> l.StartsWith "Runic Ward:")
         let context = if baseName.IsSome || hasLocalDefences then StatText.ItemLocal else StatText.Global
         let stats, unknown = StatText.parseLinesIn context db.Text candidates
@@ -283,9 +283,12 @@ module Items =
                                 | "maximum_mana_+%" -> [ Mod.inc MaxMana n ]
                                 | "global_armour_evasion_energy_shield_+%" -> [ Mod.inc Armour n; Mod.inc Evasion n; Mod.inc MaxEnergyShield n ]
                                 | "stun_threshold_+" -> [ Mod.base' (Named "StunThreshold") n ]
+                                | "spirit_+" -> [ Mod.base' (Named "Spirit") n ]
                                 | _ -> []
                             ms @ found, c
                         elif id = "local_ring_duplicate_other_ring" then ms, c
+                        // "+X to Spirit": part of a sceptre's own Spirit, a plain bonus on anything else
+                        elif id = "local_spirit" && not (lines |> List.exists (fun l -> l.StartsWith "Spirit:")) then ms @ [ Mod.base' (Named "Spirit") v ], c
                         elif shown then ms, c
                         else
                             // local stats with a name of their own; the rest read like the same stat without "local_"
@@ -318,6 +321,7 @@ module Items =
             let has (prefix: string) = lines |> List.exists (fun l -> l.StartsWith prefix)
             match st with
             | Named "Ward" -> showsWard
+            | Named "Spirit" -> has "Spirit:"
             | Armour -> hasLocalDefences && not (has "Armour:")
             | Evasion -> hasLocalDefences && not (has "Evasion")
             | MaxEnergyShield -> hasLocalDefences && not (has "Energy Shield:")
@@ -336,6 +340,7 @@ module Items =
                 elif l.StartsWith "Energy Shield:" then value "Energy Shield:" |> Option.map (fun v -> MaxEnergyShield, v)
                 elif l.StartsWith "Block chance:" then value "Block chance:" |> Option.map (fun v -> Named "ShieldBlock", v)
                 elif l.StartsWith "Runic Ward:" then value "Runic Ward:" |> Option.map (fun v -> Named "Ward", v)
+                elif l.StartsWith "Spirit:" then value "Spirit:" |> Option.map (fun v -> Named "Spirit", v)
                 else None)
         let numbers (l: string) =
             l.Split(' ') |> Array.choose (fun w -> match System.Double.TryParse(w.Trim(',')) with | true, v -> Some v | _ -> None) |> List.ofArray

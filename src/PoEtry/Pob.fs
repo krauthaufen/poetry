@@ -383,6 +383,10 @@ module Pob =
                         | Evasion -> Some(Mod.base' (Named "ShieldEvasion") v |> Mod.from slot)
                         | _ -> None)
                 else [])
+        // Spirit on the second weapon set's items (a sceptre kept there)
+        let swapSpirit =
+            parsed |> List.sumBy (fun (slot, p) -> if slot.Contains "Swap" then p.Defences |> List.sumBy (fun (st, v) -> if st = Named "Spirit" then v else 0.0) else 0.0)
+        let shieldMods = if swapSpirit > 0.0 then (Mod.base' (Named "SpiritOnSetTwo") swapSpirit |> Mod.from "weapon set two") :: shieldMods else shieldMods
         { Mods = itemMods @ shieldMods @ legacies @ radiusMods @ treeMods @ (extraMods |> List.map (sourced "quest"))
           MainHand = mainHand
           Weapons = Option.toList mainHand @ Option.toList swapHand

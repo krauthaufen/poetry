@@ -181,6 +181,12 @@ let main argv =
          let acc = Constants.monsterAccuracy level
          printfn "avoidance vs level %d: hit %.0f%% of the time, %.0f%% of hits deflected (-%.0f%%), %.0f%% blocked; stun threshold %.0f, ailment threshold %.0f"
              level (Vitals.monsterHitChance vitals.Evasion acc) (Vitals.deflectChance vitals.Deflection acc) vitals.DeflectEffect vitals.Block vitals.StunThreshold vitals.AilmentThreshold)
+        (let counts = Behaviours.minionCounts c.Spirit c.SpiritUses
+         let fixedCost = c.SpiritUses |> List.sumBy (fun u -> u.Flat)
+         let minionCost = c.SpiritUses |> List.sumBy (fun u -> if u.PerMinion > 0.0 then u.PerMinion * float (max 0 ((Map.tryFind u.Gem counts |> Option.defaultValue 1) - u.FreeMinions)) else 0.0)
+         printfn "spirit: %.0f, reserved %.0f%s%s" c.Spirit (fixedCost + minionCost)
+             (if fixedCost > c.Spirit then "  (more than the character has: some of these are off, or bound to one weapon set)" else "")
+             (c.SpiritUses |> List.map (fun u -> if u.PerMinion > 0.0 then sprintf "%s %d x %.0f" u.Gem (Map.tryFind u.Gem counts |> Option.defaultValue 1) u.PerMinion else sprintf "%s %.0f" u.Gem u.Flat) |> String.concat ", " |> fun l -> if l = "" then "" else " (" + l + ")"))
         printfn "character: %d modifiers; starts with %s" sheet.Mods.Length (resources |> List.map (fun (k, n) -> sprintf "%d %s" n k) |> String.concat ", ")
         match sheet.MainHand with
         | Some w -> printfn "main hand: %A, %.1f%% crit, %.2f APS" (w.Damage |> Map.toList |> List.map (fun (t, r) -> sprintf "%s %.0f-%.0f" (DamageType.name t) r.Min r.Max)) w.CritChance w.AttacksPerSecond

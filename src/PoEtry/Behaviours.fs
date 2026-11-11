@@ -667,6 +667,77 @@ module Behaviours =
             | _ -> []
         exposure @ remnant
 
+    /// The character's Spirit and what its persistent skills reserve.
+    /// Spirit: flat amounts (quests, mods, sceptres' own value) and "per X on body armour",
+    /// x increases. Reserved: each persistent gem's `spiritReservationFlat` at its level plus
+    /// its supports', Blasphemy's per socketed curse, / reservation efficiency. A minion gem's
+    /// reservation is per minion (the first few can be free).
+    type SpiritUse =
+        { Gem: string
+          /// Spirit for the gem itself (0 for minion gems), per minion, and minions that cost nothing.
+          Flat: float
+          PerMinion: float
+          FreeMinions: int }
+
+    let spiritTotal (sheet: CharacterSheet) =
+        let db = ModDb.ofList sheet.Mods
+        let c = Ctx.empty
+        let item stat slot = sheet.ItemDefences |> List.sumBy (fun (s, st, v) -> if st = stat && (slot = "" || s = slot) then v else 0.0)
+        let per name stat = match Mods.sumBase c [ Named name ] db with | n when n > 0.0 -> floor (item stat "Body Armour" / n) | _ -> 0.0
+        // a sceptre's Spirit counts for the weapon set it is in: the set that gives more is taken
+        let setOne = sheet.ItemDefences |> List.sumBy (fun (s, st, v) -> if st = Named "Spirit" && s.StartsWith "Weapon" then v else 0.0)
+        let setTwo = Mods.sumBase c [ Named "SpiritOnSetTwo" ] db
+        let fromItems = if Mods.flag c (Named "NoSpiritFromEquipment") db then 0.0 else item (Named "Spirit") "" - setOne + max setOne setTwo
+        if Mods.flag c (Named "NoSpirit") db then 0.0 else
+        (Mods.sumBase c [ Named "Spirit" ] db + fromItems + per "SpiritPerBodyES" MaxEnergyShield + per "SpiritPerBodyEvasion" Evasion)
+        * Mods.mult c [ Named "Spirit" ] db
+        |> floor
+
+    let spiritUses (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) : SpiritUse list =
+        let charMods = ModDb.ofList sheet.Mods
+        build.Groups
+        |> List.filter (fun g -> g.Enabled)
+        |> List.collect (fun g ->
+            let enabled = g.Gems |> List.filter (fun x -> x.Enabled)
+            let reservation (name: string) (level: int) =
+                Gems.data db name
+                |> Option.bind (fun d -> Map.tryFind level d.Levels |> Option.orElse (Map.tryFind 1 d.Levels))
+                |> Option.bind (fun l -> l.SpiritReservation)
+                |> Option.defaultValue 0.0
+            let supports = enabled |> List.filter (fun x -> x.IsSupport) |> List.sumBy (fun x -> reservation x.Name x.Level)
+            enabled
+            |> List.filter (fun x -> not x.IsSupport)
+            |> List.choose (fun gem ->
+                match Gems.data db gem.Name with
+                | Some d when d.Types.Contains "Persistent" || d.Types.Contains "HasReservation" ->
+                    let tags = d.Types |> Set.toList |> List.map (fun t -> Tag("Type:" + t)) |> Set.ofList
+                    // a buff gem's own reservation efficiency is for that gem only
+                    let forGem = sheet.Mods |> List.filter (fun m -> not (m.Source.StartsWith "buff:") || m.Source = "buff:" + d.Name) |> ModDb.ofList
+                    let eff = Mods.inc { Ctx.empty with SkillTags = tags; SkillName = d.Name } [ Named "ReservationEfficiency" ] forGem
+                    let own = reservation gem.Name gem.Level
+                    let raw = Gems.rawStats db charMods { Gem = gem.Name; Level = gem.Level; Quality = gem.Quality; StatSet = 1; Supports = [] }
+                    let stat id = raw |> List.filter (fun (k, _) -> k = id) |> List.sumBy snd
+                    // Blasphemy: per curse socketed with it
+                    let curses = enabled |> List.filter (fun x -> not x.IsSupport && x.Name <> gem.Name) |> List.length
+                    let perCurse = stat "blasphemy_base_spirit_reservation_per_socketed_curse" * float curses
+                    let isMinion = d.Types.Contains "Minion" || not d.MinionList.IsEmpty
+                    if isMinion then Some { Gem = gem.Name; Flat = 0.0; PerMinion = (own + supports) / eff; FreeMinions = int (stat "first_X_minions_have_0_base_spirit_reservation") }
+                    elif own + supports + perCurse > 0.0 then Some { Gem = gem.Name; Flat = (own + supports + perCurse) / eff; PerMinion = 0.0; FreeMinions = 0 }
+                    else None
+                | _ -> None))
+
+    /// How many minions each persistent minion gem has: the free ones, plus what the Spirit
+    /// left after everything else pays for. With several minion gems the spare Spirit is
+    /// shared out evenly (the game lets the player choose; the API doesn't say).
+    let minionCounts (spirit: float) (uses: SpiritUse list) : Map<string, int> =
+        let fixedCost = uses |> List.sumBy (fun u -> u.Flat)
+        let minionGems = uses |> List.filter (fun u -> u.PerMinion > 0.0)
+        let spare = max 0.0 (spirit - fixedCost)
+        let share = if minionGems.IsEmpty then 0.0 else spare / float minionGems.Length
+        minionGems
+        |> List.map (fun u -> u.Gem, max 1 (u.FreeMinions + int (floor (share / u.PerMinion))))
+        |> Map.ofList
+
     /// Persistent minions of a build as actors. Each minion is the monster its gem names
     /// (skills' minion list; "Spectre: X" / "Companion: X" by monster name) at the gem's level:
     /// its attacks use "weapon" damage = monster damage of that level x the monster's damage
@@ -675,6 +746,8 @@ module Behaviours =
     /// Returns the actors and notes about what was left out.
     let minions (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) : Actor list * string list =
         let charMods = ModDb.ofList sheet.Mods
+        // as many of each as the character's Spirit pays for
+        let counts = minionCounts (spiritTotal sheet) (spiritUses db sheet build)
         let minionMods = Mods.forMinions sheet.Mods
         let levelOf (gemName: string) (gemLevel: int) =
             let req name = Gems.data db name |> Option.bind (fun d -> Map.tryFind gemLevel d.Levels) |> Option.map (fun l -> int l.LevelRequirement)
@@ -726,6 +799,7 @@ module Behaviours =
                         Gems.rawStats db charMods { Gem = gem.Name; Level = gem.Level; Quality = gem.Quality; StatSet = 1; Supports = [] }
                         |> List.tryPick (fun (k, v) -> if k.EndsWith "_pack_size" then Some(int v) else None)
                         |> Option.defaultValue 1
+                        |> fun pack -> pack * (Map.tryFind gem.Name counts |> Option.defaultValue 1)
                     // a minion without any damaging skill (a healer) simply doesn't fight
                     if ordered.IsEmpty then [], []
                     else
