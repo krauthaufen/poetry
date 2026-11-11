@@ -332,6 +332,8 @@ module Sim =
         | WardArrives of amount: float
         /// Stacks of a resource arrive (picked-up infusion remnants, Verisium).
         | GainStacks of actor: string * resource: string * count: int
+        /// A meta gem gains energy (at the end of a dodge roll).
+        | EnergyArrives of actor: string * meta: string * amount: float
         | Expire
 
     type private ActorState =
@@ -952,7 +954,8 @@ module Sim =
                     |> List.fold
                         (fun w meta ->
                             let amount = meta.Sources |> List.sumBy (function DodgeRolls per -> per * distance | _ -> 0.0)
-                            if amount > 0.0 then gainEnergy env rng actor meta.Name (amount * meta.EnergyMult) w else w)
+                            // the distance is covered when the roll ends
+                            if amount > 0.0 then schedule (w.Time + useTime) (EnergyArrives(actor.Name, meta.Name, amount * meta.EnergyMult)) w else w)
                         w
                 else w
             // Spellslinger-style energy: per 10 ms of base cast time of spells the player casts
@@ -1823,6 +1826,7 @@ module Sim =
                 let maxR = Map.tryFind r actor.MaxResources |> Option.defaultValue n
                 setStacksWith env name true r (min maxR (stacksOf st r + n)) w
                 |> fun w -> { w with Counts = bump ("gained:" + r) w.Counts }
+            | EnergyArrives (name, meta, amount) -> gainEnergy env rng (actorDef env name) meta amount w
             | Expire -> w
 
     let private envOf (fight: Fight) =

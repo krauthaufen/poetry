@@ -56,7 +56,7 @@ module Summary =
         { Runs = outcomes.Length
           KillRate = float kills.Length / float outcomes.Length
           Ttk = if kills.IsEmpty then None else Some(stats kills)
-          Dps = outcomes |> List.map (fun o -> total o / max 1e-9 o.Duration) |> stats
+          Dps = outcomes |> List.map (fun o -> total o / max Constants.serverTick o.Duration) |> stats
           DamageShare =
             outcomes
             |> meanOf (fun o -> let t = max 1e-9 (total o) in o.DamageBy |> Map.map (fun _ v -> v / t))

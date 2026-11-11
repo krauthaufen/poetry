@@ -1,4 +1,6 @@
-/// poetry <build.xml | build code file> [options]
+/// poetry-sim <character.json | build.xml | build code file> [options]
+///   With only a file: picks the skill that deals the most when pressed and plays the rest
+///   by skill type (--auto). --group or --rotation choose yourself.
 ///   --group N        socket group to simulate (default: the build's main group)
 ///   --runs N         Monte Carlo runs (default 500)
 ///   --time S         fight length in seconds (default 60)
@@ -67,13 +69,55 @@ let rec private opts (args: string list) =
     | _ :: rest -> opts rest
     | [] -> Map.empty
 
+let private usage =
+    "poetry-sim <character.json | build.xml | build code file> [options]\n\
+     With only a file: picks the skill that deals the most when pressed and plays the rest\n\
+     by skill type (--auto). --group or --rotation choose yourself.\n\
+       --group N        socket group to simulate (default: the build's main group)\n\
+       --runs N         Monte Carlo runs (default 500)\n\
+       --time S         fight length in seconds (default 60)\n\
+       --scenario S     boss | pinnacle | pack | surrounded (default boss)\n\
+       --pack N,M,R     pack of N normal, M magic, R rare monsters (default 8,3,1)\n\
+       --distance D     how far in front the enemies stand, game units (default 30; 10 = 1 m)\n\
+       --level L        monster level (default 83)\n\
+       --life X         override life of every enemy (e.g. 1e12 to measure sustained DPS)\n\
+       --res X          override elemental resistance of every enemy\n\
+       --target T       nearest | strongest (default strongest)\n\
+       --charges N      power charges at the start (default: your maximum)\n\
+       --skip P         override the chance (%) to not remove charges when consuming\n\
+       --bonded         apply \"Bonded:\" rune lines (normally Shaman only)\n\
+       --without NAMES  drop these support gems (comma separated) from the simulated group\n\
+       --spread DEG     override the projectile fan angle of the simulated skill\n\
+       --shotgun        let several projectiles of one use hit the same enemy\n\
+       --layouts F      random boss and pack layouts (sizes, distances, slam reach, arena walls);\n\
+                        write an HTML page with best / median / worst pictures to file F\n\
+       --count N        number of layouts per scenario (default 40)\n\
+       --immortal       ignore incoming damage and mana costs\n\
+       --start S        full (default: charges, rage, motes at maximum) | empty (only power charges and rage)\n\
+       --chargegen S    seconds between Thaumaturgical Dynamism charges (default 5)\n\
+       --cast-on-self   ground skills land on the player (slam reach 0)\n\
+       --kept-pause S   charges kept by \"chance to not remove\" freeze their timer for S seconds (default 1.5, user observation)\n\
+       --max K=N,...    override resource maxima with observed ones, e.g. \"Mote:blue=0\"\n\
+       --noflask        don't use the mana flask\n\
+       --infused        unlimited infusions: skills always use their \"-Infused\" stat sets\n\
+                        (default: infusions are a resource, gained from remnants and Verisium)\n\
+       --sequential-uses  stored cooldown uses (Second Wind) recharge one after another (default: independently)\n\
+       --auto           play style from skill types: cooldown skills on cooldown, buffs kept up, main skill spammed\n\
+       --on-cooldown A,B  skills cast whenever ready, before the rotation (Powered by Verisium, Frost Bomb)\n\
+       --pickup S       seconds to collect a remnant (default 1.5, user observation)\n\
+       --rotation A,B   skills you press, cycled in this order (meta gems trigger the rest)\n\
+       --cascade-check F  geometric check of Spell Cascade impacts at several spacings; page to F\n\
+       --cascade-spacing K  distance between cascade impacts as a multiple of the radius (default 1.5, user observation)\n\
+       --suite          run the standard scenarios (pack, pack + 2 rares, surrounded, boss) and print a table\n\
+       --data DIR       exported game data (default: data/game next to the repo)"
+
 let private top n (xs: 'a list) = xs |> List.countBy id |> List.sortByDescending snd |> List.truncate n
 
 [<EntryPoint>]
 let main argv =
     match List.ofArray argv with
-    | [] ->
-        printfn "usage: poetry <build.xml | build-code-file> [--group N] [--runs N] [--time S] [--life X] [--level L] [--res X]"
+    | [] | "--help" :: _ | "-h" :: _ ->
+        printfn "%s" usage
         1
     | file :: rest ->
         let o = opts rest
@@ -159,7 +203,17 @@ let main argv =
             let names = g.Gems |> List.map (fun gem -> sprintf "%s%s %d" (if gem.IsSupport then "+" else "") gem.Name gem.Level) |> String.concat ", "
             printfn "  %2d%s %s" (i + 1) (if i + 1 = build.MainGroup then "*" else " ") names)
 
-        let groupIdx = int (get "group" (float build.MainGroup))
+        // no skill chosen: the one that deals the most when pressed, the rest played by type
+        let chosen =
+            if Map.containsKey "group" o || Map.containsKey "rotation" o then None
+            else Setup.strongest c options (Encounter.boss (int (get "level" 83.0)) Rarity.defaults 30.0 |> List.map (fun e -> { e with Life = 1e12 }))
+        let o = if chosen.IsSome then Map.add "auto" "1" o else o
+        let chosenGroup =
+            chosen |> Option.bind (fun gem -> build.Groups |> List.tryFindIndex (fun g -> g.Gems |> List.exists (fun x -> x.Name = gem && not x.IsSupport && x.Enabled)))
+        match chosen, chosenGroup with
+        | Some gem, None -> printfn "\n-- pressing %s" gem
+        | _ -> ()
+        let groupIdx = match chosenGroup with Some i -> i + 1 | None -> int (get "group" (float build.MainGroup))
         match List.tryItem (groupIdx - 1) build.Groups with
         | None -> printfn "no socket group %d" groupIdx; 1
         | Some group ->
@@ -220,7 +274,11 @@ let main argv =
                 // default: the simulated group's skill); --auto: from skill types
                 let mainGem = group.Gems |> List.tryFind (fun x -> not x.IsSupport && x.Enabled) |> Option.map (fun x -> x.Name) |> Option.defaultValue skill.Name
                 let play, main =
-                    if Map.containsKey "auto" o then Setup.auto c options mainGem, Some(mainGem, skill)
+                    match chosen with
+                    | Some gem when gem <> mainGem -> Setup.auto c options gem, None
+                    | _ when Map.containsKey "auto" o -> Setup.auto c options mainGem, Some(mainGem, skill)
+                    | _ ->
+                    if false then [], None
                     else
                         let rot, main =
                             match names "rotation" with
