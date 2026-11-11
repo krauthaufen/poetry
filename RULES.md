@@ -196,7 +196,10 @@ Checked against PoB's defensive numbers for 131 public characters (`tools/corpus
 | Mechanic | Rule | Source | Confidence |
 |---|---|---|---|
 | Total | flat Spirit (quests, mods, "per Socket filled", "per X on body armour") plus sceptres' own Spirit (their local lines are in the value they show), x increased Spirit. A sceptre counts for its weapon set: the set that gives more is taken. "You have no Spirit" | game item text; matches PoB on 113 of 131 corpus characters | data |
-| Reserved | each persistent gem's `spiritReservationFlat` at its level plus its supports', Blasphemy's per socketed curse, / (1 + reservation efficiency) | gem data (same values in the live game files) | data |
+| Reserved | each persistent gem's `spiritReservationFlat` at its level plus its supports', Blasphemy's per socketed curse, x each support's `reservationMultiplier`, x "less Reservation", / reservation efficiency (increased x more). Efficiency: the character's (all skills; meta, herald, minion, companion skills; non-companion, non-minion) plus the gem's own from its level and quality, which is for that gem only | gem data (same values in the live game files) | data |
+| Granted skills | a skill granted by an item reserves no Spirit (API: a skill without an inventory id; PoB: group with source "Item") | user observation | user observation |
+| Spirit per corrupted item | "increased Spirit for each Corrupted Item Equipped" counts the equipped corrupted items | game item text | data |
+| Not modelled | "Reservation Efficiency of Skills per Idol in your Equipment" | | todo |
 | Over budget | only reported: the API doesn't say which persistent gems are switched on or bound to one weapon set, so every socketed one is simulated as active | - | guess |
 | Minion counts | each persistent minion gem has its free minions plus what the Spirit left by everything else pays for (shared evenly between several minion gems) | the player chooses this in game; the API doesn't say | guess |
 

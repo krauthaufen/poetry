@@ -130,7 +130,6 @@ module Items =
         let numbers (l: string) = l.Split(' ') |> Array.choose (fun w -> match System.Double.TryParse(w.TrimStart('+').TrimEnd('%')) with | true, v -> Some v | _ -> None) |> List.ofArray
         let inert (l: string) =
             [ "Passive Skill Point"; "Triple Attribute requirements"; "Can tattoo Runes"; "additional Rune-only sockets"
-              "Reservation Efficiency of Companion Skills"; "Reservation Efficiency of non-Companion Skills"
               "For each colour of Socketed Support Gem"; "Movement Speed Penalty from using Skills" ]
             |> List.exists l.Contains
             || ((l.EndsWith " socket" || l.EndsWith " sockets") && l.Length < 30)
@@ -156,6 +155,12 @@ module Items =
                         mods @ [ Mod.base' (Named "LessCritDamageTaken") 100.0 |> Mod.whenever (WhileBuff "SupportsMajority:red") ], left
                     elif l.StartsWith "Blue: Skills have " && l.EndsWith "% less cost" then
                         mods @ (number l |> Option.map (fun v -> Mod.more ManaCost -v |> Mod.whenever (WhileBuff "SupportsMajority:blue")) |> Option.toList), left
+                    elif l.EndsWith "more Reservation Efficiency of Companion Skills" then
+                        mods @ (number l |> Option.map (fun v -> Mod.more (Named "ReservationEfficiency") v |> Mod.whenever (SkillIs(Tag "Type:Companion"))) |> Option.toList), left
+                    elif l.EndsWith "less Reservation Efficiency of non-Companion Skills" then
+                        mods @ (number l |> Option.map (fun v -> Mod.more (Named "ReservationEfficiency") -v |> Mod.whenever (Not(SkillIs(Tag "Type:Companion")))) |> Option.toList), left
+                    elif l.StartsWith "Non-Minion Skills have " && l.EndsWith "less Reservation Efficiency" then
+                        mods @ (number l |> Option.map (fun v -> Mod.more (Named "ReservationEfficiency") -v |> Mod.whenever (Not(SkillIs(Tag "Type:Minion")))) |> Option.toList), left
                     elif l.Contains "to maximum Mana per " && l.EndsWith "Item Armour on Equipped Helmet" then
                         match numbers l with
                         | [ a; b ] when b > 0.0 -> mods @ [ Mod.base' (Named "ManaPerHelmetArmour") (a / b) ], left

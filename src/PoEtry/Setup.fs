@@ -174,10 +174,7 @@ module Setup =
                 if count c >= 10 then yield "Supports10:" + name
                 if most > 0 && count c = most then yield "SupportsMajority:" + name ]
         // "for each Corrupted Item Equipped"
-        let corrupted =
-            build.Items
-            |> List.filter (fun (slot, text) -> not (slot.StartsWith "Flask" || slot.StartsWith "Charm" || slot.StartsWith "Jewel" || slot.Contains "Swap") && text.Split('\n') |> Array.exists (fun l -> l.Trim() = "Corrupted"))
-            |> List.length
+        let corrupted = Behaviours.corruptedItems build
         let spectrums = build.Items |> List.filter (fun (slot, text) -> slot.StartsWith "Jewel" && text.Contains "Grand Spectrum") |> List.length
         let maxResources =
             (Pob.maxResources sheet @ moteMax @ o.MaxOverrides @ ((equipmentFlags @ supportFlags) |> List.map (fun f -> f, 1)) @ (if corrupted > 0 then [ "CorruptedItems", corrupted ] else [])
@@ -231,7 +228,7 @@ module Setup =
           Cycles = cycles
           MoteMaxima = moteMax
           Charms = charms
-          Spirit = Behaviours.spiritTotal sheet
+          Spirit = Behaviours.spiritTotal sheet build
           SpiritUses = Behaviours.spiritUses db sheet build
           Minions = fst minionActors
           MinionNotes = snd minionActors }

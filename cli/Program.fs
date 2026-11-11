@@ -185,7 +185,7 @@ let main argv =
          let fixedCost = c.SpiritUses |> List.sumBy (fun u -> u.Flat)
          let minionCost = c.SpiritUses |> List.sumBy (fun u -> if u.PerMinion > 0.0 then u.PerMinion * float (max 0 ((Map.tryFind u.Gem counts |> Option.defaultValue 1) - u.FreeMinions)) else 0.0)
          printfn "spirit: %.0f, reserved %.0f%s%s" c.Spirit (fixedCost + minionCost)
-             (if fixedCost > c.Spirit then "  (more than the character has: some of these are off, or bound to one weapon set)" else "")
+             (if fixedCost > c.Spirit then "  (more than the character has: some of these are off, or a reduction is missing)" else "")
              (c.SpiritUses |> List.map (fun u -> if u.PerMinion > 0.0 then sprintf "%s %d x %.0f" u.Gem (Map.tryFind u.Gem counts |> Option.defaultValue 1) u.PerMinion else sprintf "%s %.0f" u.Gem u.Flat) |> String.concat ", " |> fun l -> if l = "" then "" else " (" + l + ")"))
         printfn "character: %d modifiers; starts with %s" sheet.Mods.Length (resources |> List.map (fun (k, n) -> sprintf "%d %s" n k) |> String.concat ", ")
         match sheet.MainHand with

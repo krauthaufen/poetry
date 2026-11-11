@@ -160,10 +160,10 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         let helmet = item "Helmet" [ "Armour: 100"; "--------"; "+50 to Spirit" ]
         let quest = [ "+100 to Spirit" ]
         // the sceptre's own "30% increased Spirit" is already in the 120 it shows
-        near 270.0 (Behaviours.spiritTotal (sheetOf { blank with Items = [ sceptre "Weapon 2"; helmet ]; ExtraLines = quest }))
+        near 270.0 (let b = { blank with Items = [ sceptre "Weapon 2"; helmet ]; ExtraLines = quest } in Behaviours.spiritTotal (sheetOf b) b)
         // a sceptre in weapon set two counts when it gives more than set one's
-        near 270.0 (Behaviours.spiritTotal (sheetOf { blank with Items = [ sceptre "Weapon 2 Swap"; helmet ]; ExtraLines = quest }))
-        near 150.0 (Behaviours.spiritTotal (sheetOf { blank with Items = [ helmet ]; ExtraLines = quest }))
+        near 270.0 (let b = { blank with Items = [ sceptre "Weapon 2 Swap"; helmet ]; ExtraLines = quest } in Behaviours.spiritTotal (sheetOf b) b)
+        near 150.0 (let b = { blank with Items = [ helmet ]; ExtraLines = quest } in Behaviours.spiritTotal (sheetOf b) b)
         // Skeletal Warriors: 20 Spirit each at level 20, the first two free; Herald of Thunder 30
         let gem name = { Name = name; Level = 20; Quality = 0; Enabled = true; IsSupport = false; StatSet = 1 }
         let group name = { Label = ""; Slot = ""; Enabled = true; Gems = [ gem name ] }
@@ -172,6 +172,27 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         let counts = Behaviours.minionCounts 150.0 uses
         // 150 - 30 = 120 spare: 6 paid minions and 2 free
         equal (box 8) (box counts.["Skeletal Warrior"]))
+
+    test "spirit reservation: granted skills are free, quality and tree efficiency, corrupted items" (fun () ->
+        let gem name q = { Name = name; Level = 20; Quality = q; Enabled = true; IsSupport = false; StatSet = 1 }
+        let group slot name q = { Label = ""; Slot = slot; Enabled = true; Gems = [ gem name q ] }
+        let cost (b: PobBuild) name = Behaviours.spiritUses db.Value (sheetOf b) b |> List.filter (fun u -> u.Gem = name) |> List.sumBy (fun u -> u.Flat)
+        // Cast on Critical: 100 Spirit; 0.5% reservation efficiency per quality
+        near 100.0 (cost { blank with Groups = [ group "" "Cast on Critical" 0 ] } "Cast on Critical")
+        near (100.0 / 1.1) (cost { blank with Groups = [ group "" "Cast on Critical" 20 ] } "Cast on Critical")
+        // a skill an item grants reserves nothing
+        near 0.0 (cost { blank with Groups = [ group "granted" "Cast on Critical" 0 ] } "Cast on Critical")
+        // "Meta Skills have 20% increased Reservation Efficiency" adds to the quality's 10%; a herald is not meta
+        let tree = { blank with ExtraLines = [ "Meta Skills have 20% increased Reservation Efficiency"; "8% increased Reservation Efficiency of Herald Skills" ]
+                                Groups = [ group "" "Cast on Critical" 20; group "" "Herald of Thunder" 0 ] }
+        near (100.0 / 1.3) (cost tree "Cast on Critical")
+        near (30.0 / 1.08) (cost tree "Herald of Thunder")
+        // "Persistent Buffs have 50% less Reservation"
+        near 15.0 (cost { blank with ExtraLines = [ "Persistent Buffs have 50% less Reservation" ]; Groups = [ group "" "Herald of Thunder" 0 ] } "Herald of Thunder")
+        // "1% increased Spirit for each Corrupted Item Equipped"
+        let corrupt slot = slot, "Rarity: Rare\nTest Helm\n--------\nArmour: 100\n--------\n+100 to Spirit\n1% increased Spirit for each Corrupted Item Equipped\n--------\nCorrupted\n"
+        let b = { blank with Items = [ corrupt "Helmet" ] }
+        near 101.0 (Behaviours.spiritTotal (sheetOf b) b))
 
     test "api: gem quality only when shown, weapon set passives" (fun () ->
         let json =

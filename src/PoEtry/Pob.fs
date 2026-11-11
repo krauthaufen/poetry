@@ -115,7 +115,8 @@ module Pob =
             groupNodes
             |> List.map (fun g ->
                 { Label = Xml.attr "label" g |> Option.defaultValue ""
-                  Slot = Xml.attr "slot" g |> Option.defaultValue ""
+                  // PoB marks a group an item grants with source="Item:..."
+                  Slot = (match Xml.attr "source" g with | Some src when src.StartsWith "Item" -> "granted" | _ -> Xml.attr "slot" g |> Option.defaultValue "")
                   Enabled = Xml.attr "enabled" g <> Some "false"
                   Gems =
                     Xml.children "Gem" g

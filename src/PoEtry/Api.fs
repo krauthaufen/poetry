@@ -199,8 +199,10 @@ module Api =
                           Enabled = true
                           IsSupport = support
                           StatSet = 1 })
+                // a skill an item grants has no place in the skill panel: no inventory id
+                let granted = match Json.field "inventoryId" g with | Some (JStr _) -> false | _ -> true
                 { Label = active.Name
-                  Slot = ""
+                  Slot = (if granted then "granted" else "")
                   Enabled = true
                   Gems = active :: supports })
         let hashes =

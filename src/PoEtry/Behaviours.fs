@@ -670,8 +670,9 @@ module Behaviours =
     /// The character's Spirit and what its persistent skills reserve.
     /// Spirit: flat amounts (quests, mods, sceptres' own value) and "per X on body armour",
     /// x increases. Reserved: each persistent gem's `spiritReservationFlat` at its level plus
-    /// its supports', Blasphemy's per socketed curse, / reservation efficiency. A minion gem's
-    /// reservation is per minion (the first few can be free).
+    /// its supports', Blasphemy's per socketed curse, / reservation efficiency (the character's
+    /// and the gem's own, e.g. from its quality). A minion gem's reservation is per minion
+    /// (the first few can be free). A skill granted by an item reserves nothing.
     type SpiritUse =
         { Gem: string
           /// Spirit for the gem itself (0 for minion gems), per minion, and minions that cost nothing.
@@ -679,9 +680,16 @@ module Behaviours =
           PerMinion: float
           FreeMinions: int }
 
-    let spiritTotal (sheet: CharacterSheet) =
+    /// Equipped corrupted items ("for each Corrupted Item Equipped"): not flasks, charms,
+    /// jewels or the weapon set not in use.
+    let corruptedItems (build: PobBuild) =
+        build.Items
+        |> List.filter (fun (slot, text) -> not (slot.StartsWith "Flask" || slot.StartsWith "Charm" || slot.StartsWith "Jewel" || slot.Contains "Swap") && text.Split('\n') |> Array.exists (fun l -> l.Trim() = "Corrupted"))
+        |> List.length
+
+    let spiritTotal (sheet: CharacterSheet) (build: PobBuild) =
         let db = ModDb.ofList sheet.Mods
-        let c = Ctx.empty
+        let c = { Ctx.empty with Buffs = Map.ofList [ "CorruptedItems", corruptedItems build ] }
         let item stat slot = sheet.ItemDefences |> List.sumBy (fun (s, st, v) -> if st = stat && (slot = "" || s = slot) then v else 0.0)
         let per name stat = match Mods.sumBase c [ Named name ] db with | n when n > 0.0 -> floor (item stat "Body Armour" / n) | _ -> 0.0
         // a sceptre's Spirit counts for the weapon set it is in: the set that gives more is taken
@@ -696,7 +704,7 @@ module Behaviours =
     let spiritUses (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) : SpiritUse list =
         let charMods = ModDb.ofList sheet.Mods
         build.Groups
-        |> List.filter (fun g -> g.Enabled)
+        |> List.filter (fun g -> g.Enabled && g.Slot <> "granted")
         |> List.collect (fun g ->
             let enabled = g.Gems |> List.filter (fun x -> x.Enabled)
             let reservation (name: string) (level: int) =
@@ -704,19 +712,32 @@ module Behaviours =
                 |> Option.bind (fun d -> Map.tryFind level d.Levels |> Option.orElse (Map.tryFind 1 d.Levels))
                 |> Option.bind (fun l -> l.SpiritReservation)
                 |> Option.defaultValue 0.0
-            let supports = enabled |> List.filter (fun x -> x.IsSupport) |> List.sumBy (fun x -> reservation x.Name x.Level)
+            let supportGems = enabled |> List.filter (fun x -> x.IsSupport)
+            let supports = supportGems |> List.sumBy (fun x -> reservation x.Name x.Level)
+            // supports' "+N% reservation" multiply with each other
+            let supportMult =
+                supportGems
+                |> List.fold (fun acc x ->
+                    let m = Gems.data db x.Name |> Option.bind (fun d -> Map.tryFind x.Level d.Levels |> Option.orElse (Map.tryFind 1 d.Levels)) |> Option.map (fun l -> l.ReservationMultiplier) |> Option.defaultValue 0.0
+                    acc * (1.0 + m / 100.0)) 1.0
             enabled
             |> List.filter (fun x -> not x.IsSupport)
             |> List.choose (fun gem ->
                 match Gems.data db gem.Name with
                 | Some d when d.Types.Contains "Persistent" || d.Types.Contains "HasReservation" ->
                     let tags = d.Types |> Set.toList |> List.map (fun t -> Tag("Type:" + t)) |> Set.ofList
-                    // a buff gem's own reservation efficiency is for that gem only
-                    let forGem = sheet.Mods |> List.filter (fun m -> not (m.Source.StartsWith "buff:") || m.Source = "buff:" + d.Name) |> ModDb.ofList
-                    let eff = Mods.inc { Ctx.empty with SkillTags = tags; SkillName = d.Name } [ Named "ReservationEfficiency" ] forGem
                     let own = reservation gem.Name gem.Level
                     let raw = Gems.rawStats db charMods { Gem = gem.Name; Level = gem.Level; Quality = gem.Quality; StatSet = 1; Supports = [] }
                     let stat id = raw |> List.filter (fun (k, _) -> k = id) |> List.sumBy snd
+                    // a gem's own reservation efficiency (level, quality) is for that gem only: read
+                    // from its stats here, never from the buff it gives the character
+                    let forGem = sheet.Mods |> List.filter (fun m -> not (m.Source.StartsWith "buff:")) |> ModDb.ofList
+                    let ownEff = stat "base_reservation_efficiency_+%" + stat "base_spirit_reservation_efficiency_+%"
+                    let ctx = { Ctx.empty with SkillTags = tags; SkillName = d.Name }
+                    let eff =
+                        (Mods.inc ctx [ Named "ReservationEfficiency" ] forGem + ownEff / 100.0) * Mods.more ctx [ Named "ReservationEfficiency" ] forGem
+                        / (Mods.more ctx [ Named "Reservation" ] forGem * supportMult)
+                        |> max 0.01
                     // Blasphemy: per curse socketed with it
                     let curses = enabled |> List.filter (fun x -> not x.IsSupport && x.Name <> gem.Name) |> List.length
                     let perCurse = stat "blasphemy_base_spirit_reservation_per_socketed_curse" * float curses
@@ -747,7 +768,7 @@ module Behaviours =
     let minions (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) : Actor list * string list =
         let charMods = ModDb.ofList sheet.Mods
         // as many of each as the character's Spirit pays for
-        let counts = minionCounts (spiritTotal sheet) (spiritUses db sheet build)
+        let counts = minionCounts (spiritTotal sheet build) (spiritUses db sheet build)
         let minionMods = Mods.forMinions sheet.Mods
         let levelOf (gemName: string) (gemLevel: int) =
             let req name = Gems.data db name |> Option.bind (fun d -> Map.tryFind gemLevel d.Levels) |> Option.map (fun l -> int l.LevelRequirement)
