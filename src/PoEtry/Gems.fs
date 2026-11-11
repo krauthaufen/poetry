@@ -429,6 +429,12 @@ module Gems =
         let mods = mods @ stageMods
         let time =
             if staged then time * stages + (statOf "channel_skill_end_animation_duration_override_ms" |> Option.defaultValue 0.0) / 1000.0 else time
+        // A channelled skill with a cooldown (Flame Breath) is held for its minimum channel time:
+        // one use lasts that long and hits once per its own time throughout.
+        let minChannel = (statOf "base_minimum_channel_time_ms" |> Option.defaultValue 0.0) / 1000.0
+        let held = data.Types.Contains "Channel" && not staged && time > 0.0 && minChannel > time && (gemLevel |> Option.bind (fun l -> l.Cooldown)).IsSome
+        let heldHits = if held then (let n = max 1 (int (minChannel / time)) in [ for k in 1 .. n -> float k / float n, 1.0 ]) else [ 1.0, 1.0 ]
+        let time = if held then minChannel else time
         let radius =
             let r = statOf "active_skill_base_area_of_effect_radius"
             let extra = if staged then perStage [ "radius_+_per_stage" ] * stages else 0.0
@@ -468,7 +474,7 @@ module Gems =
           BaseTime = time
           Cooldown = gemLevel |> Option.bind (fun l -> l.Cooldown)
           StoredUses = gemLevel |> Option.bind (fun l -> l.StoredUses) |> Option.map int |> Option.defaultValue 1
-          Hits = [ 1.0, 1.0 ]
+          Hits = heldHits
           Delivery = delivery
           Mods = mods
           Parts = []

@@ -204,6 +204,16 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         near (155.0 + 7.0 * 20.0) armoured.BaseDamage.[Physical].Max
         near 0.8 bare.BaseTime)
 
+    test "gem: a channelled skill with a cooldown is held for its minimum channel time" (fun () ->
+        let mace = (Items.parse db.Value "Rarity: Normal\nPlated Mace\n--------\n").Weapon
+        match Gems.skill db.Value ModDb.empty mace { Gem = "Flame Breath"; Level = 20; Quality = 0; StatSet = 1; Supports = [] } with
+        | Ok (s, _) ->
+            // 3 s minimum channel, hitting once per attack time throughout
+            near 3.0 s.BaseTime
+            if s.Hits.Length < 5 then failwithf "expected a hit per attack time, got %d" s.Hits.Length
+            near 1.0 (fst (List.last s.Hits))
+        | Error e -> failwith e)
+
     test "Blasphemy: socketed curses become auras at the gem's reduced effect" (fun () ->
         let gem name support = { Name = name; Level = 20; Quality = 0; Enabled = true; IsSupport = support; StatSet = 1 }
         let group = { Label = ""; Slot = ""; Enabled = true; Gems = [ gem "Blasphemy" false; gem "Despair" false ] }

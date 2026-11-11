@@ -315,6 +315,7 @@ module Setup =
     /// (remnants, exposure, infusions) are used on cooldown, the main skill is spammed.
     /// Marks, warcries, travel skills and anything else stay unpressed.
     let auto (c: Loaded) (o: Options) (mainGem: string) : Play list =
+        let isTotem (name: string) = Gems.data c.Db name |> Option.exists (fun d -> d.Types.Contains "SummonsTotem")
         let inOwnGroup =
             c.Build.Groups
             |> List.filter (fun g -> g.Enabled && not (g.Gems |> List.exists (fun x -> x.Enabled && not x.IsSupport && Gems.isMeta c.Db x.Name)))
@@ -323,9 +324,10 @@ module Setup =
             c.Build.Groups
             |> List.filter (fun g -> g.Enabled)
             |> List.collect (fun g -> g.Gems |> List.filter (fun x -> x.Enabled && not x.IsSupport))
-            |> List.filter (fun x -> x.Name <> mainGem && not (Gems.isMeta c.Db x.Name) && not (Gems.isPersistentBuff c.Db x.Name))
+            |> List.filter (fun x -> x.Name <> mainGem && (not (Gems.isMeta c.Db x.Name) || isTotem x.Name) && not (Gems.isPersistentBuff c.Db x.Name))
             // a gem socketed in a trigger or aura gem is used by that gem, not pressed
-            |> List.filter (fun x -> List.contains x.Name inOwnGroup)
+            // (a totem that uses socketed skills is itself placed by pressing it)
+            |> List.filter (fun x -> List.contains x.Name inOwnGroup || isTotem x.Name)
             |> List.distinctBy (fun x -> x.Name)
             |> List.choose (fun x ->
                 match Gems.data c.Db x.Name, pressed c o x.Name with
@@ -364,7 +366,11 @@ module Setup =
             match pressed c o mainGem with
             | Some p when (p.Skill.Hits.IsEmpty || p.Pattern.IsSome) && p.Rules |> List.exists (fun r -> match r.Reaction with ChargeBuff _ | GrantBuff _ -> true | _ -> false) -> KeepBuff mainGem
             | _ -> Spam mainGem
-        others @ [ main ]
+        // a main skill with a cooldown of its own goes first whenever it is ready: otherwise the
+        // other cooldown skills would fill every gap and it would never be used
+        match pressed c o mainGem with
+        | Some p when p.Skill.Cooldown.IsSome && (match main with Spam _ -> true | _ -> false) -> OnCooldown mainGem :: others @ [ main ]
+        | _ -> others @ [ main ]
 
     /// The player actor: the play style's skills, meta gems and their triggered spells,
     /// infusions, charges, defences. `main` replaces the play style's first skill (CLI
@@ -496,6 +502,12 @@ module Setup =
         |> List.filter (fun g -> not (g.Gems |> List.exists (fun x -> x.Enabled && not x.IsSupport && Gems.isMeta c.Db x.Name)))
         |> List.collect (fun g -> g.Gems |> List.filter (fun x -> x.Enabled && not x.IsSupport && not (Gems.isPersistentBuff c.Db x.Name)))
         |> List.map (fun x -> x.Name)
+        // and totems that use socketed skills: pressing them places the totem
+        |> fun own ->
+            own
+            @ (c.Build.Groups |> List.filter (fun g -> g.Enabled)
+               |> List.collect (fun g -> g.Gems |> List.filter (fun x -> x.Enabled && not x.IsSupport && Gems.isMeta c.Db x.Name && (Gems.data c.Db x.Name |> Option.exists (fun d -> d.Types.Contains "SummonsTotem"))))
+               |> List.map (fun x -> x.Name))
         |> List.distinct
 
     /// The gem that deals the most damage when it is the one pressed (everything else
