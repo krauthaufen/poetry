@@ -1311,9 +1311,11 @@ module Sim =
                     | _ -> w) w
             // an attack the player makes while empowered by a warcry uses one empowerment up
             let w =
-                if useTime > 0.0 && skill.Tags.Contains Attack && not (skill.Tags.Contains Warcry) && st.Buffs.ContainsKey "EmpoweredAttacks" then
+                if useTime > 0.0 && skill.Tags.Contains Attack && not (skill.Tags.Contains Warcry) then
                     let last = times |> List.map fst |> List.fold max w.Time
-                    schedule (last + 1e-9) (SpendBuff(actor.Name, "EmpoweredAttacks")) w
+                    // (and by Mantra of Destruction, Temper Weapon: "EmpoweredAttacks:<skill>")
+                    st.Buffs |> Map.toList |> List.filter (fun (k, _) -> k.StartsWith "EmpoweredAttacks")
+                    |> List.fold (fun w (k, _) -> schedule (last + 1e-9) (SpendBuff(actor.Name, k)) w) w
                 else w
             // and a Repeatable attack one of those readied for it (Ice-Tipped Arrows)
             let w =

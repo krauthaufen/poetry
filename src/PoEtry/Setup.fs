@@ -344,6 +344,8 @@ module Setup =
                         | Some (s', rs, ms) -> s', cryRules @ rs, cryGrants @ ms
                         | None -> s, cryRules, cryGrants
                     let cryRules = cryRules @ Behaviours.sigilOfPower db charMods setup s
+                    let empowered, empRules, empGrants = Behaviours.empowerNext db charMods (Gems.chooseWeapon db setup.Gem sheet.Weapons) setup s
+                    let cryRules, cryGrants = cryRules @ empRules, cryGrants @ empGrants
                     let tipped = Behaviours.iceTipped db charMods (Gems.chooseWeapon db setup.Gem sheet.Weapons) setup s
                     let cryRules = cryRules @ (match tipped with Some (_, rs, _) -> rs | None -> [])
                     let cryGrants = cryGrants @ (match tipped with Some (_, _, ms) -> ms | None -> [])
@@ -361,7 +363,7 @@ module Setup =
                           Grants = (match curse with Some (_, _, _, player) -> player | None -> []) @ cryGrants
                           Curse = curse |> Option.map (fun (name, _, _, _) -> name)
                           Pattern = lasting |> Option.map fst
-                          Extra = (doom |> Option.map fst |> Option.toList) @ (match tipped with Some (f, _, _) -> [ f ] | None -> []) }
+                          Extra = (doom |> Option.map fst |> Option.toList) @ (match tipped with Some (f, _, _) -> [ f ] | None -> []) @ empowered }
                 | _ -> None)
 
     let private gemOf (p: Play) =

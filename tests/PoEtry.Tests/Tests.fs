@@ -343,6 +343,19 @@ let main _ =
         // hits at 2 s with one stage, at 3 and 4 s with two, at 5, 6 and 7 s with three
         near (110.0 + 2.0 * 120.0 + 3.0 * 130.0) o.DamageBy.["Bolt (hit)"])
 
+    test "a skill that empowers the next attack: that one only" (fun () ->
+        let buff = "EmpoweredAttacks:Mantra"
+        let mantra = { Skill.make "Mantra" [ Spell ] with Hits = []; Cooldown = Some 100.0 }
+        let more = Mod.more (Damage AllDamage) 100.0 |> Mod.whenever (SkillIs Attack) |> Mod.whenever (WhileBuff buff)
+        let f = duel [ mantra; strike "Jab" 10.0 ] 5.5
+        let player =
+            { f.Player with
+                Mods = more :: f.Player.Mods
+                Rules = [ { Hook = OnUse; Filter = Called "Mantra"; Chance = 100.0; Reaction = SetStacks(buff, 1) } ] }
+        let o = Sim.run { f with Player = player } 1u
+        // Jab lands at 2, 3, 4, 5 s: the first doubled
+        near 50.0 o.DamageBy.["Jab (hit)"])
+
     test "banner: attack hits build its Glory, then its aura lasts for the duration" (fun () ->
         // 200 Glory at 100% of 20 per hit: placed with the tenth hit (10 s) and the twentieth.
         // 4 s of 100% more damage: the hits at 11, 12 and 13 s are doubled, the one at 14 s is not

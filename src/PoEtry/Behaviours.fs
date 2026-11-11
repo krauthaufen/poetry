@@ -532,6 +532,39 @@ module Behaviours =
                     { Hook = OnHit; Filter = Called skill.Name; Chance = 100.0; Reaction = IfEnemyHas(curseName, TriggerSkill name) })
             | Error _ -> None)
 
+    /// Skills that empower the attacks that follow:
+    /// - Mantra of Destruction: the next attack gains a share of all damage as extra chaos;
+    /// - Temper Weapon: every strike of the hammer empowers 3 attacks (12 at most) to Combust
+    ///   when they hit: the gem's second effect, an area attack triggered by the hit.
+    /// An empowerment is used up by an attack when its last hit has landed.
+    /// Returns extra skills, rules and mods for the empowered attacks.
+    let empowerNext (db: GameDb) (charMods: ModDb) (weapon: Weapon option) (setup: GemSetup) (skill: Skill) : Skill list * Rule list * Mod list =
+        let raw = Gems.rawStats db charMods { setup with Supports = [] }
+        let sum id = raw |> List.filter (fun (k, _) -> k = id) |> List.sumBy snd
+        let buff = "EmpoweredAttacks:" + skill.Name
+        let chaos = sum "mantra_of_destruction_grant_all_damage_%_to_gain_as_chaos_with_attacks"
+        let perStrike, cap = sum "temper_weapon_empowers_per_strike", sum "imbue_weapon_max_exerts"
+        if chaos > 0.0 then
+            [],
+            [ { Hook = OnUse; Filter = Called skill.Name; Chance = 100.0; Reaction = SetStacks(buff, max 1 (int (sum "skill_empowers_next_x_melee_attacks"))) } ],
+            [ for t in DamageType.all do
+                if t <> Chaos then yield Mod.base' (GainAs(t, Chaos)) chaos |> Mod.whenever (SkillIs Attack) |> Mod.whenever (WhileBuff buff) |> Mod.from skill.Name ]
+        elif perStrike > 0.0 then
+            let combust =
+                Map.tryFind setup.Gem db.Gems |> Option.map (fun g -> g.AdditionalEffects) |> Option.defaultValue []
+                |> List.tryPick (fun id ->
+                    match Gems.skill db charMods weapon { setup with Gem = id } with
+                    | Ok (s, _) -> Some { s with Name = skill.Name + ": " + s.Name; Tags = s.Tags.Add Triggered; Cost = 0.0; Cooldown = None }
+                    | Error _ -> None)
+            match combust with
+            | Some c ->
+                [ c ],
+                [ for _ in 1 .. int perStrike -> { Hook = OnUse; Filter = Called skill.Name; Chance = 100.0; Reaction = GrantBuff(buff, 1e9, int cap, []) } ]
+                @ [ { Hook = OnHit; Filter = WithTagNot(Attack, Triggered); Chance = 100.0; Reaction = IfBuff(buff, TriggerSkill c.Name) } ],
+                []
+            | None -> [], [], []
+        else [], [], []
+
     /// Sigil of Power: a sigil for its duration whose buff grants more spell damage per Stage;
     /// "Gains a Stage when you Spend a total of X% of your Maximum Mana while in Area",
     /// "Minimum 1 second between gaining Stages". The player is taken to stand in it; it starts
