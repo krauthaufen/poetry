@@ -1372,6 +1372,9 @@ module Sim =
                 // ailments are rolled before the damage lands; a shock the hit applies already
                 // counts for the hit itself (user observation)
                 let inflicted = Ailments.fromHit rng ctx mods def hit
+                // a part that only inflicts (a poison burst): what it would have dealt counts
+                // for the ailment, the hit itself deals nothing
+                let hit = if Mods.flag ctx (Named "NoHitDamage") mods then { hit with Dealt = Dmg.map (fun _ _ -> 0.0) hit.Dealt; Unmitigated = Dmg.map (fun _ _ -> 0.0) hit.Unmitigated } else hit
                 let hit =
                     let currentShock =
                         Map.tryFind "Shocked" e.Debuffs

@@ -261,6 +261,33 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         let fire (b: PobBuild) = Defence.uncappedResist Ctx.empty (ModDb.ofList (sheetOf b).Mods) Fire
         near (fire blank + 75.0) (fire { blank with TreeNodes = [ 9988; 60913; 61039 ] }))
 
+    test "Poisonburst Arrow's burst only poisons; Flames of Chayula come as a periodic buff" (fun () ->
+        let bow = (Items.parse db.Value "Rarity: Rare\nTest Bow\nWarmonger Bow\n--------\n").Weapon
+        match Gems.skill db.Value ModDb.empty bow { Gem = "Poisonburst Arrow"; Level = 20; Quality = 0; StatSet = 1; Supports = [] } with
+        | Ok (s, _) ->
+            let burst = s.Parts |> List.find (fun p -> p.Name.EndsWith "Poison Burst")
+            let pdb = ModDb.ofList burst.Mods
+            equal (box true) (box (Mods.flag Ctx.empty (Named "NoHitDamage") pdb))
+            near 100.0 (Mods.sumBase Ctx.empty [ AilmentChance Poison ] pdb)
+            // "Poison duration is 3 seconds"
+            near 3.0 (Ailments.duration Ctx.empty pdb Poison)
+            // the arrow itself is an ordinary hit
+            equal (box false) (box (Mods.flag Ctx.empty (Named "NoHitDamage") (ModDb.ofList s.Mods)))
+        | Error e -> failwith e
+        let gem name = { Name = name; Level = 20; Quality = 0; Enabled = true; IsSupport = false; StatSet = 1 }
+        let b = { blank with Groups = [ { Label = ""; Slot = ""; Enabled = true; Gems = [ gem "Into the Breach" ] } ] }
+        let flames only = Behaviours.periodics db.Value (sheetOf { b with ExtraLines = only }) b 5.0 |> List.tryPick (fun p -> match p.Action with GainTimedBuff (n, chance, d, cap, mods) -> Some(p.Every, chance, d, cap, mods) | _ -> None)
+        match flames [] with
+        | Some (every, chance, d, cap, mods) ->
+            // level 20: a flame every 1.21 s, one in three purple, 8 s each, ten at most
+            near 1.21 every
+            near (1.0 / 3.0) chance
+            near 8.0 d
+            equal (box 10) (box cap)
+            // 7% of damage as extra chaos, more with the gem's own "increased effect" at level 20
+            equal (box true) (box (mods |> List.exists (fun m -> m.Stat = GainAs(Physical, Chaos) && m.Value >= 7.0)))
+        | None -> failwith "no flames")
+
     test "low life only where the build keeps itself there; fewer enemies to be surrounded" (fun () ->
         let bonus = [ "30% increased Damage when on Low Life" ]
         let start b = (Setup.loadWith db.Value treeJson b Options.defaults).Vitals.StartLife

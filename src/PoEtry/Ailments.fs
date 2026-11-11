@@ -61,6 +61,8 @@ module Ailments =
         let baseD =
             match a with
             | Bleed -> Mods.override' ctx (Named "BaseBleedDuration") mods |> Option.defaultValue (baseDuration a)
+            // "Poison duration is 3 seconds" (a skill's own)
+            | Poison -> Mods.override' ctx (Named "BasePoisonDuration") mods |> Option.defaultValue (baseDuration a)
             | _ -> baseDuration a
         baseD * Mods.mult ctx [ AilmentDuration(Some a); AilmentDuration None ] mods
 

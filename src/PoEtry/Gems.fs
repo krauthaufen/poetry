@@ -496,7 +496,17 @@ module Gems =
           StoredUses = gemLevel |> Option.bind (fun l -> l.StoredUses) |> Option.map int |> Option.defaultValue 1
           Hits = heldHits
           Delivery = delivery
-          Mods = mods
+          // A part that only poisons ("display_statset_no_hit_damage", "skill poisons without
+          // hit": Poisonburst Arrow's burst): it deals no hit damage, always poisons for what
+          // the hit would have dealt, and "poison duration is skill duration"
+          Mods =
+            (let has id = set.Stats |> List.contains id
+             let burstDuration = (statOf "base_skill_effect_duration" |> Option.defaultValue 0.0) / 1000.0
+             mods
+             @ (if has "display_statset_no_hit_damage" && has "display_skill_poisons_without_hit" then
+                    [ Mod.flag (Named "NoHitDamage"); Mod.base' (AilmentChance Poison) 100.0 ]
+                else [])
+             @ (if has "poison_duration_is_skill_duration" && burstDuration > 0.0 then [ Mod.override' (Named "BasePoisonDuration") burstDuration ] else []))
           Parts = []
           Consumes =
             [ "Power"; "Frenzy"; "Endurance" ]
