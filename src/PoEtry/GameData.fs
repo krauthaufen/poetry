@@ -57,7 +57,9 @@ type SkillData =
       /// A support: the skill types it needs and refuses, as the game writes them
       /// (postfix: types, then "AND" / "OR" / "NOT").
       RequireTypes: string list
-      ExcludeTypes: string list }
+      ExcludeTypes: string list
+      /// The gem's own description.
+      Description: string }
 
 /// A monster a skill summons (PoB Data/Minions, Data/Spectres: from the game's monster tables).
 type MinionData =
@@ -150,7 +152,8 @@ module GameData =
           MinionList = Json.list (Json.field "minionList" j) |> List.choose Json.str
           Color = Json.numField "color" j |> Option.map int |> Option.defaultValue 0
           RequireTypes = Json.list (Json.field "requireSkillTypes" j) |> List.choose Json.str
-          ExcludeTypes = Json.list (Json.field "excludeSkillTypes" j) |> List.choose Json.str }
+          ExcludeTypes = Json.list (Json.field "excludeSkillTypes" j) |> List.choose Json.str
+          Description = Json.strField "description" j |> Option.defaultValue "" }
 
     /// minions.json
     let parseMinions (json: string) : Map<string, MinionData> =

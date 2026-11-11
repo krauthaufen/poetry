@@ -299,6 +299,28 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         | Ok (s, _) -> near 0.0 s.CostPerSecond
         | Error e -> failwith e)
 
+    test "a fight starts with the charges the build can generate; against a lone boss not with what needs kills" (fun () ->
+        let gem name = { Name = name; Level = 20; Quality = 0; Enabled = true; IsSupport = false; StatSet = 1 }
+        let group name = { Label = ""; Slot = ""; Enabled = true; Gems = [ gem name ] }
+        let start (b: PobBuild) (enemies: EnemyDef list) =
+            let c = Setup.loadWith db.Value treeJson b Options.defaults
+            let f = Setup.fight c Options.defaults (Setup.player c Options.defaults [] None) enemies
+            fun k -> f.Player.Resources |> List.tryPick (fun (r, n) -> if r = k then Some n else None) |> Option.defaultValue 0
+        let boss = Encounter.boss 83 Rarity.defaults 30.0
+        let pack = boss @ boss
+        // nothing generates charges: none, anywhere
+        equal (box 0) (box (start blank pack "PowerCharge"))
+        // Combat Frenzy: a Frenzy Charge on freezing, electrocuting or pinning: there against a boss too
+        let frenzy = { blank with Groups = [ group "Combat Frenzy" ] }
+        equal (box 3) (box (start frenzy boss "FrenzyCharge"))
+        equal (box 0) (box (start frenzy boss "PowerCharge"))
+        // Killing Palm: Power Charges from kills: with other enemies around, not against a lone boss
+        let palm = { blank with Groups = [ group "Killing Palm" ] }
+        equal (box 3) (box (start palm pack "PowerCharge"))
+        equal (box 0) (box (start palm boss "PowerCharge"))
+        // rage is gone after a boss's introduction
+        equal (box 0) (box (start blank boss "Rage")))
+
     test "low life only where the build keeps itself there; fewer enemies to be surrounded" (fun () ->
         let bonus = [ "30% increased Damage when on Low Life" ]
         let start b = (Setup.loadWith db.Value treeJson b Options.defaults).Vitals.StartLife

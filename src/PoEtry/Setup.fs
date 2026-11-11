@@ -519,6 +519,25 @@ module Setup =
         let enemies = if auraMods.IsEmpty then enemies else enemies |> List.map (fun e -> { e with Mods = e.Mods @ auraMods })
         let curses, curseGrants = Behaviours.curseAuras c.Db c.Sheet c.Build
         let player = if curseGrants.IsEmpty then player else { player with Mods = player.Mods @ curseGrants }
+        // What the character brings into the fight. Charges: only those the build can generate,
+        // and against a lone boss (its introduction outlasts anything gained from the last kill)
+        // only those that need no kill. Rage runs out during such an introduction unless it
+        // regenerates by itself.
+        let player =
+            let lone = enemies.Length <= 1
+            let sources = Behaviours.chargeSources c.Db c.Sheet c.Build
+            let rageRegen = Mods.sumBase Ctx.empty [ Named "RageRegen" ] db > 0.0
+            { player with
+                Resources =
+                    player.Resources |> List.map (fun (k, n) ->
+                        match k with
+                        | "PowerCharge" when o.StartPowerCharges.IsSome -> k, n
+                        | "PowerCharge" | "FrenzyCharge" | "EnduranceCharge" ->
+                            (match Map.tryFind k sources with
+                             | Some free when free || not lone -> k, n
+                             | _ -> k, 0)
+                        | "Rage" when lone && not rageRegen -> k, 0
+                        | _ -> k, n) }
         { Enemies = enemies
           EnemyAuras = curses @ Behaviours.criticalWeaknessAura c.Sheet @ Behaviours.witheringPresence c.Db c.Sheet c.Build
           Player = player

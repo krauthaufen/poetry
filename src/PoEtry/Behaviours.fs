@@ -52,6 +52,26 @@ module Behaviours =
     ///   active skills requiring that attribute, single-attribute skills counting twice.
     let charges = [ "PowerCharge"; "FrenzyCharge"; "EnduranceCharge" ]
 
+    /// Which charges the build can generate at all, and whether without killing anything
+    /// (true) or only from kills, culls and corpses (false). A fight starts with the charges
+    /// that have a source; against a lone boss only with those that need no kill.
+    let chargeSources (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) : Map<string, bool> =
+        let mods = ModDb.ofList sheet.Mods
+        let has name = Mods.flag Ctx.empty (Named name) mods || Mods.sumBase Ctx.empty [ Named name ] mods > 0.0
+        let word c = match c with "PowerCharge" -> "Power Charge" | "FrenzyCharge" -> "Frenzy Charge" | _ -> "Endurance Charge"
+        let fromSheet =
+            (if has "GeneratesRandomCharges" then charges |> List.map (fun c -> c, true) else [])
+            @ (if has "PowerChargeOnInfusionConsumed" then [ "PowerCharge", true ] else [])
+        let fromGems =
+            build.Groups |> List.filter (fun g -> g.Enabled) |> List.collect (fun g -> g.Gems |> List.filter (fun x -> x.Enabled))
+            |> List.choose (fun x -> Gems.data db x.Name)
+            |> List.filter (fun d -> d.Types.Contains "GeneratesCharges")
+            |> List.collect (fun d ->
+                let needsKill = [ "kill"; "Cull"; "Corpse" ] |> List.exists (fun w -> d.Description.Contains w)
+                charges |> List.filter (fun c -> d.Description.Contains(word c)) |> List.map (fun c -> c, not needsKill))
+        // a source that needs no kill wins over one that does
+        fromSheet @ fromGems |> List.groupBy fst |> List.map (fun (c, l) -> c, l |> List.exists snd) |> Map.ofList
+
     let periodics (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) (chargeGenSeconds: float) =
         let mods = ModDb.ofList sheet.Mods
         let sum stat = Mods.sumBase Ctx.empty [ Named stat ] mods
