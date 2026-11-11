@@ -87,7 +87,9 @@ type Skill =
       /// Crossbow ammunition: bolts per load (0: the skill uses none) and seconds to reload
       /// before speed modifiers. The cost is paid per load.
       Clip: int
-      ReloadTime: float }
+      ReloadTime: float
+      /// Channelled skills: mana per second while channelling, on top of Cost at the start.
+      CostPerSecond: float }
 
 module Skill =
     let make name tags =
@@ -110,7 +112,8 @@ module Skill =
           Dots = Map.empty
           Duration = 0.0
           Clip = 0
-          ReloadTime = 0.0 }
+          ReloadTime = 0.0
+          CostPerSecond = 0.0 }
 
     let ctx (skill: Skill) crit buffs enemyStatus =
         { Crit = crit

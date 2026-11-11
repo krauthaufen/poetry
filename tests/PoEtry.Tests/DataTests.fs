@@ -288,6 +288,17 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
             equal (box true) (box (mods |> List.exists (fun m -> m.Stat = GainAs(Physical, Chaos) && m.Value >= 7.0)))
         | None -> failwith "no flames")
 
+    test "channelled skills cost mana per second; a barrage fires at one target" (fun () ->
+        match Gems.skill db.Value ModDb.empty None { Gem = "Flameblast"; Level = 20; Quality = 0; StatSet = 1; Supports = [] } with
+        | Ok (s, _) ->
+            // level 20: 3450 mana per minute, nothing up front
+            near (3450.0 / 60.0) s.CostPerSecond
+            near 0.0 s.Cost
+        | Error e -> failwith e
+        match Gems.skill db.Value ModDb.empty None { Gem = "Spark"; Level = 20; Quality = 0; StatSet = 1; Supports = [] } with
+        | Ok (s, _) -> near 0.0 s.CostPerSecond
+        | Error e -> failwith e)
+
     test "low life only where the build keeps itself there; fewer enemies to be surrounded" (fun () ->
         let bonus = [ "30% increased Damage when on Low Life" ]
         let start b = (Setup.loadWith db.Value treeJson b Options.defaults).Vitals.StartLife

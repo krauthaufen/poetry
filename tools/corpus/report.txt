@@ -528,9 +528,9 @@
 
 == DPS against poe.ninja's (a lead, not the truth): ours / theirs
    1  under 1%
-  14  1% to 10%
-  23  10% to 50%
-  43  50% to 200%
+  13  1% to 10%
+  25  10% to 50%
+  42  50% to 200%
   30  2x to 10x
   11  over 10x
 
@@ -561,7 +561,7 @@
 024-spirit-walker-companion-zekoa-the-headcrusher    Wild Protector                                 447441 dps (theirs     448836)  0 unknown, 8 unmapped, 27 unsimulated  energy shield 1069/882  fire res 116/96  cold res 75/55  lightning res 102/70  chaos res 68/60
 025-stormweaver-living-bomb                          Living Bomb (pressed Raise Shield)               1145 dps (theirs     659332)  0 unknown, 13 unmapped, 31 unsimulated
 026-tactician-explosive-spear                        Explosive Spear                               1798792 dps (theirs     429164)  0 unknown, 8 unmapped, 31 unsimulated
-027-titan-resonating-shield                          Resonating Shield                                 306 dps (theirs         83)  0 unknown, 11 unmapped, 21 unsimulated  life 13296/15880  fire res 104/94  cold res 103/93  lightning res 114/104
+027-titan-resonating-shield                          Resonating Shield                                 336 dps (theirs         83)  0 unknown, 11 unmapped, 21 unsimulated  life 13296/15880  fire res 104/94  cold res 103/93  lightning res 114/104
 028-warbringer-shield-wall                           Shield Wall                                    254805 dps (theirs     607869)  0 unknown, 14 unmapped, 24 unsimulated  chaos res 74/70
 029-warrior-shield-wall                              Shield Wall                                       371 dps (theirs       2139)  0 unknown, 14 unmapped, 26 unsimulated
 030-witch-sunder                                     Sunder (pressed Ancestral Warrior Totem)        60881 dps (theirs     251832)  0 unknown, 5 unmapped, 32 unsimulated  chaos res 62/54
@@ -585,7 +585,7 @@
 048-oracle-thrashing-vines                           Thrashing Vines                                 19101 dps (theirs      65936)  1 unknown, 10 unmapped, 19 unsimulated  energy shield 9984/10475  armour 735/855
 049-pathfinder-pounce                                Pounce (pressed Ice Shot)                       34065 dps (theirs        346)  0 unknown, 12 unmapped, 19 unsimulated  evasion 1225/1036  deflection 552/467
 050-ranger-ice-shot                                  Ice Shot (pressed Snipe)                       324332 dps (theirs      27389)  0 unknown, 9 unmapped, 12 unsimulated
-051-ritualist-oil-barrage                            Oil Barrage                                     29912 dps (theirs     538987)  0 unknown, 17 unmapped, 22 unsimulated  intelligence 124/127  chaos res 58/54
+051-ritualist-oil-barrage                            Oil Barrage                                    121514 dps (theirs     538987)  0 unknown, 17 unmapped, 22 unsimulated  intelligence 124/127  chaos res 58/54
 052-shaman-comet                                     Comet (pressed Spark)                          287457 dps (theirs     903048)  0 unknown, 5 unmapped, 22 unsimulated
 053-smith-of-kitava-molten-shower                    Molten Shower                                  135887 dps (theirs     954112)  0 unknown, 7 unmapped, 19 unsimulated  strength 1837/1886  fire res 197/242  cold res 90/115  lightning res 94/119
 054-sorceress-comet                                  Comet (pressed Spark)                           65599 dps (theirs    3140573)  0 unknown, 3 unmapped, 14 unsimulated  life 702/757  strength 114/118  dexterity 87/90  fire res 114/71  cold res 71/75  lightning res 69/74  chaos res 26/22
@@ -604,7 +604,7 @@
 067-chronomancer-raise-zombie                        Raise Zombie                                    85238 dps (theirs      23805)  0 unknown, 8 unmapped, 24 unsimulated  energy shield 10147/10909
 068-deadeye-pounce                                   Pounce (pressed Ice Shot)                      121926 dps (theirs       1606)  0 unknown, 5 unmapped, 12 unsimulated
 069-disciple-of-varashta-kelari-s-deception          Kelari, the Tainted Sands                     1598948 dps (theirs          0)  0 unknown, 12 unmapped, 24 unsimulated  energy shield 13136/13826
-070-gemling-legionnaire-flameblast                   Flameblast                                     670834 dps (theirs     747377)  0 unknown, 10 unmapped, 22 unsimulated  life 3896/4075  chaos res 78/68
+070-gemling-legionnaire-flameblast                   Flameblast                                     345361 dps (theirs     747377)  0 unknown, 10 unmapped, 22 unsimulated  life 3896/4075  chaos res 78/68
 071-infernalist-spark                                Spark                                         6600715 dps (theirs    2424071)  0 unknown, 2 unmapped, 10 unsimulated  lightning res 53/98
 072-invoker-shattering-palm                          Shattering Palm                                533212 dps (theirs     405235)  0 unknown, 10 unmapped, 14 unsimulated  dexterity 157/144  spirit 321/256
 073-lich-companion-elephant-tortoise                 Elemental Weakness                               7683 dps (theirs          0)  0 unknown, 3 unmapped, 43 unsimulated  energy shield 6087/6677  armour 2002/2505  evasion 34338/44610  deflection 26063/33858  fire res 81/76  cold res 128/113  lightning res 94/79

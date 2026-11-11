@@ -29,6 +29,8 @@ type SkillLevel =
       StoredUses: float option
       /// Base mana cost per use.
       ManaCost: float option
+      /// Channelled skills: mana per minute while channelling.
+      ManaPerMinute: float option
       /// Support gems: cost multiplier in percent more (30 = ×1.3).
       ManaMultiplier: float option
       /// Spirit reserved while the skill is active (per minion for minion gems; supports add theirs).
@@ -129,6 +131,7 @@ module GameData =
           AttackTime = Json.numField "attackTime" j
           StoredUses = Json.numField "storedUses" j
           ManaCost = Json.field "cost" j |> Option.bind (Json.numField "Mana")
+          ManaPerMinute = Json.field "cost" j |> Option.bind (Json.numField "ManaPerMinute")
           ManaMultiplier = Json.numField "manaMultiplier" j
           SpiritReservation = Json.numField "spiritReservationFlat" j
           ReservationMultiplier = Json.numField "reservationMultiplier" j |> Option.defaultValue 0.0 }

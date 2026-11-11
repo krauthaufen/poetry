@@ -1097,6 +1097,11 @@ module Sim =
                 | Some pools -> pools.Mana * Mods.sumBase costCtx [ Named "ExtraCostPercentOfMaxMana" ] db / 100.0
                 | None -> 0.0
             let ownCost = if skill.Clip > 0 && not (st.LoadDue.Contains skill.Name) then 0.0 else skill.Cost
+            // a channel: its cost per second for as long as this use takes; what it costs to
+            // start is paid when the channel begins, not with every use that continues it
+            let ownCost =
+                if skill.CostPerSecond <= 0.0 then ownCost
+                else (if st.LastUsed = skill.Name then 0.0 else ownCost) + skill.CostPerSecond * max Constants.serverTick (useTime env actor skill w)
             (ownCost + extraCost) * Mods.mult costCtx [ ManaCost ] db / Mods.inc costCtx [ ManaCostEfficiency ] db
         let affordable (skill: Skill) =
             match actor.Vitals, w.Player with
@@ -1123,6 +1128,9 @@ module Sim =
                 | None -> 0.0
             // crossbow ammunition: the cost is for loading, paid with the first shot of a new load
             let ownCost = if skill.Clip > 0 && not (st.LoadDue.Contains skill.Name) then 0.0 else skill.Cost
+            let ownCost =
+                if skill.CostPerSecond <= 0.0 then ownCost
+                else (if st.LastUsed = skill.Name then 0.0 else ownCost) + skill.CostPerSecond * t
             let cost = (ownCost + extraCost) * Mods.mult costCtx [ ManaCost ] db / Mods.inc costCtx [ ManaCostEfficiency ] db
             // after the last bolt of a load: reload (attack speed and reload speed shorten it;
             // PoB: increases add up, more multiplies), unless the reload is instant

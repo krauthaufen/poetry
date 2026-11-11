@@ -469,7 +469,8 @@ module Gems =
                 Projectiles
                     { ProjectileShape.make count with
                         // "projectiles_nova": fired in a full circle
-                        Spread = (if flagAny "projectiles_nova" then 360.0 else statOf "total_projectile_spread_angle_override" |> Option.defaultValue 30.0)
+                        // "projectiles_barrage": fired one after the other at the target, so each can hit it
+                        Spread = (if flagAny "projectiles_nova" then 360.0 elif flagOf "projectiles_barrage" then 0.0 else statOf "total_projectile_spread_angle_override" |> Option.defaultValue 30.0)
                         Pierce = (if flagOf "always_pierce" then 100 else int (statOf "projectile_base_number_of_targets_to_pierce" |> Option.defaultValue 0.0))
                         Chains = int (statOf "number_of_chains" |> Option.defaultValue 0.0)
                         // projectiles that drop on their targets, one each, in a number the skill
@@ -526,7 +527,8 @@ module Gems =
             |> Map.ofList
           Duration = (statOf "base_skill_effect_duration" |> Option.defaultValue 0.0) / 1000.0
           Clip = 0
-          ReloadTime = 0.0 },
+          ReloadTime = 0.0
+          CostPerSecond = (gemLevel |> Option.bind (fun l -> l.ManaPerMinute) |> Option.defaultValue 0.0) / 60.0 },
         cov
 
     /// Build a simulator Skill from a socketed gem. `characterMods` are needed for
@@ -620,7 +622,7 @@ module Gems =
                     setup.Supports
                     |> List.choose (fun (name, lvl) -> skillOfGem db name |> Option.bind (fun s -> Map.tryFind (max 1 lvl) s.Levels |> Option.orElse (Map.tryFind 1 s.Levels)))
                     |> List.fold (fun k l -> k * (1.0 + (l.ManaMultiplier |> Option.defaultValue 0.0) / 100.0)) 1.0
-                Ok({ main with Parts = parts; Cost = main.Cost * costMult }, cov)
+                Ok({ main with Parts = parts; Cost = main.Cost * costMult; CostPerSecond = main.CostPerSecond * costMult }, cov)
 
     /// The game stats of a socketed gem (own stat set, quality, alt quality, supports),
     /// for behaviours that need raw numbers.
