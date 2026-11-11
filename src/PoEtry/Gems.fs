@@ -374,6 +374,8 @@ module Gems =
               ("Shred", ""), [ "Seq:0,1/6" ]
               ("Shred", "Fast Strikes"), [ "Seq:2,3,4/6" ]
               ("Shred", "Final Strike"), [ "Seq:5/6"; "Hits:2" ]
+              // "Simultaneously fires a Physical Projectile and a Chaos Projectile"
+              ("Coiling Bolts", "Chaos"), [ "Part" ]
               // the eruption happens once; the sprays that follow rain down around the volcano
               ("Volcano", ""), [ "Once" ]
               ("Volcano", "Projectiles"), [ "Rain" ]
@@ -777,7 +779,7 @@ module Gems =
                     |> List.filter (fun s ->
                         s <> set
                         && (isPart s
-                            || (Map.tryFind (data.Name, s.Label) partConditions |> Option.exists (List.exists (fun (c: string) -> c.StartsWith "Seq:")))
+                            || (Map.tryFind (data.Name, s.Label) partConditions |> Option.exists (List.exists (fun (c: string) -> c.StartsWith "Seq:" || c = "Part")))
                             || (set.Stats |> List.contains "base_deal_no_damage" && not (s.Label.EndsWith "-Infused")
                                 && set.ConstantStats |> List.exists (fun (k, _) -> k = "dps_display_statset_index"))))
                     |> List.map (fun s ->
