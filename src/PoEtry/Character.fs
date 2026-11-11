@@ -196,7 +196,8 @@ module Items =
                 && not (inertLine l))
         // armour pieces and weapons carry local stats; jewellery, jewels and charms don't
         let hasLocalDefences =
-            lines |> List.exists (fun l -> l.StartsWith "Armour:" || l.StartsWith "Evasion" || l.StartsWith "Energy Shield:")
+            lines |> List.exists (fun l -> l.StartsWith "Armour:" || l.StartsWith "Evasion" || l.StartsWith "Energy Shield:" || l.StartsWith "Runic Ward:" || l.StartsWith "Block chance:")
+        let showsWard = lines |> List.exists (fun l -> l.StartsWith "Runic Ward:")
         let context = if baseName.IsSome || hasLocalDefences then StatText.ItemLocal else StatText.Global
         let stats, unknown = StatText.parseLinesIn context db.Text candidates
         let mods, locals, cov = interpret stats
@@ -214,14 +215,31 @@ module Items =
                     | LocalOther id ->
                         let has (w: string) = id.Contains w
                         let shown =
-                            [ "armour"; "evasion"; "energy_shield"; "ward"; "block_chance"; "requirement"; "prefixes"; "suffixes"; "quality"
+                            [ "armour"; "physical_damage_reduction_rating"; "evasion"; "energy_shield"; "ward"; "block_chance"; "requirement"; "prefixes"; "suffixes"; "quality"
                               "_display_"; "socket"; "local_is_"; "implicit_stat_magnitude"; "soul_core"; "weapon_range"; "reload_speed"
                               "corruption"; "charm"; "flask"; "local_jewel_"; "alternate_tree"; "cannot_be_thrown"; "mod_effect"
                               "hungry_loop"; "mages_legacy"; "synthesised"; "in_breach"; "base_crit_chance_permyriad_override"
                               "no_physical_damage"; "spirit" ]
                             |> List.exists has
-                        if id = "local_resist_all_elements_+%_per_rune_or_soul_core" then
-                            ms @ (Mod.resistAllElemental (v * socketsFilled)), c
+                        if id.EndsWith "_per_rune_or_soul_core" then
+                            // "per Socket filled": once per rune, soul core or idol in the item
+                            let n = v * socketsFilled
+                            let attrs = [ Attribute "Str"; Attribute "Dex"; Attribute "Int" ]
+                            let found =
+                                match id.Substring(6, id.Length - 6 - "_per_rune_or_soul_core".Length) with
+                                | "resist_all_elements_+%" -> Mod.resistAllElemental n
+                                | "all_attributes_+" -> attrs |> List.map (fun a -> Mod.base' a n)
+                                | "all_attributes_+%" -> attrs |> List.map (fun a -> Mod.inc a n)
+                                | "base_chaos_damage_resistance_%" -> [ Mod.base' (Resist Chaos) n ]
+                                | "base_life_regeneration_rate_per_minute_+" -> [ Mod.base' LifeRegen (n / 60.0) ]
+                                | "base_maximum_life_+" -> [ Mod.base' MaxLife n ]
+                                | "base_maximum_mana_+" -> [ Mod.base' MaxMana n ]
+                                | "maximum_life_+%" -> [ Mod.inc MaxLife n ]
+                                | "maximum_mana_+%" -> [ Mod.inc MaxMana n ]
+                                | "global_armour_evasion_energy_shield_+%" -> [ Mod.inc Armour n; Mod.inc Evasion n; Mod.inc MaxEnergyShield n ]
+                                | "stun_threshold_+" -> [ Mod.base' (Named "StunThreshold") n ]
+                                | _ -> []
+                            ms @ found, c
                         elif id = "local_ring_duplicate_other_ring" then ms, c
                         elif shown then ms, c
                         else
@@ -232,6 +250,18 @@ module Items =
                             | _ -> ms, { c with Unsimulated = c.Unsimulated @ [ id, "item-local" ] }
                     | _ -> ms, c)
                 ([], Coverage.empty)
+        // an item that shows Runic Ward has its own "+X to maximum Runic Ward" and
+        // "X% increased Runic Ward" in that number already; an armour piece with no armour,
+        // evasion or energy shield of its own gets nothing from its local increases
+        let shownHere (st: Stat) =
+            let has (prefix: string) = lines |> List.exists (fun l -> l.StartsWith prefix)
+            match st with
+            | Named "Ward" -> showsWard
+            | Armour -> hasLocalDefences && not (has "Armour:")
+            | Evasion -> hasLocalDefences && not (has "Evasion")
+            | MaxEnergyShield -> hasLocalDefences && not (has "Energy Shield:")
+            | _ -> false
+        let mods = if hasLocalDefences && baseName.IsNone then mods |> List.filter (fun m -> not (shownHere m.Stat && m.Conds.IsEmpty)) else mods
         let mods, cov = mods @ localMods, Coverage.merge cov localCov
         // Lines before the first understood stat are usually the name block; don't report them.
         let unknown = unknown |> List.filter (fun l -> l.Contains " " && not (Some l = baseName))

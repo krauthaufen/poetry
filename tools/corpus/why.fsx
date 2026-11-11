@@ -17,6 +17,11 @@ for m in c.Sheet.Mods do
 for slot, st, v in c.Sheet.ItemDefences do
     let s = sprintf "%A" st
     if words |> Array.exists (fun w -> s.Contains w) then printfn "%-34s item  %8.1f  %s" s v slot
+let sdb = ModDb.ofList c.Sheet.Mods
+for st in c.Sheet.Mods |> List.map (fun m -> m.Stat) |> List.distinct do
+    let s = sprintf "%A" st
+    if words |> Array.exists (fun w -> s.Contains w) then
+        printfn "TOTAL %s: base %.1f, inc %.0f%%, more x%.3f (no conditions)" (s.Replace("\n", " ")) (Mods.sumBase Ctx.empty [ st ] sdb) (Mods.sumInc Ctx.empty [ st ] sdb) (Mods.more Ctx.empty [ st ] sdb)
 let v = c.Vitals
 printfn "ours: str %.0f dex %.0f int %.0f life %.0f mana %.0f es %.0f armour %.0f evasion %.0f deflection %.0f block %.0f ward %.0f res %A" v.Str v.Dex v.Int v.Life v.Mana v.EnergyShield v.Armour v.Evasion v.Deflection v.Block v.Ward (v.Resist |> Map.toList)
 match Json.field "ninja" (Json.parse text) |> Option.bind (Json.field "defensiveStats") with

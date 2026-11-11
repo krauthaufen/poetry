@@ -134,7 +134,9 @@ module Api =
         // runes, soul cores, idols in the item's sockets ("per Socket filled")
         let filled =
             Json.list (Json.field "socketedItems" item)
-            |> List.filter (fun s -> Json.field "support" s |> Option.isNone && (Json.strField "frameTypeId" s <> Some "Gem") && not (Json.list (Json.field "properties" s) |> List.exists (fun p -> Json.strField "name" p = Some "Level")))
+            |> List.filter (fun s ->
+                let props = Json.list (Json.field "properties" s) |> List.choose (Json.strField "name")
+                Json.field "support" s <> Some(JBool true) && not (props |> List.exists (fun n -> n = "Level" || n = "Cost" || n.Contains "Support")))
             |> List.length
         let sockets = (if filled > 0 then [ sprintf "Sockets filled: %d" filled ] else []) @ (if Json.field "corrupted" item = Some(JBool true) then [ "Corrupted" ] else [])
         [ "Rarity: " + get "rarity"; get "name"; get "typeLine"; "--------" ] @ quality @ defences @ templated @ radius @ sockets @ [ "--------" ] @ modLines item
@@ -199,6 +201,9 @@ module Api =
             |> List.choose Json.num
             |> List.map int
         let passives = Json.field "passives" c
+        // passives allocated with weapon set points ("specialisations": set1, set2)
+        let setNodes key =
+            Json.list (passives |> Option.bind (Json.field "specialisations") |> Option.bind (Json.field key)) |> List.choose Json.num |> List.map int
         // chosen attributes etc.: node id -> the stats it really grants
         let overrides =
             match passives |> Option.bind (Json.field "skill_overrides") with
@@ -214,6 +219,8 @@ module Api =
           Ascendancy = ""
           Items = items @ jewels
           TreeNodes = hashes
+          TreeNodesSet1 = setNodes "set1"
+          TreeNodesSet2 = setNodes "set2"
           Groups = groups
           MainGroup = 1
           Config = Map.empty

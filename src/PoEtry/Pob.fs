@@ -24,6 +24,9 @@ type PobBuild =
       /// Slot name -> raw item text.
       Items: (string * string) list
       TreeNodes: int list
+      /// Passives allocated with weapon set points: they only count while that set is in use.
+      TreeNodesSet1: int list
+      TreeNodesSet2: int list
       Groups: PobGroup list
       MainGroup: int
       /// PoB configuration inputs, name -> value.
@@ -143,6 +146,8 @@ module Pob =
           Ascendancy = build |> Option.bind (Xml.attr "ascendClassName") |> Option.defaultValue ""
           Items = items
           TreeNodes = nodes
+          TreeNodesSet1 = []
+          TreeNodesSet2 = []
           Groups = groups
           MainGroup = build |> Option.bind (Xml.attr "mainSocketGroup") |> fun m -> int' m 1
           Config = config
@@ -344,7 +349,12 @@ module Pob =
             |> List.map (fun (slot, p) -> { p.Coverage with UnknownText = p.Coverage.UnknownText |> List.map (fun l -> slot + ": " + l) })
             |> List.fold Coverage.merge Coverage.empty
         let tree = build.TreeOverrides |> Map.fold (fun t id stats -> match Map.tryFind id t with Some n -> Map.add id { n with Stats = stats } t | None -> t) tree
-        let treeMods, treeCov = Tree.mods db tree build.TreeNodes
+        let treeMods, treeCov =
+            let common, cov = Tree.mods db tree build.TreeNodes
+            let set1, cov1 = Tree.mods db tree build.TreeNodesSet1
+            let set2, cov2 = Tree.mods db tree build.TreeNodesSet2
+            common @ (set1 |> List.map (Mod.whenever (Not setTwo))) @ (set2 |> List.map (Mod.whenever setTwo)),
+            Coverage.merge cov (Coverage.merge cov1 cov2)
         let extraStats, extraUnknown = StatText.parseLines db.Text build.ExtraLines
         let extraMods, _, extraCov = Items.interpret extraStats
         let flaskOf (pick: ParsedItem -> (float * float * float * float) option) =
