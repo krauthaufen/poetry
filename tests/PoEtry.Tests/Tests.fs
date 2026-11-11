@@ -699,6 +699,14 @@ let main _ =
         let fed = { idle with Mods = [ Mod.base' (Named "RageRegen") 6.0 ] }
         near 130.0 (Sim.run (Fight.single (boss 1e9) fed 12.5) 1u).DamageBy.["Swing (hit)"])
 
+    test "a periodic heal: life back every so often" (fun () ->
+        let player =
+            { Actor.make "Player" [ noIgnite ] [ fireSpell 1.0 ] with
+                Vitals = Some { PlayerStats.basic 1000.0 0.0 with StartLife = 0.5 }
+                Periodics = [ { Name = "Time of Need"; Every = 2.0; Action = HealLife 100.0 } ] }
+        let o = Sim.run { Fight.single (boss 1e9) player 5.0 with MaxTime = 5.0 } 1u
+        equal 2 o.Counts.["healed"])
+
     test "berserk: life is lost for every Rage held while Rage is not being lost" (fun () ->
         // 20 Rage kept up by regeneration, 6% of life per minute per Rage: 2% of life a second
         let jab = { Skill.make "Jab" [ Attack; Melee ] with BaseDamage = Map.ofList [ Physical, Range.fixedAt 1.0 ]; BaseCrit = 0.0 }

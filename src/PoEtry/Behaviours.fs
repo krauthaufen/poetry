@@ -85,6 +85,10 @@ module Behaviours =
                   let setup = { Gem = gem.Name; Level = gem.Level; Quality = gem.Quality; StatSet = 1; Supports = [] }
                   let raw = if (Gems.data db gem.Name).IsSome then Gems.rawStats db mods setup else []
                   let stat id = raw |> List.filter (fun (k, _) -> k = id) |> List.sumBy snd
+                  // Time of Need: "periodically invokes divine blessings to heal you"
+                  let heal, healEvery = stat "skill_time_of_need_gain_x_life", stat "base_cooldown_modifiable_repeat_interval_ms" / 1000.0
+                  if heal > 0.0 && healEvery > 0.0 then
+                      yield { Name = gem.Name; Every = healEvery / Mods.mult Ctx.empty [ CooldownRecovery ] mods; Action = HealLife heal }
                   let every = stat "breach_flame_spawn_rate_ms" / 1000.0
                   let perFlame = stat "breach_flame_chaos_addition_%"
                   if every > 0.0 && perFlame > 0.0 then

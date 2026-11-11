@@ -198,6 +198,8 @@ type PeriodicAction =
     /// With this chance (0..1), one stack of a buff that lasts `duration` on its own: every
     /// stack runs out separately (Flames of Chayula). `mods` are per stack.
     | GainTimedBuff of buff: string * chance: float * duration: float * maxStacks: int * mods: Mod list
+    /// The player recovers this much life at once (Time of Need).
+    | HealLife of amount: float
 
 /// Mana Remnants: a remnant on a critical hit against an enemy with an elemental ailment (at
 /// most one per `CritCooldown` seconds) and by chance on killing one; collected, each gives
@@ -2417,6 +2419,11 @@ module Sim =
                 setStacksWith env actorName true r (min maxR (stacksOf st r + 1)) w
                 |> markStatus actorName ("Gained" + r + "Recently")
                 |> fun w -> { w with Counts = bump ("gained:" + r) w.Counts }
+            | HealLife amount ->
+                match env.Fight.Player.Vitals, w.Player with
+                | Some v, Some p when p.Died.IsNone && v.Life > 1.0 ->
+                    { w with Player = Some { p with Life = min (max p.Life v.Life) (p.Life + amount * v.LifeRecoveryRate) }; Counts = bump "healed" w.Counts }
+                | _ -> w
             | GainTimedBuff (buff, chance, duration, maxStacks, mods) ->
                 if rng.Float() >= chance || stacksOf st buff >= maxStacks then w
                 else
