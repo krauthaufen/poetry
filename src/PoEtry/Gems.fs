@@ -336,6 +336,26 @@ module Gems =
         set.Stats |> List.contains "display_statset_hide_usage_stats" && not (set.Label.EndsWith "-Infused")
 
     /// One stat set of a skill as a simulator Skill.
+    /// Does a type expression (postfix: types, "AND", "OR", "NOT") hold for a skill's types?
+    let private typesMatch (expr: string list) (types: Set<string>) =
+        let stack =
+            expr |> List.fold (fun (st: bool list) tok ->
+                match tok, st with
+                | "AND", a :: b :: rest -> (a && b) :: rest
+                | "OR", a :: b :: rest -> (a || b) :: rest
+                | "NOT", a :: rest -> (not a) :: rest
+                | ("AND" | "OR" | "NOT"), _ -> st
+                | t, _ -> types.Contains t :: st) []
+        stack |> List.exists id
+
+    /// Can this support gem support a skill with these types? It needs one of its required
+    /// types (none required: any skill) and none of its excluded ones. The types known here
+    /// are those of a gem's first effect only (a buff's triggered effect or a minion's skills
+    /// have their own), so a "no" is only trusted where another gem in the group says "yes".
+    let canSupport (support: SkillData) (types: Set<string>) =
+        (support.RequireTypes.IsEmpty || typesMatch support.RequireTypes types)
+        && not (not support.ExcludeTypes.IsEmpty && typesMatch support.ExcludeTypes types)
+
     let private buildSet altQuality (data: SkillData) (set: StatSetData) name tags level quality (supportStats: (string * float) list) (weapon: Weapon option) (shieldArmour: float, shieldEvasion: float) =
         let gemLevel = Map.tryFind level data.Levels
         let ownStats = statsWith altQuality data set level quality

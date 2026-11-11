@@ -712,14 +712,7 @@ module Behaviours =
                 |> Option.bind (fun d -> Map.tryFind level d.Levels |> Option.orElse (Map.tryFind 1 d.Levels))
                 |> Option.bind (fun l -> l.SpiritReservation)
                 |> Option.defaultValue 0.0
-            let supportGems = enabled |> List.filter (fun x -> x.IsSupport)
-            let supports = supportGems |> List.sumBy (fun x -> reservation x.Name x.Level)
-            // supports' "+N% reservation" multiply with each other
-            let supportMult =
-                supportGems
-                |> List.fold (fun acc x ->
-                    let m = Gems.data db x.Name |> Option.bind (fun d -> Map.tryFind x.Level d.Levels |> Option.orElse (Map.tryFind 1 d.Levels)) |> Option.map (fun l -> l.ReservationMultiplier) |> Option.defaultValue 0.0
-                    acc * (1.0 + m / 100.0)) 1.0
+            let level (x: PobGem) = Gems.data db x.Name |> Option.bind (fun d -> Map.tryFind x.Level d.Levels |> Option.orElse (Map.tryFind 1 d.Levels))
             enabled
             |> List.filter (fun x -> not x.IsSupport)
             |> List.choose (fun gem ->
@@ -727,6 +720,17 @@ module Behaviours =
                 | Some d when d.Types.Contains "Persistent" || d.Types.Contains "HasReservation" ->
                     let tags = d.Types |> Set.toList |> List.map (fun t -> Tag("Type:" + t)) |> Set.ofList
                     let own = reservation gem.Name gem.Level
+                    // supports' own Spirit, and their "+N% reservation", which multiply with each other
+                    // In a meta gem a support belongs to the meta gem or to a skill socketed in it:
+                    // one that fits a socketed skill and not the meta gem costs the meta gem nothing.
+                    let others = enabled |> List.filter (fun x -> not x.IsSupport && x.Name <> gem.Name) |> List.choose (fun x -> Gems.data db x.Name)
+                    let forOther (x: PobGem) =
+                        match Gems.data db x.Name with
+                        | Some s -> not (Gems.canSupport s d.Types) && others |> List.exists (fun o -> Gems.canSupport s o.Types)
+                        | None -> false
+                    let supportGems = enabled |> List.filter (fun x -> x.IsSupport && not (forOther x))
+                    let supports = supportGems |> List.sumBy (fun x -> reservation x.Name x.Level)
+                    let supportMult = supportGems |> List.fold (fun acc x -> acc * (1.0 + (level x |> Option.map (fun l -> l.ReservationMultiplier) |> Option.defaultValue 0.0) / 100.0)) 1.0
                     let raw = Gems.rawStats db charMods { Gem = gem.Name; Level = gem.Level; Quality = gem.Quality; StatSet = 1; Supports = [] }
                     let stat id = raw |> List.filter (fun (k, _) -> k = id) |> List.sumBy snd
                     // a gem's own reservation efficiency (level, quality) is for that gem only: read

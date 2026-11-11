@@ -189,6 +189,14 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         near (30.0 / 1.08) (cost tree "Herald of Thunder")
         // "Persistent Buffs have 50% less Reservation"
         near 15.0 (cost { blank with ExtraLines = [ "Persistent Buffs have 50% less Reservation" ]; Groups = [ group "" "Herald of Thunder" 0 ] } "Herald of Thunder")
+        // supports: Clarity II adds 20 Spirit to a persistent buff; Heightened Curse's 140% is for
+        // the curse socketed in a meta gem, not for the meta gem
+        let sup name = { Name = name; Level = 1; Quality = 0; Enabled = true; IsSupport = true; StatSet = 1 }
+        let withGems gems = { blank with Groups = [ { Label = ""; Slot = ""; Enabled = true; Gems = gems } ] }
+        near 50.0 (cost (withGems [ gem "Herald of Thunder" 0; sup "Clarity II" ]) "Herald of Thunder")
+        near 100.0 (cost (withGems [ gem "Cast on Critical" 0; gem "Enfeeble" 0; sup "Heightened Curse" ]) "Cast on Critical")
+        // Dialla's Desire: 90% reservation
+        near 27.0 (cost (withGems [ gem "Herald of Thunder" 0; sup "Dialla's Desire" ]) "Herald of Thunder")
         // "1% increased Spirit for each Corrupted Item Equipped"
         let corrupt slot = slot, "Rarity: Rare\nTest Helm\n--------\nArmour: 100\n--------\n+100 to Spirit\n1% increased Spirit for each Corrupted Item Equipped\n--------\nCorrupted\n"
         let b = { blank with Items = [ corrupt "Helmet" ] }
