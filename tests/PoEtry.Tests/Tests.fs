@@ -707,6 +707,17 @@ let main _ =
         let o = Sim.run { Fight.single (boss 1e9) player 5.0 with MaxTime = 5.0 } 1u
         equal 2 o.Counts.["healed"])
 
+    test "a part that spends Rage takes the place of the plain hit while there is enough" (fun () ->
+        // 25 Rage, 10 per use: two enraged uses (300 each), then plain ones (100)
+        let big = { strike "Slam: Enraged" 300.0 with Mods = [ Mod.base' (Named "SpendsRage") 10.0 ] }
+        let slam = { strike "Slam" 100.0 with Mods = [ Mod.flag (Named "NotEnraged") ]; Parts = [ big ] }
+        let f = duel [ slam ] 4.5
+        let o = Sim.run { f with Player = { f.Player with MaxResources = Map.ofList [ "Rage", 30 ]; Resources = [ "Rage", 25 ] } } 1u
+        equal 2 o.Counts.["enraged:Slam"]
+        // the Rage that is left gives 1% more attack damage each: 300 x 1.15 and 300 x 1.05
+        near 660.0 o.DamageBy.["Slam: Enraged (hit)"]
+        equal 2 o.Counts.["hits:Slam"])
+
     test "berserk: life is lost for every Rage held while Rage is not being lost" (fun () ->
         // 20 Rage kept up by regeneration, 6% of life per minute per Rage: 2% of life a second
         let jab = { Skill.make "Jab" [ Attack; Melee ] with BaseDamage = Map.ofList [ Physical, Range.fixedAt 1.0 ]; BaseCrit = 0.0 }

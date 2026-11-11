@@ -1263,6 +1263,9 @@ module Sim =
                         let charged = match skill.Consumes with Some charge -> stacks charge > 0 | None -> false
                         let isCharged (p: Skill) = p.Name.EndsWith "-Charged"
                         let hasCharged = skill.Parts |> List.exists isCharged
+                        // a part that spends Rage happens when there is enough, in place of the plain one
+                        let rageFor (p: Skill) = p.Mods |> List.sumBy (fun m -> if m.Stat = Named "SpendsRage" then m.Value else 0.0)
+                        let enraged = skill.Parts |> List.exists (fun p -> rageFor p > 0.0 && float (stacks "Rage") >= rageFor p)
                         (skill :: skill.Parts)
                         |> List.filter (fun p -> not (partFlag p "DetonatedByDamage"))
                         // a part that happens once however long the skill keeps hitting (an eruption)
@@ -1270,7 +1273,10 @@ module Sim =
                         // a part that only happens when something sets it off (the Bell's shockwave)
                         |> List.filter (fun p -> p.Name = skill.Name || not (partFlag p "OnlyTriggered"))
                         |> List.filter (fun p ->
-                            if isCharged p || partFlag p "OnlyWithCharge" then charged
+                            if rageFor p > 0.0 then enraged
+                            elif partFlag p "NotEnraged" then not enraged
+                            elif partFlag p "NotWithCharge" then not charged
+                            elif isCharged p || partFlag p "OnlyWithCharge" then charged
                             elif (partNamed p "DetonatedBy:").IsSome then false
                             else
                                 match partNamed p "OnlyInfused:" with
@@ -1294,6 +1300,16 @@ module Sim =
                         Bombs = (actor.Name, skill.Name, target.Def.Name, target.Life, needed, w.Time + useTime + lasts) :: (w.Bombs |> List.filter (fun (a, s, _, _, _, _) -> not (a = actor.Name && s = skill.Name)))
                         Counts = bump ("planted:" + skill.Name) w.Counts }
                 | None -> w
+            // the Rage a part spent
+            let w =
+                let need = skill.Parts |> List.sumBy (fun p -> p.Mods |> List.sumBy (fun m -> if m.Stat = Named "SpendsRage" then m.Value else 0.0))
+                match Map.tryFind "Rage" st.Buffs with
+                | Some r when need > 0.0 && float r.Stacks >= need ->
+                    { w with Counts = bump ("enraged:" + skill.Name) w.Counts }
+                    |> updateActor actor.Name (fun st ->
+                        let left = r.Stacks - int need
+                        { st with Buffs = if left > 0 then Map.add "Rage" { r with Stacks = left } st.Buffs else Map.remove "Rage" st.Buffs })
+                | _ -> w
             // a debuff that records damage (Inevitable Agony), on the enemy aimed at
             let w =
                 match skill.Mods |> List.tryPick (fun m -> if m.Stat = Named "RecordsDamage" then Some m.Value else None) with

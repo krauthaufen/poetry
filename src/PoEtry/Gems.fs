@@ -402,6 +402,11 @@ module Gems =
               ("Frost Darts", "Explosion"), [ "Part"; "Infused:ColdInfusion" ]
               ("Fireball", "Firebolts"), [ "Part"; "Infused:FireInfusion"; "Behind" ]
               ("Ember Fusillade", "Beam"), [ "Part"; "Infused:LightningInfusion" ]
+              // the form a skill takes when it has something to spend, in place of the plain one
+              ("Rend", ""), [ "NotWithCharge" ]
+              ("Rend", "Lightning-Charged"), [ "Part" ]
+              ("Furious Slam", ""), [ "NotEnraged" ]
+              ("Furious Slam", "Enraged"), [ "Part"; "SpendsRage:10" ]
               // the spears a standing enemy touches explode at once (four of them: guess)
               // and, set off within half a second of appearing, deal 80% less
               ("Spearfield", "Explosion"), [ "Part"; "Hits:4"; "Less:80" ]
@@ -454,6 +459,8 @@ module Gems =
                 let parts = (c.Substring 4).Split '/'
                 [ Mod.flag (Named("SeqSteps:" + parts.[0])); Mod.base' (Named "SeqLength") (float parts.[1]) ]
             elif c.StartsWith "Less:" then [ Mod.more (Damage AllDamage) (-(float (c.Substring 5))) ]
+            elif c = "NotWithCharge" || c = "NotEnraged" then [ Mod.flag (Named c) ]
+            elif c.StartsWith "SpendsRage:" then [ Mod.base' (Named "SpendsRage") (float (c.Substring 11)) ]
             elif c = "Once" then [ Mod.flag (Named "OncePerUse") ]
             elif c.StartsWith "Hits:" then [ Mod.base' (Named "SeqHits") (float (c.Substring 5)) ]
             elif c = "Charge" then [ Mod.flag (Named "OnlyWithCharge") ]
