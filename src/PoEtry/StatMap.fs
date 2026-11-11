@@ -278,6 +278,11 @@ module StatMap =
         // Beidat's Will: "+1 to Maximum Spirit per 25 Maximum Life" (the value is the 25)
         | "ascendancy_beidats_will_spirit_+_per_X_maximum_life" -> one (Mod.base' (Named "SpiritPerLife") v)
         | "spirit_+_per_empty_charm_slot" -> one (Mod.base' (Named "SpiritPerEmptyCharmSlot") v)
+        // "+200 to Armour for each Connected Notable Passive Skill Allocated": Pob.character counts them
+        | "connected_notables_grant_armour_display" -> one (Mod.base' (Named "ArmourPerConnectedNotable") v)
+        // only for what the shield / body armour itself shows (Defence.slotInc, slotMore)
+        | "shield_armour_evasion_energy_shield_+%" -> Some(Mods [ for d in [ "Armour"; "Evasion"; "ES" ] -> Mod.inc (Named(sprintf "SlotInc:%s:Weapon 2" d)) v ])
+        | "ascendancy_titan_damage_reduction_rating_from_body_armour_+%_final" -> one (Mod.more (Named "SlotMore:Armour:Body Armour") v)
         | "armour_+_per_1_spirit" -> one (Mod.base' Armour v |> Mod.whenever (PerStack("Spirit", 1.0)))
         | "double_evasion_rating_from_gloves_helmets_boots" -> one (Mod.flag (Named "DoubleEvasionHelmetGlovesBoots"))
         | "halve_evasion_rating_from_body" -> one (Mod.flag (Named "HalveEvasionBodyArmour"))

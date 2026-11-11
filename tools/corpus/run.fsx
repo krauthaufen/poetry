@@ -93,6 +93,9 @@ let runOne (path: string) : Result =
             // Chaos Inoculation: immune, not a resistance; Runic Ward is newer than PoB's data
             // (PoB still shows the life under Chaos Inoculation and the mana under Blood Magic)
             |> List.filter (fun (name, _, _) -> name <> "ward" && not ((name = "chaos res" || name = "life") && v.Life <= 1.0) && not (name = "mana" && v.Mana <= 0.0))
+            // PoB does not know Runic Ward: it still gives an item that shows Ward the armour, evasion
+            // or energy shield of its old base, so those are no reference on such a character
+            |> List.filter (fun (name, _, _) -> not (v.Ward > 0.0 && List.contains name [ "armour"; "evasion"; "energy shield"; "deflection"; "block" ]))
             // their block chance is not capped
             |> List.map (fun (name, ours, theirs) -> if name = "block" && theirs > ours && ours >= 50.0 then name, ours, ours else name, ours, theirs)
         let dpsOf (gem: string) =

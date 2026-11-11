@@ -23,6 +23,8 @@ type TreeNode =
       IsJewelSocket: bool
       /// The ascendancy the node belongs to, "" on the main tree.
       Ascendancy: string
+      /// Node ids this node's own connections lead to.
+      Connections: int list
       /// Position on the tree (tools/treegeo.py); 0, 0 if unknown.
       X: float
       Y: float }
@@ -415,6 +417,7 @@ module Tree =
                           IsNotable = Json.field "isNotable" j = Some(JBool true)
                           IsJewelSocket = Json.field "isJewelSocket" j = Some(JBool true)
                           Ascendancy = Json.strField "ascendancyName" j |> Option.defaultValue ""
+                          Connections = Json.list (Json.field "connections" j) |> List.choose (Json.numField "id") |> List.map int
                           X = Json.numField "x" j |> Option.defaultValue 0.0
                           Y = Json.numField "y" j |> Option.defaultValue 0.0 }
                     )
@@ -473,6 +476,11 @@ module Tree =
                     |> List.filter (fun l ->
                         not (l.StartsWith "+5 to any Attribute") && not (l.StartsWith "Grants Skill:")
                         && not (ruledKeystones.Contains node.Name && (l.Contains "Infernal Flame instead" || l.StartsWith "Maximum Mana is replaced")))
+                // "Body Armour grants 15% increased maximum Life" (Smith of Kitava): the rest of the
+                // line is a modifier like any other, there while a body armour is worn
+                let relevant =
+                    relevant |> List.map (fun l ->
+                        if l.StartsWith "Body Armour grants " && l.Length > 19 then string (System.Char.ToUpperInvariant l.[19]) + l.Substring 20 else l)
                 let ruledLines, relevant =
                     relevant |> List.partition (fun l -> keystoneLines |> List.exists (fun (k, start, _) -> k = node.Name && l.StartsWith start))
                 let lineMods =

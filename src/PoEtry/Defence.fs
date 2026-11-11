@@ -107,13 +107,19 @@ module Defence =
                 | Armour -> Mods.sumInc c [ Named "BodyArmourArmour" ] db
                 | _ -> 0.0
              else 0.0)
-            + (if stat = MaxEnergyShield then Mods.sumInc c [ Named("SlotInc:ES:" + slot) ] db else 0.0)
+            + (match stat with
+               | MaxEnergyShield -> Mods.sumInc c [ Named("SlotInc:ES:" + slot) ] db
+               | Armour -> Mods.sumInc c [ Named("SlotInc:Armour:" + slot) ] db
+               | Evasion -> Mods.sumInc c [ Named("SlotInc:Evasion:" + slot) ] db
+               | _ -> 0.0)
+        // "50% more Armour from Equipped Body Armour"
+        let slotMore stat slot = if stat = Armour then Mods.more c [ Named("SlotMore:Armour:" + slot) ] db else 1.0
         /// Armour, evasion or energy shield: item values and flat amounts, increased and multiplied.
         let itemPoolIn (c: Ctx) stat (flat: float) =
             let inc = Mods.sumInc c [ stat ] db
             let fromSlots =
                 sheet.ItemDefences
-                |> List.sumBy (fun (slot, s, v) -> if s = stat then v * max 0.0 (1.0 + (inc + slotInc stat slot) / 100.0) else 0.0)
+                |> List.sumBy (fun (slot, s, v) -> if s = stat then v * max 0.0 (1.0 + (inc + slotInc stat slot) / 100.0) * slotMore stat slot else 0.0)
             (fromSlots + (flat + Mods.sumBase c [ stat ] db) * max 0.0 (1.0 + inc / 100.0)) * Mods.more c [ stat ] db
         let fromItems stat = itemValue stat (fun _ -> true)
         let bodyEvasion = itemValue Evasion ((=) "Body Armour")
@@ -147,12 +153,19 @@ module Defence =
         let lifeRecharges = flag "LifeRechargesInsteadOfES"
         // "while you have Energy Shield"
         let cES = if es > 0.0 then { c with Buffs = Map.add "HasEnergyShield" 1 c.Buffs } else c
-        let armour = itemPoolIn cES Armour (itemValue MaxEnergyShield ((=) "Boots") * Mods.sumBase c [ Named "ArmourPerBootsES" ] db) + mana * Mods.sumBase c [ Named "ManaGainedAsArmour" ] db / 100.0
         // Character.ot base_evasion_rating = 7
-        let evasion = itemPoolIn cES Evasion (7.0 + itemValue MaxEnergyShield ((=) "Helmet") * Mods.sumBase c [ Named "EvasionPerHelmetES" ] db)
-        let armour = armour + evasion * Mods.sumBase c [ Named "EvasionGainedAsArmour" ] db / 100.0
-        // Iron Reflexes: all evasion becomes armour
-        let armour, evasion = if Mods.flag c (Named "EvasionToArmour") db then armour + evasion, 0.0 else armour, evasion
+        let evasionFlat = 7.0 + itemValue MaxEnergyShield ((=) "Helmet") * Mods.sumBase c [ Named "EvasionPerHelmetES" ] db
+        // "Gain N% of Evasion Rating as extra Armour", Iron Reflexes (all of it): the evasion the
+        // items show and the flat amounts become armour before either is increased, so armour's
+        // increases apply to it, not evasion's (PoB CalcDefence, resource conversion)
+        let ironReflexes = Mods.flag c (Named "EvasionToArmour") db
+        let evasionAsArmour =
+            (itemValue Evasion (fun _ -> true) + evasionFlat + Mods.sumBase c [ Evasion ] db)
+            * (if ironReflexes then 1.0 else Mods.sumBase c [ Named "EvasionGainedAsArmour" ] db / 100.0)
+        let armour =
+            itemPoolIn cES Armour (itemValue MaxEnergyShield ((=) "Boots") * Mods.sumBase c [ Named "ArmourPerBootsES" ] db + evasionAsArmour)
+            + mana * Mods.sumBase c [ Named "ManaGainedAsArmour" ] db / 100.0
+        let evasion = if ironReflexes then 0.0 else itemPoolIn cES Evasion evasionFlat
         let named n = Mods.sumBase c [ Named n ] db
         let ailments = [ "Ignite"; "Chill"; "Freeze"; "Shock"; "Bleed"; "Poison" ]
         // stun threshold: maximum life (before Chaos Inoculation), ailment threshold: half of it

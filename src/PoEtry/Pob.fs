@@ -433,6 +433,16 @@ module Pob =
                     { m with Stat = stat p.[1]; Value = m.Value * floor (shown / float p.[4]) }
                 | _ -> m)
         let itemMods, treeMods = perItemDefence itemMods, perItemDefence treeMods
+        // "+200 to Armour for each Connected Notable Passive Skill Allocated" (Smith's Masterwork):
+        // the allocated notables joined to that passive
+        let treeMods =
+            let allocated = build.TreeNodes |> List.distinct |> List.choose (fun id -> Map.tryFind id tree)
+            let connected =
+                allocated
+                |> List.filter (fun n -> n.Stats |> List.exists (fun l -> l.Contains "for each Connected Notable Passive Skill Allocated"))
+                |> List.sumBy (fun n ->
+                    allocated |> List.filter (fun m -> m.IsNotable && m.Id <> n.Id && (List.contains m.Id n.Connections || List.contains n.Id m.Connections)) |> List.length)
+            treeMods |> List.map (fun m -> if m.Stat = Named "ArmourPerConnectedNotable" then { m with Stat = Armour; Value = m.Value * float connected } else m)
         let flaskOf (pick: ParsedItem -> (float * float * float * float) option) =
             build.Items
             |> List.filter (fun (slot, _) -> slot.StartsWith "Flask")

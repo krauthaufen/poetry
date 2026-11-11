@@ -233,6 +233,34 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         let armour b = (Setup.loadWith db.Value treeJson b Options.defaults).Vitals.Armour
         near 200.0 (armour { blank with ExtraLines = quest @ [ "+2 to Armour per 1 Spirit" ] } - armour { blank with ExtraLines = quest }))
 
+    test "defences by slot: the shield's and the body armour's own; evasion gained as armour at base" (fun () ->
+        let shield = "Weapon 2", "Rarity: Rare\nTest Shield\n--------\nArmour: 200"
+        let body = item "Body Armour" [ "Armour: 300" ]
+        let b = { blank with Items = [ shield; body ] }
+        let plain = stats b
+        near 500.0 plain.Armour
+        // "100% increased Armour, Evasion and Energy Shield from Equipped Shield": the shield's 200 only
+        near 700.0 (stats { b with ExtraLines = [ "100% increased Armour, Evasion and Energy Shield from Equipped Shield" ] }).Armour
+        // "50% more Armour from Equipped Body Armour": the body armour's 300 only
+        near 650.0 (stats { b with ExtraLines = [ "50% more Armour from Equipped Body Armour" ] }).Armour
+        // "Gain 30% of Evasion Rating as extra Armour": 30% of the helmet's 1000 and the 7 everyone has,
+        // increased by armour's 100%, not by evasion's 50%
+        let helmet = item "Helmet" [ "Evasion Rating: 1000" ]
+        let gain = stats { blank with Items = [ helmet ]; ExtraLines = [ "Gain 30% of Evasion Rating as extra Armour"; "100% increased Armour"; "50% increased Evasion Rating" ] }
+        near (1007.0 * 0.3 * 2.0) gain.Armour
+        near (1007.0 * 1.5) gain.Evasion)
+
+    test "Smith of Kitava: what the body armour grants, armour per connected notable" (fun () ->
+        // Smith's Masterwork (9988) with Kitavan Engraving (60913: "Body Armour grants 15% increased
+        // maximum Life") and Tantalum Alloy (61039: "Body Armour grants +75% to Fire Resistance")
+        let plain = stats blank
+        let smith = stats { blank with TreeNodes = [ 9988; 60913; 61039 ] }
+        near (plain.Life * 1.15) smith.Life
+        // +200 armour for each of the two connected notables
+        near (plain.Armour + 400.0) smith.Armour
+        let fire (b: PobBuild) = Defence.uncappedResist Ctx.empty (ModDb.ofList (sheetOf b).Mods) Fire
+        near (fire blank + 75.0) (fire { blank with TreeNodes = [ 9988; 60913; 61039 ] }))
+
     test "the sheet of the second weapon set counts its weapons, not the first set's" (fun () ->
         let b = { blank with Items = [ item "Weapon 1" [ "+30 to Strength" ]; item "Weapon 1 Swap" [ "+10 to Strength" ]
                                        "Weapon 2", "Rarity: Rare\nTest Shield\n--------\nArmour: 200"
