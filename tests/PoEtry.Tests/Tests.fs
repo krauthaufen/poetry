@@ -356,6 +356,15 @@ let main _ =
         // Jab lands at 2, 3, 4, 5 s: the first doubled
         near 50.0 o.DamageBy.["Jab (hit)"])
 
+    test "recorded damage: a quarter of what the enemy lost is taken again when the debuff ends" (fun () ->
+        let agony = { Skill.make "Agony" [ Spell ] with Hits = []; Duration = 4.0; Mods = [ Mod.base' (Named "RecordsDamage") 25.0 ] }
+        let f = { Fight.single (boss 1e12) (Actor.make "Player" [ noIgnite ] [ agony; fireSpell 100.0 ]) 6.5 with MaxTime = 6.5 }
+        let o = Sim.run f 1u
+        // Agony at 0 s lasts until 5 s; the Bolts at 2, 3 and 4 s are recorded (the one at 5 s
+        // lands as it ends): a quarter of 300
+        near 75.0 o.DamageBy.["Agony"]
+        equal 2 o.Counts.["recording:Agony"])
+
     test "banner: attack hits build its Glory, then its aura lasts for the duration" (fun () ->
         // 200 Glory at 100% of 20 per hit: placed with the tenth hit (10 s) and the twentieth.
         // 4 s of 100% more damage: the hits at 11, 12 and 13 s are doubled, the one at 14 s is not

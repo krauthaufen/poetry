@@ -484,7 +484,11 @@ module Sim =
           CorpsesUsed: int
           /// Seeds planted in enemies (Living Bomb): owner, skill, enemy, the enemy's life when
           /// planted, the damage it takes to set the seed off, when it fizzles.
-          Bombs: (string * string * string * float * float * float) list }
+          Bombs: (string * string * string * float * float * float) list
+          /// Debuffs that record a share of the damage an enemy takes and take it again as life
+          /// at the end (Inevitable Agony): owner, skill, enemy, the enemy's life when applied,
+          /// the share, when it ends.
+          Agonies: (string * string * string * float * float * float) list }
 
     /// Fixed for the whole fight: mod dbs built once, buffs layered on per event.
     type private Env =
@@ -1286,6 +1290,15 @@ module Sim =
                         Bombs = (actor.Name, skill.Name, target.Def.Name, target.Life, needed, w.Time + useTime + lasts) :: (w.Bombs |> List.filter (fun (a, s, _, _, _, _) -> not (a = actor.Name && s = skill.Name)))
                         Counts = bump ("planted:" + skill.Name) w.Counts }
                 | None -> w
+            // a debuff that records damage (Inevitable Agony), on the enemy aimed at
+            let w =
+                match skill.Mods |> List.tryPick (fun m -> if m.Stat = Named "RecordsDamage" then Some m.Value else None) with
+                | Some pct when skill.Duration > 0.0 ->
+                    let lasts = skill.Duration * Mods.mult ctx [ SkillDuration ] mods
+                    { w with
+                        Agonies = (actor.Name, skill.Name, target.Def.Name, target.Life, pct / 100.0, w.Time + useTime + lasts) :: (w.Agonies |> List.filter (fun (a, s, _, _, _, _) -> not (a = actor.Name && s = skill.Name)))
+                        Counts = bump ("recording:" + skill.Name) w.Counts }
+                | _ -> w
             // an infusion a part needed is used up; a part that waits is put down
             let w =
                 skill.Parts |> List.fold (fun w p ->
@@ -1418,6 +1431,8 @@ module Sim =
                     && (match warpsInto s with
                         | Some gem -> ballInFlight actor.Name gem w || (aimed env w |> Option.exists (fun e -> (status e).ContainsKey "Cullable"))
                         | None -> true)
+                    // a recording debuff is left to run out
+                    && not (w.Agonies |> List.exists (fun (a, b, _, _, _, _) -> a = actor.Name && b = s.Name))
                     // a seed still in an enemy is not planted over
                     && not (w.Bombs |> List.exists (fun (a, b, _, _, _, _) -> a = actor.Name && b = s.Name)))
             usable |> List.tryFind (fun step -> affordable (skillOf actor step.Use)) |> Option.orElse (List.tryHead usable)
@@ -2450,6 +2465,24 @@ module Sim =
                             match aimed env w with
                             | Some other -> drop w |> schedule w.Time (Strike(owner, skill, 1.0, other.Def.Name))
                             | None -> drop w) w
+            // recorded damage is taken again as life when the debuff ends, or as soon as that kills
+            let w =
+                if w.Agonies.IsEmpty then w
+                else
+                    w.Agonies |> List.fold (fun w ((_, skill, enemy, mark, share, until) as a) ->
+                        let drop w = { w with Agonies = w.Agonies |> List.filter (fun x -> x <> a) }
+                        match Map.tryFind enemy w.Enemies with
+                        | Some e when e.Life > 0.0 ->
+                            let owed = share * max 0.0 (mark - e.Life)
+                            if w.Time >= until || owed >= e.Life then
+                                let dealt = min owed e.Life
+                                let dead = owed >= e.Life
+                                { drop w with
+                                    Enemies = Map.add enemy { e with Life = (if dead then 0.0 else e.Life - dealt) } w.Enemies
+                                    DamageBy = addf skill dealt w.DamageBy
+                                    Kills = if dead then (enemy, e.Def.Rarity, w.Time) :: w.Kills else w.Kills }
+                            else w
+                        | _ -> drop w) w
             // Demon Form: a Demonflame for every second in the form (at most 10), life lost for
             // each; at 1 life the form ends and its cooldown starts
             let w =
@@ -2755,7 +2788,8 @@ module Sim =
               Uptime = Map.empty
               Kills = []
               CorpsesUsed = 0
-              Bombs = [] }
+              Bombs = []
+              Agonies = [] }
             |> fun w -> actors |> List.fold (fun w a -> schedule 0.0 (Ready a.Name) w) w
             |> fun w -> actors |> List.fold (fun w a -> a.Cycles |> List.fold (fun w c -> schedule 0.0 (CycleTick(a.Name, c.Name)) w) w) w
             |> fun w -> actors |> List.fold scheduleResourceTimers w

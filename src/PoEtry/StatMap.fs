@@ -352,6 +352,7 @@ module StatMap =
         | "charge_mastery_crit_chance_+%_final_with_power_charges" -> one (Mod.more CritChance v |> Mod.whenever (WhileBuff "PowerCharge"))
         | "charge_mastery_armour_evasion_energy_shield_+%_final_with_endurance_charges" | "charge_mastery_defences_+%_final_with_endurance_charges" ->
             Some(Mods [ for st in [ Armour; Evasion; MaxEnergyShield ] -> Mod.more st v |> Mod.whenever (WhileBuff "EnduranceCharge") ])
+        | "curse_pain_synchronisation_base_recorded_damage_%_to_apply" -> one (Mod.base' (Named "RecordsDamage") v)
         | "banner_aura_effect_+%" -> one (Mod.inc (Named "BannerEffect") v)
         | "attacks_roll_crits_twice" -> one (Mod.flag (Named "BifurcateCrits") |> Mod.whenever (SkillIs Attack))
         | "oracle_hits_eventually_crit_with_critical_strike_multiplier_+%_final_per_failed_roll" -> one (Mod.flag (Named "InevitableCrits"))
