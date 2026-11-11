@@ -248,7 +248,8 @@ module Pob =
                 | Some o when reflects text && not (reflects o) -> slot, o
                 | _ -> slot, text)
         let extraNodes = allocatedByItems tree (List.map snd items)
-        let build = { build with TreeNodes = build.TreeNodes @ extraNodes }
+        // a passive allocated on the tree and by an item still counts once
+        let build = { build with TreeNodes = List.distinct (build.TreeNodes @ extraNodes) }
         // Radius jewels: "Notable / Small Passive Skills in Radius also grant X" gives X once per
         // allocated passive of that kind within the jewel's radius of its socket.
         let radiusMods, items =
