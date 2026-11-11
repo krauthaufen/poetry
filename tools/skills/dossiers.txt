@@ -1678,8 +1678,8 @@
   set Hexblast         hexblast_maximum_number_of_explosions=10 active_skill_base_area_of_effect_radius=20 active_skill_base_secondary_area_of_effect_radius=28  | spell_minimum_base_chaos_damage spell_maximum_base_chaos_damage is_area_damage can_perform_skill_while_moving show_curse_hexblastable
   play: spam Hexblast
   built Hexblast                           x1.00, 1.00s, cd None x1, cost 127 +0/s, hits [(1.0, 1.0)], area 20
-  fight: 733 dps; Hexblast (hit) 100%
-         hits:Hexblast 14, uses:Hexblast 15
+  fight: 0 dps; 
+         
 
 #### High Velocity Rounds   [Attack ConsumesFullyBrokenArmour CrossbowAmmoSkill MirageArcherCanUse ReservesManually]   needs: Crossbow
   Load your Crossbow with Piercing bolts that apply Riven Armour to enemies with Fully Broken Armour, causing any Hits against those enemies to deal extra damage.
@@ -2321,10 +2321,10 @@ Purple Flames of Chayula for a duration.
   Skewer a Skeleton on a bone spike to send nearby Minions into a frenzy as long as the spike remains, making their skills faster and harder hitting.  The bone spike is itself a Minion. If it dies, the effect ends immediately.
   level 20: cost Some 110.0 (per minute None), cooldown None xNone, multiplier None, crit None
   set Pain Offering    base_skill_effect_duration=6000 base_secondary_skill_effect_duration=6000 active_skill_base_area_of_effect_radius=60 base_number_of_pain_offerings_allowed=1  | pain_offering_attack_and_cast_speed_+% pain_offering_damage_+% can_perform_skill_while_moving
-  play: spam Pain Offering
+  play: buff Pain Offering
   built Pain Offering                      x1.00, 0.60s, cd None x1, cost 110 +0/s, hits [], area 60
   fight: 0 dps; 
-         uses:Pain Offering 31
+         uses:Pain Offering 4
   types without a model: Offering
 
 #### Parry   [ActiveBlock Attack Channel Duration Melee Physical RequiresBuckler]   needs: One Hand Mace
@@ -3477,8 +3477,8 @@ Purple Flames of Chayula for a duration.
   play: spam Supporting Fire
   built Supporting Fire                    x1.00, 0.00s, cd None x1, cost 0 +0/s, hits [], single
   minion Artillery Squad: Artillery Squad: Death From Above
-  fight: 181 dps; Artillery Squad: Death From Above (hit) 100%
-         hits:Artillery Squad: Death From Above 2, uses:Artillery Squad: Death From Above 3, uses:Supporting Fire 607
+  fight: 1309 dps; Artillery Squad: Death From Above (hit) 100%
+         crits:Artillery Squad: Death From Above 2, hits:Artillery Squad: Death From Above 12, uses:Artillery Squad: Death From Above 3, uses:Supporting Fire 607
   types without a model: CommandableMinion, MinionsAreUndamagable
 
 #### Tame Beast   [Companion Duration Minion]

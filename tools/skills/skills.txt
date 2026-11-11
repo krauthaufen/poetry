@@ -67,7 +67,7 @@ Frost Bomb                   used by 13  sets: Frost Bomb
     Create a pulsing Orb of frost. Each pulse inflicts Elemental Exposure on nearby enemies. When the Orb's duration ends, it Detonates, dealing Cold damage to surrounding enemies and leaving behind a Cold Infusion.
     types without a model: DetonatesAfterTime, Orb
     unmapped: base_maximum_number_of_frost_bombs
-    not simulated: frost_bomb_exposure_does_not_apply_to_enemies_of_level_higher_than_X, active_skill_all_elemental_exposure_compounding_magnitude, active_skill_all_elemental_exposure_compounding_magnitude_cap
+    not simulated: frost_bomb_exposure_does_not_apply_to_enemies_of_level_higher_than_X
 Sniper's Mark                used by 13  sets: Sniper's Mark
     Mark a target. The next Critical Hit the target receives Activates the Mark, Consuming it to deal extra damage and grant you a Frenzy Charge.
     types without a model: GeneratesCharges
@@ -175,7 +175,7 @@ Overwhelming Presence        used by  7  sets: Overwhelming Presence
 Pain Offering                used by  7  sets: Pain Offering
     Skewer a Skeleton on a bone spike to send nearby Minions into a frenzy as long as the spike remains, making their skills faster and harder hitting.  The bone spike is itself a Minion. If it dies, the effect ends immediately.
     types without a model: Offering
-    unmapped: pain_offering_attack_and_cast_speed_+%, pain_offering_damage_+%, base_number_of_pain_offerings_allowed
+    unmapped: base_number_of_pain_offerings_allowed
 Profane Ritual               used by  7  sets: Profane Ritual
     Mark a Corpse with a profane rune, dealing Chaos damage over time to nearby enemies. When the ritual is complete the Corpse is consumed and you gain a Power Charge.
     types without a model: CreatesGroundRune, DegenOnlySpellDamage, GeneratesCharges, TargetsDestructibleCorpses
@@ -1197,7 +1197,7 @@ Solar Orb                    used by  0  sets: Pulse, Ignite
 Soul Offering                used by  0  sets: Soul Offering
     Skewer a Skeleton on a bone spike, granting you a powerful Spell damage Buff as long as the spike remains. Does not affect your Minions.  The bone spike is itself a Minion. If it dies, the effect ends immediately.
     types without a model: Offering
-    unmapped: power_offering_buff_spell_damage_+%, base_number_of_power_offerings_allowed
+    unmapped: base_number_of_power_offerings_allowed
 Spear of Solaris             used by  0  sets: Impact, Pulse, Ignited Ground
     Build Glory by inflicting Freeze, Shock or Ignite on enemies. When you have maximum Glory you may call forth the Azmeri goddess Solaris, jumping backwards and throwing your Spear in the air. On landing the spear deals heavy damage in an area, then calls a divine skybeam that pulses periodically and creates expanding Ignited Ground. Modifiers to number of Projectiles fired do not apply to this skill.
     types without a model: CreatesGroundEffect
