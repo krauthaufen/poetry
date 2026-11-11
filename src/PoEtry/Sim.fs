@@ -894,6 +894,15 @@ module Sim =
     let private partNamed (p: Skill) (prefix: string) =
         p.Mods |> List.tryPick (fun m -> match m.Stat with Named n when n.StartsWith prefix -> Some(n.Substring prefix.Length) | _ -> None)
 
+    /// "Can also be used on Ball Lightning Projectiles": the skill a warp can go into, and
+    /// whether one of its projectiles is still on its way (it has strikes to come).
+    let private warpsInto (skill: Skill) = partNamed skill "WarpsInto:"
+    let private ballInFlight (actorName: string) (gem: string) (w: World) =
+        w.Queue |> Map.exists (fun _ ev ->
+            match ev with
+            | Strike (a, name, _, _) -> a = actorName && (name = gem || name.StartsWith(gem + " "))
+            | _ -> false)
+
     /// Barrage: the readied repeats waiting for the next Repeatable bow or spear attack.
     let private barraged (skill: Skill) (st: ActorState) =
         if skill.Tags.Contains(Tag "Type:Barrageable") && skill.Tags.Contains Attack then
@@ -1187,6 +1196,21 @@ module Sim =
                 | [] -> w
                 | reqs -> updateActor actor.Name (fun st -> { st with Energy = reqs |> List.fold (fun e (key, _) -> Map.remove key e) st.Energy }) w
             let w = if skill.Tags.Contains(Tag "Type:TargetsDestructibleCorpses") && w.Kills.Length > w.CorpsesUsed then { w with CorpsesUsed = w.CorpsesUsed + 1 } else w
+            // a warp into one's own projectile: the projectile is gone (what it had still to do
+            // with it), and the warp's explosion happens whatever state the enemy is in
+            let w =
+                match warpsInto skill with
+                | Some gem when ballInFlight actor.Name gem w ->
+                    { w with
+                        Queue =
+                            w.Queue |> Map.filter (fun _ ev ->
+                                match ev with
+                                | Strike (a, name, _, _) -> not (a = actor.Name && (name = gem || name.StartsWith(gem + " ")))
+                                | _ -> true)
+                        Counts = bump ("warped into:" + gem) w.Counts }
+                    |> updateActor actor.Name (fun st ->
+                        { st with Buffs = st.Buffs |> Map.remove (gem + " buff") |> Map.add ("Warped:" + skill.Name) { Name = "Warped:" + skill.Name; Mods = []; Stacks = 1; Expires = infinity } })
+                | _ -> w
             // chained attacks: this use's place in the chain, and the next
             let step = seqStep skill st
             let w =
@@ -1364,6 +1388,10 @@ module Sim =
                 actor.Rotation |> List.filter (fun step ->
                     let s = skillOf actor step.Use
                     step.When v && ready st w.Time s && (corpses > 0 || not (needsCorpse s)) && built st s
+                    // a warp needs something to warp into: an enemy that can be culled, or a projectile
+                    && (match warpsInto s with
+                        | Some gem -> ballInFlight actor.Name gem w || (aimed env w |> Option.exists (fun e -> (status e).ContainsKey "Cullable"))
+                        | None -> true)
                     // a seed still in an enemy is not planted over
                     && not (w.Bombs |> List.exists (fun (a, b, _, _, _, _) -> a = actor.Name && b = s.Name)))
             usable |> List.tryFind (fun step -> affordable (skillOf actor step.Use)) |> Option.orElse (List.tryHead usable)
@@ -1619,6 +1647,10 @@ module Sim =
                 skill.Mods |> List.tryPick (fun m -> match m.Stat with Named n when n.StartsWith "NotVs:" -> Some(n.Substring 6) | _ -> None)
                 |> Option.map (fun (st: string) -> st.Split '|' |> List.ofArray) |> Option.defaultValue []
             let takes = skill.Mods |> List.tryPick (fun m -> match m.Stat with Named n when n.StartsWith "Takes:" -> Some(n.Substring 6) | _ -> None)
+            // a warp into a projectile explodes there, whatever the enemy's state
+            let warped = (Map.find actor.Name w.Actors).Buffs.ContainsKey("Warped:" + skill.Name)
+            let w = if warped then updateActor actor.Name (fun st -> { st with Buffs = Map.remove ("Warped:" + skill.Name) st.Buffs }) w else w
+            let states, consumesVs = if warped then [], false else states, consumesVs
             if not states.IsEmpty && not (states |> List.exists enemyStatus.ContainsKey) then w
             elif notVs |> List.exists enemyStatus.ContainsKey then w
             else

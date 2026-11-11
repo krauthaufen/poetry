@@ -403,7 +403,7 @@ module Gems =
               ("Solar Orb", "Ignite"), [ "NoHit"; "Ignites" ]
               ("Flame Wall", "Projectile Damage"), [ "NoHit" ]
               ("Gathering Storm", "Tempest Shockwave"), [ "Vs:TempestBell" ]
-              ("Lightning Warp", ""), [ "Vs:Cullable" ]
+              ("Lightning Warp", ""), [ "Vs:Cullable"; "WarpsInto:Ball Lightning" ]
               ("His Vile Intrusion", ""), [ "Vs:Cullable" ]
               ("Detonate Living", ""), [ "Vs:Cullable" ]
               ("Power Siphon", ""), [ "Vs:Cullable" ] ]
@@ -415,7 +415,7 @@ module Gems =
             if c.StartsWith "Vs:" then
                 let states = c.Substring 3
                 if states.EndsWith "!" then [ Mod.flag (Named("OnlyVs:" + states.TrimEnd '!')); Mod.flag (Named "ConsumesVs") ] else [ Mod.flag (Named("OnlyVs:" + states)) ]
-            elif c.StartsWith "NotVs:" || c.StartsWith "Takes:" then [ Mod.flag (Named c) ]
+            elif c.StartsWith "NotVs:" || c.StartsWith "Takes:" || c.StartsWith "WarpsInto:" then [ Mod.flag (Named c) ]
             elif c.StartsWith "Seq:" then
                 let parts = (c.Substring 4).Split '/'
                 [ Mod.flag (Named("SeqSteps:" + parts.[0])); Mod.base' (Named "SeqLength") (float parts.[1]) ]

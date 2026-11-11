@@ -285,6 +285,20 @@ let main _ =
         equal 4 o.Counts.["hits:Jab"]
         equal 3 o.Counts.["hits:Bell: Wave"])
 
+    test "warp into one's own projectile: only with one on its way; it ends the projectile and explodes" (fun () ->
+        // Ball: 1 s cast, then a bolt every second for four seconds. Warp: only against a
+        // cullable enemy or into a Ball, 0.5 s
+        let ball = { fireSpell 10.0 with Name = "Ball" }
+        let warp = { fireSpell 1000.0 with Name = "Warp"; BaseTime = 0.5; Mods = [ Mod.flag (Named "OnlyVs:Cullable"); Mod.flag (Named "WarpsInto:Ball") ] }
+        let f = { Fight.single (boss 1e12) (Actor.make "Player" [ noIgnite ] [ warp; ball ]) 6.2 with MaxTime = 6.2 }
+        let f = { f with Player = { f.Player with HitPattern = Map.ofList [ "Ball", [ for k in 1 .. 4 -> After(float k), 1.0 ] ] } }
+        let o = Sim.run f 1u
+        // Ball at 0 s, its first bolt at 1 s; the warp then (the other three bolts never come)
+        // explodes at 1.5 s; and so on every 1.5 s: four balls, four bolts, four warps
+        equal 4 o.Counts.["warped into:Ball"]
+        near 40.0 o.DamageBy.["Ball (hit)"]
+        near 4000.0 o.DamageBy.["Warp (hit)"])
+
     test "banner: attack hits build its Glory, then its aura lasts for the duration" (fun () ->
         // 200 Glory at 100% of 20 per hit: placed with the tenth hit (10 s) and the twentieth.
         // 4 s of 100% more damage: the hits at 11, 12 and 13 s are doubled, the one at 14 s is not

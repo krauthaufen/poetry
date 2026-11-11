@@ -399,7 +399,10 @@ module Setup =
                     let barrage = p.Skill.Mods |> List.exists (fun m -> m.Stat = Named "BarrageRepeats" && m.Value > 0.0)
                     let mainRepeats = Gems.data c.Db mainGem |> Option.exists (fun m -> m.Types.Contains "Barrageable")
                     let tipped = p.Rules |> List.exists (fun r -> match r.Reaction with SetStacks (b, _) -> b.StartsWith "EmpoweredRepeatable:" | _ -> false)
-                    if barrage || tipped then (if mainRepeats then Some(OnCooldown x.Name) else None)
+                    // a warp is used into the main skill's projectile whenever there is one
+                    let warps = p.Skill.Mods |> List.exists (fun m -> m.Stat = Named("WarpsInto:" + mainGem))
+                    if warps then Some(OnCooldown x.Name)
+                    elif barrage || tipped then (if mainRepeats then Some(OnCooldown x.Name) else None)
                     elif skip then None
                     // a skill that needs Glory or Combo is used whenever it has enough
                     elif needsBuilding then Some(OnCooldown x.Name)
@@ -521,13 +524,7 @@ module Setup =
         { Actor.make "Player" (sheet.Mods @ (used |> List.collect (fun (_, p) -> p.Grants))) (pressedSkills @ (metas |> List.collect (fun (_, s, _) -> s)) @ (consumers |> List.map (fun (_, _, cp) -> cp)) @ heraldSkills @ (used |> List.collect (fun (_, p) -> p.Extra))) with
             Rotation = steps
             OverkillBurns = overkillBurns
-            // the infused copy of a skill hits in the same pattern
-            HitPattern =
-                used |> List.collect (fun (_, p) ->
-                    match p.Pattern with
-                    | Some pat -> (p.Skill.Name, pat) :: (consumers |> List.choose (fun (n, _, cp) -> if n = p.Skill.Name then Some(cp.Name, pat) else None))
-                    | None -> [])
-                |> Map.ofList
+            HitPattern = used |> List.choose (fun (_, p) -> p.Pattern |> Option.map (fun pat -> p.Skill.Name, pat)) |> Map.ofList
             Rules = grantRules @ (used |> List.collect (fun (_, p) -> p.Rules)) @ heraldRules @ Behaviours.keywordRules sheet pressedSkills
             Metas = metas |> List.map (fun (m, _, _) -> m)
             Infusions = infusionSetup
