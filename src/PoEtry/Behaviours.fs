@@ -586,10 +586,13 @@ module Behaviours =
     /// "..._number_of_pulses", else duration / interval.
     let sustained (db: GameDb) (charMods: ModDb) (setup: GemSetup) (skill: Skill) : ((HitTiming * float) list * Rule list) option =
         match Gems.data db setup.Gem with
-        | Some d when d.Types.Contains "Sustained" ->
+        | Some d when d.Types.Contains "Sustained" || (Gems.rawStats db charMods { setup with Supports = [] } |> List.exists (fun (k, v) -> k.EndsWith "_hit_interval_ms" && v > 0.0)) ->
+            // a projectile that keeps hitting what it stays on (Twister: "..._hit_interval_ms" for
+            // its duration) is used again and again; a Sustained effect stands and isn't recast
+            let stands = d.Types.Contains "Sustained"
             let own = Gems.rawStats db charMods { setup with Supports = [] }
             let pick (endings: string list) = own |> List.tryPick (fun (k, v) -> if v > 0.0 && endings |> List.exists (fun (e: string) -> k.EndsWith e) then Some v else None)
-            let interval = pick [ "_frequency_ms"; "_pulse_delay_ms"; "_pulse_interval_ms"; "_every_x_ms"; "_fireball_delay_ms" ] |> Option.map (fun v -> v / 1000.0)
+            let interval = pick [ "_frequency_ms"; "_pulse_delay_ms"; "_pulse_interval_ms"; "_every_x_ms"; "_fireball_delay_ms"; "_hit_interval_ms" ] |> Option.map (fun v -> v / 1000.0)
             let fixedCount = pick [ "_maximum_number_of_hits"; "_number_of_pulses" ]
             let ctx = { Ctx.empty with SkillTags = skill.Tags; SkillName = skill.Name }
             let duration = skill.Duration * Mods.mult ctx [ SkillDuration ] (ModDb.ofList (ModDb.toList charMods @ skill.Mods))
@@ -603,7 +606,7 @@ module Behaviours =
                 let lasts = if duration > 0.0 then duration else float n * dt
                 Some(
                     [ for k in 1 .. n -> After(float k * dt), 1.0 ],
-                    [ { Hook = OnUse; Filter = Called skill.Name; Chance = 100.0; Reaction = GrantBuff(skill.Name + " buff", lasts, 1, []) } ])
+                    (if stands then [ { Hook = OnUse; Filter = Called skill.Name; Chance = 100.0; Reaction = GrantBuff(skill.Name + " buff", lasts, 1, []) } ] else []))
             | _ -> None
         | _ -> None
 
