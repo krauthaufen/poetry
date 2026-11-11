@@ -1098,7 +1098,13 @@ module Behaviours =
                 let n =
                     match fixedCount with
                     | Some c -> int c
-                    | None -> if duration > 0.0 then int (duration / dt) else 1
+                    | None when duration > 0.0 -> int (duration / dt)
+                    | None ->
+                        // a slow projectile that strikes what is near as it passes (Ball Lightning):
+                        // for as long as the target is within its radius
+                        match Map.tryFind setup.Gem Constants.passingProjectileSpeed, pick [ "active_skill_base_area_of_effect_radius" ] with
+                        | Some speed, Some r -> int (2.0 * (r + Constants.passedMonsterRadius) / speed / dt + 1e-9)
+                        | _ -> 1
                 let n = max 1 (min 200 n)
                 let lasts = if duration > 0.0 then duration else float n * dt
                 Some(

@@ -364,6 +364,15 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         near 70.0 (Behaviours.spiritUses db.Value (sheetOf plain) plain |> List.sumBy (fun u -> u.Flat))
         near 1.0 (Setup.loadWith db.Value treeJson plain Options.defaults).Vitals.StartLife)
 
+    test "Ball Lightning: a bolt every 0.2 s for as long as the target is within its radius" (fun () ->
+        let setup = { Gem = "Ball Lightning"; Level = 20; Quality = 0; StatSet = 1; Supports = [] }
+        match Gems.skill db.Value ModDb.empty None setup with
+        | Ok (s, _) ->
+            // radius 18 and a boss of 10 on either side, at 40 units per second: 1.4 s, seven bolts
+            let pattern, _ = (Behaviours.sustained db.Value ModDb.empty setup s).Value
+            equal 7 pattern.Length
+        | Error e -> failwith e)
+
     test "perfect timing: the perfect hit replaces the normal one; the release follows the channel" (fun () ->
         let flag name (sk: Skill) = Mods.flag { Ctx.empty with SkillName = sk.Name } (Named name) (ModDb.ofList sk.Mods)
         let mace = (Items.parse db.Value "Rarity: Normal\nAkoyan Club\n--------\n").Weapon

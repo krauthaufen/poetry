@@ -509,7 +509,13 @@ module Setup =
         { Actor.make "Player" (sheet.Mods @ (used |> List.collect (fun (_, p) -> p.Grants))) (pressedSkills @ (metas |> List.collect (fun (_, s, _) -> s)) @ (consumers |> List.map (fun (_, _, cp) -> cp)) @ heraldSkills @ (used |> List.collect (fun (_, p) -> p.Extra))) with
             Rotation = steps
             OverkillBurns = overkillBurns
-            HitPattern = used |> List.choose (fun (_, p) -> p.Pattern |> Option.map (fun pat -> p.Skill.Name, pat)) |> Map.ofList
+            // the infused copy of a skill hits in the same pattern
+            HitPattern =
+                used |> List.collect (fun (_, p) ->
+                    match p.Pattern with
+                    | Some pat -> (p.Skill.Name, pat) :: (consumers |> List.choose (fun (n, _, cp) -> if n = p.Skill.Name then Some(cp.Name, pat) else None))
+                    | None -> [])
+                |> Map.ofList
             Rules = grantRules @ (used |> List.collect (fun (_, p) -> p.Rules)) @ heraldRules @ Behaviours.keywordRules sheet pressedSkills
             Metas = metas |> List.map (fun (m, _, _) -> m)
             Infusions = infusionSetup

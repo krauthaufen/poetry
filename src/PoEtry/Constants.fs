@@ -162,3 +162,11 @@ module Constants =
 
     /// Revealing Weaknesses: "occupy a total of 45% of their maximum Life" (keyword text).
     let revealedWeaknessLifeShare = 0.45
+
+    /// Slow projectiles that hit from a distance as they pass (game table Projectiles,
+    /// ProjectileSpeed): Ball Lightning 400. Read as tenths of a unit per second (an arrow's
+    /// 3260 is then 33 m/s, a Fireball's 1040 10 m/s): a guess at the unit.
+    let passingProjectileSpeed = Map.ofList [ "Ball Lightning", 40.0 ]
+
+    /// Radius (units) of the monster such a projectile passes: a boss is 10, others 4.
+    let passedMonsterRadius = 10.0
