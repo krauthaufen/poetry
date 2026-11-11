@@ -197,6 +197,21 @@ type PeriodicAction =
     /// stack runs out separately (Flames of Chayula). `mods` are per stack.
     | GainTimedBuff of buff: string * chance: float * duration: float * maxStacks: int * mods: Mod list
 
+/// Mana Remnants: a remnant on a critical hit against an enemy with an elemental ailment (at
+/// most one per `CritCooldown` seconds) and by chance on killing one; collected, each gives
+/// mana, which can overflow the maximum.
+type ManaRemnants =
+    { OnKillChance: float
+      CritCooldown: float
+      ManaPerRemnant: float
+      /// "Recover N% of Maximum Mana when you collect a Remnant".
+      PercentOfMaxMana: float
+      ExtraChance: float
+      /// Seconds from creation until the mana arrives (collecting).
+      Delay: float
+      /// Mana can overflow to this multiple of its maximum.
+      Overflow: float }
+
 type Periodic =
     { Name: string
       Every: float
@@ -243,6 +258,7 @@ type Actor =
       /// Stored cooldown uses recharge at the same time (true) or one after another (false).
       ParallelUses: bool
       WardRemnants: WardRemnants option
+      ManaRemnants: ManaRemnants option
       /// The actor only acts while the player has this buff (a totem while it stands).
       ActiveWhile: string option
       Infusions: Infusions option
@@ -270,6 +286,7 @@ module Actor =
           KeptChargesPause = 0.0
           ParallelUses = false
           WardRemnants = None
+          ManaRemnants = None
           ActiveWhile = None
           Infusions = None
           Archons = []
@@ -363,6 +380,8 @@ module Sim =
         | PeriodicTick of actor: string * periodic: string
         /// A ward remnant's ward arrives.
         | WardArrives of amount: float
+        /// A mana remnant's mana arrives.
+        | ManaArrives of amount: float
         /// Stacks of a resource arrive (picked-up infusion remnants, Verisium).
         | GainStacks of actor: string * resource: string * count: int
         /// One stack of a buff is used up (an empowered attack has landed).
@@ -417,6 +436,7 @@ module Sim =
           Ward: float
           InfernalFlame: float
           LastStunRemnant: float
+          LastManaRemnant: float
           /// Life still to be recovered from leech.
           LifeLeechPool: float
           StrikeLifeLeech: float
@@ -1623,6 +1643,19 @@ module Sim =
                             { w with Counts = bump "ward remnant" w.Counts } |> schedule (w.Time + r.Delay) (WardArrives(r.WardPerRemnant * count))
                         else w
                     | _ -> w
+                // Mana Remnants: from a critical hit on, or the kill of, an enemy with an elemental ailment
+                let w =
+                    match actor.ManaRemnants, w.Player with
+                    | Some r, Some p ->
+                        let ailing = [ "Ignited"; "Chilled"; "Frozen"; "Shocked"; "Electrocuted" ] |> List.exists (status e).ContainsKey
+                        let fromKill = dead && ailing && rng.Chance r.OnKillChance
+                        let fromCrit = hit.Crit && ailing && w.Time - p.LastManaRemnant >= r.CritCooldown
+                        if fromKill || fromCrit then
+                            let count = if rng.Chance r.ExtraChance then 2.0 else 1.0
+                            let w = if fromCrit then { w with Player = Some { p with LastManaRemnant = w.Time } } else w
+                            { w with Counts = bump "mana remnant" w.Counts } |> schedule (w.Time + r.Delay) (ManaArrives((r.ManaPerRemnant + r.PercentOfMaxMana / 100.0 * (actor.Vitals |> Option.map (fun v -> v.Mana) |> Option.defaultValue 0.0)) * count))
+                        else w
+                    | _ -> w
                 // Trinity: the hit's strongest element gains resonance (up to 100), the others lose some
                 let w =
                     let gain = Mods.sumBase ctx [ Named "TrinityGain" ] mods
@@ -2054,6 +2087,12 @@ module Sim =
                           "FullMana", p.Mana >= v.Mana
                           "LowMana", p.Mana <= 0.35 * v.Mana
                           "HasEnergyShield", p.EnergyShield > 0.0
+                          // a flask drunk and still working (a constant one is a resource the fight starts with)
+                          "ManaFlaskEffect", (w.Time < p.FlaskUntil || stacksOf (Map.find env.Fight.Player.Name w.Actors) "ConstantManaFlask" > 0)
+                          "LifeFlaskEffect", (w.Time < p.LifeFlaskUntil || stacksOf (Map.find env.Fight.Player.Name w.Actors) "ConstantLifeFlask" > 0)
+                          "FlaskEffect",
+                          (w.Time < p.FlaskUntil || w.Time < p.LifeFlaskUntil
+                           || (let st = Map.find env.Fight.Player.Name w.Actors in stacksOf st "ConstantManaFlask" > 0 || stacksOf st "ConstantLifeFlask" > 0))
                           "Leeching", p.Recoups |> List.exists (fun (until, _, pool) -> pool.StartsWith "Leech" && until > w.Time)
                           // surrounded: at least 5 monsters within 3 m (PoB SurroundedRadiusBase, game constant)
                           "Surrounded", (alive w |> List.filter (fun e -> Vec.length e.Def.Position - e.Def.Size <= 30.0) |> List.length) >= max 1 v.SurroundedAt ]
@@ -2079,6 +2118,10 @@ module Sim =
             | Strike (name, skill, mult, aimedAt) -> onStrike env rng name skill mult aimedAt w
             | EnemyAttack name -> enemyAttack env rng name w
             | PeriodicTick (name, periodic) -> onPeriodic env rng name periodic w
+            | ManaArrives amount ->
+                match env.Fight.Player.Vitals, env.Fight.Player.ManaRemnants, w.Player with
+                | Some v, Some r, Some p -> { w with Player = Some { p with Mana = min (max p.Mana (v.Mana * r.Overflow)) (p.Mana + amount * v.ManaRecoveryRate) } }
+                | _ -> w
             | WardArrives amount ->
                 match env.Fight.Player.Vitals, env.Fight.Player.WardRemnants, w.Player with
                 | Some v, Some r, Some p -> { w with Player = Some { p with Ward = min (v.Ward * r.Overflow) (p.Ward + amount) } }
@@ -2210,6 +2253,7 @@ module Sim =
                       Ward = v.Ward
                       InfernalFlame = 0.0
                       LastStunRemnant = -1e9
+                      LastManaRemnant = -1e9
                       LifeLeechPool = 0.0
                       StrikeLifeLeech = 0.0
                       LifeFlaskCharges = v.LifeFlask |> Option.map (fun f -> f.MaxCharges) |> Option.defaultValue 0.0

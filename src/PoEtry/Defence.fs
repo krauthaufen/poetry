@@ -204,10 +204,12 @@ module Defence =
           Evasion = evasion
           Deflection = deflection
           Resist = DamageType.all |> List.filter ((<>) Physical) |> List.map resist |> Map.ofList
-          LifeRegen = if ci || regenToES || onlyLeech then 0.0 else lifeRegen * lifeRecovery
+          LifeRegen = (if ci || regenToES || onlyLeech then 0.0 else lifeRegen * lifeRecovery) + (if ci then 0.0 else named "ConstantLifeRecovery" * lifeRecovery)
           ManaRegen =
             ((if flag "NoInherentManaRegen" then 0.0 else mana * manaRegenPercent / 100.0) + life * named "ManaRegenPercentOfLife" / 100.0)
             * Mods.mult c [ ManaRegen ] db * manaRecovery
+            // a flask that applies its effect constantly: recovery, not regeneration
+            + (if bloodMagic then 0.0 else named "ConstantManaRecovery" * manaRecovery)
           EnergyShieldRecharge =
             if flag "NoESRecharge" || lifeRecharges then 0.0
             else es * esRechargePercent / 100.0 * Mods.mult c [ Named "ESRechargeRate" ] db * esRecovery

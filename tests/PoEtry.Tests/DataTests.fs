@@ -321,6 +321,29 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         // rage is gone after a boss's introduction
         equal (box 0) (box (start blank boss "Rage")))
 
+    test "a flask that applies constantly is recovery per second and keeps flask effects on; Mana Remnants" (fun () ->
+        let flask = "Flask 1", "Rarity: Unique\nLavianga's Spirits\nGargantuan Mana Flask\n--------\nFlask: Recovers 64 Mana every 2 Seconds\nFlask: Consumes 10 of 75 Charges on use\n--------\nThis Flask cannot be Used but applies its Effect constantly"
+        let plain = Setup.loadWith db.Value treeJson blank Options.defaults
+        let c = Setup.loadWith db.Value treeJson { blank with Items = [ flask ] } Options.defaults
+        // 64 mana every 2 seconds: 32 per second on top of regeneration, and nothing left to drink
+        near (plain.Vitals.ManaRegen + 32.0) c.Vitals.ManaRegen
+        equal (box true) (box c.Sheet.ManaFlask.IsNone)
+        equal (box true) (box (c.Resources |> List.exists (fun (k, n) -> k = "ConstantManaFlask" && n = 1)))
+        // "during any Flask effect" is a condition on the flask effect
+        match StatMap.meaning "critical_strike_chance_+%_during_any_flask_effect" 20.0 with
+        | Mods [ m ] -> equal (box [ WhileBuff "FlaskEffect" ]) (box m.Conds)
+        | m -> failwithf "%A" m
+        // Mana Remnants at level 20: 281 mana each, one per 2 s from crits on ailing enemies, 25% on such kills
+        let gem name lvl = { Name = name; Level = lvl; Quality = 0; Enabled = true; IsSupport = false; StatSet = 1 }
+        let b = { blank with Groups = [ { Label = ""; Slot = ""; Enabled = true; Gems = [ gem "Mana Remnants" 20 ] } ]; ExtraLines = [ "Recover 2% of Maximum Mana when you collect a Remnant" ] }
+        match Behaviours.manaRemnants db.Value (sheetOf b) b 1.0 with
+        | Some r ->
+            near 281.0 r.ManaPerRemnant
+            near 2.0 r.CritCooldown
+            near 25.0 r.OnKillChance
+            near 2.0 r.PercentOfMaxMana
+        | None -> failwith "no mana remnants")
+
     test "low life only where the build keeps itself there; fewer enemies to be surrounded" (fun () ->
         let bonus = [ "30% increased Damage when on Low Life" ]
         let start b = (Setup.loadWith db.Value treeJson b Options.defaults).Vitals.StartLife

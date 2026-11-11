@@ -136,6 +136,9 @@ let runOne (path: string) : Result =
                     let str (x: string) = "\"" + esc x + "\""
                     let pressedSkill = player.Skills |> List.tryFind (fun sk -> sk.Name = pg)
                     obj [ "file", str file; "main", str mainGem; "pressed", str pg; "duration", sprintf "%.3f" out.Duration
+                          "starved", sprintf "%.3f" sum.Starved
+                          "mana", sprintf "%.0f" c.Vitals.Mana
+                          "cost", (match pressedSkill with Some sk -> sprintf "%.1f" (sk.Cost + sk.CostPerSecond * sk.BaseTime) | None -> "0")
                           "baseTime", (match pressedSkill with Some sk -> sprintf "%.4f" sk.BaseTime | None -> "0")
                           "play", str (play |> List.map (function Spam g -> "spam " + g | OnCooldown g -> "cd " + g | KeepBuff g -> "buff " + g | KeepCurse g -> "curse " + g | _ -> "?") |> String.concat "; ")
                           "startsWith", obj ((Setup.fight c o player boss).Player.Resources |> List.filter (fun (k, n) -> n > 0 && (k.EndsWith "Charge" || k = "Rage")) |> List.map (fun (k, n) -> k, string n))

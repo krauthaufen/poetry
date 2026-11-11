@@ -28,9 +28,10 @@ def side(f):
     if not o: return None
     c, d, pr = o["counts"], o["damage"], o["pressed"]
     # the skill itself, its infused form and its parts ("X infused", "X: Explosion")
-    own = lambda k: k == pr or k.startswith(pr + " infused") or k.startswith(pr + ": ")
+    prl = pr.lower()
+    own = lambda k: k.lower() == prl or k.lower().startswith(prl + " infused") or k.lower().startswith(prl + ": ")
     tot = lambda prefix: sum(v for k, v in c.items() if k.startswith(prefix) and own(k[len(prefix):]))
-    uses, hits, crits = c.get("uses:" + pr, 0), tot("hits:"), tot("crits:")
+    uses, hits, crits = sum(v for k, v in c.items() if k.lower() == "uses:" + prl), tot("hits:"), tot("crits:")
     hit_dmg = sum(v for k, v in d.items() if k.endswith(" (hit)") and own(k[:-6]))
     total = sum(d.values())
     dot = sum(v for k, v in d.items() if "(hit)" not in k)
@@ -40,7 +41,7 @@ def side(f):
 
 def ratio(a, b): return "%6.2f" % (a / b) if b else "     -"
 
-if len(sys.argv) > 1:
+if len(sys.argv) > 1 and sys.argv[1].isdigit():
     f = next(k for k in ours if k.startswith(sys.argv[1]))
     s = side(f)
     print(f, "| pressed", s["o"]["pressed"], "| play:", s["o"]["play"], "| starts with", s["o"]["startsWith"])
@@ -65,6 +66,11 @@ for f in sorted(ours):
     rows.append((s["hitdps"] / their_dps if their_dps else 9e9, f[:34], ratio(s["uses"] * s["hpu"], h.get("Speed", 0)), "%5.1f/%5.1f" % (s["crit"], h.get("CritChance", 0)),
                  ratio(s["avg"], their_hit), ratio(s["hitdps"], their_dps), "%9.0f/%9.0f" % (s["dot"], h.get("TotalDotDPS", 0)),
                  " ".join(k.replace("condition", "").replace("multiplier", "") + ("=" + str(cfg[k]) if not isinstance(cfg[k], bool) else "") for k in ASSUME if cfg.get(k) and k not in ("enemyIsBoss", "multiplierNearbyEnemies"))))
+if "--starved" in sys.argv:
+    for f in sorted(ours, key=lambda f: -float(ours[f].get("starved", 0))):
+        o = ours[f]
+        if float(o.get("starved", 0)) >= 0.2: print("%-40s waits for mana %3.0f%% of the time; mana %s, the pressed skill costs %s" % (f[:40], 100 * float(o["starved"]), o["mana"], o["cost"]))
+    sys.exit(0)
 rows.sort()
 print("%-34s %6s %11s %6s %6s %19s  %s" % ("character (main skill pressed)", "hits/s", "crit o/p", "avghit", "hitdps", "other dps o/p", "PoB assumes"))
 for r in rows: print("%-34s %6s %11s %6s %6s %19s  %s" % r[1:])

@@ -443,9 +443,25 @@ module Pob =
                 |> List.sumBy (fun n ->
                     allocated |> List.filter (fun m -> m.IsNotable && m.Id <> n.Id && (List.contains m.Id n.Connections || List.contains n.Id m.Connections)) |> List.length)
             treeMods |> List.map (fun m -> if m.Stat = Named "ArmourPerConnectedNotable" then { m with Stat = Armour; Value = m.Value * float connected } else m)
+        // "This Flask cannot be Used but applies its Effect constantly" (Lavianga's Spirits): not
+        // a flask to drink but so much life or mana per second, and its effect is always on
+        let constant (text: string) = text.Contains "cannot be Used but applies its Effect constantly"
+        let constantFlaskMods =
+            build.Items
+            |> List.filter (fun (slot, text) -> slot.StartsWith "Flask" && constant text)
+            |> List.collect (fun (slot, text) ->
+                let p = Items.parse db text
+                let per (f: (float * float * float * float) option) = match f with Some (amount, every, _, _) when every > 0.0 -> amount / every | _ -> 0.0
+                [ if per p.ManaFlask > 0.0 then
+                      yield Mod.base' (Named "ConstantManaRecovery") (per p.ManaFlask)
+                      yield Mod.flag (Named "ConstantFlask:Mana")
+                  if per p.LifeFlask > 0.0 then
+                      yield Mod.base' (Named "ConstantLifeRecovery") (per p.LifeFlask)
+                      yield Mod.flag (Named "ConstantFlask:Life") ]
+                |> List.map (Mod.from (slot + ": " + p.Name)))
         let flaskOf (pick: ParsedItem -> (float * float * float * float) option) =
             build.Items
-            |> List.filter (fun (slot, _) -> slot.StartsWith "Flask")
+            |> List.filter (fun (slot, text) -> slot.StartsWith "Flask" && not (constant text))
             |> List.tryPick (fun (_, text) ->
                 let p = Items.parse db text
                 pick p |> Option.map (fun f ->
@@ -465,7 +481,7 @@ module Pob =
         let swapSpirit =
             parsed |> List.sumBy (fun (slot, p) -> if slot.Contains "Swap" then p.Defences |> List.sumBy (fun (st, v) -> if st = Named "Spirit" then v else 0.0) else 0.0)
         let shieldMods = if swapSpirit > 0.0 then (Mod.base' (Named "SpiritOnSetTwo") swapSpirit |> Mod.from "weapon set two") :: shieldMods else shieldMods
-        { Mods = itemMods @ shieldMods @ legacies @ radiusMods @ treeMods @ (extraMods |> List.map (sourced "quest"))
+        { Mods = itemMods @ constantFlaskMods @ shieldMods @ legacies @ radiusMods @ treeMods @ (extraMods |> List.map (sourced "quest"))
           MainHand = mainHand
           Weapons = Option.toList mainHand @ Option.toList swapHand
           // the second weapon set's items keep their "... Swap" slot: Defence picks the set

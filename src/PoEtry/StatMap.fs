@@ -142,6 +142,11 @@ module StatMap =
             // "... per 15 strength": the character's attributes are stacks "Str" / "Dex" / "Int"
             | "per" :: n :: ("strength" | "dexterity" | "intelligence" as attr) :: tail when n <> "" && n |> Seq.forall System.Char.IsDigit ->
                 go (PerStack((match attr with "strength" -> "Str" | "dexterity" -> "Dex" | _ -> "Int"), float n) :: acc) tail
+            // "during any Flask effect", "while using a Flask", "during Mana Flask effect"
+            | "during" :: "any" :: "flask" :: "effect" :: tail | "during" :: "flask" :: "effect" :: tail | "while" :: "using" :: "flask" :: tail
+            | "during" :: "life" :: "or" :: "mana" :: "flask" :: "effect" :: tail -> go (WhileBuff "FlaskEffect" :: acc) tail
+            | "during" :: "mana" :: "flask" :: "effect" :: tail | "during" :: "mana" :: "flask" :: tail -> go (WhileBuff "ManaFlaskEffect" :: acc) tail
+            | "during" :: "life" :: "flask" :: "effect" :: tail | "while" :: "using" :: "life" :: "flask" :: tail -> go (WhileBuff "LifeFlaskEffect" :: acc) tail
             // "per 20 Spirit": the character's total Spirit as stacks
             | "per" :: n :: "spirit" :: tail when n <> "" && n |> Seq.forall System.Char.IsDigit -> go (PerStack("Spirit", float n) :: acc) tail
             // "... if 10 red supports socketed", "... if majority blue supports socketed"
@@ -291,6 +296,10 @@ module StatMap =
         | "your_life_cannot_change_while_you_have_energy_shield" -> one (Mod.flag (Named "LifeFrozenWithES"))
         // "You require N fewer enemies to be Surrounded" (the value is negative)
         | "required_enemies_to_be_considered_surrounded_offset" -> one (Mod.base' (Named "SurroundedOffset") v)
+        | "remnant_recover_%_mana_on_pickup" -> one (Mod.base' (Named "RemnantRecoverManaPercent") v)
+        // Mana Remnants' own numbers: read by Behaviours.manaRemnants
+        | "mana_remnants_mana_gain_per_globe" | "mana_remnants_spawn_remnant_on_crit_vs_elemental_ailment_enemy_every_X_ms"
+        | "mana_remnants_chance_to_spawn_orb_on_killing_enemy_with_elemental_ailment_%" -> Some Structural
         | "armour_+_per_1_spirit" -> one (Mod.base' Armour v |> Mod.whenever (PerStack("Spirit", 1.0)))
         | "double_evasion_rating_from_gloves_helmets_boots" -> one (Mod.flag (Named "DoubleEvasionHelmetGlovesBoots"))
         | "halve_evasion_rating_from_body" -> one (Mod.flag (Named "HalveEvasionBodyArmour"))
@@ -779,7 +788,7 @@ module StatMap =
         | id when id.StartsWith "dummy_stat_" || id.StartsWith "warping_rune_add_item_tag_" || id.StartsWith "quality_display_"
                   || id.StartsWith "pvp_" || id.StartsWith "replace_" || id.EndsWith "_art_variation" -> Some Structural
         // read by id where the mechanic lives (Behaviours): remnants, infusions, conflux, motes
-        | id when id.StartsWith "ward_remnants_" || id.StartsWith "infusion_remnants_" || id.StartsWith "skill_elemental_conflux_"
+        | id when id.StartsWith "ward_remnants_" || id.StartsWith "mana_remnants_mana_gain" || id.StartsWith "mana_remnants_spawn" || id.StartsWith "mana_remnants_chance" || id.StartsWith "infusion_remnants_" || id.StartsWith "skill_elemental_conflux_"
                   || id = "base_remnant_duration_ms" || id = "verisium_infusion_skill_number_of_verisium_infusion_to_grant" -> Some Structural
         // ---- more offence ----
         // projectile speed changes nothing here: projectiles land when the use hits

@@ -264,6 +264,33 @@ module Behaviours =
                               Delay = pickupSeconds + sum "remnant_delay_X_ms" / 1000.0
                               Overflow = 1.5 }))
 
+    /// Mana Remnants (the persistent gem with `mana_remnants_mana_gain_per_globe`), with its
+    /// group's supports. Collecting takes `pickupSeconds` (guess). Mana overflows to twice the
+    /// maximum (guess: the game only says it can overflow).
+    let manaRemnants (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) (pickupSeconds: float) =
+        let charMods = ModDb.ofList sheet.Mods
+        build.Groups
+        |> List.filter (fun g -> g.Enabled)
+        |> List.tryPick (fun g ->
+            let enabled = g.Gems |> List.filter (fun x -> x.Enabled)
+            enabled
+            |> List.tryPick (fun gem ->
+                if gem.IsSupport then None
+                else
+                    let supports = enabled |> List.filter (fun x -> x.IsSupport) |> List.map (fun x -> x.Name, x.Level)
+                    let raw = Gems.rawStats db charMods { Gem = gem.Name; Level = gem.Level; Quality = gem.Quality; StatSet = 1; Supports = supports }
+                    let sum id = raw |> List.filter (fun (k, _) -> k = id) |> List.sumBy snd
+                    if sum "mana_remnants_mana_gain_per_globe" <= 0.0 then None
+                    else
+                        Some
+                            { ManaRemnants.OnKillChance = sum "mana_remnants_chance_to_spawn_orb_on_killing_enemy_with_elemental_ailment_%"
+                              CritCooldown = sum "mana_remnants_spawn_remnant_on_crit_vs_elemental_ailment_enemy_every_X_ms" / 1000.0
+                              ManaPerRemnant = sum "mana_remnants_mana_gain_per_globe" * (1.0 + (sum "remnant_effect_+%" + Mods.sumInc Ctx.empty [ Named "RemnantEffect" ] charMods) / 100.0)
+                              PercentOfMaxMana = Mods.sumBase Ctx.empty [ Named "RemnantRecoverManaPercent" ] charMods
+                              ExtraChance = sum "chance_%_to_create_additional_remnant"
+                              Delay = pickupSeconds + sum "remnant_delay_X_ms" / 1000.0
+                              Overflow = 2.0 }))
+
     /// The elemental (and Verisium) infusions: maximum 3 each (BaseMaximumInfusionCount, plus
     /// "maximum X infusion stacks"), 20 s (BaseInfusionDurationMs, "infusion duration").
     let infusionResources = [ "FireInfusion"; "ColdInfusion"; "LightningInfusion"; "VerisiumInfusion" ]

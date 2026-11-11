@@ -182,8 +182,14 @@ module Setup =
         // "for each Corrupted Item Equipped"
         let corrupted = Behaviours.corruptedItems build
         let spectrums = build.Items |> List.filter (fun (slot, text) -> slot.StartsWith "Jewel" && text.Contains "Grand Spectrum") |> List.length
+        // a flask whose effect is constant: "during any Flask effect" always holds
+        let flaskFlags =
+            let sdb = ModDb.ofList sheet.Mods
+            [ for kind in [ "Mana"; "Life" ] do
+                if Mods.flag Ctx.empty (Named("ConstantFlask:" + kind)) sdb then
+                    yield "Constant" + kind + "Flask", 1 ]
         let maxResources =
-            (Pob.maxResources sheet @ moteMax @ o.MaxOverrides @ ((equipmentFlags @ supportFlags) |> List.map (fun f -> f, 1)) @ (if corrupted > 0 then [ "CorruptedItems", corrupted ] else [])
+            (Pob.maxResources sheet @ flaskFlags @ moteMax @ o.MaxOverrides @ ((equipmentFlags @ supportFlags) |> List.map (fun f -> f, 1)) @ (if corrupted > 0 then [ "CorruptedItems", corrupted ] else [])
              @ (if spectrums > 0 then [ "GrandSpectrum", spectrums ] else []))
             |> Map.ofList
         let startResources =
@@ -505,6 +511,7 @@ module Setup =
             // user: stored uses are "just two cooldowns"
             ParallelUses = not o.SequentialUses
             WardRemnants = Behaviours.wardRemnants db sheet c.Build o.Pickup
+            ManaRemnants = Behaviours.manaRemnants db sheet c.Build o.Pickup
             Archons = [ Behaviours.elementalArchon sheet ]
             Charms = (if o.Immortal || o.NoFlask then [] else c.Charms)
             ManaFlask =
