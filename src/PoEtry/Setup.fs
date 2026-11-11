@@ -463,7 +463,16 @@ module Setup =
     /// whose damage comes from triggers this finds the skill that feeds them best.
     and strongest (c: Loaded) (o: Options) (enemies: EnemyDef list) : string option =
         let o = { o with MaxTime = min o.MaxTime 10.0 }
-        pressable c
+        // something that deals damage itself comes first; curses, marks and buffs are only
+        // candidates when nothing else is
+        let candidates =
+            let all = pressable c |> List.choose (fun g -> pressed c o g |> Option.map (fun p -> g, p))
+            let damaging =
+                all |> List.filter (fun (_, p) ->
+                    p.Curse.IsNone && not p.Skill.Hits.IsEmpty
+                    && (not p.Skill.BaseDamage.IsEmpty || p.Skill.Tags.Contains Attack || not p.Skill.Dots.IsEmpty || not p.Skill.Parts.IsEmpty))
+            (if damaging.IsEmpty then all else damaging) |> List.map fst
+        candidates
         |> List.choose (fun g ->
             match pressed c o g with
             | Some _ ->

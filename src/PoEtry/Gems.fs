@@ -427,7 +427,9 @@ module Gems =
                         Spread = (if flagAny "projectiles_nova" then 360.0 else statOf "total_projectile_spread_angle_override" |> Option.defaultValue 30.0)
                         Pierce = (if flagOf "always_pierce" then 100 else int (statOf "projectile_base_number_of_targets_to_pierce" |> Option.defaultValue 0.0))
                         Chains = int (statOf "number_of_chains" |> Option.defaultValue 0.0)
-                        CanShotgun = true
+                        // projectiles that drop on their targets, one each, in a number the skill
+                        // sets itself (Dark Effigy's "one per afflicted enemy, up to 100"): never two on one enemy
+                        CanShotgun = not (data.Types.Contains "ProjectileNoCollision" && data.Types.Contains "ProjectilesNumberModifiersNotApplied")
                         PerCharge = perCharge
                         FromImpact = data.Types.Contains "ProjectilesNotFromUser"
                         Explosion = if data.Types.Contains "Area" && not (List.contains "is_area_damage" set.Stats) then radius else None }

@@ -1420,7 +1420,7 @@ module Sim =
                             { p with
                                 Count =
                                     p.Count + fromCharges
-                                    + (if p.Count + fromCharges > 0 then
+                                    + (if p.Count + fromCharges > 0 && not (skill.Tags.Contains(Tag "Type:ProjectilesNumberModifiersNotApplied")) then
                                            int (Mods.sumBase ctx [ AdditionalProjectiles ] mods)
                                            + (if rng.Chance(Mods.sumBase ctx [ Named "ExtraProjectileChance2" ] mods) then 2 else 0)
                                            + (let c = Mods.sumBase ctx [ Named "ExtraProjectileChance1" ] mods
