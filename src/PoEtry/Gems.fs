@@ -604,6 +604,11 @@ module Gems =
                         PerCharge = perCharge
                         FromImpact = data.Types.Contains "ProjectilesNotFromUser" || behind
                         SkipPrimary = behind
+                        // a rain over the skill's area, each projectile with its own small impact
+                        Rain =
+                            match statOf "active_skill_base_area_of_effect_radius", statOf "active_skill_base_secondary_area_of_effect_radius" with
+                            | Some area, Some impact when data.Types.Contains "Rain" && impact < area && count >= 2 -> Some(area, impact)
+                            | _ -> None
                         Explosion = if data.Types.Contains "Area" && not (List.contains "is_area_damage" set.Stats) then radius else None }
             else
                 match radius with

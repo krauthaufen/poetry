@@ -20,6 +20,9 @@ type ProjectileShape =
       FromImpact: bool
       /// Shards that spring from the enemy that was hit and fly on: they cannot hit it.
       SkipPrimary: bool
+      /// Projectiles that rain down at random over an area around the target (its radius),
+      /// each hitting what is within its own impact radius.
+      Rain: (float * float) option
       /// Chance (%) to bounce off a wall once ("chain 1 extra time from terrain").
       TerrainChain: float
       /// Projectiles appear this far from their origin, along their direction (game units).
@@ -48,6 +51,7 @@ module ProjectileShape =
           PerCharge = None
           FromImpact = false
           SkipPrimary = false
+          Rain = None
           TerrainChain = 0.0
           StartOffset = 0.0 }
 

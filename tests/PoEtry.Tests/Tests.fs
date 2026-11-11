@@ -314,6 +314,13 @@ let main _ =
         // bolts land at 2 .. 8 s with 2, 3, 4, 5, 6 Demonflame, then none
         near (100.0 * (1.2 + 1.3 + 1.4 + 1.5 + 1.6 + 1.0 + 1.0)) o.DamageBy.["Bolt (hit)"])
 
+    test "rain: projectiles land at random over the area; the share that hits is the area ratio" (fun () ->
+        // area 36, impact 7, a target of radius 10 in the middle: (17 / 36)^2 = 22.3%
+        let target = { EnemyDef.atLevel 83 1e6 with Size = 10.0 }
+        let rain = Projectiles { ProjectileShape.make 10000 with Rain = Some(36.0, 7.0) }
+        let hits = (Geometry.targetsFrom (Rng 7u) [] 100.0 rain 1.0 target [ target ]).Length
+        equal true (abs (float hits / 10000.0 - 0.223) < 0.015))
+
     test "banner: attack hits build its Glory, then its aura lasts for the duration" (fun () ->
         // 200 Glory at 100% of 20 per hit: placed with the tenth hit (10 s) and the twentieth.
         // 4 s of 100% more damage: the hits at 11, 12 and 13 s are doubled, the one at 14 s is not

@@ -348,6 +348,13 @@ module Geometry =
         | AreaAroundSelf r ->
             let r = radius r areaMult
             alive |> List.filter (within Vec.zero r) |> List.map (fun e -> e.Name)
+        | Projectiles ({ Rain = Some (area, impact) } as p) ->
+            // every projectile lands at a random point of the area and hits what is in reach
+            let area, impact = radius area areaMult, radius impact areaMult
+            [ for _ in 1 .. p.Count do
+                let r, a = area * sqrt (rng.Float()), 2.0 * System.Math.PI * rng.Float()
+                let at = Vec.add primary.Position (Vec.scale r (Vec.ofAngle a))
+                yield! alive |> List.filter (within at impact) |> List.map (fun e -> e.Name) ]
         | Projectiles p ->
             let explode (at: Vec) =
                 match p.Explosion with
