@@ -347,7 +347,9 @@ The game's standard buffs and debuffs, with the numbers of its keyword text. Sta
 | Herald of Ice | an attack that kills a frozen enemy triggers the gem's "Explosion" stat set (weapon damage as cold, area), centred on the enemy aimed at rather than the corpse | gem description + data | data; centre is a simplification |
 | Herald of Thunder | after an attack kills a shocked enemy, the next N attack hits (`herald_of_thunder_storm_max_hits`) each trigger the "Bolt" stat set | gem description + data | data |
 | Chains | a herald's own hits don't set heralds off | game rule (recollection) | guess |
-| Herald of Ash (overkill ignite), Blood, Plague, the Royal Queen | not modelled | - | missing |
+| Herald of Ash | a non-herald attack that kills with overkill of at least `herald_of_ash_overkill_threshold_%` (20%) of the enemy's maximum life ignites the living enemies in the "Explosion" stat set's area (around the killed enemy) for `herald_of_ash_burning_%_overkill_damage_per_minute` / 60 of the overkill per second, for the explosion's duration. Overkill is the hit's damage beyond the enemy's remaining life | gem description + data | data; the ignite takes no further modifiers (guess) |
+| Extra charges | "N% chance to gain an additional Power / Frenzy / Endurance Charge": each gain rolls once for one more. "Gain a Power Charge when you consume an Elemental Infusion". "if you've gained a Power Charge Recently": 4 s after a gain | stat descriptions | data |
+| Herald of Blood, Plague, the Royal Queen | not modelled | - | missing |
 
 ### Skills granted by supports
 

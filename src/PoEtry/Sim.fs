@@ -72,6 +72,17 @@ type Reaction =
     /// counting up to `cap` power, at least one. The buff's stacks are the attacks left.
     | Empower of buff: string * perPower: float * cap: float
 
+/// "Enemies you sufficiently Overkill ... cause an explosion that Ignites nearby enemies
+/// based on the Overkill damage dealt" (Herald of Ash). `Skill` is the explosion among the
+/// actor's skills: its area, radius and duration are the explosion's.
+type OverkillBurn =
+    { Skill: string
+      Filter: SkillFilter
+      /// Overkill needed, percent of the killed enemy's maximum life.
+      ThresholdPercent: float
+      /// Ignite damage per second, percent of the overkill damage.
+      PercentPerSecond: float }
+
 type Rule =
     { Hook: Hook
       Filter: SkillFilter
@@ -233,7 +244,8 @@ type Actor =
       ActiveWhile: string option
       Infusions: Infusions option
       Archons: Archon list
-      Charms: Charm list }
+      Charms: Charm list
+      OverkillBurns: OverkillBurn list }
 
 module Actor =
     let make name mods skills =
@@ -258,7 +270,8 @@ module Actor =
           ActiveWhile = None
           Infusions = None
           Archons = []
-          Charms = [] }
+          Charms = []
+          OverkillBurns = [] }
 
     let always skill = { Use = skill; When = fun _ -> true }
 
@@ -1378,6 +1391,26 @@ module Sim =
                         DamageBy = addf (skill.Name + " (hit)") (min dealt e.Life) w.DamageBy
                         Counts = w.Counts |> bump ("hits:" + skill.Name) |> (if hit.Crit then bump ("crits:" + skill.Name) else id)
                         Kills = if dead then (target, e.Def.Rarity, w.Time) :: w.Kills else w.Kills }
+                // overkill explosions: nearby enemies are ignited for a share of the overkill
+                let w =
+                    let overkill = dealt - e.Life
+                    if not dead || overkill <= 0.0 || actor.OverkillBurns.IsEmpty then w
+                    else
+                        actor.OverkillBurns
+                        |> List.filter (fun b -> matches b.Filter skill && overkill >= e.Def.Life * b.ThresholdPercent / 100.0)
+                        |> List.fold (fun (w: World) b ->
+                            match actor.Skills |> List.tryFind (fun x -> x.Name = b.Skill) with
+                            | Some sk ->
+                                let st = Map.find actor.Name w.Actors
+                                let bctx = Skill.ctx sk false (skillStacks actor sk st) Map.empty
+                                let bmods = skillDb env actor sk st
+                                let radius = match sk.Delivery with | AreaAtTarget r -> Geometry.radius r (Mods.mult bctx [ AreaOfEffect ] bmods) | _ -> 0.0
+                                let seconds = sk.Duration * Mods.mult bctx [ SkillDuration ] bmods
+                                let dps = overkill * b.PercentPerSecond / 100.0
+                                alive w
+                                |> List.filter (fun o -> o.Def.Name <> e.Def.Name && Vec.dist o.Def.Position e.Def.Position <= radius + o.Def.Size)
+                                |> List.fold (fun w o -> inflict o.Def.Name actor.Name (Dot(Ignite, Fire, dps, seconds, 1)) { w with Counts = bump ("overkill ignite:" + b.Skill) w.Counts }) w
+                            | None -> w) w
                 // Armour Break: the hit breaks armour by a share of the damage it dealt; armour at
                 // zero is Fully Broken: the enemy takes increased physical damage from hits
                 let w =
@@ -1673,6 +1706,10 @@ module Sim =
                         let keep = Mods.sumBase Ctx.empty [ Named "InfusionKeepChance" ] (skillDb env actor infused st)
                         let w = { w with Counts = bump ("infused:" + skillName) w.Counts }
                         let w = markStatus name "ConsumedInfusionRecently" w
+                        // "Gain a Power Charge when you consume an Elemental Infusion"
+                        let w =
+                            let n = int (Mods.sumBase Ctx.empty [ Named "PowerChargeOnInfusionConsumed" ] (skillDb env actor infused st))
+                            if n > 0 then schedule w.Time (GainStacks(name, "PowerCharge", n)) w else w
                         if rng.Chance keep then infused, w
                         else infused, setStacksWith env name false r (stacksOf st r - 1) w
             let w = { w with Player = w.Player |> Option.map (fun p -> { p with StrikeLeech = 0.0; StrikeLifeLeech = 0.0 }) }
@@ -2063,7 +2100,18 @@ module Sim =
                 let actor = actorDef env name
                 let st = Map.find name w.Actors
                 let maxR = Map.tryFind r actor.MaxResources |> Option.defaultValue n
+                // "N% chance to gain an additional (Power) Charge when you gain a Charge"
+                let n =
+                    if not (r.EndsWith "Charge") then n
+                    else
+                        match actor.Skills |> List.tryHead with
+                        | Some sk ->
+                            let db = skillDb env actor sk st
+                            let chance = Mods.sumBase Ctx.empty [ Named("ExtraChargeChance:" + r); Named "ExtraChargeChance:Any" ] db
+                            if chance > 0.0 && rng.Chance chance then n + 1 else n
+                        | None -> n
                 setStacksWith env name true r (min maxR (stacksOf st r + n)) w
+                |> (if r.EndsWith "Charge" then markStatus name ("Gained" + r + "Recently") else id)
                 |> fun w -> { w with Counts = bump ("gained:" + r) w.Counts }
             | EnergyArrives (name, meta, amount) -> gainEnergy env rng (actorDef env name) meta amount w
             | SpendBuff (name, buff) ->

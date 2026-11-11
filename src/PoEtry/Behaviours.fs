@@ -436,7 +436,7 @@ module Behaviours =
     /// - Herald of Thunder: after an attack kills a shocked enemy, lightning bolts strike the
     ///   targets of the next N attack hits ("Bolt", N = `herald_of_thunder_storm_max_hits`).
     /// The explosion is centred on the enemy aimed at, not on the corpse. A herald's own hits
-    /// don't set heralds off. Herald of Ash, Blood, Plague: not modelled.
+    /// don't set heralds off. Herald of Ash: see `heraldOfAsh`. Blood, Plague: not modelled.
     let heralds (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) : Skill list * Rule list =
         let charMods = ModDb.ofList sheet.Mods
         let attack = WithTagNot(Attack, Herald)
@@ -470,6 +470,37 @@ module Behaviours =
                     | Error _ -> None)))
         |> List.unzip
         |> fun (skills, rules) -> skills, List.concat rules
+
+    /// Herald of Ash: a non-herald attack that kills with overkill of at least
+    /// `herald_of_ash_overkill_threshold_%` of the enemy's life makes it explode: enemies in the
+    /// explosion's area are ignited for `herald_of_ash_burning_%_overkill_damage_per_minute` of
+    /// the overkill damage, for the explosion's duration. The explosion (stat set "Explosion")
+    /// is returned as a skill that is never used: it carries the area and duration.
+    let heraldOfAsh (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) : Skill list * OverkillBurn list =
+        let charMods = ModDb.ofList sheet.Mods
+        build.Groups
+        |> List.filter (fun g -> g.Enabled)
+        |> List.collect (fun g ->
+            let enabled = g.Gems |> List.filter (fun x -> x.Enabled)
+            let supports = enabled |> List.filter (fun x -> x.IsSupport) |> List.map (fun x -> x.Name, x.Level)
+            enabled
+            |> List.filter (fun x -> not x.IsSupport)
+            |> List.choose (fun gem ->
+                let setup n = { Gem = gem.Name; Level = gem.Level; Quality = gem.Quality; StatSet = n; Supports = supports }
+                let sum n id = Gems.rawStats db charMods (setup n) |> List.filter (fun (k, _) -> k = id) |> List.sumBy snd
+                let threshold = sum 1 "herald_of_ash_overkill_threshold_%"
+                Gems.data db gem.Name
+                |> Option.filter (fun _ -> threshold > 0.0)
+                |> Option.bind (fun d -> d.StatSets |> List.tryFindIndex (fun s -> s.Stats |> List.contains "herald_of_ash_burning_%_overkill_damage_per_minute"))
+                |> Option.bind (fun i ->
+                    match Gems.skill db charMods None (setup (i + 1)) with
+                    | Ok (s, _) ->
+                        let name = gem.Name + ": Explosion"
+                        Some({ s with Name = name; Tags = s.Tags.Add(Triggered).Add(Herald); Parts = []; Cost = 0.0; Cooldown = None },
+                             { Skill = name; Filter = WithTagNot(Attack, Herald); ThresholdPercent = threshold
+                               PercentPerSecond = sum (i + 1) "herald_of_ash_burning_%_overkill_damage_per_minute" / 60.0 })
+                    | Error _ -> None)))
+        |> List.unzip
 
     /// The game's standard named effects, with the numbers of its keyword text:
     /// Onslaught 20% increased skill speed; Arcane Surge 15% increased cast speed (its mana

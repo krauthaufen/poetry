@@ -281,6 +281,12 @@ module StatMap =
             Some(Mods [ for a in [ Ignite; Shock; Bleed; Poison ] -> Mod.inc (AilmentChance a) v |> Mod.whenever (EnemyHas "RareOrUnique") ])
         | "cast_speed_for_cold_skills_+%" -> one (Mod.inc Speed v |> Mod.whenever (SkillIs Spell) |> Mod.whenever (SkillIs(Tag "Cold")))
         | "chance_for_extra_damage_roll_%" -> one (Mod.base' (Named "LuckyDamageChance") v)
+        | "critical_strike_multiplier_+_if_gained_power_charge_recently" -> one (Mod.inc CritBonus v |> Mod.whenever (WhileBuff "GainedPowerChargeRecently"))
+        | "chance_to_gain_1_more_power_charge_%" -> one (Mod.base' (Named "ExtraChargeChance:PowerCharge") v)
+        | "chance_to_gain_1_more_frenzy_charge_%" -> one (Mod.base' (Named "ExtraChargeChance:FrenzyCharge") v)
+        | "chance_to_gain_1_more_endurance_charge_%" -> one (Mod.base' (Named "ExtraChargeChance:EnduranceCharge") v)
+        | "chance_to_gain_1_more_charge_%" -> one (Mod.base' (Named "ExtraChargeChance:Any") v)
+        | "gain_a_power_charge_when_you_consume_an_elemental_infusion" -> one (Mod.base' (Named "PowerChargeOnInfusionConsumed") 1.0)
         | "critical_strike_multiplier_+_if_have_dealt_non_crit_recently" -> one (Mod.inc CritBonus v |> Mod.whenever (WhileBuff "NonCritRecently"))
         | "damage_+%_if_triggered_skill_recently" -> one (Mod.inc (Damage AllDamage) v |> Mod.whenever (WhileBuff "TriggeredRecently"))
         | "gain_accuracy_rating_equal_to_intelligence" -> one (Mod.flag (Named "AccuracyFromIntelligence"))
@@ -292,7 +298,7 @@ module StatMap =
         // seconds added to the use time, not shortened by speed
         | "total_attack_time_+_ms" | "total_cast_time_+_ms" -> one (Mod.base' (Named "FixedUseTime") (v / 1000.0))
         // how a skill is aimed and animated, where remnants can be collected, things monsters never do to the player
-        | "skill_withering_presence_frequency_ms" | "herald_of_thunder_storm_max_hits" | "action_requires_aiming_stance" | "action_required_target_facing_angle_tolerance_degrees" | "crossbow_barrage_recoil_per_shot"
+        | "skill_withering_presence_frequency_ms" | "herald_of_thunder_storm_max_hits" | "herald_of_ash_overkill_threshold_%" | "herald_of_ash_burning_%_overkill_damage_per_minute" | "action_requires_aiming_stance" | "action_required_target_facing_angle_tolerance_degrees" | "crossbow_barrage_recoil_per_shot"
         | "crossbow_barrage_total_recoil_buff_count" | "crossbow_barrage_debuff_duration_ms" | "crossbow_barrage_attack_time_ratio_%"
         | "base_minimum_channel_time_ms" | "base_melee_dash_range" | "base_knockback_distance" | "main_hand_weapon_range_+"
         | "remnant_pickup_range_+%" | "immune_to_maim" | "immune_to_hinder" | "enemy_extra_damage_rolls_chance_%"

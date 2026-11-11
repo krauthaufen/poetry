@@ -396,6 +396,36 @@ let main _ =
         equal 2 o.Counts.["trigger:Bolt"]
         equal 2 o.Counts.["hits:Bolt"])
 
+    test "charges: chance to gain one more, and 'gained a Power Charge recently'" (fun () ->
+        let swing = { Skill.make "Swing" [ Attack; Melee ] with BaseDamage = Map.ofList [ Physical, Range.fixedAt 100.0 ]; BaseCrit = 0.0 }
+        let perCharge = Mod.inc (Damage AllDamage) 100.0 |> Mod.whenever (PerStack("PowerCharge", 1.0))
+        let run perUse mods =
+            let rule = { Hook = OnUse; Filter = Called "Swing"; Chance = 100.0; Reaction = GainResource("PowerCharge", perUse) }
+            let player = { Actor.make "Player" (perCharge :: mods) [ swing ] with Rotation = [ Actor.always "Swing" ]; Rules = [ rule ]; MaxResources = Map.ofList [ "PowerCharge", 100 ] }
+            (Sim.run (Fight.single (boss 1e9) player 4.5) 1u).DamageBy.["Swing (hit)"]
+        // one charge per swing with a 100% chance for one more is two charges per swing
+        let one, two = run 1 [], run 2 []
+        if two <= one then failwith "charges should add damage"
+        near two (run 1 [ Mod.base' (Named "ExtraChargeChance:PowerCharge") 100.0 ])
+        near one (run 1 [ Mod.base' (Named "ExtraChargeChance:FrenzyCharge") 100.0 ])
+        // "if you've gained a Power Charge Recently" holds once a charge was gained
+        let recent = run 1 [ Mod.more (Damage AllDamage) 50.0 |> Mod.whenever (WhileBuff "GainedPowerChargeRecently") ]
+        if recent < one * 1.2 then failwith "gained recently should apply")
+
+    test "overkill explosion: nearby enemies are ignited for a share of the overkill damage" (fun () ->
+        let swing = { Skill.make "Swing" [ Attack; Melee ] with BaseDamage = Map.ofList [ Physical, Range.fixedAt 100.0 ]; BaseCrit = 0.0 }
+        let blast = { Skill.make "Blast" [ Herald; Triggered ] with Delivery = AreaAtTarget 30.0; Duration = 3.0 }
+        let burn = { Skill = "Blast"; Filter = WithTagNot(Attack, Herald); ThresholdPercent = 20.0; PercentPerSecond = 23.0 }
+        let player = { Actor.make "Player" [] [ swing; blast ] with Rotation = [ Actor.always "Swing" ]; OverkillBurns = [ burn ] }
+        let tough = { dummy "tough" 12.0 0.0 with Life = 1e9 }
+        let run life = Sim.run { Fight.single tough player 6.5 with Enemies = [ { dummy "weak" 10.0 0.0 with Life = life }; tough ]; Targeting = Nearest } 1u
+        // 100 damage into 50 life: 50 overkill (100% of its life): 23% of 50 per second for 3 s
+        let o = run 50.0
+        equal 1 o.Counts.["overkill ignite:Blast"]
+        near (50.0 * 0.23 * 3.0) o.DamageBy.["Ignite"]
+        // 100 into 90 life: 10 overkill is under 20% of 90: no explosion
+        if (run 90.0).Counts.ContainsKey "overkill ignite:Blast" then failwith "overkill under the threshold should not explode")
+
     test "armour break: hits strip armour; fully broken armour takes 20% increased physical damage" (fun () ->
         let swing = { Skill.make "Swing" [ Attack; Melee ] with BaseDamage = Map.ofList [ Physical, Range.fixedAt 1000.0 ]; BaseCrit = 0.0 }
         // 10000 armour against 1000 damage: 50% less. Breaking 400% of the damage dealt: 2000 after the first hit

@@ -428,6 +428,8 @@ module Setup =
             let known = pressedSkills |> List.map (fun s -> s.Name) |> Set.ofList
             steps |> List.filter (fun st -> known.Contains st.Use)
         let heraldSkills, heraldRules = Behaviours.heralds db sheet c.Build
+        let ashSkills, overkillBurns = Behaviours.heraldOfAsh db sheet c.Build
+        let heraldSkills = heraldSkills @ ashSkills
         let consumers =
             (used |> List.choose (fun (_, p) -> p.Infused)) @ (metas |> List.collect (fun (_, _, cs) -> cs))
         let grantRules =
@@ -439,6 +441,7 @@ module Setup =
             else Behaviours.infusions db sheet c.Build o.Pickup (consumers |> List.map (fun (n, el, cp) -> n, (el, cp.Name)) |> Map.ofList)
         { Actor.make "Player" (sheet.Mods @ (used |> List.collect (fun (_, p) -> p.Grants))) (pressedSkills @ (metas |> List.collect (fun (_, s, _) -> s)) @ (consumers |> List.map (fun (_, _, cp) -> cp)) @ heraldSkills @ (used |> List.collect (fun (_, p) -> p.Extra))) with
             Rotation = steps
+            OverkillBurns = overkillBurns
             HitPattern = used |> List.choose (fun (_, p) -> p.Pattern |> Option.map (fun pat -> p.Skill.Name, pat)) |> Map.ofList
             Rules = grantRules @ (used |> List.collect (fun (_, p) -> p.Rules)) @ heraldRules @ Behaviours.keywordRules sheet pressedSkills
             Metas = metas |> List.map (fun (m, _, _) -> m)
