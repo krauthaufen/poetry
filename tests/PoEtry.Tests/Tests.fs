@@ -743,6 +743,17 @@ let main _ =
         // bites land at 1 .. 5 s: those at 1 and 2 s are within the three seconds
         near (2.0 * 150.0 + 3.0 * 100.0) o.DamageBy.["Bite (hit)"])
 
+    test "hexblast: waits until a curse is half expired, detonates it, and then has nothing to detonate" (fun () ->
+        let hex = { fireSpell 0.0 with Name = "Hex"; BaseDamage = Map.empty; Cooldown = Some 100.0 }
+        let blast = { fireSpell 500.0 with Name = "Blast"; Mods = [ Mod.flag (Named "DetonatesCurse") ] }
+        let player =
+            { Actor.make "Player" [ noIgnite ] [ blast; hex; fireSpell 10.0 ] with
+                Rules = [ { Hook = OnHit; Filter = Called "Hex"; Chance = 100.0; Reaction = ApplyCurse("Curse:Hex", 4.0, []) } ] }
+        let o = Sim.run { Fight.single (boss 1e12) player 7.5 with MaxTime = 7.5 } 1u
+        // the curse lands at 1 s and lasts until 5 s: ripe from 3 s
+        equal 1 o.Counts.["curse detonated"]
+        near 500.0 o.DamageBy.["Blast (hit)"])
+
     test "berserk: life is lost for every Rage held while Rage is not being lost" (fun () ->
         // 20 Rage kept up by regeneration, 6% of life per minute per Rage: 2% of life a second
         let jab = { Skill.make "Jab" [ Attack; Melee ] with BaseDamage = Map.ofList [ Physical, Range.fixedAt 1.0 ]; BaseCrit = 0.0 }

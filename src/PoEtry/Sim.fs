@@ -952,6 +952,21 @@ module Sim =
             | Strike (a, name, _, _) -> a = actorName && (name = gem || name.StartsWith(gem + " "))
             | _ -> false)
 
+    /// Curses on an enemy that Hexblast can detonate: those at least half expired (their
+    /// duration is the one the actor's own curse rule gives; unknown: any).
+    let private ripeCurses (actor: Actor) (e: EnemyState) now =
+        e.Debuffs |> Map.toList |> List.filter (fun (k, x) ->
+            k.StartsWith "Curse:" && x.Expires > now
+            && (actor.Rules |> List.tryPick (fun r ->
+                    let rec find reaction =
+                        match reaction with
+                        | ApplyCurse (n, d, _) when n = k || "Curse:" + n = k -> Some d
+                        | IfEnemyHas (_, next) | IfBuff (_, next) | SpendStack (_, next) -> find next
+                        | _ -> None
+                    find r.Reaction)
+                |> Option.forall (fun d -> x.Expires - now <= d / 2.0)))
+        |> List.map fst
+
     /// Barrage: the readied repeats waiting for the next Repeatable bow or spear attack.
     let private barraged (skill: Skill) (st: ActorState) =
         if skill.Tags.Contains(Tag "Type:Barrageable") && skill.Tags.Contains Attack then
@@ -1475,6 +1490,8 @@ module Sim =
                     && (match warpsInto s with
                         | Some gem -> ballInFlight actor.Name gem w || (aimed env w |> Option.exists (fun e -> (status e).ContainsKey "Cullable"))
                         | None -> true)
+                    // Hexblast waits for a curse that can be detonated
+                    && (not (partFlag s "DetonatesCurse") || (aimed env w |> Option.exists (fun e -> not (ripeCurses actor e w.Time).IsEmpty)))
                     // a recording debuff is left to run out
                     && not (w.Agonies |> List.exists (fun (a, b, _, _, _, _) -> a = actor.Name && b = s.Name))
                     // a seed still in an enemy is not planted over
@@ -1732,6 +1749,15 @@ module Sim =
                 skill.Mods |> List.tryPick (fun m -> match m.Stat with Named n when n.StartsWith "NotVs:" -> Some(n.Substring 6) | _ -> None)
                 |> Option.map (fun (st: string) -> st.Split '|' |> List.ofArray) |> Option.defaultValue []
             let takes = skill.Mods |> List.tryPick (fun m -> match m.Stat with Named n when n.StartsWith "Takes:" -> Some(n.Substring 6) | _ -> None)
+            // Hexblast: nothing without a curse that is ripe; the curses it detonates are gone
+            let ripe = if partFlag skill "DetonatesCurse" then ripeCurses actor e w.Time else []
+            if partFlag skill "DetonatesCurse" && ripe.IsEmpty then w
+            else
+            let w =
+                if ripe.IsEmpty then w
+                else
+                    updateEnemy target (fun en -> { en with Debuffs = ripe |> List.fold (fun m k -> Map.remove k m) en.Debuffs }) w
+                    |> fun w -> { w with Counts = bump "curse detonated" w.Counts }
             // a warp into a projectile explodes there, whatever the enemy's state
             let warped = (Map.find actor.Name w.Actors).Buffs.ContainsKey("Warped:" + skill.Name)
             let w = if warped then updateActor actor.Name (fun st -> { st with Buffs = Map.remove ("Warped:" + skill.Name) st.Buffs }) w else w
