@@ -193,6 +193,9 @@ type PeriodicAction =
     /// One stack of each resource that has any (Charge Regulation). Charge-removal
     /// skip chances apply.
     | ConsumeEach of resources: string list
+    /// With this chance (0..1), one stack of a buff that lasts `duration` on its own: every
+    /// stack runs out separately (Flames of Chayula). `mods` are per stack.
+    | GainTimedBuff of buff: string * chance: float * duration: float * maxStacks: int * mods: Mod list
 
 type Periodic =
     { Name: string
@@ -1975,6 +1978,14 @@ module Sim =
                 setStacksWith env actorName true r (min maxR (stacksOf st r + 1)) w
                 |> markStatus actorName ("Gained" + r + "Recently")
                 |> fun w -> { w with Counts = bump ("gained:" + r) w.Counts }
+            | GainTimedBuff (buff, chance, duration, maxStacks, mods) ->
+                if rng.Float() >= chance || stacksOf st buff >= maxStacks then w
+                else
+                    updateActor actorName (fun st ->
+                        let n = stacksOf st buff + 1
+                        { st with Buffs = Map.add buff { Name = buff; Mods = mods; Stacks = n; Expires = infinity } st.Buffs }) w
+                    |> schedule (w.Time + duration) (SpendBuff(actorName, buff))
+                    |> fun w -> { w with Counts = bump ("gained:" + buff) w.Counts }
             | ConsumeEach resources ->
                 let skip = Mods.sumBase Ctx.empty [ Named "ChargeSkipConsume" ] (ModDb.ofList actor.Mods)
                 resources
@@ -2017,6 +2028,12 @@ module Sim =
                     let w = if n <> have then setStacksWith env name false "Rage" n w else w
                     updateActor name (fun st -> { st with RageCarry = (if n = 0 && carry < 0.0 then 0.0 elif n = maxRage && carry > 0.0 then 0.0 else carry - float whole) }) w
             // the player's life and mana state, as buffs conditions can read
+            // "Your Life cannot change while you have Energy Shield": no recovery above where it started
+            let w =
+                match env.Fight.Player.Vitals, w.Player with
+                | Some v, Some p when v.LifeFrozenWithES && p.EnergyShield > 0.0 && p.Life > v.StartLife * v.Life ->
+                    { w with Player = Some { p with Life = v.StartLife * v.Life } }
+                | _ -> w
             let w =
                 match env.Fight.Player.Vitals, w.Player with
                 | Some v, Some p ->
@@ -2028,7 +2045,7 @@ module Sim =
                           "HasEnergyShield", p.EnergyShield > 0.0
                           "Leeching", p.Recoups |> List.exists (fun (until, _, pool) -> pool.StartsWith "Leech" && until > w.Time)
                           // surrounded: at least 5 monsters within 3 m (PoB SurroundedRadiusBase, game constant)
-                          "Surrounded", (alive w |> List.filter (fun e -> Vec.length e.Def.Position - e.Def.Size <= 30.0) |> List.length) >= 5 ]
+                          "Surrounded", (alive w |> List.filter (fun e -> Vec.length e.Def.Position - e.Def.Size <= 30.0) |> List.length) >= max 1 v.SurroundedAt ]
                     // charge states: "while at maximum Power Charges", "while you have no Frenzy Charges"
                     let playerSt = Map.find env.Fight.Player.Name w.Actors
                     let states =
@@ -2165,7 +2182,7 @@ module Sim =
             { Player =
                 fight.Player.Vitals
                 |> Option.map (fun v ->
-                    { Life = v.Life
+                    { Life = max 1.0 (v.Life * v.StartLife)
                       EnergyShield = v.EnergyShield
                       Mana = v.Mana
                       LastHit = -1e9

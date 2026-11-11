@@ -267,7 +267,26 @@ module Defence =
           UnluckyEvade = flag "UnluckyEvade"
           LuckyDeflect = flag "LuckyDeflect"
           LifeLeechRate = max 0.05 (Mods.mult c [ Named "LifeLeechRate" ] db)
-          DeflectEffect = min 100.0 (Vitals.deflectEffect + named "DeflectEffect") }
+          DeflectEffect = min 100.0 (Vitals.deflectEffect + named "DeflectEffect")
+          // A build made for low life starts there, when something keeps it there: nothing
+          // regenerates its life, or its life cannot change while it has energy shield.
+          StartLife =
+            (let wantsLowLife =
+                Map.containsKey "LowLifeIntent" resources
+                || sheet.Mods |> List.exists (fun m ->
+                    m.Value > 0.0 && m.Conds |> List.contains (WhileBuff "LowLife")
+                    // something to deal damage with, not a comfort for when things go wrong
+                    && (match m.Stat with Damage _ | CritBonus | CritChance | Speed -> true | _ -> false))
+             let regen = if ci || regenToES || onlyLeech then 0.0 else lifeRegen * lifeRecovery
+             let frozen = flag "LifeFrozenWithES" && es > 0.0
+             // nothing brings life back: no regeneration, no life flask, no leech, nothing on hit or kill
+             let noRecovery =
+                 regen <= 0.0 && sheet.LifeFlask.IsNone
+                 && not (sheet.Mods |> List.exists (fun m ->
+                     m.Value > 0.0 && (match m.Stat with Named("LifeLeech" | "LifeOnHit" | "LifeOnKill" | "LifeOnBlock") | LifeRegen | LifeRegenPercent -> true | _ -> false)))
+             if not ci && life > 1.0 && wantsLowLife && (frozen || noRecovery) then 0.35 else 1.0)
+          LifeFrozenWithES = flag "LifeFrozenWithES"
+          SurroundedAt = 5 + int (named "SurroundedOffset") }
 
     let compute bases sheet = computeWith Map.empty bases sheet
 

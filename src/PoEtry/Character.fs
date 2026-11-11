@@ -92,7 +92,9 @@ module Items =
     /// Apply local stats to a weapon base. Quality counts as increased physical damage.
     let weapon (b: WeaponBase) (qualityPct: float) (locals: (LocalStat * float) list) =
         let sum pred = locals |> List.sumBy (fun (s, v) -> if pred s then v else 0.0)
-        let incPhys = sum ((=) LocalDamageInc) + qualityPct
+        // quality multiplies: a bow with 255% increased Physical Damage and 30% quality shows
+        // base x 3.55 x 1.30
+        let incPhys = sum ((=) LocalDamageInc)
         let added t =
             { Min = sum ((=) (LocalAddedMin t))
               Max = sum ((=) (LocalAddedMax t)) }
@@ -101,7 +103,7 @@ module Items =
             |> List.choose (fun t ->
                 let b = Map.tryFind t b.Damage |> Option.defaultValue Range.zero
                 let r = Range.add b (added t)
-                let r = if t = Physical then Range.scale (1.0 + incPhys / 100.0) r else r
+                let r = if t = Physical then Range.scale ((1.0 + incPhys / 100.0) * (1.0 + qualityPct / 100.0)) r else r
                 if r.Max > 0.0 then Some(t, r) else None)
             |> Map.ofList
         { Damage = damage

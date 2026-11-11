@@ -29,6 +29,8 @@ type Options =
       ChargeGen: float
       /// Observed resource maxima override computed ones.
       MaxOverrides: (string * int) list
+      /// The character is kept on low life (35% of the maximum), whatever its recovery says.
+      LowLife: bool
       /// Show the character sheet (pools, defences) with the second weapon set in hand.
       SheetSetTwo: bool
       /// Start with this many power charges instead of the maximum.
@@ -64,6 +66,7 @@ module Options =
           Bonded = false
           ChargeGen = 5.0
           MaxOverrides = []
+          LowLife = false
           SheetSetTwo = false
           StartPowerCharges = None
           StartEmpty = false
@@ -194,10 +197,19 @@ module Setup =
         let sheet =
             let v = Defence.computeWith startResources bases sheet
             { sheet with Mods = sheet.Mods @ ([ "Life", v.Life; "Str", v.Str; "Dex", v.Dex; "Int", v.Int ] |> List.map (fun (k, x) -> Mod.base' (Named("Sheet:" + k)) x |> Mod.from "sheet")) }
+        // support gems that pay off on low life ("... while on Low Life") show the build means to be there
+        let startResources =
+            let lowLifeGem =
+                build.Groups |> List.filter (fun g -> g.Enabled) |> List.collect (fun g -> g.Gems) |> List.filter (fun x -> x.Enabled)
+                |> List.exists (fun x ->
+                    Gems.data db x.Name |> Option.exists (fun d ->
+                        d.StatSets |> List.exists (fun st -> st.Stats |> List.exists (fun id -> id.Contains "on_low_life" && not (id.Contains "enem")))))
+            if lowLifeGem then Map.add "LowLifeIntent" 1 startResources else startResources
         // total Spirit as a stack count, for "per 1 Spirit"
         let spirit = int (Behaviours.spiritTotal sheet build)
         let maxResources, startResources = Map.add "Spirit" spirit maxResources, Map.add "Spirit" spirit startResources
         let vitals = Defence.computeWith (if o.SheetSetTwo then Map.add "WeaponSetTwo" 1 startResources else startResources) bases sheet
+        let vitals = if o.LowLife && vitals.Life > 1.0 then { vitals with StartLife = 0.35 } else vitals
         // accuracy: 6 per level above the first and 6 per Dexterity (Character.ot, PoB AccuracyPerDexBase)
         let sheet =
             { sheet with

@@ -58,9 +58,9 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
             + "Adds 10 to 20 Physical Damage\n40% increased Physical Damage\n15% increased Attack Speed\n30% increased Fire Damage\n"
         let p = Items.parse db.Value item
         let w = p.Weapon.Value
-        // Plated Mace: 18-38 physical, 1.4 APS, 5% crit
-        near ((18.0 + 10.0) * 1.6) w.Damage.[Physical].Min
-        near ((38.0 + 20.0) * 1.6) w.Damage.[Physical].Max
+        // Plated Mace: 18-38 physical, 1.4 APS, 5% crit; quality multiplies the increased damage
+        near ((18.0 + 10.0) * 1.4 * 1.2) w.Damage.[Physical].Min
+        near ((38.0 + 20.0) * 1.4 * 1.2) w.Damage.[Physical].Max
         near (1.4 * 1.15) w.AttacksPerSecond
         equal (box [ Mod.inc (Damage(OfType Fire)) 30.0 ]) (box p.Mods))
 
@@ -260,6 +260,20 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         near (plain.Armour + 400.0) smith.Armour
         let fire (b: PobBuild) = Defence.uncappedResist Ctx.empty (ModDb.ofList (sheetOf b).Mods) Fire
         near (fire blank + 75.0) (fire { blank with TreeNodes = [ 9988; 60913; 61039 ] }))
+
+    test "low life only where the build keeps itself there; fewer enemies to be surrounded" (fun () ->
+        let bonus = [ "30% increased Damage when on Low Life" ]
+        let start b = (Setup.loadWith db.Value treeJson b Options.defaults).Vitals.StartLife
+        let shield = item "Helmet" [ "Energy Shield: 100" ]
+        // nothing recovers life and the build has a low-life bonus: starts there
+        near 0.35 (start { blank with ExtraLines = bonus })
+        // no bonus, or some recovery: full life
+        near 1.0 (start blank)
+        near 1.0 (start { blank with ExtraLines = bonus @ [ "5 Life Regeneration per second" ] })
+        // "Your Life cannot change while you have Energy Shield" keeps it there despite regeneration
+        near 0.35 (start { blank with Items = [ shield ]; ExtraLines = bonus @ [ "5 Life Regeneration per second"; "Your Life cannot change while you have Energy Shield" ] })
+        near 0.35 (Setup.loadWith db.Value treeJson blank { Options.defaults with LowLife = true }).Vitals.StartLife
+        equal (box 1) (box (Setup.loadWith db.Value treeJson { blank with ExtraLines = [ "Require 4 fewer enemies to be Surrounded" ] } Options.defaults).Vitals.SurroundedAt))
 
     test "the sheet of the second weapon set counts its weapons, not the first set's" (fun () ->
         let b = { blank with Items = [ item "Weapon 1" [ "+30 to Strength" ]; item "Weapon 1 Swap" [ "+10 to Strength" ]

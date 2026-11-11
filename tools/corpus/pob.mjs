@@ -61,6 +61,15 @@ ex(`function dumpSkill()
       pcall(runCallback, "OnFrame")
       local o = build.calcsTab.mainOutput
       res[#res+1] = "group " .. i .. ": " .. table.concat(nm, " + ")
+      for _, hand in ipairs({"MainHand", "OffHand"}) do
+        local h = o[hand]
+        if type(h) == "table" then
+          local hk = {}
+          for k, v in pairs(h) do if type(v) == "number" and v ~= 0 then hk[#hk+1] = k end end
+          table.sort(hk)
+          for _, k in ipairs(hk) do res[#res+1] = string.format("  %s.%-25s %s", hand, k, tostring(h[k])) end
+        end
+      end
       local keys = {}
       for k, v in pairs(o) do if type(v) == "number" and v ~= 0 then keys[#keys+1] = k end end
       table.sort(keys)

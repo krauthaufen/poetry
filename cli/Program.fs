@@ -27,6 +27,7 @@
 ///   --kept-pause S   charges kept by "chance to not remove" freeze their timer for S seconds (default 1.5, user observation)
 ///   --max K=N,...    override resource maxima with observed ones, e.g. "Mote:blue=0"
 ///   --noflask        don't use the mana flask
+///   --low-life       the character is kept on low life (35%); otherwise only when nothing recovers its life
 ///   --infused        unlimited infusions: skills always use their "-Infused" stat sets
 ///                    (default: infusions are a resource, gained from remnants and Verisium)
 ///   --sequential-uses  stored cooldown uses (Second Wind) recharge one after another (default: independently)
@@ -63,6 +64,7 @@ let rec private opts (args: string list) =
     | "--noflask" :: rest -> Map.add "noflask" "1" (opts rest)
     | "--cast-on-self" :: rest -> Map.add "cast-on-self" "1" (opts rest)
     | "--infused" :: rest -> Map.add "infused" "1" (opts rest)
+    | "--low-life" :: rest -> Map.add "low-life" "1" (opts rest)
     | "--auto" :: rest -> Map.add "auto" "1" (opts rest)
     | "--sequential-uses" :: rest -> Map.add "sequential-uses" "1" (opts rest)
     | k :: v :: rest when k.StartsWith "--" -> Map.add (k.Substring 2) v (opts rest)
@@ -99,6 +101,7 @@ let private usage =
        --kept-pause S   charges kept by \"chance to not remove\" freeze their timer for S seconds (default 1.5, user observation)\n\
        --max K=N,...    override resource maxima with observed ones, e.g. \"Mote:blue=0\"\n\
        --noflask        don't use the mana flask\n\
+       --low-life       the character is kept on low life (35%); otherwise only when nothing recovers its life\n\
        --infused        unlimited infusions: skills always use their \"-Infused\" stat sets\n\
                         (default: infusions are a resource, gained from remnants and Verisium)\n\
        --sequential-uses  stored cooldown uses (Second Wind) recharge one after another (default: independently)\n\
@@ -144,6 +147,7 @@ let main argv =
                 StartEmpty = (Map.tryFind "start" o = Some "empty")
                 ChargeSkip = Map.tryFind "skip" o |> Option.map float
                 Infused = Map.containsKey "infused" o
+                LowLife = Map.containsKey "low-life" o
                 Pickup = get "pickup" 1.0
                 Banked = get "banked" 1.0
                 KeptChargesPause = get "kept-pause" 1.0

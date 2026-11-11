@@ -58,6 +58,24 @@ module Behaviours =
         [ let consume = sum "ConsumeEachChargeEveryMs"
           if consume > 0.0 then
               yield { Name = "consume charges"; Every = consume / 1000.0; Action = ConsumeEach charges }
+          // Into the Breach: a Flame of Chayula appears every so often; a purple one, picked up,
+          // gives "N% of damage as extra Chaos" for 8 seconds, each on its own, ten at most
+          for g in build.Groups |> List.filter (fun g -> g.Enabled) do
+              for gem in g.Gems |> List.filter (fun x -> x.Enabled && not x.IsSupport) do
+                  let setup = { Gem = gem.Name; Level = gem.Level; Quality = gem.Quality; StatSet = 1; Supports = [] }
+                  let raw = if (Gems.data db gem.Name).IsSome then Gems.rawStats db mods setup else []
+                  let stat id = raw |> List.filter (fun (k, _) -> k = id) |> List.sumBy snd
+                  let every = stat "breach_flame_spawn_rate_ms" / 1000.0
+                  let perFlame = stat "breach_flame_chaos_addition_%"
+                  if every > 0.0 && perFlame > 0.0 then
+                      let flag name = Mods.flag Ctx.empty (Named name) mods
+                      let doubled = if flag "BreachFlameDoubled" then 2.0 else 1.0
+                      let effect = 1.0 + (stat "remnant_effect_+%" + Mods.sumInc Ctx.empty [ Named "RemnantEffect" ] mods) / 100.0
+                      let chance = if flag "BreachFlameOnly:purple" then 1.0 elif flag "BreachFlameOnly:red" || flag "BreachFlameOnly:blue" then 0.0 else 1.0 / 3.0
+                      let value = floor (perFlame * effect * doubled)
+                      if chance > 0.0 then
+                          yield { Name = "flames of chayula"; Every = every
+                                  Action = GainTimedBuff("Purple Flame", chance, 8.0 * doubled, 10, [ for t in DamageType.all -> Mod.base' (GainAs(t, Chaos)) value |> Mod.from gem.Name ]) }
           if Mods.flag Ctx.empty (Named "GeneratesRandomCharges") mods then
               // weighted by the total attribute requirements of socketed skill gems:
               // Strength -> endurance, Dexterity -> frenzy, Intelligence -> power
