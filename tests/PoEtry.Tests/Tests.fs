@@ -430,6 +430,22 @@ let main _ =
         let fed = { idle with Mods = [ Mod.base' (Named "RageRegen") 6.0 ] }
         near 130.0 (Sim.run (Fight.single (boss 1e9) fed 12.5) 1u).DamageBy.["Swing (hit)"])
 
+    test "warcry: empowers one attack per so much monster power; each attack uses one up" (fun () ->
+        let swing = { Skill.make "Swing" [ Attack; Melee ] with BaseDamage = Map.ofList [ Physical, Range.fixedAt 100.0 ]; BaseCrit = 0.0 }
+        let cry = { Skill.make "Cry" [ Warcry ] with BaseTime = 0.5; Cooldown = Some 100.0; Hits = [] }
+        let mods = [ Mod.inc (Damage AllDamage) 100.0 |> Mod.whenever (SkillIs Attack) |> Mod.whenever (WhileBuff "EmpoweredAttacks") ]
+        let rules = [ { Hook = OnUse; Filter = Called "Cry"; Chance = 100.0; Reaction = Empower("EmpoweredAttacks", 10.0, 50.0) } ]
+        let player = { Actor.make "Player" mods [ cry; swing ] with Rules = rules }
+        // a unique monster has 20 power: two empowered attacks, then plain ones
+        let unique = { EnemyDef.make Rarity.defaults 83 Unique "Boss" (Vec.make 10.0 0.0) with Life = 1e9; Mods = []; Attack = None }
+        let o = Sim.run (Fight.single unique player 5.75) 1u
+        // swings land at 1.5, 2.5, 3.5, 4.5, 5.5
+        near (200.0 + 200.0 + 100.0 + 100.0 + 100.0) o.DamageBy.["Swing (hit)"]
+        // a lone normal monster still empowers one
+        let normal = { EnemyDef.make Rarity.defaults 83 Normal "Mob" (Vec.make 10.0 0.0) with Life = 1e9; Mods = []; Attack = None }
+        let o1 = Sim.run (Fight.single normal player 5.75) 1u
+        near (200.0 + 4.0 * 100.0) o1.DamageBy.["Swing (hit)"])
+
     test "crossbow: a load of bolts, then a reload" (fun () ->
         // 2 bolts per load, 0.5 s per shot, 1 s reload: two shots every 2 s
         let shot = { Skill.make "Shot" [ Attack; Projectile ] with BaseDamage = Map.ofList [ Physical, Range.fixedAt 10.0 ]; BaseTime = 0.5; Clip = 2; ReloadTime = 1.0 }

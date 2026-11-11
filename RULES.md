@@ -287,6 +287,15 @@ Checked against PoB's defensive numbers for 131 public characters (`tools/corpus
 | Base damage | skills that hit with the shield (Resonating Shield, Shield Charge, Raise Shield, Parry) use `off_hand_weapon_minimum/maximum_physical_damage` plus `off_hand_..._added_physical_damage_per_N_shield_armour` (or evasion) x the shield's own armour / N | gem stats | data |
 | Active block, retaliation, parry | not modelled | - | missing |
 
+### Warcries
+
+| Mechanic | Rule | Source | Confidence |
+|---|---|---|---|
+| Empowering | a warcry empowers one attack per `warcry_empowers_per_X_monster_power` of enemy power (normal 1, magic 2, rare 5, unique 20), counting up to its cap, at least one; all living enemies count (the cry's area is not checked) | gem stats | data; area ignored |
+| Using them up | each attack the player makes while empowered uses one, after its hits; triggered attacks and the cry itself don't | game rule | guess |
+| What empowered attacks get | "Empowered Attacks deal X% increased Damage"; Infernal Cry: gain X% of damage as extra fire; Seismic Cry: slams cause an additional aftershock | stat text, gem stats | data |
+| Not modelled | the cries' own explosions and knockback, Guard (Fortifying Cry), rage per power (Ferocious Roar), Ancestral Cry, Arctic Howl's added cold damage | - | missing |
+
 ### Heralds
 
 | Mechanic | Rule | Source | Confidence |

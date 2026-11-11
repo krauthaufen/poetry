@@ -64,6 +64,9 @@ type Reaction =
     | SpendStack of buff: string * then': Reaction
     /// Set a buff's stacks (no duration), e.g. "the next 3 attack hits".
     | SetStacks of buff: string * stacks: int
+    /// A warcry: empowers one attack per `perPower` monster power among the living enemies,
+    /// counting up to `cap` power, at least one. The buff's stacks are the attacks left.
+    | Empower of buff: string * perPower: float * cap: float
 
 type Rule =
     { Hook: Hook
@@ -342,6 +345,8 @@ module Sim =
         | WardArrives of amount: float
         /// Stacks of a resource arrive (picked-up infusion remnants, Verisium).
         | GainStacks of actor: string * resource: string * count: int
+        /// One stack of a buff is used up (an empowered attack has landed).
+        | SpendBuff of actor: string * buff: string
         /// A meta gem gains energy (at the end of a dodge roll).
         | EnergyArrives of actor: string * meta: string * amount: float
         | Expire
@@ -852,6 +857,11 @@ module Sim =
                           | _ -> w
                       | SetStacks (buff, n) ->
                           updateActor actor.Name (fun st -> { st with Buffs = Map.add buff { Name = buff; Mods = []; Stacks = n; Expires = infinity } st.Buffs }) w
+                      | Empower (buff, perPower, cap) ->
+                          let power = alive w |> List.sumBy (fun e -> MonsterPower.ofRarity e.Def.Rarity)
+                          let n = max 1 (int (floor (min cap power / max 1.0 perPower)))
+                          { w with Counts = bump ("empowered:" + string n) w.Counts }
+                          |> updateActor actor.Name (fun st -> { st with Buffs = Map.add buff { Name = buff; Mods = []; Stacks = n; Expires = infinity } st.Buffs })
                       | other -> performSimple other w
                     and performSimple reaction (w: World) =
                      let onTarget f =
@@ -859,7 +869,7 @@ module Sim =
                         | Some t when w.Enemies.[t].Life > 0.0 -> f t
                         | _ -> w
                      match reaction with
-                     | SpendStack _ | SetStacks _ -> w
+                     | SpendStack _ | SetStacks _ | Empower _ -> w
                      | GrantBuff (name, duration, maxStacks, mods) ->
                          let w =
                              updateActor actor.Name (fun st ->
@@ -999,6 +1009,12 @@ module Sim =
                         (skill :: skill.Parts)
                         |> List.fold (fun w part -> schedule at (Strike(actor.Name, part.Name, mult, target.Def.Name)) w) w)
                     w
+            // an attack the player makes while empowered by a warcry uses one empowerment up
+            let w =
+                if useTime > 0.0 && skill.Tags.Contains Attack && not (skill.Tags.Contains Warcry) && st.Buffs.ContainsKey "EmpoweredAttacks" then
+                    let last = times |> List.map fst |> List.fold max w.Time
+                    schedule (last + 1e-9) (SpendBuff(actor.Name, "EmpoweredAttacks")) w
+                else w
             let w =
                 match skill.Consumes with
                 | Some charge ->
@@ -2030,6 +2046,11 @@ module Sim =
                 setStacksWith env name true r (min maxR (stacksOf st r + n)) w
                 |> fun w -> { w with Counts = bump ("gained:" + r) w.Counts }
             | EnergyArrives (name, meta, amount) -> gainEnergy env rng (actorDef env name) meta amount w
+            | SpendBuff (name, buff) ->
+                updateActor name (fun st ->
+                    match Map.tryFind buff st.Buffs with
+                    | Some e when e.Stacks > 1 -> { st with Buffs = Map.add buff { e with Stacks = e.Stacks - 1 } st.Buffs }
+                    | _ -> { st with Buffs = Map.remove buff st.Buffs }) w
             | Expire -> w
 
     let private envOf (fight: Fight) =

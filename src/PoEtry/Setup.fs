@@ -279,7 +279,8 @@ module Setup =
                         | Some (name, duration, monster, _) -> [ { Hook = OnHit; Filter = Called s.Name; Chance = 100.0; Reaction = ApplyCurse(name, duration, monster) } ]
                         | None -> []
                     let lasting = Behaviours.sustained db charMods setup s
-                    let rules = (match lasting with Some (_, rs) -> rs | None -> []) @ Behaviours.useRules db charMods setup s.Name o.Pickup @ Behaviours.buffRules db charMods setup s @ Behaviours.totemPlacement db charMods setup s @ curseRules
+                    let cryRules, cryGrants = Behaviours.warcry db charMods setup s
+                    let rules = cryRules @ (match lasting with Some (_, rs) -> rs | None -> []) @ Behaviours.useRules db charMods setup s.Name o.Pickup @ Behaviours.buffRules db charMods setup s @ Behaviours.totemPlacement db charMods setup s @ curseRules
                     let grants = Behaviours.verisiumGrant db charMods setup
                     let s = Behaviours.applyObserved s
                     // skills that deal no damage (buffs, infusion grants) don't hit
@@ -290,7 +291,7 @@ module Setup =
                           Infused = copy
                           GrantsVerisium = grants
                           Rules = rules
-                          Grants = (match curse with Some (_, _, _, player) -> player | None -> [])
+                          Grants = (match curse with Some (_, _, _, player) -> player | None -> []) @ cryGrants
                           Curse = curse |> Option.map (fun (name, _, _, _) -> name)
                           Pattern = lasting |> Option.map fst }
                 | _ -> None)
@@ -320,10 +321,13 @@ module Setup =
             |> List.choose (fun x ->
                 match Gems.data c.Db x.Name, pressed c o x.Name with
                 | Some d, Some p ->
-                    let skip = [ "Warcry"; "Travel"; "Minion"; "ModifiesNextSkill"; "Persistent" ] |> List.exists d.Types.Contains
+                    let skip = [ "Travel"; "Minion"; "ModifiesNextSkill"; "Persistent" ] |> List.exists d.Types.Contains
+                    let empowers = p.Rules |> List.exists (fun r -> match r.Reaction with Empower _ -> true | _ -> false)
                     let grantsBuff = p.Rules |> List.exists (fun r -> match r.Reaction with ChargeBuff _ | GrantBuff _ -> true | _ -> false)
                     let cooldown = p.Skill.Cooldown |> Option.defaultValue 0.0
                     if skip then None
+                    // a warcry is worth pressing when it empowers attacks
+                    elif d.Types.Contains "Warcry" then (if empowers then Some(OnCooldown x.Name) else None)
                     elif p.Curse.IsSome then (if p.Rules |> List.exists (fun r -> match r.Reaction with ApplyCurse (_, _, ms) -> not ms.IsEmpty | _ -> false) || not p.Grants.IsEmpty then Some(KeepCurse x.Name) else None)
                     elif grantsBuff then Some(KeepBuff x.Name)
                     elif cooldown >= 1.0 && (not p.Skill.Hits.IsEmpty || not p.Rules.IsEmpty || p.GrantsVerisium > 0) then Some(OnCooldown x.Name)

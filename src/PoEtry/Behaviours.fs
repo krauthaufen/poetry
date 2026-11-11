@@ -388,6 +388,28 @@ module Behaviours =
             let effect = Mods.mult ctx [ Named(if isCurse then "CurseEffect" else "MarkEffect") ] all
             Some(name, duration, monster |> List.map (Mod.scaled effect), player |> List.map (Mod.scaled effect >> Mod.from skill.Name))
 
+    /// Warcries: using one empowers the next attacks, one per `warcry_empowers_per_X_monster_power`
+    /// of enemy power, counting up to `..._mp_cap`. What empowered attacks get is on the gem:
+    /// Infernal Cry "Empowered Attacks Gain X% of damage as extra Fire damage", Seismic Cry an
+    /// extra aftershock for slams. Returns the use rule and the mods for empowered attacks.
+    /// Other warcry effects (Guard, rage per power, knockback, the cry's explosion): not modelled.
+    let warcry (db: GameDb) (charMods: ModDb) (setup: GemSetup) (skill: Skill) : Rule list * Mod list =
+        match Gems.data db setup.Gem with
+        | Some d when d.Types.Contains "Warcry" ->
+            let raw = Gems.rawStats db charMods { setup with Supports = [] }
+            let sum id = raw |> List.filter (fun (k, _) -> k = id) |> List.sumBy snd
+            let per, cap = sum "warcry_empowers_per_X_monster_power", sum "warcry_empowers_per_X_monster_power_mp_cap"
+            if per <= 0.0 then [], []
+            else
+                let empowered (m: Mod) = m |> Mod.whenever (SkillIs Attack) |> Mod.whenever (WhileBuff "EmpoweredAttacks") |> Mod.from skill.Name
+                let fire = sum "infernal_cry_exerted_attack_all_damage_%_to_gain_as_fire_%"
+                let aftershocks = sum "seismic_cry_slam_skill_additional_aftershocks"
+                [ { Hook = OnUse; Filter = Called skill.Name; Chance = 100.0; Reaction = Empower("EmpoweredAttacks", per, (if cap > 0.0 then cap else infinity)) } ],
+                [ if fire > 0.0 then
+                      for t in DamageType.all -> empowered (Mod.base' (GainAs(t, Fire)) fire)
+                  if aftershocks > 0.0 then yield empowered (Mod.base' (Named "AftershockChance") (100.0 * aftershocks) |> Mod.whenever (SkillIs Slam)) ]
+        | _ -> [], []
+
     /// What heralds do themselves (their buff's mods are on the character already). The rule is
     /// the gem's description, the damage its second stat set:
     /// - Herald of Ice: an attack that kills a frozen enemy makes it explode ("Explosion").
