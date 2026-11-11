@@ -152,6 +152,25 @@ module Behaviours =
             match Gems.skill db charMods mainHand { setup with StatSet = set } with
             | Ok (skill, _) -> Some(element, skill)
             | Error _ -> None
+        // no stat set of its own for the infused form, but stats that say what consuming does
+        // (Arc: "200% more damage when Lightning Infused", "Chains 6 additional times")
+        | Some element, None ->
+            let raw = Gems.rawStats db charMods { setup with Supports = [] }
+            let ending (e: string) = raw |> List.filter (fun (k, _) -> k.EndsWith e) |> List.sumBy snd
+            let more, chains = ending "_damage_+%_final_from_infusion_consumption", ending "_chains_gained_from_infusion_consumption"
+            if more = 0.0 && chains = 0.0 then None
+            else
+                match Gems.skill db charMods mainHand setup with
+                | Ok (skill, _) ->
+                    Some(
+                        element,
+                        { skill with
+                            Mods = (if more <> 0.0 then [ Mod.more (Damage AllDamage) more |> Mod.from "infusion consumed" ] else []) @ skill.Mods
+                            Delivery =
+                                match skill.Delivery with
+                                | Projectiles p -> Projectiles { p with Chains = p.Chains + int chains }
+                                | other -> other })
+                | Error _ -> None
         | _ -> None
 
     /// Meta gems of a build and the spells they trigger. Every enabled group whose active gem is

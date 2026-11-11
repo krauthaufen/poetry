@@ -345,6 +345,13 @@ module StatMap =
         | "empower_barrage_number_of_barrage_repeats_per_frenzy_charge" -> one (Mod.base' (Named "BarrageRepeatsPerFrenzy") v)
         | "empower_barrage_damage_-%_final_with_repeated_projectiles" -> one (Mod.base' (Named "BarrageRepeatLess") v)
         | "empower_barrage_cooldown_%_of_attack_time" -> one (Mod.base' (Named "BarrageCooldownPct") v)
+        // Charge Regulation: "more Skill Speed while you have a Frenzy Charge", "more Critical Hit
+        // Chance while you have a Power Charge", "more Defences while you have an Endurance Charge"
+        | "charge_mastery_skill_speed_+%_with_frenzy_charges" | "charge_mastery_skill_speed_+%_final_with_frenzy_charges" ->
+            one (Mod.more Speed v |> Mod.whenever (WhileBuff "FrenzyCharge"))
+        | "charge_mastery_crit_chance_+%_final_with_power_charges" -> one (Mod.more CritChance v |> Mod.whenever (WhileBuff "PowerCharge"))
+        | "charge_mastery_armour_evasion_energy_shield_+%_final_with_endurance_charges" | "charge_mastery_defences_+%_final_with_endurance_charges" ->
+            Some(Mods [ for st in [ Armour; Evasion; MaxEnergyShield ] -> Mod.more st v |> Mod.whenever (WhileBuff "EnduranceCharge") ])
         | "banner_aura_effect_+%" -> one (Mod.inc (Named "BannerEffect") v)
         | "attacks_roll_crits_twice" -> one (Mod.flag (Named "BifurcateCrits") |> Mod.whenever (SkillIs Attack))
         | "oracle_hits_eventually_crit_with_critical_strike_multiplier_+%_final_per_failed_roll" -> one (Mod.flag (Named "InevitableCrits"))

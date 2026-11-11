@@ -398,6 +398,25 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
             | _ -> failwith "the sprays are projectiles"
         | Error e -> failwith e)
 
+    test "Charge Regulation's buffs hold while a charge of the kind is held; Arc's infused form" (fun () ->
+        match StatMap.meaning "charge_mastery_skill_speed_+%_with_frenzy_charges" 25.0, StatMap.meaning "charge_mastery_crit_chance_+%_final_with_power_charges" 26.0 with
+        | Mods [ speed ], Mods [ crit ] ->
+            let withCharge name = { Ctx.empty with Buffs = Map.ofList [ name, 1 ] }
+            near 1.25 (Mods.mult (withCharge "FrenzyCharge") [ Speed ] (ModDb.ofList [ speed ]))
+            near 1.0 (Mods.mult Ctx.empty [ Speed ] (ModDb.ofList [ speed ]))
+            near 1.26 (Mods.mult (withCharge "PowerCharge") [ CritChance ] (ModDb.ofList [ crit ]))
+        | a -> failwithf "%A" a
+        let setup = { Gem = "Arc"; Level = 20; Quality = 0; StatSet = 1; Supports = [] }
+        match Gems.skill db.Value ModDb.empty None setup, Behaviours.infusedCopy db.Value ModDb.empty None setup with
+        | Ok (plain, _), Some (element, infused) ->
+            equal "LightningInfusion" element
+            // "200% more damage when Lightning Infused", "Chains 6 additional times"
+            near 3.0 (Mods.mult Ctx.empty [ Damage AllDamage ] (ModDb.ofList infused.Mods) / Mods.mult Ctx.empty [ Damage AllDamage ] (ModDb.ofList plain.Mods))
+            match plain.Delivery, infused.Delivery with
+            | Projectiles a, Projectiles b -> equal (a.Chains + 6) b.Chains
+            | _ -> failwith "Arc is a projectile"
+        | a -> failwithf "%A" a)
+
     test "perfect timing: the perfect hit replaces the normal one; the release follows the channel" (fun () ->
         let flag name (sk: Skill) = Mods.flag { Ctx.empty with SkillName = sk.Name } (Named name) (ModDb.ofList sk.Mods)
         let mace = (Items.parse db.Value "Rarity: Normal\nAkoyan Club\n--------\n").Weapon
