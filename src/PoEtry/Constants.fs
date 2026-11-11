@@ -64,7 +64,8 @@ module Constants =
         match a with
         | Freeze -> gc "FreezeDuration"
         | Electrocute -> gc "ElectrocuteDuration" / 1000.0
-        | HeavyStun -> 3.0 // UNVERIFIED placeholder, no game constant found; see RULES.md
+        // Monster.ot base_heavy_stun_duration_ms
+        | HeavyStun -> Map.find "base_heavy_stun_duration_ms" Tables.monsterConstants / 1000.0
         | Pin -> gc "PinDuration"
         | _ -> 0.0
 
@@ -103,6 +104,19 @@ module Constants =
     /// Monster hits: more stun from melee and from physical damage (monster object stats).
     let monsterMeleeStunMore = mc "melee_hit_damage_stun_multiplier_+%_final_from_ot"
     let monsterPhysicalStunMore = mc "physical_hit_damage_stun_multiplier_+%_final_from_ot"
+    /// After a heavy stun the stun threshold is higher for a while (GameConstants
+    /// HeavyStunThresholdModifier / HeavyStunModifierDuration, and their "...Player" versions).
+    let heavyStunThresholdMore = gc "HeavyStunThresholdModifier"
+    let heavyStunThresholdSeconds = gc "HeavyStunModifierDuration"
+    let playerHeavyStunScale = gc "HeavyStunDamageScalePlayer"
+    let playerHeavyStunThresholdMore = gc "HeavyStunThresholdModifierPlayer"
+    let playerHeavyStunThresholdSeconds = gc "HeavyStunModifierDurationPlayer"
+    /// Heavy stun on the player: seconds stunned. GUESS: the monsters' own value (Monster.ot);
+    /// the player's is not in the exported data.
+    let playerHeavyStunDuration = Map.find "base_heavy_stun_duration_ms" Tables.monsterConstants / 1000.0
+    /// Stun buildup starts to decay this long after the last hit, by this share of the bar per second (Monster.ot poise_decay_*).
+    let poiseDecayDelay = Map.find "poise_decay_delay_ms" Tables.monsterConstants / 1000.0
+    let poiseDecayPerSecond = Map.find "poise_decay_%_per_second" Tables.monsterConstants
     /// Seconds a light stun interrupts the player. GUESS (no player constant in the data).
     let playerLightStunDuration = 0.35
 

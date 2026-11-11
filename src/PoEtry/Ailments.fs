@@ -72,6 +72,8 @@ module Ailments =
         let extra =
             match a with
             | Freeze | Electrocute -> [ PoiseThreshold; AilmentThreshold ]
+            // raised for a while after a heavy stun
+            | HeavyStun -> [ PoiseThreshold; Named "HeavyStunThreshold" ]
             | _ -> [ PoiseThreshold ]
         Constants.poiseThreshold defender.Level * Mods.mult Ctx.empty extra defender.Mods
 

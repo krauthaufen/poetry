@@ -402,6 +402,10 @@ module Sim =
           /// Stunned or frozen: no action before this time.
           LockedUntil: float
           FreezeBuildup: float
+          /// Heavy stun on the player: the bar (%), when it last grew, and until when the threshold is raised.
+          StunBuildup: float
+          StunBuiltAt: float
+          StunResistantUntil: float
           /// Charges per charm (by its buff name).
           CharmCharges: Map<string, float> }
 
@@ -798,6 +802,12 @@ module Sim =
             if total >= 100.0 && not (Map.containsKey (Ailment.status a) e.Debuffs) then
                 updateEnemy target (fun e -> { e with Buildup = Map.add a 0.0 e.Buildup }) w
                 |> addDebuff target (Ailment.status a) (Constants.buildupDuration a) 1 []
+                |> fun w ->
+                    // after a heavy stun the monster is much harder to stun again for a while
+                    if a = HeavyStun then
+                        addDebuff target "StunResistant" (Constants.buildupDuration a + Constants.heavyStunThresholdSeconds) 1
+                            [ Mod.more (Named "HeavyStunThreshold") Constants.heavyStunThresholdMore ] w
+                    else w
                 |> fun w -> { w with Counts = bump ("inflict:" + Ailment.name a) w.Counts }
             else
                 updateEnemy target (fun e -> { e with Buildup = Map.add a (min total 100.0) e.Buildup }) w
@@ -1758,9 +1768,24 @@ module Sim =
                                 |> List.sumBy (fun (t, d) -> if t = Physical then d * (1.0 + Constants.monsterPhysicalStunMore / 100.0) else d)
                                 |> fun d -> if atk.Melee then d * (1.0 + Constants.monsterMeleeStunMore / 100.0) else d
                             let stunChance = min 100.0 (stunDamage / max 1.0 v.StunThreshold * 100.0)
-                            if stunChance >= Constants.playerLightStunMinimum && rng.Chance stunChance && not (rng.Chance v.AvoidStun) then
-                                w |> unlessCharm "Stunned" (lock Constants.playerLightStunDuration "Stunned")
-                            else w
+                            let w =
+                                if stunChance >= Constants.playerLightStunMinimum && rng.Chance stunChance && not (rng.Chance v.AvoidStun) then
+                                    w |> unlessCharm "Stunned" (lock Constants.playerLightStunDuration "Stunned")
+                                else w
+                            // heavy stun: every hit fills a bar by its share of the stun threshold; the
+                            // bar decays when nothing has hit for a while; full: stunned, and harder
+                            // to stun again for some time
+                            match w.Player with
+                            | Some p ->
+                                let idle = w.Time - p.StunBuiltAt - Constants.poiseDecayDelay
+                                let decayed = if idle > 0.0 then max 0.0 (p.StunBuildup - Constants.poiseDecayPerSecond * idle) else p.StunBuildup
+                                let threshold = max 1.0 v.StunThreshold * (if w.Time < p.StunResistantUntil then 1.0 + Constants.playerHeavyStunThresholdMore / 100.0 else 1.0)
+                                let bar = decayed + stunDamage * Constants.playerHeavyStunScale / threshold * 100.0
+                                if bar >= 100.0 then
+                                    { w with Player = Some { p with StunBuildup = 0.0; StunBuiltAt = w.Time; StunResistantUntil = w.Time + Constants.playerHeavyStunDuration + Constants.playerHeavyStunThresholdSeconds } }
+                                    |> unlessCharm "Stunned" (lock Constants.playerHeavyStunDuration "HeavilyStunned")
+                                else { w with Player = Some { p with StunBuildup = bar; StunBuiltAt = w.Time } }
+                            | None -> w
                     let w =
                         { w with
                             Counts = w.Counts |> bump "enemy:hit" |> (if deflected then bump "enemy:deflected" else id) |> (if blocked then bump "enemy:blocked" else id) }
@@ -2001,6 +2026,9 @@ module Sim =
                       Recoups = []
                       LockedUntil = 0.0
                       FreezeBuildup = 0.0
+                      StunBuildup = 0.0
+                      StunBuiltAt = 0.0
+                      StunResistantUntil = 0.0
                       CharmCharges = fight.Player.Charms |> List.map (fun c -> c.Buff, c.MaxCharges) |> Map.ofList })
               Time = 0.0
               Enemies =

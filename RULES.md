@@ -68,7 +68,8 @@ Confidence levels:
 | Buildup sources | freeze: cold; electrocute: lightning, only with `Named "CanElectrocute"`; heavy stun: all damage; pin: physical, only with `Named "CanPin"` | PoB `buildupTypes` | guess for heavy stun (no melee/physical bonus yet) |
 | Buildup decay | none: the bar never drains | — | guess, **known to be wrong**, needs data |
 | Repeat-freeze threshold growth (`FreezeModifierDuration` etc.) | not modelled | — | missing |
-| Statuses after buildup | freeze 4 s, electrocute 5 s, pin 3 s, heavy stun 3 s | GameConstants; heavy stun is a placeholder | data / guess |
+| Statuses after buildup | freeze 4 s, electrocute 5 s, pin 3 s, heavy stun 2 s (Monster.ot `base_heavy_stun_duration_ms`) | GameConstants, Monster.ot | data |
+| After a heavy stun | the monster's heavy stun threshold is 500% more for the stun and 16.5 s after it (HeavyStunThresholdModifier, HeavyStunModifierDuration) | GameConstants; that the time starts when the stun ends is our reading | data |
 | Daze, maim, blind, hinder | flat chance × inc × more, 4 s | — | guess (duration) |
 
 ## Timing and the event engine
@@ -193,7 +194,8 @@ Checked against PoB's defensive numbers for 131 public characters (`tools/corpus
 | Life flask | drunk when life falls below half, if charges allow; amount x life recovery rate over its duration | player behaviour | guess |
 | Leech (life) | % of physical attack damage, from one enemy per hit event, recovered at most 20% of maximum per second | as mana leech | guess |
 | Ailments on the player | threshold = half of maximum life (PlayerAilmentThresholdLifeFactor) + mods. Ignite: chance = fire / threshold x IgniteChanceMultiplier, burns 4 s, strongest only, lowered by fire resistance. Shock: chance likewise, +20% damage taken for 4 s. Chill: slow = ChillEffectMultiplier x cold / threshold for 2 s. Freeze: builds cold x FreezeDamageScalePlayer / freeze threshold, frozen 2 s at 100%. "Avoid", "effect on you" and duration stats apply. Unmitigated hit damage is used. Bleed / poison from monsters: not modelled | GameConstants "...Player" | data; using unmitigated damage is a guess |
-| Light stun on the player | chance = hit / stun threshold (maximum life before CI + mods); physical +100%, melee +33% (monster object stats); nothing below 15% (LightStunMinimumChancePlayer); interrupts for 0.35 s (GUESS); a stun only delays the next action, it does not cancel one under way. Heavy stun on the player: not modelled | game constants; formula a guess | guess |
+| Light stun on the player | chance = hit / stun threshold (maximum life before CI + mods); physical +100%, melee +33% (monster object stats); nothing below 15% (LightStunMinimumChancePlayer); interrupts for 0.35 s (GUESS); a stun only delays the next action, it does not cancel one under way. | game constants; formula a guess | guess |
+| Heavy stun on the player | every hit fills a bar by stun damage x 0.65 (HeavyStunDamageScalePlayer) / stun threshold; the bar decays 5% per second after 8 s without a hit (Monster.ot poise decay); full: stunned 2 s (GUESS: the monsters' value), then the threshold is 100% more for 10 s (HeavyStunThresholdModifierPlayer, HeavyStunModifierDurationPlayer). A stun charm stops it | GameConstants; duration and decay taken from Monster.ot | data / guess |
 | Evasion | every monster hit can be evaded | PoE2 0.3 (recollection) | guess |
 
 ### Keystones
