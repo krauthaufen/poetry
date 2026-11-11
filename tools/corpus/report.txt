@@ -531,8 +531,8 @@
    5  under 1%
   10  1% to 10%
   18  10% to 50%
-  44  50% to 200%
-  35  2x to 10x
+  45  50% to 200%
+  34  2x to 10x
   10  over 10x
 
 == per build
@@ -645,7 +645,7 @@
 107-warbringer-leap-slam                             Leap Slam                                       63627 dps (theirs      64928)  0 unknown, 19 unmapped, 38 unsimulated
 108-witchhunter-bow-shot                             Bow Shot                                         1599 dps (theirs        633)  0 unknown, 12 unmapped, 21 unsimulated  life 2330/2574  evasion 3921/2352  deflection 1608/2657  fire res 87/107  cold res 80/100  lightning res 77/97
 109-abyssal-lich-bonestorm                           Bonestorm (pressed Ball Lightning)           13473311 dps (theirs     189824)  0 unknown, 7 unmapped, 28 unsimulated  mana 808/783  energy shield 4778/5277
-110-acolyte-of-chayula-volcano                       Volcano                                           485 dps (theirs         87)  2 unknown, 23 unmapped, 27 unsimulated  energy shield 9864/10248  evasion 34502/32666  deflection 37608/35605
+110-acolyte-of-chayula-volcano                       Volcano                                            53 dps (theirs         87)  2 unknown, 23 unmapped, 27 unsimulated  energy shield 9864/10248  evasion 34502/32666  deflection 37608/35605
 111-amazon-fragmentation-rounds                      Fragmentation Rounds                           259880 dps (theirs      26215)  0 unknown, 10 unmapped, 17 unsimulated
 112-blood-mage-doom-blast                            Elemental Weakness                               4171 dps (theirs          0)  0 unknown, 3 unmapped, 26 unsimulated
 113-chronomancer-reap                                Reap                                          1189910 dps (theirs    1322925)  0 unknown, 5 unmapped, 13 unsimulated
@@ -657,7 +657,7 @@
 119-lich-wardbound-minions                           Wardbound Minions                              251804 dps (theirs     172116)  0 unknown, 4 unmapped, 21 unsimulated  fire res 129/126  cold res 110/107  lightning res 116/113
 120-martial-artist-devour                            Devour                                              0 dps (theirs      42799)  0 unknown, 18 unmapped, 19 unsimulated  strength 102/92  dexterity 113/103  intelligence 133/125
 121-oracle-entangle                                  Entangle                                       955796 dps (theirs    1114083)  0 unknown, 11 unmapped, 21 unsimulated  fire res 84/73
-122-pathfinder-companion-plague-harvester            Volcano                                          1578 dps (theirs         77)  0 unknown, 16 unmapped, 24 unsimulated  life 8614/9336
+122-pathfinder-companion-plague-harvester            Volcano                                           798 dps (theirs         77)  0 unknown, 16 unmapped, 24 unsimulated  life 8614/9336
 123-ritualist-azmerian-wolf                          Azmerian Wolf                                   34015 dps (theirs     142047)  0 unknown, 11 unmapped, 36 unsimulated
 124-shaman-grim-pillars                              Grim Pillars (pressed Entangle)                116381 dps (theirs     424914)  0 unknown, 12 unmapped, 22 unsimulated
 125-smith-of-kitava-flame-breath                     Flame Breath                                    18141 dps (theirs     185078)  0 unknown, 5 unmapped, 34 unsimulated  cold res 81/77  lightning res 81/77  chaos res 62/56

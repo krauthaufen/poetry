@@ -37,10 +37,10 @@
   Perform a Warcry using Glory gained by Igniting enemies to turn you into an embodiment of Kaom. While embodying Kaom, you Trigger Volcanic Steps while travelling, Melee Strikes and Slams are Ancestrally Boosted, and your Melee Strikes Trigger Volcanic Eruption.
   level 20: cost Some 44.0 (per minute None), cooldown None xNone, multiplier None, crit None
   set Warcry           ancestral_cry_empowered_attacks_strike_X_additional_enemies=2 skill_empower_limitation_specifier_for_stat_description=1 ancestral_cry_duration_+%_final_per_removable_endurance_charge=50 base_skill_effect_duration=8000 active_skill_requires_X_glory=100 active_skill_generates_mp_%_glory_per_ignite=100 ancestral_cry_non_skill_physical_to_fire_convert_%=100 active_skill_base_area_of_effect_radius=40 skill_specific_stat_description_mode=1 ancestral_cry_triggers_shockwave_every_X_units_travelled=12  | base_deal_no_damage cannot_cancel_skill_before_contact_point warcry_count_power_from_enemies warcries_knock_back_enemies can_perform_skill_while_moving
-  play: spam Ancestral Cry
+  play: cd Ancestral Cry
   built Ancestral Cry                      x1.00, 0.80s, cd None x1, cost 44 +0/s, hits [], around self 40
   fight: 0 dps; 
-         uses:Ancestral Cry 19
+         
   types without a model: EmpowersOtherSkill
 
 #### Ancestral Spirits   [AttackInPlace CreatesMinion Duration InbuiltTrigger Minion Triggered]
@@ -83,10 +83,10 @@
   Build Glory by Hitting enemies with Elemental damage. When you have maximum Glory, you may become the walking Apocalypse for a duration, Triggering one of multiple powerful Elemental Skills at an interval while this Buff lasts.
   level 20: cost Some 55.0 (per minute None), cooldown None xNone, multiplier None, crit None
   set Apocalypse       active_skill_requires_X_glory=100 active_skill_generates_mp_%_glory_per_elemental_hit=100 active_skill_base_area_of_effect_radius=70 base_skill_effect_duration=12000 unleash_the_elements_base_trigger_frequency_ms=750  | can_perform_skill_while_moving base_deal_no_damage
-  play: spam Apocalypse
+  play: cd Apocalypse
   built Apocalypse                         x1.00, 1.00s, cd None x1, cost 55 +0/s, hits [], area 70
   fight: 0 dps; 
-         uses:Apocalypse 15
+         
 
 #### Arc   [Chains Damage Lightning Projectile Spell]
   An arc of Lightning stretches from the caster to a targeted enemy and Chains on to other nearby enemies. Consumes a Lightning Infusion if possible to deal more damage and Chain further.
@@ -109,10 +109,10 @@
   Build Glory by dealing Chaos damage to enemies. When you have maximum Glory, you can entreat the Dreamer to inhabit you, briefly becoming his Archon.
   level 20: cost None (per minute None), cooldown None xNone, multiplier None, crit None
   set Archon of Chayula active_skill_requires_X_glory=100 active_skill_generates_mp_%_glory_per_chaos_hit=100 archon_of_chayula_spawn_chaos_tornado_interval_ms=3000 archon_of_chayula_physical_and_chaos_damage_+%_final=20 archon_of_chayula_withered_on_hit_for_4_seconds_%_chance=25  | can_perform_skill_while_moving base_deal_no_damage
-  play: spam Archon of Chayula
+  play: cd Archon of Chayula
   built Archon of Chayula                  x1.00, 1.00s, cd None x1, cost 0 +0/s, hits [], single
   fight: 0 dps; 
-         uses:Archon of Chayula 15
+         
 
 #### Arctic Armour   [AttackInPlace Buff Cold Cooldown Damage GainsStages HasReservation OngoingSkill Persistent Spell Sustained]
   While active, conjures an icy barrier that gains stages over time. While the barrier has stages, Melee Attacks that hit you will remove a stage to cause a burst of ice that deals Cold Spell damage to the attacker.
@@ -198,8 +198,8 @@
   play: buff Ball Lightning
   built Ball Lightning                     x1.00, 1.00s, cd None x1, cost 96 +0/s, hits [(1.0, 1.0)], 1 projectiles, pierce 0, chain 0
   built Ball Lightning infused             x1.00, 1.00s, cd None x1, cost 96 +0/s, hits [(1.0, 1.0)], 1 projectiles, pierce 0, chain 0
-  fight: 179 dps; Ball Lightning infused (hit) 87%, Ball Lightning (hit) 13%
-         crits:Ball Lightning 2, hits:Ball Lightning 9, hits:Ball Lightning infused 6, infused:Ball Lightning 6, uninfused:Ball Lightning 9, uses:Ball Lightning 15
+  fight: 357 dps; Ball Lightning (hit) 55%, Ball Lightning infused (hit) 45%
+         crits:Ball Lightning 7, hits:Ball Lightning 91, hits:Ball Lightning infused 6, infused:Ball Lightning 6, uninfused:Ball Lightning 91, uses:Ball Lightning 14
   types without a model: CreatesGroundEffect
 
 #### Barkskin   [AttackInPlace Buff Duration HasReservation OngoingSkill Persistent]
@@ -217,7 +217,7 @@
   play: cd Barrage; spam Barrage
   built Barrage                            x1.00, 0.70s, cd Some 2.0 x1, cost 51 +0/s, hits [], single
   fight: 0 dps; 
-         uses:Barrage 11
+         barrage readied 11, uses:Barrage 11
   types without a model: EmpowersOtherSkill, ModifiesNextSkill
 
 #### Barrier Invocation   [Buff CanHaveMultipleOngoingSkillInstances Cooldown GeneratesEnergy HasReservation Invocation Meta OngoingSkill Persistent Triggers]
@@ -617,8 +617,8 @@
   set Shockwave        active_skill_base_secondary_area_of_effect_radius=16 wolf_cross_slash_angle=75 wolf_cross_slash_offset=14 ice_chunk_refire_search_radius=70 ice_chunk_refire_overshoot_min=20 ice_chunk_refire_overshoot_max=50 wolf_pounce_mark_shockwave_delay_ms=150 active_skill_base_area_of_effect_radius=24  | is_area_damage
   play: cd Cross Slash; spam Cross Slash
   built Cross Slash                        x2.35, 0.70s, cd Some 2.0 x1, cost 67 +0/s, hits [(1.0, 1.0)], area 47
-  fight: 27 dps; Cross Slash (hit) 100%
-         crits:Cross Slash 1, hits:Cross Slash 10, uses:Cross Slash 11
+  fight: 70 dps; Cross Slash (hit) 100%
+         crits:Cross Slash 4, hits:Cross Slash 20, uses:Cross Slash 11
 
 #### Crossbow Shot   [Area Attack CrossbowSkill Projectile ProjectilesFromUser RangedAttack]   needs: Crossbow
   Fire a bolt from your crossbow.
@@ -692,10 +692,10 @@
   Shapeshift into a demon, vastly boosting the power of your Spells. You gain Demonflame every second you remain in demon form, causing your Life to be lost at an ever-increasing rate. Maximum 10 Demonflame. Revert to human form if you reach 1 Life, use a Skill that isn't a Spell, or reactivate this Skill.
   level 20: cost Some 65.0 (per minute None), cooldown Some 15.0 xSome 1.0, multiplier None, crit None
   set Demon Form       demon_form_spell_damage_+%_final_per_stack=3  | demon_form_grants_cast_speed_+% demon_form_life_loss_per_minute_per_stack base_deal_no_damage demon_transformation_cooldown_does_not_tick
-  play: cd Demon Form; spam Demon Form
+  play: buff Demon Form
   built Demon Form                         x1.00, 1.00s, cd Some 15.0 x1, cost 65 +0/s, hits [], single
   fight: 0 dps; 
-         uses:Demon Form 2
+         demon form ended 1, uses:Demon Form 1
   types without a model: ManualCooldownConsumption
 
 #### Despair   [AppliesCurse Area AreaSpell Chaos Duration Spell]
@@ -1457,12 +1457,12 @@
   set Shockwave        active_skill_override_turn_duration_ms=360 perfect_strike_timing_window_base_ms=400 base_melee_dash_range=75 attack_maximum_action_distance_+=20 channel_start_lock_cancelling_of_attack_time_%=50 total_attack_time_+_ms=800 gathering_storm_perfect_aoe_limit=50 active_skill_base_physical_damage_%_to_convert_to_lightning=20 channel_end_duration_as_%_of_attack_time=85 active_skill_base_area_of_effect_radius=22 active_skill_base_physical_damage_%_to_convert_to_lightning=80  | is_area_damage base_skill_show_average_damage_instead_of_dps precise_cursor_targeting_uses_contact_point_height_offset perfectly_timed
   set Tempest Shockwave active_skill_override_turn_duration_ms=360 perfect_strike_timing_window_base_ms=400 base_melee_dash_range=75 attack_maximum_action_distance_+=20 channel_start_lock_cancelling_of_attack_time_%=50 total_attack_time_+_ms=800 gathering_storm_perfect_aoe_limit=50 active_skill_base_physical_damage_%_to_convert_to_lightning=20 channel_end_duration_as_%_of_attack_time=85 active_skill_base_area_of_effect_radius=32 active_skill_base_physical_damage_%_to_convert_to_lightning=80 base_skill_effect_duration=5000  | is_area_damage base_skill_show_average_damage_instead_of_dps precise_cursor_targeting_uses_contact_point_height_offset perfectly_timed
   play: spam Gathering Storm
-  built Gathering Storm                    x4.35, 0.71s, cd None x1, cost 0 +53/s, hits [(1.0, 1.0)], area 18
+  built Gathering Storm                    x4.35, 1.32s, cd None x1, cost 0 +53/s, hits [(1.0, 1.0)], area 18
         part Gathering Storm: Perfect Dash x10.14, hits [(1.0, 1.0)]
         part Gathering Storm: Shockwave   x4.35, hits [(1.0, 1.0)]
         part Gathering Storm: Tempest Shockwave x8.69, hits [(1.0, 1.0)]
-  fight: 588 dps; Gathering Storm: Perfect Dash (hit) 60%, Gathering Storm: Shockwave (hit) 25%, Gathering Storm (hit) 15%
-         crits:Gathering Storm 1, crits:Gathering Storm: Perfect Dash 3, crits:Gathering Storm: Shockwave 1, hits:Gathering Storm 11, hits:Gathering Storm: Perfect Dash 11, hits:Gathering Storm: Shockwave 11, uses:Gathering Storm 12
+  fight: 280 dps; Gathering Storm: Perfect Dash (hit) 68%, Gathering Storm: Shockwave (hit) 32%, Gathering Storm (hit) 0%
+         crits:Gathering Storm 3, crits:Gathering Storm: Perfect Dash 1, hits:Gathering Storm 7, hits:Gathering Storm: Perfect Dash 7, hits:Gathering Storm: Shockwave 7, uses:Gathering Storm 8
   types without a model: CreatesGroundEffect, PerfectTiming, Travel
 
 #### Gelid Palm   [Area Attack AttackInPlace Buff Cold HasReservation NoAttackOrCastTime OngoingSkill Persistent]   needs: Unarmed
@@ -1568,10 +1568,10 @@
   Build Glory by Heavy Stunning enemies. When you have maximum Glory you may entreat the Ancestors to crush your enemies, manifesting a massive hammer that falls from the sky onto your target, Slamming into the ground after a short duration and dealing immense damage based on your weapon.
   level 20: cost Some 73.0 (per minute None), cooldown None xNone, multiplier Some 15.29, crit None
   set Hammer of the Gods base_skill_effect_duration=2500 active_skill_base_area_of_effect_radius=24 active_skill_damage_+%_final_while_dual_wielding=-30 active_skill_requires_X_glory=20 active_skill_generates_mp_%_glory_per_heavy_stun=100  | is_area_damage can_perform_skill_while_moving global_always_hit
-  play: spam Hammer of the Gods
+  play: cd Hammer of the Gods
   built Hammer of the Gods                 x15.29, 1.90s, cd None x1, cost 73 +0/s, hits [(1.0, 1.0)], area 24
-  fight: 592 dps; Hammer of the Gods (hit) 100%
-         crits:Hammer of the Gods 1, hits:Hammer of the Gods 7, uses:Hammer of the Gods 8
+  fight: 0 dps; 
+         
 
 #### Hand of Chayula   [Area Attack Chaos Melee MeleeSingleTarget Meta Palm]   needs: Quarterstaff
   Dash to an enemy and Strike them, triggering socketed Marks with increased effect and applying socketed Curses with increased duration.
@@ -1791,8 +1791,8 @@
   play: spam Ice Shot
   built Ice Shot                           x3.44, 0.93s, cd None x1, cost 40 +0/s, hits [(1.0, 1.0)], 1 projectiles, pierce 0, chain 0
         part Ice Shot: Shards             x3.44, hits [(1.0, 1.0)]
-  fight: 595 dps; Ice Shot: Shards (hit) 78%, Ice Shot (hit) 22%
-         crits:Ice Shot: Shards 3, hits:Ice Shot 15, hits:Ice Shot: Shards 45, uses:Ice Shot 16
+  fight: 144 dps; Ice Shot (hit) 100%
+         crits:Ice Shot 1, hits:Ice Shot 15, uses:Ice Shot 16
 
 #### Ice Strike   [Area Attack AttackInPlace Cold Melee MeleeSingleTarget PerformsFinalStrike]   needs: Quarterstaff
   Perform a fast icy Strike. Using this Attack three times in quick succession causes a final strike that is slower and more powerful.
@@ -1801,8 +1801,9 @@
   set Third Strike     melee_conditional_step_distance=10 statset_index_for_final_animation_combo_index=1 active_skill_base_physical_damage_%_to_convert_to_cold=80 base_melee_dash_range=30 supplementary_stat_container_attack_speed_+%_final=-50 melee_range_+=7  | is_area_damage precise_cursor_targeting_uses_contact_point_height_offset is_final_strike
   play: spam Ice Strike
   built Ice Strike                         x1.87, 0.51s, cd None x1, cost 36 +0/s, hits [(1.0, 1.0)], single
-  fight: 136 dps; Ice Strike (hit) 100%
-         crits:Ice Strike 3, hits:Ice Strike 28, uses:Ice Strike 29
+        part Ice Strike: Third Strike     x4.05, hits [(1.0, 1.0)]
+  fight: 144 dps; Ice Strike (hit) 58%, Ice Strike: Third Strike (hit) 42%
+         crits:Ice Strike 4, hits:Ice Strike 14, hits:Ice Strike: Third Strike 7, uses:Ice Strike 22
   types without a model: PerformsFinalStrike
 
 #### Ice-Tipped Arrows   [Buff CannotChain CannotTerrainChain ConsumesCharges Cooldown Duration EmpowersOtherSkill GroundTargetedProjectile ModifiesNextSkill ProjectileNoCollision SkillConsumesFrenzyChargesOnUse Spell]   needs: Spear / Bow
@@ -1811,6 +1812,7 @@
   set Ice-Tipped Arrows base_skill_effect_duration=20000 shearing_bolts_number_of_empowered_attacks=4 shearing_bolts_non_skill_base_physical_damage_%_to_convert_to_cold=100  | can_perform_skill_while_moving
   play: cd Ice-Tipped Arrows; spam Ice-Tipped Arrows
   built Ice-Tipped Arrows                  x1.00, 0.70s, cd Some 12.0 x1, cost 63 +0/s, hits [], single
+  built Ice-Tipped Arrows: Ice Fragments   x1.87, 0.83s, cd Some 0.15 x1, cost 0 +0/s, hits [(1.0, 1.0); (1.0, 1.0); (1.0, 1.0); (1.0, 1.0)], area 18
   fight: 0 dps; 
          uses:Ice-Tipped Arrows 2
   types without a model: EmpowersOtherSkill, ModifiesNextSkill
@@ -2007,7 +2009,7 @@ pushed out of the way.
   play: spam Lightning Warp
   built Lightning Warp                     x1.00, 0.50s, cd None x1, cost 83 +0/s, hits [(1.0, 1.0)], area 30
   fight: 0 dps; 
-         gained:LightningInfusion 28, remnant:LightningInfusion 29, uses:Lightning Warp 29
+         
   types without a model: CreatesGroundEffect, Movement
 
 #### Lingering Illusion   [Buff Duration GeneratesCharges GeneratesRemnants HasReservation OngoingSkill Persistent]
@@ -2025,8 +2027,8 @@ pushed out of the way.
   set Living Bomb      base_skill_effect_duration=15000 active_skill_base_area_of_effect_radius=25 living_bomb_base_number_of_bombs_allowed=1 living_bomb_damage_threshold_%_of_ailment_threshold=200  | spell_minimum_base_fire_damage spell_maximum_base_fire_damage base_skill_show_average_damage_instead_of_dps is_area_damage can_perform_skill_while_moving
   play: spam Living Bomb
   built Living Bomb                        x1.00, 0.60s, cd None x1, cost 85 +0/s, hits [(1.0, 1.0)], area 25
-  fight: 563 dps; Living Bomb (hit) 100%
-         crits:Living Bomb 3, gained:FireInfusion 23, hits:Living Bomb 23, remnant:FireInfusion 24, uses:Living Bomb 24
+  fight: 0 dps; 
+         fizzled:Living Bomb 1, planted:Living Bomb 2, uses:Living Bomb 2
 
 #### Lunar Assault   [Area Attack AttackInPlace Cold Melee MeleeSingleTarget Shapeshift Wolf]   needs: Talisman
   Shapeshift into a Werewolf and swipe with your claws, projecting an arc of moonlight and ice forward in a crescent.
@@ -2126,10 +2128,10 @@ pushed out of the way.
 Purple Flames of Chayula for a duration.
   level 20: cost Some 0.0 (per minute None), cooldown None xNone, multiplier None, crit None
   set Mantra of Destruction active_skill_required_number_of_combo_stacks=8 base_combo_stacks_decay_delay_ms=8000 skill_empowers_next_x_melee_attacks=1 base_skill_effect_duration=8000 mantra_of_destruction_purple_flame_all_damage_%_gained_as_chaos=7 base_secondary_skill_effect_duration=20000  | mantra_of_destruction_grant_all_damage_%_to_gain_as_chaos_with_attacks can_perform_skill_while_moving combo_only_stacks_from_hits_with_weapon_restriction base_deal_no_damage
-  play: buff Mantra of Destruction
+  play: cd Mantra of Destruction
   built Mantra of Destruction              x1.00, 0.60s, cd None x1, cost 0 +0/s, hits [], single
   fight: 0 dps; 
-         uses:Mantra of Destruction 3
+         
   types without a model: ComboStacking, EmpowersOtherSkill
 
 #### Maul   [Area Attack AttackInPlace Bear Melee MeleeSingleTarget Shapeshift]   needs: Talisman
@@ -2322,10 +2324,10 @@ Purple Flames of Chayula for a duration.
   set Normal Strikes   perfect_strike_timing_window_base_ms=300 active_skill_base_physical_damage_%_to_convert_to_fire=40 active_skill_override_turn_duration_ms=360 active_skill_damage_+%_final_while_dual_wielding=-30 channel_start_lock_cancelling_of_attack_time_%=50 channel_end_duration_as_%_of_attack_time=35  | is_area_damage base_skill_show_average_damage_instead_of_dps precise_cursor_targeting_uses_contact_point_height_offset
   set Perfect Strike   active_skill_base_physical_damage_%_to_convert_to_fire=40 active_skill_override_turn_duration_ms=360 active_skill_damage_+%_final_while_dual_wielding=-30 channel_end_duration_as_%_of_attack_time=35 active_skill_base_physical_damage_%_to_convert_to_fire=40 melee_range_+=35  | is_area_damage base_skill_show_average_damage_instead_of_dps precise_cursor_targeting_uses_contact_point_height_offset perfectly_timed
   play: spam Perfect Strike
-  built Perfect Strike                     x3.43, 3.17s, cd None x1, cost 0 +42/s, hits [(1.0, 1.0)], single
+  built Perfect Strike                     x3.43, 4.29s, cd None x1, cost 0 +42/s, hits [(1.0, 1.0)], single
         part Perfect Strike: Perfect Strike x11.32, hits [(1.0, 1.0)]
-  fight: 210 dps; Perfect Strike: Perfect Strike (hit) 83%, Perfect Strike (hit) 17%
-         hits:Perfect Strike 4, hits:Perfect Strike: Perfect Strike 4, uses:Perfect Strike 5
+  fight: 183 dps; Perfect Strike: Perfect Strike (hit) 100%, Perfect Strike (hit) 0%
+         crits:Perfect Strike: Perfect Strike 1, hits:Perfect Strike 3, hits:Perfect Strike: Perfect Strike 3, uses:Perfect Strike 4
   types without a model: PerfectTiming
 
 #### Permafrost Bolts   [Attack CrossbowAmmoSkill MirageArcherCanUse ReservesManually]   needs: Crossbow
@@ -2435,8 +2437,8 @@ Purple Flames of Chayula for a duration.
   built Primal Strikes                     x2.50, 0.78s, cd None x1, cost 38 +0/s, hits [(1.0, 1.0)], single
         part Primal Strikes: Spirits      x4.35, hits [(1.0, 1.0)]
         part Primal Strikes: Final Strike x3.12, hits [(1.0, 1.0)]
-  fight: 145 dps; Primal Strikes: Final Strike (hit) 58%, Primal Strikes (hit) 42%
-         crits:Primal Strikes 2, hits:Primal Strikes 18, hits:Primal Strikes: Final Strike 18, uses:Primal Strikes 19
+  fight: 55 dps; Primal Strikes (hit) 58%, Primal Strikes: Final Strike (hit) 42%
+         hits:Primal Strikes 10, hits:Primal Strikes: Final Strike 5, uses:Primal Strikes 16
   types without a model: PerformsFinalStrike, SkillConsumesShock
 
 #### Profane Ritual   [Area AreaSpell Chaos CreatesGroundRune DamageOverTime DegenOnlySpellDamage Duration GeneratesCharges Limit Spell TargetsDestructibleCorpses]
@@ -2509,8 +2511,8 @@ Purple Flames of Chayula for a duration.
   set Rain of Arrows   active_skill_base_area_of_effect_radius=36 active_skill_base_secondary_area_of_effect_radius=7 rain_of_arrows_projectile_count_multiplier_per_frenzy_charge=150 base_number_of_arrow_rains_allowed=1 rain_of_arrows_delay_per_arrow=80 rain_hit_delay_ms=120 skill_specific_stat_description_mode=1  | base_number_of_projectiles base_is_projectile skill_can_fire_arrows has_modular_projectiles_enabled can_perform_skill_while_moving is_area_damage
   play: spam Rain of Arrows
   built Rain of Arrows                     x1.81, 1.04s, cd None x1, cost 103 +0/s, hits [(1.0, 1.0)], 39 projectiles, pierce 0, chain 0
-  fight: 1814 dps; Rain of Arrows (hit) 100%
-         crits:Rain of Arrows 27, hits:Rain of Arrows 546, uses:Rain of Arrows 15
+  fight: 403 dps; Rain of Arrows (hit) 100%
+         crits:Rain of Arrows 7, hits:Rain of Arrows 123, uses:Rain of Arrows 15
 
 #### Rain of Blades   [Buff Cooldown Duration EmpowersOtherSkill IndeterminateEmpowermentAmount]   needs: Any Martial Weapon
   Pour your Runic Ward into conjuring blades. For the duration of the Buff, these blades fall on enemies Hit by your Projectile Attacks.
@@ -2573,8 +2575,8 @@ Purple Flames of Chayula for a duration.
   built Rapid Assault                      x0.78, 1.56s, cd None x1, cost 69 +0/s, hits [(1.0, 1.0)], single
         part Rapid Assault: Final Strike  x3.12, hits [(1.0, 1.0)]
         part Rapid Assault: Explosion     x5.46, hits [(1.0, 1.0)]
-  fight: 70 dps; Bleed 46%, Rapid Assault: Final Strike (hit) 45%, Rapid Assault (hit) 9%
-         crits:Rapid Assault 2, crits:Rapid Assault: Final Strike 2, hits:Rapid Assault 9, hits:Rapid Assault: Final Strike 9, inflict:Bleed 9, uses:Rapid Assault 10
+  fight: 92 dps; Bleed 40%, Rapid Assault: Final Strike (hit) 30%, Rapid Assault (hit) 30%
+         crits:Rapid Assault 4, crits:Rapid Assault: Final Strike 1, hits:Rapid Assault 46, hits:Rapid Assault: Final Strike 9, inflict:Bleed 9, uses:Rapid Assault 10
 
 #### Rapid Shot   [Attack CrossbowAmmoSkill MirageArcherCanUse ReservesManually]   needs: Crossbow
   Load your Crossbow with a large clip of heated bolts. Heat builds up on your Crossbow as you fire them, and reaching maximum Heat will prevent you from firing or reloading these bolts for a short time. However, other Skills can Consume Heat for extra benefits. Using this Skill again reloads the clip.
@@ -2908,8 +2910,10 @@ Purple Flames of Chayula for a duration.
   set Final Strike     statset_index_for_third_animation_combo_index=1 statset_index_for_fourth_animation_combo_index=1 statset_index_for_fifth_animation_combo_index=1 statset_index_for_final_animation_combo_index=2 base_melee_dash_range=40 melee_conditional_step_distance=10 frozen_claws_dash_cooldown_ms=1500 melee_range_+=6 melee_conditional_step_distance=6 supplementary_stat_container_attack_speed_+%_final=-55  | frozen_claws_hits_trigger_ballistic_ice_chunks_vs_frozen_enemies is_area_damage precise_cursor_targeting_uses_contact_point_height_offset never_freeze is_final_strike
   play: spam Shred
   built Shred                              x1.25, 0.38s, cd None x1, cost 0 +0/s, hits [(1.0, 1.0)], single
-  fight: 54 dps; Shred (hit) 100%
-         crits:Shred 6, hits:Shred 37, uses:Shred 38
+        part Shred: Fast Strikes          x1.09, hits [(1.0, 1.0)]
+        part Shred: Final Strike          x1.87, hits [(1.0, 1.0)]
+  fight: 61 dps; Shred: Final Strike (hit) 39%, Shred: Fast Strikes (hit) 35%, Shred (hit) 26%
+         crits:Shred 1, crits:Shred: Fast Strikes 1, crits:Shred: Final Strike 2, hits:Shred 12, hits:Shred: Fast Strikes 18, hits:Shred: Final Strike 10, uses:Shred 36
   types without a model: PerformsFinalStrike
 
 #### Siege Ballista   [Duration Limit ProjectilesFromUser SummonsAttackTotem SummonsTotem TotemsAreBallistae]   needs: Crossbow
@@ -3110,11 +3114,11 @@ Purple Flames of Chayula for a duration.
   level 20: cost None (per minute None), cooldown None xNone, multiplier None, crit Some 14.0
   set Skyfall          range_backflip_conditional_distance=30 total_cast_time_+_ms=1000 active_skill_generates_%_of_ward_spent_as_glory=100 comet_fall_time_ms=470 active_skill_base_area_of_effect_radius=30 active_skill_base_secondary_area_of_effect_radius=15 base_number_of_verisium_octopus_minions_allowed=12 base_skill_effect_duration=20000 verisium_comet_number_of_minions_to_create=3  | spell_minimum_base_cold_damage spell_maximum_base_cold_damage spell_minimum_base_physical_damage spell_maximum_base_physical_damage active_skill_requires_X_glory is_area_damage base_skill_show_average_damage_instead_of_dps active_skill_consumes_a_verisium_infusion
   set Verisium-Infused range_backflip_conditional_distance=30 total_cast_time_+_ms=1000 active_skill_generates_%_of_ward_spent_as_glory=100 comet_fall_time_ms=470 active_skill_base_area_of_effect_radius=30 active_skill_base_secondary_area_of_effect_radius=15 base_number_of_verisium_octopus_minions_allowed=12 base_skill_effect_duration=20000 verisium_comet_number_of_minions_to_create=3 verisium_comet_number_of_minions_to_create=3  | spell_minimum_base_cold_damage spell_maximum_base_cold_damage spell_minimum_base_physical_damage spell_maximum_base_physical_damage spell_minimum_base_cold_damage spell_maximum_base_cold_damage spell_minimum_base_physical_damage spell_maximum_base_physical_damage active_skill_requires_X_glory is_area_damage base_skill_show_average_damage_instead_of_dps active_skill_consumes_a_verisium_infusion
-  play: spam Skyfall
+  play: cd Skyfall
   built Skyfall                            x1.00, 1.00s, cd None x1, cost 0 +0/s, hits [(1.0, 1.0)], area 30
   built Skyfall infused                    x1.00, 1.00s, cd None x1, cost 0 +0/s, hits [(1.0, 1.0)], area 30
-  fight: 620 dps; Skyfall (hit) 80%, Skyfall infused (hit) 20%
-         crits:Skyfall 1, hits:Skyfall 10, hits:Skyfall infused 3, inflict:Chill 7, infused:Skyfall 3, uninfused:Skyfall 10, uses:Skyfall 15
+  fight: 0 dps; 
+         
 
 #### Smash to Smithereens   [Area Attack AttackInPlace Cooldown Fire InbuiltTrigger NoAttackOrCastTime Triggered]   needs: Any Martial Weapon / Unarmed
   Blows strong enough to Heavy Stun an enemy reverberate in an area around the enemy and heavily Break Armour.
@@ -3143,11 +3147,11 @@ Purple Flames of Chayula for a duration.
   set Explosion        active_skill_override_turn_duration_ms=120 skill_animation_duration_multiplier_override=2 perfect_strike_timing_window_base_ms=300 channel_skill_end_animation_duration_multiplier_permyriad=2500 channel_end_duration_as_%_of_attack_time=133 active_skill_base_area_of_effect_radius=25  | base_is_projectile skill_can_fire_arrows has_modular_projectiles_enabled attack_speed_modifiers_apply_to_over_time_cost channel_start_lock_cancelling_scales_with_attack_speed skill_moving_start_slowdown never_freeze precise_cursor_targeting_uses_contact_point_height_offset is_area_damage perfectly_timed
   set Icy Blast        active_skill_override_turn_duration_ms=120 skill_animation_duration_multiplier_override=2 perfect_strike_timing_window_base_ms=300 channel_skill_end_animation_duration_multiplier_permyriad=2500 channel_end_duration_as_%_of_attack_time=133 active_skill_base_area_of_effect_radius=30 active_skill_base_physical_damage_%_to_convert_to_cold=100  | snipe_damage_+%_final_if_created_from_unique base_is_projectile skill_can_fire_arrows has_modular_projectiles_enabled attack_speed_modifiers_apply_to_over_time_cost channel_start_lock_cancelling_scales_with_attack_speed skill_moving_start_slowdown never_freeze precise_cursor_targeting_uses_contact_point_height_offset is_area_damage perfectly_timed
   play: spam Snipe
-  built Snipe                              x3.12, 1.85s, cd None x1, cost 0 +119/s, hits [(1.0, 1.0)], 1 projectiles, pierce 0, chain 0
+  built Snipe                              x3.12, 2.47s, cd None x1, cost 0 +119/s, hits [(1.0, 1.0)], 1 projectiles, pierce 0, chain 0
         part Snipe: Explosion             x14.49, hits [(1.0, 1.0)]
         part Snipe: Icy Blast             x30.67, hits [(1.0, 1.0)]
-  fight: 313 dps; Snipe: Explosion (hit) 86%, Snipe (hit) 14%
-         crits:Snipe 1, hits:Snipe 7, hits:Snipe: Explosion 7, uses:Snipe 8
+  fight: 228 dps; Snipe: Explosion (hit) 86%, Snipe (hit) 14%
+         crits:Snipe 1, hits:Snipe 5, hits:Snipe: Explosion 5, uses:Snipe 6
   types without a model: PerfectTiming, SkillConsumesFreeze
 
 #### Sniper's Mark   [Cooldown Duration GeneratesCharges Limit Mark]
@@ -3248,12 +3252,12 @@ Purple Flames of Chayula for a duration.
   set Impact           active_skill_base_area_of_effect_radius=20 attack_maximum_action_distance_+=60 total_attack_time_+_ms=1400 active_skill_base_physical_damage_%_to_convert_to_fire=75 active_skill_requires_X_glory=20 active_skill_generates_mp_%_glory_per_freeze=100 active_skill_hundred_times_generates_glory_per_ignite=100 active_skill_hundred_times_generates_glory_per_shock=100  | is_area_damage has_modular_projectiles_enabled base_is_projectile global_always_hit base_skill_enabled_while_mounted
   set Pulse            attack_maximum_action_distance_+=60 active_skill_base_physical_damage_%_to_convert_to_fire=75 active_skill_generates_mp_%_glory_per_freeze=100 active_skill_hundred_times_generates_glory_per_ignite=100 active_skill_hundred_times_generates_glory_per_shock=100 active_skill_base_area_of_effect_radius=20 solaris_spear_number_of_pulses=20 solaris_spear_pulse_delay_ms=200  | is_area_damage has_modular_projectiles_enabled base_is_projectile base_skill_enabled_while_mounted
   set Ignited Ground   active_skill_base_area_of_effect_radius=20 attack_maximum_action_distance_+=60 active_skill_base_physical_damage_%_to_convert_to_fire=75 active_skill_generates_mp_%_glory_per_freeze=100 active_skill_hundred_times_generates_glory_per_ignite=100 active_skill_hundred_times_generates_glory_per_shock=100 active_skill_base_physical_damage_%_to_convert_to_fire=25 solaris_spear_ground_expands_to_+%_final_by_skill_end=100  | is_area_damage has_modular_projectiles_enabled base_is_projectile base_skill_enabled_while_mounted
-  play: spam Spear of Solaris
+  play: cd Spear of Solaris
   built Spear of Solaris                   x6.12, 0.62s, cd None x1, cost 91 +0/s, hits [(1.0, 1.0)], 1 projectiles, pierce 0, chain 0
         part Spear of Solaris: Pulse      x1.10, hits [(1.0, 1.0)]
         part Spear of Solaris: Ignited Ground x14.29, hits [(1.0, 1.0)]
-  fight: 351 dps; Spear of Solaris: Ignited Ground (hit) 71%, Spear of Solaris (hit) 25%, Spear of Solaris: Pulse (hit) 4%
-         crits:Spear of Solaris 1, crits:Spear of Solaris: Ignited Ground 1, crits:Spear of Solaris: Pulse 1, hits:Spear of Solaris 8, hits:Spear of Solaris: Ignited Ground 8, hits:Spear of Solaris: Pulse 8, uses:Spear of Solaris 9
+  fight: 0 dps; 
+         
   types without a model: CreatesGroundEffect
 
 #### Spearfield   [Area Attack AttackInPlace Duration Hazard Melee Spear Sustained]   needs: Spear
@@ -3352,10 +3356,10 @@ Purple Flames of Chayula for a duration.
   level 20: cost Some 0.0 (per minute None), cooldown None xNone, multiplier Some 1.66, crit None
   set Impact           total_attack_time_+_ms=1200 leap_slam_animation_distance_threshold=200 active_skill_base_area_of_effect_radius=25 empyrean_descent_number_of_explosions=20 active_skill_requires_X_glory=20 volcanic_fissure_base_maximum_number_of_fissures=8 base_number_of_fissures=3 base_skill_effect_duration=8000 attack_maximum_action_distance_+=60 active_skill_generates_mp_%_glory_per_freeze=100 empyrean_descent_secondary_explosions_initial_delay_ms=300 empyrean_descent_secondary_explosions_delay_ms=300 empyrean_descent_secondary_explosions_inner_radius=20 empyrean_descent_secondary_explosions_outer_radius=60 number_of_branching_fissures=2 active_skill_base_physical_damage_%_to_convert_to_cold=70  | is_area_damage fissures_nova
   set Star Fall        total_attack_time_+_ms=1200 leap_slam_animation_distance_threshold=200 empyrean_descent_number_of_explosions=20 base_skill_effect_duration=8000 attack_maximum_action_distance_+=60 active_skill_generates_mp_%_glory_per_freeze=100 empyrean_descent_secondary_explosions_initial_delay_ms=300 empyrean_descent_secondary_explosions_delay_ms=300 empyrean_descent_secondary_explosions_inner_radius=20 empyrean_descent_secondary_explosions_outer_radius=60 active_skill_base_area_of_effect_radius=20 active_skill_base_physical_damage_%_to_convert_to_cold=100  | is_area_damage fissures_nova
-  play: spam Starborn Onslaught
+  play: cd Starborn Onslaught
   built Starborn Onslaught                 x1.66, 0.95s, cd None x1, cost 0 +0/s, hits [(1.0, 1.0)], area 25
-  fight: 42 dps; Starborn Onslaught (hit) 100%
-         crits:Starborn Onslaught 1, hits:Starborn Onslaught 7, uses:Starborn Onslaught 8
+  fight: 0 dps; 
+         
   types without a model: CreatesFissure
 
 #### Storm Lance   [Area Attack ConsumesCharges CreatesGroundEffect Damage Duration Lightning Limit MirageArcherCanUse Projectile ProjectilesFromUser RangedAttack SkillConsumesFrenzyChargesOnUse Spear Sustained]   needs: Spear
@@ -3477,12 +3481,12 @@ Purple Flames of Chayula for a duration.
   set Tempest Bell     active_skill_required_number_of_combo_stacks=4 melee_conditional_step_distance=21 base_skill_effect_duration=6000 base_combo_stacks_decay_delay_ms=8000 dps_display_statset_index=2 bell_hit_limit=10 skill_specific_stat_description_mode=1  | base_number_of_tempest_bells_allowed is_area_damage skill_show_tempest_bell_on_staff cannot_damage_bell skill_cannot_be_stunned base_skill_show_average_damage_instead_of_dps base_deal_no_damage combo_only_stacks_from_hits_with_weapon_restriction
   set Impact           melee_conditional_step_distance=21 dps_display_statset_index=2 bell_hit_limit=10 active_skill_base_area_of_effect_radius=21  | base_number_of_tempest_bells_allowed is_area_damage skill_show_tempest_bell_on_staff cannot_damage_bell skill_cannot_be_stunned base_skill_show_average_damage_instead_of_dps combo_only_stacks_from_hits_with_weapon_restriction
   set Shockwave        melee_conditional_step_distance=21 dps_display_statset_index=2 bell_hit_limit=10 active_skill_base_area_of_effect_radius=26 tempest_bell_area_of_effect_+%_final_per_1_unit_of_knockback=30 bell_distance_limit_for_recall=90 bell_shockwave_cooldown_ms=300 tempest_bell_physical_damage_%_as_elemental_per_ailment=30  | base_number_of_tempest_bells_allowed bell_ailment_threshold bell_poise_threshold is_area_damage skill_show_tempest_bell_on_staff cannot_damage_bell skill_cannot_be_stunned base_skill_show_average_damage_instead_of_dps combo_only_stacks_from_hits_with_weapon_restriction
-  play: cd Tempest Bell; spam Tempest Bell
+  play: cd Tempest Bell
   built Tempest Bell                       x1.00, 0.60s, cd Some 0.5 x1, cost 98 +0/s, hits [(1.0, 1.0)], single
         part Tempest Bell: Impact         x4.08, hits [(1.0, 1.0)]
         part Tempest Bell: Shockwave      x1.19, hits [(1.0, 1.0)]
-  fight: 204 dps; Tempest Bell: Impact (hit) 84%, Tempest Bell: Shockwave (hit) 16%, Tempest Bell (hit) 0%
-         crits:Tempest Bell: Impact 3, crits:Tempest Bell: Shockwave 4, hits:Tempest Bell 24, hits:Tempest Bell: Impact 24, hits:Tempest Bell: Shockwave 24, uses:Tempest Bell 25
+  fight: 0 dps; 
+         
   types without a model: ComboStacking, ManualCooldownConsumption, ObjectDurability, SpecialAncestralBoost
 
 #### Tempest Flurry   [Area Attack Lightning Melee MeleeSingleTarget PerformsFinalStrike]   needs: Quarterstaff
@@ -3493,8 +3497,10 @@ Purple Flames of Chayula for a duration.
   set Fourth Strike    statset_index_for_third_animation_combo_index=1 statset_index_for_final_animation_combo_index=2 attack_maximum_action_distance_+=5 melee_range_+=4 active_skill_base_physical_damage_%_to_convert_to_lightning=60 active_skill_override_turn_duration_ms=200 supplementary_stat_container_attack_speed_+%_final=-45 active_skill_base_physical_damage_%_to_convert_to_lightning=40 active_skill_shock_chance_+%_final=100 melee_range_+=2 shock_effect_+%=100  | is_area_damage precise_cursor_targeting_uses_contact_point_height_offset is_final_strike
   play: spam Tempest Flurry
   built Tempest Flurry                     x1.40, 0.51s, cd None x1, cost 37 +0/s, hits [(1.0, 1.0)], single
-  fight: 90 dps; Tempest Flurry (hit) 100%
-         crits:Tempest Flurry 4, hits:Tempest Flurry 28, uses:Tempest Flurry 29
+        part Tempest Flurry: Third Strike x0.90, hits [(1.0, 1.0)]
+        part Tempest Flurry: Fourth Strike x4.21, hits [(1.0, 1.0)]
+  fight: 130 dps; Tempest Flurry: Fourth Strike (hit) 44%, Tempest Flurry (hit) 30%, Tempest Flurry: Third Strike (hit) 26%
+         crits:Tempest Flurry 3, crits:Tempest Flurry: Third Strike 3, hits:Tempest Flurry 11, hits:Tempest Flurry: Fourth Strike 5, hits:Tempest Flurry: Third Strike 15, uses:Tempest Flurry 22
   types without a model: PerformsFinalStrike
 
 #### Temporal Chains   [AppliesCurse Area AreaSpell Duration Spell]
@@ -3792,8 +3798,8 @@ Purple Flames of Chayula for a duration.
   play: buff Volcano
   built Volcano                            x1.00, 3.20s, cd None x1, cost 73 +61/s, hits [(1.0, 1.0)], area 12
         part Volcano: Projectiles         x1.00, hits [(1.0, 1.0)]
-  fight: 2029 dps; Volcano (hit) 59%, Volcano: Projectiles (hit) 41%
-         crits:Volcano 2, crits:Volcano: Projectiles 12, hits:Volcano 39, hits:Volcano: Projectiles 195, uses:Volcano 3
+  fight: 346 dps; Volcano: Projectiles (hit) 75%, Volcano (hit) 25%
+         crits:Volcano: Projectiles 8, hits:Volcano 3, hits:Volcano: Projectiles 56, uses:Volcano 3
 
 #### Voltaic Barrier   [Area Attack Lightning Wall]   needs: Any non-Talisman Martial Weapon
   Raise a pair of electrified pylons in front of you which project a wall of electricity between them, damaging and Electrocuting enemies caught between them. Projectiles you fire through the wall become energised, and discharge that energy on Hit as Chaining Lightning beams.
@@ -3837,10 +3843,10 @@ Purple Flames of Chayula for a duration.
   Build Glory by gaining Rage while already at maximum Rage. When you have maximum Glory, roar to the heavens to bring them down upon your enemies. For the duration of the Skill, meteors rain down around you and you Gain Fire damage and Rage regeneration. This Skill's effects are suppressed if you leave Bear form, but will resume if you return to Bear form before the duration expires.
   level 20: cost Some 166.0 (per minute None), cooldown None xNone, multiplier Some 0.0, crit None
   set Walking Calamity active_skill_requires_X_glory=50 base_skill_effect_duration=10000 active_skill_base_area_of_effect_radius=80 walking_calamity_spawn_meteor_every_ms=150 walking_calamity_base_rage_regeneration_per_minute=300 walking_calamity_non_skill_base_all_damage_%_to_gain_as_fire=30 walking_calamity_large_meteor_every=15 bear_skills_additional_base_attack_time_when_performing_from_default_stance=300 walking_calamity_large_meteor_same_target_prevention_duration_ms=2000 walking_calamity_meteor_frequency_+%_per_enemy_in_walking_calamity_radius=50 walking_calamity_meteor_frequency_+%_cap=200 walking_calamity_ignore_first_x_enemies_for_frequency_increase=1  | base_deal_no_damage disable_quadruped_head_movement_when_turning base_skill_show_average_damage_instead_of_dps
-  play: spam Walking Calamity
+  play: cd Walking Calamity
   built Walking Calamity                   x0.00, 1.10s, cd None x1, cost 166 +0/s, hits [(1.0, 1.0)], area 80
-  fight: 0 dps; Walking Calamity (hit) 0%
-         crits:Walking Calamity 2, hits:Walking Calamity 13, uses:Walking Calamity 14
+  fight: 0 dps; 
+         
 
 #### War Banner   [Area Banner Buff CanHaveMultipleOngoingSkillInstances Duration HasReservation OngoingSkill Persistent]
   While active, Attacking enemies builds Glory. When you have maximum Glory, you can place an inspiring Banner for a duration with an Aura that grants you and nearby Allies Attack damage, Attack speed and Accuracy.
