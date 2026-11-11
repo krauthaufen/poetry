@@ -699,6 +699,16 @@ let main _ =
         let fed = { idle with Mods = [ Mod.base' (Named "RageRegen") 6.0 ] }
         near 130.0 (Sim.run (Fight.single (boss 1e9) fed 12.5) 1u).DamageBy.["Swing (hit)"])
 
+    test "berserk: life is lost for every Rage held while Rage is not being lost" (fun () ->
+        // 20 Rage kept up by regeneration, 6% of life per minute per Rage: 2% of life a second
+        let jab = { Skill.make "Jab" [ Attack; Melee ] with BaseDamage = Map.ofList [ Physical, Range.fixedAt 1.0 ]; BaseCrit = 0.0 }
+        let player =
+            { Actor.make "Player" [ Mod.base' (Named "RageRegen") 50.0; Mod.base' (Named "LifeLossPercentPerMinutePerRage") 6.0 ] [ jab ] with
+                MaxResources = Map.ofList [ "Rage", 20 ]; Resources = [ "Rage", 20 ]
+                Vitals = Some(PlayerStats.basic 1000.0 0.0) }
+        let o = Sim.run { Fight.single (boss 1e9) player 10.0 with MaxTime = 10.0 } 1u
+        near 0.8 o.MinLife)
+
     test "warcry: empowers one attack per so much monster power; each attack uses one up" (fun () ->
         let swing = { Skill.make "Swing" [ Attack; Melee ] with BaseDamage = Map.ofList [ Physical, Range.fixedAt 100.0 ]; BaseCrit = 0.0 }
         let cry = { Skill.make "Cry" [ Warcry ] with BaseTime = 0.5; Cooldown = Some 100.0; Hits = [] }

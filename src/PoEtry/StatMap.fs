@@ -950,6 +950,8 @@ module StatMap =
         // Berserk's alternate quality: maximum Rage while Berserk is active (character-wide)
         | "berserk_maximum_rage_granted_+" -> one (Mod.base' (Named "MaxRage") v)
         | "charge_skip_consume_chance_%" -> one (Mod.base' (Named "ChargeSkipConsume") v)
+        // Berserk: "lose X% of maximum Life per minute per Rage while not losing Rage"
+        | "skill_base_life_loss_%_per_minute_per_rage_while_not_losing_rage_to_apply" -> one (Mod.base' (Named "LifeLossPercentPerMinutePerRage") v)
         | "skill_base_rage_effect_+%_to_apply" | "rage_effect_+%" -> one (Mod.inc (Named "RageEffect") v)
         | "chance_%_to_double_effect_of_removing_charges" -> Some(Unsimulated "double effect of removing charges")
         | "treat_enemy_resistances_as_negated_on_elemental_damage_hit_%_chance" ->

@@ -494,6 +494,8 @@ module Sim =
     type private Env =
         { Fight: Fight
           SkillDbs: Map<string * string, ModDb>
+          /// Percent of maximum life lost per minute per Rage (Berserk).
+          BerserkLoss: float
           /// The player's rage upkeep: regeneration per second, loss per second, seconds without
           /// gaining before it is lost, rage when hit, rage on kill.
           Rage: float * float * float * float * float }
@@ -2519,6 +2521,13 @@ module Sim =
                 if dt <= 0.0 || maxRage <= 0 || (regen <= 0.0 && have = 0) then w
                 else
                     let losing = if w.Time - st.RageAt > delay then loss else 0.0
+                    // Berserk: life lost for every Rage held while Rage is not being lost (not below 1)
+                    let w =
+                        match env.Fight.Player.Vitals, w.Player with
+                        | Some v, Some p when losing <= regen && have > 0 && env.BerserkLoss > 0.0 ->
+                            let life = max (min p.Life 1.0) (p.Life - env.BerserkLoss / 100.0 / 60.0 * float have * v.Life * dt)
+                            { w with Player = Some { p with Life = life; MinLife = min p.MinLife (life / max 1.0 v.Life) } }
+                        | _ -> w
                     let carry = st.RageCarry + (regen - losing) * dt
                     let whole = int (System.Math.Truncate carry)
                     let n = max 0 (min maxRage (have + whole))
@@ -2663,6 +2672,7 @@ module Sim =
              Constants.rageLossDelay + Mods.sumBase c [ Named "RageLossDelay" ] db,
              Mods.sumBase c [ Named "RageWhenHit" ] db,
              Mods.sumBase c [ Named "RageOnKill" ] db)
+          BerserkLoss = Mods.sumBase Ctx.empty [ Named "LifeLossPercentPerMinutePerRage" ] (ModDb.ofList fight.Player.Mods)
           SkillDbs =
             Map.ofList
                 [ for a in fight.Player :: fight.Minions do
