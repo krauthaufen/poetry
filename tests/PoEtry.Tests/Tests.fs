@@ -242,6 +242,20 @@ let main _ =
         equal 1 o.Counts.["hits:Bomb"]
         near 5000.0 o.DamageBy.["Bomb (hit)"])
 
+    test "barrage: the next repeatable attack fires again per repeat in one longer use; the cooldown grows with it" (fun () ->
+        let barrage =
+            { Skill.make "Barrage" [ Spell ] with
+                Hits = []; Cooldown = Some 2.0; Duration = 5.0
+                Mods = [ Mod.base' (Named "BarrageRepeats") 2.0; Mod.base' (Named "BarrageRepeatLess") 50.0; Mod.base' (Named "BarrageCooldownPct") 400.0 ] }
+        let shot = { strike "Shot" 100.0 with Tags = Set.ofList [ Attack; Tag "Type:Barrageable" ] }
+        let o = Sim.run (duel [ barrage; shot ] 9.5) 1u
+        // Barrage at 0 s; the shot at 1 s takes 1.1 s and hits for 100, 50, 50; Barrage is back
+        // at 2 + 4 x 1.1 = 6.4 s; plain shots from 2.1 s land at 3.1 .. 7.1 s; Barrage again at
+        // 7.1 s, the barraged shot from 8.1 s
+        equal 2 o.Counts.["uses:Barrage"]
+        equal 2 o.Counts.["barraged:Shot"]
+        near (2.0 * 200.0 + 5.0 * 100.0) o.DamageBy.["Shot (hit)"])
+
     test "banner: attack hits build its Glory, then its aura lasts for the duration" (fun () ->
         // 200 Glory at 100% of 20 per hit: placed with the tenth hit (10 s) and the twentieth.
         // 4 s of 100% more damage: the hits at 11, 12 and 13 s are doubled, the one at 14 s is not

@@ -170,3 +170,6 @@ module Constants =
 
     /// Radius (units) of the monster such a projectile passes: a boss is 10, others 4.
     let passedMonsterRadius = 10.0
+
+    /// "Skills take 5% longer to perform for each time they Repeat" (keyword text, Repeating Skills).
+    let longerPerRepeat = 0.05

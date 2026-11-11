@@ -892,6 +892,12 @@ module Sim =
     let private partNamed (p: Skill) (prefix: string) =
         p.Mods |> List.tryPick (fun m -> match m.Stat with Named n when n.StartsWith prefix -> Some(n.Substring prefix.Length) | _ -> None)
 
+    /// Barrage: the readied repeats waiting for the next Repeatable bow or spear attack.
+    let private barraged (skill: Skill) (st: ActorState) =
+        if skill.Tags.Contains(Tag "Type:Barrageable") && skill.Tags.Contains Attack then
+            Map.tryFind "Barrage" st.Buffs |> Option.filter (fun b -> b.Stacks > 0)
+        else None
+
     /// Chained attacks (Ice Strike, Tempest Flurry): which use of the chain comes next. Using
     /// another skill in between starts the chain again.
     let private seqLength (skill: Skill) =
@@ -1125,6 +1131,49 @@ module Sim =
                 else
                     let k = 1.0 + sealOwn "SealRepeatDamage" / 100.0
                     pattern @ [ for i in 1 .. repeats do for (_, mult) in pattern -> After(useTime + 0.1 * float i), mult * k ]
+            // Barrage readies repeats for the next Repeatable attack: its base number and one per
+            // Frenzy Charge, all of which it consumes
+            let w =
+                let own name = skill.Mods |> List.sumBy (fun m -> if m.Stat = Named name && m.Kind = Base then m.Value else 0.0)
+                if own "BarrageRepeats" <= 0.0 then w
+                else
+                    let charges = Map.tryFind "FrenzyCharge" st.Buffs |> Option.map (fun e -> e.Stacks) |> Option.defaultValue 0
+                    let n = int (own "BarrageRepeats" + own "BarrageRepeatsPerFrenzy" * float charges)
+                    let lasts = useTime + (if skill.Duration > 0.0 then skill.Duration * Mods.mult ctx [ SkillDuration ] mods else 5.0)
+                    let carried = [ Mod.base' (Named "BarrageRepeatLess") (own "BarrageRepeatLess"); Mod.base' (Named "BarrageCooldownPct") (own "BarrageCooldownPct") |> Mod.from skill.Name ]
+                    updateActor actor.Name (fun st ->
+                        { st with Buffs = st.Buffs |> Map.remove "FrenzyCharge" |> Map.add "Barrage" { Name = "Barrage"; Mods = carried; Stacks = n; Expires = w.Time + lasts } }) w
+                    |> schedule (w.Time + lasts) Expire
+                    |> fun w -> { w with Counts = bump "barrage readied" w.Counts }
+            // a Repeatable attack with Barrage readied fires again for every repeat, within the
+            // same (longer) use; the repeats deal less. Barrage's cooldown grows by a share of
+            // the attack's time
+            let pattern, w =
+                match barraged skill st with
+                | Some b when w.Time < b.Expires && useTime > 0.0 ->
+                    let value name = b.Mods |> List.sumBy (fun m -> if m.Stat = Named name then m.Value else 0.0)
+                    let n = b.Stacks
+                    let k = 1.0 - value "BarrageRepeatLess" / 100.0
+                    let pattern =
+                        [ for i in 0 .. n do
+                            for (timing, mult) in pattern ->
+                                (match timing with
+                                 | DuringUse f -> DuringUse((float i + f) / float (n + 1))
+                                 | After t -> After(t + useTime * float i / float (n + 1))),
+                                (if i = 0 then mult else mult * k) ]
+                    let source = b.Mods |> List.tryPick (fun m -> if m.Stat = Named "BarrageCooldownPct" && m.Source <> "" then Some m.Source else None)
+                    let extra = value "BarrageCooldownPct" / 100.0 * useTime
+                    let w =
+                        updateActor actor.Name (fun st ->
+                            let st = { st with Buffs = Map.remove "Barrage" st.Buffs }
+                            match source with
+                            | Some name when extra > 0.0 ->
+                                // "to a maximum of 30 seconds"
+                                let ready = min (w.Time + 30.0) ((Map.tryFind name st.Cooldowns |> Option.defaultValue w.Time |> max w.Time) + extra)
+                                { st with Cooldowns = Map.add name ready st.Cooldowns; Recharges = Map.add name [ ready ] st.Recharges }
+                            | _ -> st) w
+                    pattern, { w with Counts = bump ("barraged:" + skill.Name) w.Counts }
+                | _ -> pattern, w
             let w = { w with Counts = bump ("uses:" + skill.Name) w.Counts }
             // the Glory or Combo the skill needed is spent
             let w =
@@ -1261,8 +1310,10 @@ module Sim =
         // a chained attack takes the time of the strike that is due (its own speed)
         let own = stepSkill skill st
         let speed = if own.Name = skill.Name then Mods.mult ctx [ Speed ] db else Mods.mult (Skill.ctx own false (buffStacks st) target) [ Speed ] (skillDb env actor own st)
+        // "Skills take 5% longer to perform for each time they Repeat"
+        let repeats = match barraged skill st with Some b when w.Time < b.Expires -> float b.Stacks | _ -> 0.0
         // "+1 second to Total Cast Time": added after speed
-        own.BaseTime / speed + Mods.sumBase ctx [ Named "FixedUseTime" ] db
+        own.BaseTime / speed * (1.0 + Constants.longerPerRepeat * repeats) + Mods.sumBase ctx [ Named "FixedUseTime" ] db
 
     let private onReadyUnlocked env (rng: Rng) name (w: World) =
         let actor = actorDef env name
