@@ -191,7 +191,7 @@ let main argv =
          printfn "spirit: %.0f, reserved %.0f%s%s" c.Spirit (fixedCost + minionCost)
              (if fixedCost > c.Spirit then "  (more than the character has: some of these are off, or a reduction is missing)" else "")
              (c.SpiritUses |> List.map (fun u -> if u.PerMinion > 0.0 then sprintf "%s %d x %.0f" u.Gem (Map.tryFind u.Gem counts |> Option.defaultValue 1) u.PerMinion else sprintf "%s %.0f" u.Gem u.Flat) |> String.concat ", " |> fun l -> if l = "" then "" else " (" + l + ")"))
-        printfn "character: %d modifiers; starts with %s" sheet.Mods.Length (resources |> List.map (fun (k, n) -> sprintf "%d %s" n k) |> String.concat ", ")
+        printfn "character: %d modifiers" sheet.Mods.Length
         match sheet.MainHand with
         | Some w -> printfn "main hand: %A, %.1f%% crit, %.2f APS" (w.Damage |> Map.toList |> List.map (fun (t, r) -> sprintf "%s %.0f-%.0f" (DamageType.name t) r.Min r.Max)) w.CritChance w.AttacksPerSecond
         | None -> printfn "main hand: none"
@@ -303,6 +303,8 @@ let main argv =
                 | Some inf -> for KeyValue (n, (el, _)) in inf.Consumers do printfn "  consumes %s: %s" el n
                 | None -> ()
                 let fight = Setup.fight c options player enemies
+                // what the character brings into this fight (charges only where the build can make them)
+                printfn "starts with %s" (fight.Player.Resources |> List.filter (fun (_, n) -> n > 0) |> List.map (fun (k, n) -> sprintf "%d %s" n k) |> String.concat ", ")
                 printfn ""
                 if Map.containsKey "cascade-check" o then
                     // geometric check of Spell Cascade impacts for the first triggered area spell with cascades
