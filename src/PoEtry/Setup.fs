@@ -31,8 +31,9 @@ type Options =
       MaxOverrides: (string * int) list
       /// The character is kept on low life (35% of the maximum), whatever its recovery says.
       LowLife: bool
-      /// Show the character sheet (pools, defences) with the second weapon set in hand.
-      SheetSetTwo: bool
+      /// The weapon set the character sheet (pools, defences) is for: the second, the first, or
+      /// (None) the one whose weapons are stronger.
+      SheetSetTwo: bool option
       /// Start with this many power charges instead of the maximum.
       StartPowerCharges: int option
       /// Start with no resources except power charges and rage.
@@ -67,7 +68,7 @@ module Options =
           ChargeGen = 5.0
           MaxOverrides = []
           LowLife = false
-          SheetSetTwo = false
+          SheetSetTwo = None
           StartPowerCharges = None
           StartEmpty = false
           ChargeSkip = None
@@ -217,8 +218,10 @@ module Setup =
         // The character sheet is the one of the weapon set the character fights with: set two when
         // its weapon is the stronger one (the API does not say which set is in hand).
         let sheetSetTwo =
-            o.SheetSetTwo
-            || (let strength (w: Weapon) = (w.Damage |> Map.toList |> List.sumBy (fun (_, r) -> (r.Min + r.Max) / 2.0)) * w.AttacksPerSecond
+            match o.SheetSetTwo with
+            | Some chosen -> chosen
+            | None ->
+               (let strength (w: Weapon) = (w.Damage |> Map.toList |> List.sumBy (fun (_, r) -> (r.Min + r.Max) / 2.0)) * w.AttacksPerSecond
                 let one = sheet.Weapons |> List.filter (fun w -> not (List.contains (Tag "WeaponSet2") w.Tags)) |> List.sumBy strength
                 let two = sheet.Weapons |> List.filter (fun w -> List.contains (Tag "WeaponSet2") w.Tags) |> List.sumBy strength
                 two > one)

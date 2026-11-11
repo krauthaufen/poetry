@@ -69,7 +69,7 @@ let runOne (path: string) : Result =
                 let ignored = Json.list (ninja |> Option.bind (Json.field "pobIgnoredNodes")) |> List.choose Json.num |> List.map int
                 let overrides = ignored |> List.fold (fun m id -> Map.add id [] m) build.TreeOverrides
                 // and with the weapon set PoB had in hand
-                Setup.loadWith db treeJson { build with ExtraLines = lines |> List.choose Json.str; TreeOverrides = overrides } { o with SheetSetTwo = setTwo }
+                Setup.loadWith db treeJson { build with ExtraLines = lines |> List.choose Json.str; TreeOverrides = overrides } { o with SheetSetTwo = Some setTwo }
             | _ -> c
         let sheet =
             let v = cs.Vitals
