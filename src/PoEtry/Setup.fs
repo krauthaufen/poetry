@@ -512,6 +512,13 @@ module Setup =
                  else c.Resources |> List.map (fun (k, n) -> if k = "Rage" then k, 0 else k, n))
                 // shapeshift skills are used in animal form: "while Shapeshifted" holds
                 @ (if used |> List.exists (fun (g, _) -> Gems.data db g |> Option.exists (fun d -> d.Types.Contains "Shapeshift")) then [ "Shapeshifted", 1 ] else [])
+                // "while moving": a character that gains from moving moves, where the skills it
+                // keeps using can be used on the move
+                @ (let gains (ms: Mod list) = ms |> List.exists (fun m -> m.Value > 0.0 && m.Kind <> Flag && List.contains (WhileBuff "Moving") m.Conds)
+                   let spammed = play |> List.collect (function Spam g -> [ g ] | Cycle gs -> gs | _ -> [])
+                   let onTheMove (g: string) = Gems.data db g |> Option.exists (fun d -> d.Types.Contains "UsableWhileMoving")
+                   if not spammed.IsEmpty && spammed |> List.forall onTheMove && (gains sheet.Mods || used |> List.exists (fun (_, p) -> gains p.Skill.Mods)) then [ "Moving", 1 ]
+                   else [])
                 @ (match infusionSetup with
                    | Some inf ->
                        let usedInf = (consumers |> List.map (fun (_, el, _) -> el)) @ Option.toList inf.Wildcard |> List.distinct

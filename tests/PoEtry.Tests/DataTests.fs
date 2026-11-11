@@ -409,6 +409,19 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         let plain = Setup.loadWith db.Value treeJson blank Options.defaults
         near (plain.Vitals.Str + 50.0) both.Vitals.Str)
 
+    test "a character that gains from moving moves, if its skill can be used on the move" (fun () ->
+        let gem name = { Name = name; Level = 20; Quality = 0; Enabled = true; IsSupport = false; StatSet = 1 }
+        let group name = { Label = ""; Slot = ""; Enabled = true; Gems = [ gem name ] }
+        let bow = "Weapon 1", "Rarity: Normal\nCrude Bow\n--------\n"
+        let moving lines name =
+            let c = Setup.loadWith db.Value treeJson { blank with Items = [ bow ]; Groups = [ group name ]; ExtraLines = lines } Options.defaults
+            (Setup.player c Options.defaults [ Spam name ] None).Resources |> List.exists (fun (k, n) -> k = "Moving" && n > 0)
+        let bonus = [ "20% increased Attack Damage while moving" ]
+        // Lightning Arrow can be used while moving; Comet cannot
+        equal (box true) (box (moving bonus "Lightning Arrow"))
+        equal (box false) (box (moving [] "Lightning Arrow"))
+        equal (box false) (box (moving bonus "Comet")))
+
     test "low life only where the build keeps itself there; fewer enemies to be surrounded" (fun () ->
         let bonus = [ "30% increased Damage when on Low Life" ]
         let start b = (Setup.loadWith db.Value treeJson b Options.defaults).Vitals.StartLife
