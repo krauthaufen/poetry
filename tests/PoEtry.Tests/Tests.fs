@@ -67,6 +67,17 @@ let main _ =
         let expected = 100.0 * (1.0 + 2.0 * 0.73125)
         if abs (mean - expected) > 0.03 * expected then failwithf "mean %.1f, expected %.1f" mean expected)
 
+    test "bifurcating critical hits: two rolls, the bonus twice when both succeed" (fun () ->
+        // 50% chance, bonus 200%: 25% no crit (100), 50% one crit (300), 25% both (500)
+        let skill = { fireSpell 100.0 with BaseCrit = 50.0 }
+        let mods = ModDb.ofList [ Mod.flag (Named "BifurcateCrits"); Mod.base' CritBonus 100.0 ]
+        let rng = Rng 3u
+        let hits = [ for _ in 1 .. 6000 -> Hit.roll rng ctx mods skill (enemy []) ]
+        let share = float (hits |> List.filter (fun h -> h.Crit) |> List.length) / 6000.0
+        if abs (share - 0.75) > 0.02 then failwithf "crit share %.3f" share
+        let mean = hits |> List.averageBy (fun h -> h.Unmitigated |> Map.toList |> List.sumBy snd)
+        if abs (mean - 300.0) > 9.0 then failwithf "mean %.1f" mean)
+
     test "conversion over 100% is scaled down" (fun () ->
         let mods = [ Mod.base' (Convert(Physical, Fire)) 80.0; Mod.base' (Convert(Physical, Cold)) 40.0 ]
         let r = Hit.convert ctx (ModDb.ofList mods) (Map.ofList [ Physical, Range.fixedAt 120.0 ])
@@ -153,6 +164,18 @@ let main _ =
         let o = Sim.run (fight (fireSpell 100.0) 1000.0) 1u
         equal (Some 10.0) o.Ttk
         equal 10 o.Counts.["hits:Bolt"])
+
+    test "sim: a sealed skill starts with its seals, breaks them on use and regains them over time" (fun () ->
+        // two seals at most, one every 2.5 s; each broken seal repeats the hit at half damage.
+        // 1 s per use, at 0 .. 6 s: the first breaks two seals, those at 3 s and 6 s one each
+        let seal name v = Mod.base' (Named name) v
+        let skill = { fireSpell 100.0 with Mods = [ seal "MaxSeals" 2.0; seal "SealIntervalMs" 2500.0; seal "SealRepeats" 1.0; seal "SealRepeatDamage" -50.0 ] }
+        let f = { fight skill 1e9 with MaxTime = 6.5 }
+        let o = Sim.run f 1u
+        equal 7 o.Counts.["uses:Bolt"]
+        equal 3 o.Counts.["seals:Bolt"]
+        // hits land at the end of a use: six by 6.5 s, and the three repeats of the first two breaks
+        near (6.0 * 100.0 + 3.0 * 50.0) o.DamageBy.["Bolt (hit)"])
 
     test "sim: speed shortens the cadence" (fun () ->
         let f = fight (fireSpell 100.0) 1000.0

@@ -336,6 +336,8 @@ module Items =
                                 | "local_bleed_on_hit" -> Mods [ Mod.base' (AilmentChance Bleed) 100.0 ]
                                 | "local_poison_on_hit_%" -> Mods [ Mod.base' (AilmentChance Poison) v ]
                                 | "local_poison_on_hit" -> Mods [ Mod.base' (AilmentChance Poison) 100.0 ]
+                                // "Bifurcates Critical Hits" on a weapon
+                                | "local_weapon_roll_crits_twice" -> Mods [ Mod.flag (Named "BifurcateCrits") ]
                                 | "local_chaos_penetration_%" -> Mods [ Mod.base' (Penetration Chaos) v ]
                                 | "local_elemental_penetration_%" -> Mods (DamageType.elemental |> List.map (fun t -> Mod.base' (Penetration t) v))
                                 | _ when id.StartsWith "local_%_chance_to_trigger_" && id.Contains "_on_hit_with_this_weapon_per_" ->

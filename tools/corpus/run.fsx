@@ -136,6 +136,20 @@ let runOne (path: string) : Result =
                     let str (x: string) = "\"" + esc x + "\""
                     let pressedSkill = player.Skills |> List.tryFind (fun sk -> sk.Name = pg)
                     obj [ "file", str file; "main", str mainGem; "pressed", str pg; "duration", sprintf "%.3f" out.Duration
+                          // one hit of the pressed skill before the enemy: non-crit average, crit chance and
+                          // multiplier, with what the fight starts with and the character on low life if it starts there
+                          "static",
+                          (match pressedSkill with
+                           | Some sk ->
+                               let f = Setup.fight c o player boss
+                               let buffs = Map.ofList f.Player.Resources |> fun m -> if c.Vitals.StartLife <= 0.35 then Map.add "LowLife" 1 m else Map.add "FullLife" 1 m
+                               let ctx = { Ctx.empty with SkillTags = sk.Tags; SkillName = sk.Name; Buffs = buffs }
+                               let mdb = ModDb.ofList (f.Player.Mods @ sk.Mods)
+                               let rng = Rng 1u
+                               let n = 400
+                               let avg = ([ for _ in 1 .. n -> Hit.rollUnmitigated rng ctx mdb sk false |> Map.toList |> List.sumBy snd ] |> List.sum) / float n
+                               obj [ "hit", sprintf "%.0f" avg; "crit", sprintf "%.2f" (Hit.critChance ctx mdb sk); "mult", sprintf "%.3f" (Hit.critMultiplier { ctx with Crit = true } mdb) ]
+                           | None -> "{}")
                           "starved", sprintf "%.3f" sum.Starved
                           "mana", sprintf "%.0f" c.Vitals.Mana
                           "cost", (match pressedSkill with Some sk -> sprintf "%.1f" (sk.Cost + sk.CostPerSecond * sk.BaseTime) | None -> "0")

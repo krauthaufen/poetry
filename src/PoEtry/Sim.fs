@@ -1034,6 +1034,43 @@ module Sim =
             let pattern =
                 Map.tryFind skill.Name actor.HitPattern
                 |> Option.defaultValue (skill.Hits |> List.map (fun (f, m) -> DuringUse f, m))
+            // Sealed skills: a seal every so often (a fixed time, or a share of the use time), up to
+            // a maximum; the use breaks them all. A fight starts with the seals full.
+            let seals =
+                let own name = skill.Mods |> List.sumBy (fun m -> if m.Stat = Named name && m.Kind = Base then m.Value else 0.0)
+                let maxSeals = own "MaxSeals"
+                let interval = own "SealIntervalMs" / 1000.0 + own "SealIntervalPercentOfUse" / 100.0 * useTime
+                if maxSeals <= 0.0 || interval <= 0.0 || useTime <= 0.0 then 0
+                else
+                    match Map.tryFind ("SealBreak:" + skill.Name) st.Cooldowns with
+                    | Some last -> int (min maxSeals (floor ((w.Time - last) / interval)))
+                    | None -> int maxSeals
+            let sealOwn name = skill.Mods |> List.sumBy (fun m -> if m.Stat = Named name && m.Kind = Base then m.Value else 0.0)
+            let w =
+                if seals <= 0 then w
+                else
+                    let perSeal = sealOwn "SealProjectiles"
+                    updateActor actor.Name (fun st ->
+                        { st with
+                            Cooldowns = Map.add ("SealBreak:" + skill.Name) w.Time st.Cooldowns
+                            // "additional Projectiles are fired": for this use
+                            Buffs =
+                                if perSeal > 0.0 then
+                                    Map.add "SealsBroken" { Name = "SealsBroken"; Mods = [ Mod.base' AdditionalProjectiles perSeal |> Mod.whenever (SkillNamed skill.Name) ]; Stacks = seals; Expires = w.Time + useTime + skill.HitDelay + 1e-6 } st.Buffs
+                                else st.Buffs }) w
+                    |> fun w -> { w with Counts = bump ("seals:" + skill.Name) w.Counts }
+            let w =
+                // a use without seals still restarts the count
+                if seals = 0 && sealOwn "MaxSeals" > 0.0 && not (Map.containsKey ("SealBreak:" + skill.Name) st.Cooldowns) then
+                    updateActor actor.Name (fun st -> { st with Cooldowns = Map.add ("SealBreak:" + skill.Name) w.Time st.Cooldowns }) w
+                else w
+            // "each causing the Spell to Repeat": the hits again per seal, with the repeats' own damage
+            let pattern =
+                let repeats = seals * int (sealOwn "SealRepeats")
+                if repeats <= 0 then pattern
+                else
+                    let k = 1.0 + sealOwn "SealRepeatDamage" / 100.0
+                    pattern @ [ for i in 1 .. repeats do for (_, mult) in pattern -> After(useTime + 0.1 * float i), mult * k ]
             let w = { w with Counts = bump ("uses:" + skill.Name) w.Counts }
             let w = if useTime > 0.0 then updateActor actor.Name (fun st -> { st with LastUsed = skill.Name }) w else w
             let times =

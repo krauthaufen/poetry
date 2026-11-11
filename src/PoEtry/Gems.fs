@@ -236,6 +236,13 @@ module Gems =
             | None -> Map.tryFind n db.Skills
         find name |> Option.orElse (if plain name <> name then find (plain name) else None)
 
+    /// A support gem's data. A name can belong to a support and to a skill ("Unleash"): in a
+    /// support socket it is the support.
+    let private supportOfGem (db: GameDb) (name: string) =
+        Map.tryFind name db.GemVariants |> Option.defaultValue []
+        |> List.tryPick (fun g -> Map.tryFind g.GrantedEffectId db.Skills |> Option.filter (fun s -> s.Support))
+        |> Option.orElse (skillOfGem db name)
+
     /// Does a weapon (None: unarmed) satisfy a gem's weapon requirements? Requirements name
     /// base types; a weapon carries its own as the tag "Base:<type>".
     let weaponMatches (reqs: string list) (weapon: Weapon option) =
@@ -575,7 +582,7 @@ module Gems =
                 |> Result.map (fun (s, cov) ->
                     let supportBolts =
                         setup.Supports |> List.sumBy (fun (name, lvl) ->
-                            match skillOfGem db name with
+                            match supportOfGem db name with
                             | Some sd when sd.Support -> sd.StatSets |> List.tryHead |> Option.map (fun set -> stats sd set lvl 0 |> List.sumBy (fun (id, v) -> if id.Contains "number_of_crossbow_bolts" then v else 0.0)) |> Option.defaultValue 0.0
                             | _ -> 0.0)
                     let bolts =
@@ -626,7 +633,7 @@ module Gems =
                 let supportStats, supportCov =
                     setup.Supports
                     |> List.map (fun (name, lvl) ->
-                        match skillOfGem db name with
+                        match supportOfGem db name with
                         | Some s when s.Support ->
                             s.StatSets |> List.tryHead |> Option.map (fun set -> stats s set lvl 0) |> Option.defaultValue [], Coverage.empty
                         | _ -> [], { Coverage.empty with UnknownText = [ "unknown support: " + name ] })
@@ -646,7 +653,7 @@ module Gems =
                 // supports multiply the cost: "Cost Multiplier 130%" is manaMultiplier 30
                 let costMult =
                     setup.Supports
-                    |> List.choose (fun (name, lvl) -> skillOfGem db name |> Option.bind (fun s -> Map.tryFind (max 1 lvl) s.Levels |> Option.orElse (Map.tryFind 1 s.Levels)))
+                    |> List.choose (fun (name, lvl) -> supportOfGem db name |> Option.bind (fun s -> Map.tryFind (max 1 lvl) s.Levels |> Option.orElse (Map.tryFind 1 s.Levels)))
                     |> List.fold (fun k l -> k * (1.0 + (l.ManaMultiplier |> Option.defaultValue 0.0) / 100.0)) 1.0
                 Ok({ main with Parts = parts; Cost = main.Cost * costMult; CostPerSecond = main.CostPerSecond * costMult }, cov)
 
@@ -668,7 +675,7 @@ module Gems =
                 let supports =
                     setup.Supports
                     |> List.collect (fun (name, lvl) ->
-                        match skillOfGem db name with
+                        match supportOfGem db name with
                         | Some s when s.Support -> s.StatSets |> List.tryHead |> Option.map (fun set -> stats s set lvl 0) |> Option.defaultValue []
                         | _ -> [])
                 statsWith alt data set level quality @ supports

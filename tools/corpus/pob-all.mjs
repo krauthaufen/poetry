@@ -55,7 +55,7 @@ function mainSkill(args)
   for _, gi in ipairs(g.gemList or {}) do res.gems[#res.gems+1] = gi.nameSpec end
   local sk = build.calcsTab.mainEnv and build.calcsTab.mainEnv.player.mainSkill
   if sk and sk.activeEffect then res.active = sk.activeEffect.grantedEffect.name; res.part = sk.skillPartName end
-  local function keep(k) return k:match("DPS") or k:match("^Average") or k == "Speed" or k:match("^Crit") or k:match("HitAverage$") or k == "HitChance" or k:match("MinBase$") or k:match("MaxBase$") or k:match("Stacks") or k:match("Multiplier") or k == "Repeats" or k:match("^Pre") or k == "Time" or k:match("Duration$") or k:match("EffMult$") or k == "Cooldown" or k == "ManaCost" or k:match("^Total") end
+  local function keep(k) return k:match("DPS") or k:match("^Average") or k == "Speed" or k:match("^Crit") or k:match("HitAverage$") or k:match("StoredHitAvg$") or k == "HitChance" or k:match("MinBase$") or k:match("MaxBase$") or k:match("Stacks") or k:match("Multiplier") or k == "Repeats" or k:match("^Pre") or k == "Time" or k:match("Duration$") or k:match("EffMult$") or k == "Cooldown" or k == "ManaCost" or k:match("^Total") end
   for k, v in pairs(o) do if type(v) == "number" and v ~= 0 and keep(k) then res.out[k] = v end end
   if type(o.MainHand) == "table" then for k, v in pairs(o.MainHand) do if type(v) == "number" and v ~= 0 and keep(k) then res.hand[k] = v end end end
   if type(o.Minion) == "table" then res.minion = {}; for k, v in pairs(o.Minion) do if type(v) == "number" and v ~= 0 and keep(k) then res.minion[k] = v end end end

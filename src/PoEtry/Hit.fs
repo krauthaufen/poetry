@@ -318,11 +318,17 @@ module Hit =
             else
                 let rec go n = if n >= 4 || rng.Chance chance then n else go (n + 1)
                 go 1
-        let crit = first || rerolls > 0
+        // Bifurcating critical hits: the chance is rolled twice; one success is a critical hit,
+        // two apply the critical damage bonus twice
+        let second = rerolls = 0 && chance > 0.0 && Mods.flag ctx (Named "BifurcateCrits") mods && rng.Chance chance
+        let crit = first || second || rerolls > 0
         let ctx = { ctx with Crit = crit }
         let unmitigated = rollUnmitigated rng ctx mods skill crit
         let unmitigated =
-            if rerolls = 0 then unmitigated
+            if first && second then
+                let full = critMultiplier ctx mods
+                Dmg.map (fun _ v -> v * (1.0 + 2.0 * (full - 1.0)) / full) unmitigated
+            elif rerolls = 0 then unmitigated
             else
                 let full = critMultiplier ctx mods
                 let kept = max 0.0 (1.0 - Constants.inevitableCritLessPerReroll * float rerolls)

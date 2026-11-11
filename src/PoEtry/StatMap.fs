@@ -300,6 +300,19 @@ module StatMap =
         // Mana Remnants' own numbers: read by Behaviours.manaRemnants
         | "mana_remnants_mana_gain_per_globe" | "mana_remnants_spawn_remnant_on_crit_vs_elemental_ailment_enemy_every_X_ms"
         | "mana_remnants_chance_to_spawn_orb_on_killing_enemy_with_elemental_ailment_%" -> Some Structural
+        // supports: Deadly Poison, Unseen, Ignition
+        | "support_deadly_poison_poison_effect_+%_final" -> one (Mod.more (AilmentMagnitude(Some Poison)) v)
+        | "support_unseen_critical_damage_multiplier_+%_final_vs_blinded_enemies" -> one (Mod.more CritBonus v |> Mod.whenever (EnemyHas "Blinded"))
+        | "support_ignition_chance_to_ignite_+%_final" -> one (Mod.more (AilmentChance Ignite) v)
+        // sealed skills (Salvo, Unleash, Zarokh's Revolt, Freezing Salvo): read by the engine at use
+        | "base_maximum_seals_for_skill" -> one (Mod.base' (Named "MaxSeals") v)
+        | "base_skill_seal_gain_interval_ms" -> one (Mod.base' (Named "SealIntervalMs") v)
+        | "support_%_of_total_cast_time_as_base_skill_seal_gain_interval" -> one (Mod.base' (Named "SealIntervalPercentOfUse") v)
+        | "skill_additional_projectiles_per_seal_broken" -> one (Mod.base' (Named "SealProjectiles") v)
+        | "skill_rapid_fire_repeats_per_broken_seal" -> one (Mod.base' (Named "SealRepeats") v)
+        | "support_spell_rapid_fire_repeat_use_damage_+%_final" -> one (Mod.base' (Named "SealRepeatDamage") v)
+        | "base_skill_is_sealed_skill" -> Some Structural
+        | "attacks_roll_crits_twice" -> one (Mod.flag (Named "BifurcateCrits") |> Mod.whenever (SkillIs Attack))
         | "oracle_hits_eventually_crit_with_critical_strike_multiplier_+%_final_per_failed_roll" -> one (Mod.flag (Named "InevitableCrits"))
         // Direstrike: "increased Attack Damage while on Low Life while a Supported Skill is active"
         | "support_attack_damage_spirit_cost_attack_damage_+%_on_low_life" ->

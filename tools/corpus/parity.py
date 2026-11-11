@@ -66,6 +66,23 @@ for f in sorted(ours):
     rows.append((s["hitdps"] / their_dps if their_dps else 9e9, f[:34], ratio(s["uses"] * s["hpu"], h.get("Speed", 0)), "%5.1f/%5.1f" % (s["crit"], h.get("CritChance", 0)),
                  ratio(s["avg"], their_hit), ratio(s["hitdps"], their_dps), "%9.0f/%9.0f" % (s["dot"], h.get("TotalDotDPS", 0)),
                  " ".join(k.replace("condition", "").replace("multiplier", "") + ("=" + str(cfg[k]) if not isinstance(cfg[k], bool) else "") for k in ASSUME if cfg.get(k) and k not in ("enemyIsBoss", "multiplierNearbyEnemies"))))
+if "--static" in sys.argv:
+    # one hit before the enemy: our non-crit average, crit chance and multiplier against PoB's
+    out = []
+    for f in sorted(ours):
+        s = side(f)
+        if not s or not s["h"] or s["o"]["pressed"].lower() != s["o"]["main"].lower(): continue
+        st, h = s["o"].get("static") or {}, s["h"]
+        stored = sum(v for k, v in h.items() if k.endswith("StoredHitAvg"))
+        if not st or not stored: continue
+        hit, crit, mult = float(st["hit"]), float(st["crit"]), float(st["mult"])
+        pc = h.get("PreEffectiveCritChance", h.get("CritChance", 0))
+        pm = h.get("PreEffectiveCritMultiplier", h.get("CritMultiplier", 0))
+        out.append((hit / stored, f[:38], hit, stored, crit, pc, mult, pm))
+    out.sort()
+    print("%-38s %6s %10s %10s  %11s  %11s" % ("character (main skill pressed)", "ratio", "our hit", "PoB hit", "crit o/p", "mult o/p"))
+    for r in out: print("%-38s %6.2f %10.0f %10.0f  %5.1f/%5.1f  %5.2f/%5.2f" % (r[1], r[0], r[2], r[3], r[4], r[5], r[6], r[7]))
+    sys.exit(0)
 if "--starved" in sys.argv:
     for f in sorted(ours, key=lambda f: -float(ours[f].get("starved", 0))):
         o = ours[f]
