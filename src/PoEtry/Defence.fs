@@ -29,8 +29,8 @@ module Defence =
     let private wardRegenPercent = 5.0
     let playerMaxResist = 75.0
     let playerResistCap = 90.0
-    /// Recoup returns its share of damage taken over 4 seconds (stat text).
-    let private recoupSeconds = 4.0
+    /// Recoup returns its share of damage taken over 8 seconds (game keyword text).
+    let private recoupSeconds = 8.0
 
     /// A flask with the character's flask modifiers: amount, recovery rate (same amount,
     /// shorter time), charges used and gained.

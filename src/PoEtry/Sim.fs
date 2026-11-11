@@ -412,10 +412,6 @@ module Sim =
           /// Stunned or frozen: no action before this time.
           LockedUntil: float
           FreezeBuildup: float
-          /// Heavy stun on the player: the bar (%), when it last grew, and until when the threshold is raised.
-          StunBuildup: float
-          StunBuiltAt: float
-          StunResistantUntil: float
           /// Charges per charm (by its buff name).
           CharmCharges: Map<string, float> }
 
@@ -687,7 +683,8 @@ module Sim =
             let t0 = w.Time - dt
             let overlap until = max 0.0 (min w.Time until - t0)
             let stream pool = p.Recoups |> List.sumBy (fun (until, rate, pl) -> if pl = pool then rate * overlap until else 0.0)
-            let leech = min p.LeechPool (v.Mana * Constants.maxManaLeechRate / 100.0 * dt)
+            // leech: each instance is recovered over one second (keyword text)
+            let leech = stream "LeechMana"
             let regen = v.ManaRegen * dt
             let mana = min v.Mana (p.Mana + regen + leech)
             let es =
@@ -700,7 +697,7 @@ module Sim =
             let gained =
                 p.ManaGained |> addf "regen" (min regen (v.Mana - p.Mana)) |> addf "leech" leech |> addf "flask" flask
                 |> (if recouped > 0.0 then addf "recoup" recouped else id)
-            let lifeLeech = min p.LifeLeechPool (v.Life * Constants.maxManaLeechRate / 100.0 * v.LifeLeechRate * dt)
+            let lifeLeech = stream "LeechLife"
             let lifeRecharge = if v.LifeRecharge > 0.0 && w.Time - p.LastHit >= v.ESRechargeDelay then v.LifeRecharge * dt else 0.0
             let lifeGain = v.LifeRegen * dt + lifeLeech + lifeRecharge + p.LifeFlaskRate * overlap p.LifeFlaskUntil + stream "Life"
             let lifeCharges =
@@ -717,8 +714,6 @@ module Sim =
                         Some
                             { p with
                                 Mana = mana
-                                LeechPool = p.LeechPool - leech
-                                LifeLeechPool = p.LifeLeechPool - lifeLeech
                                 EnergyShield = es
                                 Life = min (max p.Life v.Life) (p.Life + lifeGain)
                                 LifeFlaskCharges = lifeCharges
@@ -816,10 +811,11 @@ module Sim =
                 updateEnemy target (fun e -> { e with Buildup = Map.add a 0.0 e.Buildup }) w
                 |> addDebuff target (Ailment.status a) (Constants.buildupDuration a) 1 []
                 |> fun w ->
-                    // after a heavy stun the monster is much harder to stun again for a while
-                    if a = HeavyStun then
-                        addDebuff target "StunResistant" (Constants.buildupDuration a + Constants.heavyStunThresholdSeconds) 1
-                            [ Mod.more (Named "HeavyStunThreshold") Constants.heavyStunThresholdMore ] w
+                    // afterwards the monster is much harder to freeze / electrocute / stun / pin again for a while
+                    let more, seconds = Constants.afterBuildup a
+                    if more > 0.0 then
+                        addDebuff target (Ailment.name a + "Resistant") (Constants.buildupDuration a + seconds) 1
+                            [ Mod.more (Named(Ailment.name a + "Threshold")) more ] w
                     else w
                 |> fun w -> { w with Counts = bump ("inflict:" + Ailment.name a) w.Counts }
             else
@@ -1183,7 +1179,7 @@ module Sim =
             | Some v, Some p when p.Mana < cost ->
                 // not enough mana: wait until regeneration and leech have covered it
                 let rate =
-                    v.ManaRegen + (if p.LeechPool > 0.0 then v.Mana * Constants.maxManaLeechRate / 100.0 else 0.0)
+                    v.ManaRegen + (p.Recoups |> List.sumBy (fun (until, rate, pool) -> if pool = "LeechMana" && until > w.Time then rate else 0.0))
                     + (if w.Time < p.FlaskUntil then p.FlaskRate else 0.0)
                 let wait = max Constants.serverTick (if rate > 0.0 then (cost - p.Mana) / rate else 1.0)
                 { w with Player = Some { p with Starved = p.Starved + wait } } |> schedule (w.Time + wait) (Ready name)
@@ -1305,7 +1301,9 @@ module Sim =
         else
             let st = Map.find actor.Name w.Actors
             let mods = skillDb env actor skill st
-            let ctx = Skill.ctx skill false (skillStacks actor skill st) (status e)
+            // Isolated: none of its allies within 6 m (keyword text)
+            let isolated = alive w |> List.forall (fun o -> o.Def.Name = e.Def.Name || Vec.dist o.Def.Position e.Def.Position > 60.0)
+            let ctx = Skill.ctx skill false (skillStacks actor skill st) (if isolated then Map.add "Isolated" 1 (status e) else status e)
             let hitChance =
                 match Mods.override' ctx HitChance mods with
                 | Some v -> v
@@ -1418,12 +1416,18 @@ module Sim =
                                 Player =
                                     Some
                                         { p with
-                                            LeechPool = p.LeechPool + extra
+                                            Recoups =
+                                                // a leech instance comes back over one second ("Leech Life X% less quickly" stretches it)
+                                                (if extra > 0.0 then [ w.Time + Constants.leechSeconds, extra / Constants.leechSeconds, "LeechMana" ] else [])
+                                                @ (if lifeLeech > 0.0 && v.Life > 1.0 then
+                                                       (let t = Constants.leechSeconds / max 0.05 v.LifeLeechRate
+                                                        [ w.Time + t, lifeLeech / t, "LeechLife" ])
+                                                   else [])
+                                                @ p.Recoups
                                             StrikeLeech = max leech p.StrikeLeech
                                             StrikeLifeLeech = max lifeLeechFull p.StrikeLifeLeech
                                             FlaskCharges = charges
                                             LifeFlaskCharges = lifeCharges
-                                            LifeLeechPool = (if v.Life > 1.0 then p.LifeLeechPool + lifeLeech else 0.0)
                                             Life = min (max p.Life v.Life) (p.Life + (if v.Life > 1.0 then onHit else 0.0) + (if dead then v.LifeOnKill else 0.0))
                                             EnergyShield = min (max p.EnergyShield v.EnergyShield) (p.EnergyShield + (if dead then v.ESOnKill else 0.0)) } }
                         let w = if manaOnHit > 0.0 then gainMana v "hit" manaOnHit w else w
@@ -1581,7 +1585,8 @@ module Sim =
                                         { p with
                                             CharmCharges =
                                                 env.Fight.Player.Charms |> List.fold (fun (m: Map<string, float>) c ->
-                                                    let gain = (RarityCharges.flaskChargesPerKill e.Def.Rarity + (if rng.Chance c.ChargeOnKillChance then 1.0 else 0.0)) * c.ChargeGainMult
+                                                    // "granting charges equal to half of the monster's Power"
+                                                    let gain = (MonsterPower.ofRarity e.Def.Rarity / 2.0 + (if rng.Chance c.ChargeOnKillChance then 1.0 else 0.0)) * c.ChargeGainMult
                                                     Map.add c.Buff (min c.MaxCharges ((Map.tryFind c.Buff m |> Option.defaultValue 0.0) + gain)) m) p.CharmCharges }) }
                         if e.Def.Rarity = Rare || e.Def.Rarity = Unique then fst (charm env "KillRare" w) else w
                 // rage from hitting (once per moment, however many enemies the use hits) and from kills
@@ -1770,6 +1775,8 @@ module Sim =
                               * (if blocked then v.BlockedDamageTaken / 100.0 else 1.0))
                     let w = takeDamage pools taken { w with Player = Some p } |> fun w -> { w with Player = w.Player |> Option.map (fun p -> { p with LastHit = w.Time }) }
                     let w = (let _, _, _, whenHit, _ = env.Rage in gainRage env whenHit w)
+                    // "Rage loss is paused for 4 seconds upon gaining Rage, or after taking damage"
+                    let w = updateActor env.Fight.Player.Name (fun st -> { st with RageAt = w.Time }) w
                     // charms used when a hit of their damage type is taken (they help from the next hit on)
                     let w = taken |> Map.fold (fun w t d -> if d > 0.0 then fst (charm env ("Hit:" + DamageType.name t) w) else w) w
                     let w = if crit then { w with Counts = bump "enemy:crit" w.Counts } else w
@@ -1825,7 +1832,7 @@ module Sim =
                                 let chill = Constants.chillEffectMultiplier * cold / thr * effect "Chill"
                                 let w =
                                     if chill >= 1.0 && not (avoided "Chill") then
-                                        w |> unlessCharm "Slowed" (buff "Chilled" [ Mod.more Speed (-(min Constants.chillMaxEffect chill)) ] (Constants.playerChillDuration * lasts "Chill"))
+                                        w |> unlessCharm "Slowed" (buff "Chilled" [ Mod.more Speed (-(min Constants.chillMaxEffect (max Constants.chillMinEffect chill))) ] (Constants.playerChillDuration * lasts "Chill"))
                                     else w
                                 // freeze builds up with cold damage; full: frozen
                                 match w.Player with
@@ -1841,24 +1848,11 @@ module Sim =
                                 |> List.sumBy (fun (t, d) -> if t = Physical then d * (1.0 + Constants.monsterPhysicalStunMore / 100.0) else d)
                                 |> fun d -> if atk.Melee then d * (1.0 + Constants.monsterMeleeStunMore / 100.0) else d
                             let stunChance = min 100.0 (stunDamage / max 1.0 v.StunThreshold * 100.0)
-                            let w =
-                                if stunChance >= Constants.playerLightStunMinimum && rng.Chance stunChance && not (rng.Chance v.AvoidStun) then
-                                    w |> unlessCharm "Stunned" (lock Constants.playerLightStunDuration "Stunned")
-                                else w
-                            // heavy stun: every hit fills a bar by its share of the stun threshold; the
-                            // bar decays when nothing has hit for a while; full: stunned, and harder
-                            // to stun again for some time
-                            match w.Player with
-                            | Some p ->
-                                let idle = w.Time - p.StunBuiltAt - Constants.poiseDecayDelay
-                                let decayed = if idle > 0.0 then max 0.0 (p.StunBuildup - Constants.poiseDecayPerSecond * idle) else p.StunBuildup
-                                let threshold = max 1.0 v.StunThreshold * (if w.Time < p.StunResistantUntil then 1.0 + Constants.playerHeavyStunThresholdMore / 100.0 else 1.0)
-                                let bar = decayed + stunDamage * Constants.playerHeavyStunScale / threshold * 100.0
-                                if bar >= 100.0 then
-                                    { w with Player = Some { p with StunBuildup = 0.0; StunBuiltAt = w.Time; StunResistantUntil = w.Time + Constants.playerHeavyStunDuration + Constants.playerHeavyStunThresholdSeconds } }
-                                    |> unlessCharm "Stunned" (lock Constants.playerHeavyStunDuration "HeavilyStunned")
-                                else { w with Player = Some { p with StunBuildup = bar; StunBuiltAt = w.Time } }
-                            | None -> w
+                            // players are not heavily stunned by ordinary hits (only while raising a shield,
+                            // parrying or mounted: not modelled)
+                            if stunChance >= Constants.playerLightStunMinimum && rng.Chance stunChance && not (rng.Chance v.AvoidStun) then
+                                w |> unlessCharm "Stunned" (lock Constants.playerLightStunDuration "Stunned")
+                            else w
                     let w =
                         { w with
                             Counts = w.Counts |> bump "enemy:hit" |> (if deflected then bump "enemy:deflected" else id) |> (if blocked then bump "enemy:blocked" else id) }
@@ -1975,7 +1969,7 @@ module Sim =
                           "FullMana", p.Mana >= v.Mana
                           "LowMana", p.Mana <= 0.35 * v.Mana
                           "HasEnergyShield", p.EnergyShield > 0.0
-                          "Leeching", p.LeechPool > 0.0 || p.LifeLeechPool > 0.0
+                          "Leeching", p.Recoups |> List.exists (fun (until, _, pool) -> pool.StartsWith "Leech" && until > w.Time)
                           // surrounded: at least 5 monsters within 3 m (PoB SurroundedRadiusBase, game constant)
                           "Surrounded", (alive w |> List.filter (fun e -> Vec.length e.Def.Position - e.Def.Size <= 30.0) |> List.length) >= 5 ]
                     // charge states: "while at maximum Power Charges", "while you have no Frenzy Charges"
@@ -2129,9 +2123,6 @@ module Sim =
                       Recoups = []
                       LockedUntil = 0.0
                       FreezeBuildup = 0.0
-                      StunBuildup = 0.0
-                      StunBuiltAt = 0.0
-                      StunResistantUntil = 0.0
                       CharmCharges = fight.Player.Charms |> List.map (fun c -> c.Buff, c.MaxCharges) |> Map.ofList })
               Time = 0.0
               Enemies =

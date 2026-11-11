@@ -355,15 +355,12 @@ let main _ =
         // first hit lands at 1 s; 9.5 s of ticking
         near 950.0 o.DamageBy.["Drain (chaos over time)"])
 
-    test "defence: hits fill the player's heavy stun bar; after a stun it fills half as fast" (fun () ->
-        // stun threshold 1000; each 200 chaos hit fills 200 x 0.65 / 1000 = 13%: stunned by the 8th hit,
-        // then the threshold is doubled for 10 s (plus the 2 s stunned)
+    test "defence: ordinary hits never heavy stun the player" (fun () ->
+        // big enough to light stun every time; players are only heavily stunned while blocking with a raised shield or parrying
         let stats = { PlayerStats.basic 1e6 0.0 with StunThreshold = 1000.0 }
-        let o = against stats (attacker Chaos 200.0 1.0) 11.9
-        equal 1 o.Counts.["player:HeavilyStunned"]
-        // too small to light stun (20% chance is above the 15% floor, so it may; heavy stuns are what is counted)
-        let gentle = against stats (attacker Chaos 10.0 1.0) 60.0
-        equal false (gentle.Counts.ContainsKey "player:HeavilyStunned"))
+        let o = against stats (attacker Chaos 2000.0 1.0) 30.0
+        equal false (o.Counts.ContainsKey "player:HeavilyStunned")
+        if not (o.Counts.ContainsKey "player:Stunned") then failwith "light stuns should still happen")
 
     test "charms: used when their condition occurs, preventing it while they have charges" (fun () ->
         let thawing =

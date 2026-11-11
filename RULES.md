@@ -52,8 +52,8 @@ Confidence levels:
 | Mechanic | Rule | Source | Confidence |
 |---|---|---|---|
 | Breaking | a hit breaks armour by its share of the damage it dealt ("Break Armour equal to X% of Physical / Fire / Hit Damage dealt", flat amounts), x increased armour break; the monster's armour is lower by the total, up to all of it | stat text | data |
-| Duration | broken armour comes back 12 s after the last break (x duration modifiers) | - | guess |
-| Fully Broken Armour | at zero armour the enemy takes 20% increased physical damage from hits (x effect), or more types with "also applies to ..." | PoB CalcPerform | pob |
+| Duration | fully broken armour lasts 12 s (x duration modifiers); we let partly broken armour come back after the same time without a new break | game keyword text ("Fully Broken for 12 seconds"); the partial case is our reading | data / guess |
+| Fully Broken Armour | at zero armour the enemy takes 20% increased physical damage from hits (x effect), or more types with "also applies to ..." | game keyword text | data |
 | Not modelled | armour break taken modifiers, breaking below zero, consuming broken armour, sundering | - | missing |
 
 ## Ailments
@@ -78,7 +78,10 @@ Confidence levels:
 | Buildup decay | none: the bar never drains | — | guess, **known to be wrong**, needs data |
 | Repeat-freeze threshold growth (`FreezeModifierDuration` etc.) | not modelled | — | missing |
 | Statuses after buildup | freeze 4 s, electrocute 5 s, pin 3 s, heavy stun 2 s (Monster.ot `base_heavy_stun_duration_ms`) | GameConstants, Monster.ot | data |
-| After a heavy stun | the monster's heavy stun threshold is 500% more for the stun and 16.5 s after it (HeavyStunThresholdModifier, HeavyStunModifierDuration) | GameConstants; that the time starts when the stun ends is our reading | data |
+| Heavy stun buildup | physical damage and melee damage each build 50% more (multiplicative); a Dazed enemy takes 50% more; Daze lasts 8 s | game keyword text | data |
+| Chill | magnitude from cold damage against the ailment threshold, at least 30%, at most 50% | game keyword text, GameConstants | data |
+| Isolated | an enemy with no ally within 6 m | game keyword text | data |
+| After a buildup ailment | once frozen, electrocuted, heavily stunned or pinned, the monster's threshold for that is 500% more while it lasts and for 14 / 15 / 16.5 / 13 s after (`<X>ThresholdModifier`, `<X>ModifierDuration`) | GameConstants; that the time starts when the status ends is our reading | data |
 | Daze, maim, blind, hinder | flat chance × inc × more, 4 s | — | guess (duration) |
 
 ## Timing and the event engine
@@ -184,7 +187,7 @@ Checked against PoB's defensive numbers for 131 public characters (`tools/corpus
 | Weapon set passives | passives allocated with weapon set points count only while that set is in use; the sheet is shown for set one | API `specialisations`; PoB counts them differently in some builds | data |
 | Gem quality | only what the API shows; a gem without the property has none | API | data |
 | Doubled chaos resistance, maximum resistance override, life from body armour energy shield, armour from mana / boots energy shield, evasion from helmet energy shield, deflection from armour, "per 10 Intelligence", "per Corrupted Item", Grand Spectrum | as their text says | game text | data |
-| Charms | used by themselves when their condition occurs (frozen, stunned, ignited, shocked, slowed, a hit of their damage type, killing a rare or unique), if they have the charges; the effect ("Utility" lines: resistances...) lasts for the charm's duration; immunity charms stop the occurrence that used them and any other while they last. Charges: from kills like flasks, per second, and by chance on kill. Life / mana on use and "Energy Shield Recharge starts on use" apply. Not modelled: Guard, "Possessed by Spirit", consecrated ground, armour during effect. PoB counts a charm's resistance as always on | game item text | data; charge gain per kill taken from flasks (guess) |
+| Charms | used by themselves when their condition occurs (frozen, stunned, ignited, shocked, slowed, a hit of their damage type, killing a rare or unique), if they have the charges; the effect ("Utility" lines: resistances...) lasts for the charm's duration; immunity charms stop the occurrence that used them and any other while they last. Charges: half the killed monster's power, per second, and by chance on kill. Life / mana on use and "Energy Shield Recharge starts on use" apply. Not modelled: Guard, "Possessed by Spirit", consecrated ground, armour during effect. PoB counts a charm's resistance as always on | game item text | data; charges per kill: half the monster's power (keyword text) |
 | Block | capped at 50% + maximum block (poe.ninja shows it uncapped) | Character.ot | data |
 | Runic Ward | item values x increases; PoB 0.23 does not know this league's ward items, so it is unchecked | game item text | guess |
 
@@ -198,13 +201,13 @@ Checked against PoB's defensive numbers for 131 public characters (`tools/corpus
 | Armour vs elemental | "X% of armour applies to <type> damage": armour formula with that share, after resistance | stat text; order a guess | guess |
 | Damage taken | increased / reduced damage taken by type multiplies after mitigation; flat physical reduction applies to melee hits before armour | stat text | guess (order) |
 | Monster crits | 5% chance, +30% damage (monster base_critical_hit_damage_bonus), less with "enemies deal less extra crit damage" | game data; 5% PoB default | data |
-| Recoup | share of damage taken (by type) returns to the pool evenly over 4 s; "recoup speed" shortens it | stat text | data |
+| Recoup | share of damage taken from hits (by type) returns to the pool evenly over 8 s; "recoup speed" shortens it | game keyword text | data |
 | ES recharge | starts 4 s after the last damage taken (hits and damage over time), / (1 + faster start); 12.5% per second x recharge rate | PoB, Character.ot | pob |
 | Life flask | drunk when life falls below half, if charges allow; amount x life recovery rate over its duration | player behaviour | guess |
-| Leech (life) | % of physical attack damage, from one enemy per hit event, recovered at most 20% of maximum per second | as mana leech | guess |
+| Leech (life, mana) | % of physical attack damage dealt, from one enemy per hit event; each instance is recovered over one second ("Leech Life X% less quickly" stretches it) | game keyword text; the one-enemy rule is a guess | data / guess |
 | Ailments on the player | threshold = half of maximum life (PlayerAilmentThresholdLifeFactor) + mods. Ignite: chance = fire / threshold x IgniteChanceMultiplier, burns 4 s, strongest only, lowered by fire resistance. Shock: chance likewise, +20% damage taken for 4 s. Chill: slow = ChillEffectMultiplier x cold / threshold for 2 s. Freeze: builds cold x FreezeDamageScalePlayer / freeze threshold, frozen 2 s at 100%. "Avoid", "effect on you" and duration stats apply. Unmitigated hit damage is used. Bleed / poison from monsters: not modelled | GameConstants "...Player" | data; using unmitigated damage is a guess |
 | Light stun on the player | chance = hit / stun threshold (maximum life before CI + mods); physical +100%, melee +33% (monster object stats); nothing below 15% (LightStunMinimumChancePlayer); interrupts for 0.35 s (GUESS); a stun only delays the next action, it does not cancel one under way. | game constants; formula a guess | guess |
-| Heavy stun on the player | every hit fills a bar by stun damage x 0.65 (HeavyStunDamageScalePlayer) / stun threshold; the bar decays 5% per second after 8 s without a hit (Monster.ot poise decay); full: stunned 2 s (GUESS: the monsters' value), then the threshold is 100% more for 10 s (HeavyStunThresholdModifierPlayer, HeavyStunModifierDurationPlayer). A stun charm stops it | GameConstants; duration and decay taken from Monster.ot | data / guess |
+| Heavy stun on the player | not applied: "Players and their Minions usually cannot be Heavily Stunned" (only while raising a shield, parrying or mounted, which are not modelled) | game keyword text | data |
 | Evasion | every monster hit can be evaded | PoE2 0.3 (recollection) | guess |
 
 ### Keystones
@@ -221,7 +224,7 @@ Checked against PoB's defensive numbers for 131 public characters (`tools/corpus
 | Eternal Youth | life recharges like energy shield would; 50% less life flask recovery | data |
 | Mind Over Matter | all damage from mana before life; 50% less mana recovery | data |
 | Blood Magic | no mana; skills cost life (a use that would kill waits) | data |
-| Eldritch Battery | the energy shield on items (and flat energy shield) becomes base mana; increases to energy shield don't apply to it, increases to mana do; costs doubled | user ("converts only item ES, no increases apply"); that mana increases apply is our reading | user observation |
+| Eldritch Battery | the energy shield on items (and flat energy shield) becomes base mana; increases to energy shield don't apply to it, increases to mana do; costs doubled | user; game keyword "Stat Conversion" (the base value of A goes to B and scales with B's modifiers, not A's) | data |
 | Unwavering Stance | cannot be light stunned | data |
 | Resolute Technique | never crit; accuracy doubled (accuracy not simulated yet) | data |
 | Dance with Death | 25% more skill speed with a one-handed weapon and empty off hand | data |
@@ -324,7 +327,7 @@ Checked against PoB's defensive numbers for 131 public characters (`tools/corpus
 | Mechanic | Rule | Source | Confidence |
 |---|---|---|---|
 | Charges, rage, motes | stacks on the player with a maximum each (charges: 3 + max charge stats; rage 30 + max rage; motes below) | data | data |
-| Rage | 1% more attack damage per rage (x rage effect). Gained on attack / melee hits (once per use, however many enemies it hits), on kills and when hit, and regenerated (Eternal Rage); once none has been gained for 4 s it is lost at 5 per second (BaseRageLossDelayMs, BaseRageLossPerMinute; decay and delay modifiers apply). A fight starts at maximum rage if anything on the character or its skills generates rage, else at none | game constants, stat text; "once per use" is a guess | data / guess |
+| Rage | 1% more attack damage per rage (x rage effect). Gained on attack / melee hits (once per use, however many enemies it hits), on kills and when hit, and regenerated (Eternal Rage). Lost at 1 per 0.2 s; the loss pauses for 4 s on gaining rage or taking damage (decay and delay modifiers apply). A fight starts at maximum rage if anything on the character or its skills generates rage, else at none | game keyword text, GameConstants; "once per use" is a guess | data / guess |
 | Charge duration | 15 s × (1 + increased charge duration); all charges of a kind share one timer, gaining one (also at maximum) refreshes it, and they expire together. Removing a charge doesn't refresh. The user's power charges: 15 × 2.2 = 33 s, matching the game | PoB CalcSetup base 15 s; user (33 s, expiry behaviour) | pob + user |
 | Start of a fight | everything at its maximum (steady state mid-map); `--start empty` starts frenzy / endurance / motes at 0. Changing areas resets charges to 0 in game, so a map starts empty and the charge-building phase is part of every map | user | — |
 | Kept charges and their timer | a consume that keeps the charges ("chance to not remove") freezes their timer at its current value (it does not restart it); the user sees the timer stand still while slamming continuously, so the pause is at least the time between slams; default 1 s (any value above ~0.6 s gives the same results for this build), `--kept-pause S` | user observation | user |
@@ -347,10 +350,10 @@ Checked against PoB's defensive numbers for 131 public characters (`tools/corpus
 | Energy sources | from the gem's stats: `*_centienergy_per_monster_power_on_crit / freeze / shock / ignite`, `*_centienergy_on_block`, `*_centienergy_per_10ms_base_cast_time` (spells the player casts) | data | data |
 | No energy from triggered skills | hits and ailments of triggered skills (and spells socketed in meta gems) give no energy, so triggers can't feed themselves | poe2wiki / poe2db: "Energy cannot be gained from direct effects of Triggered Skills" | community |
 | Energy per event | per-power value × monster power × (damage of the relevant types / enemy ailment threshold) × (1 + energy generated: gem + group supports) | PoB developer draft (GitHub issue #181); not confirmed game logic | community |
-| Monster power | normal 1, magic 2, rare 5, unique / boss 20 | Mobalytics; boss 20 agreed, magic / rare disputed | community |
+| Monster power | normal 1, magic 2, rare 5 (x the monster's own base power, about 1); unique always 20 | game keyword text | data |
 | Energy per trigger | 100 per second of base cast time of the socketed spells (cast time + `total_cast_time_+_ms`); Comet: 1 + 1 s = 200 | "10 per 0.1 s" (community); a guide quotes 300 for Comet (older version?) | community |
 | Release | "Cast on ...": trigger all socketed spells on reaching maximum (= the cost), energy spent. Invocations (Elemental Invocation, Spellslinger): bank up to `generic_ongoing_trigger_maximum_energy`; used as soon as a trigger is covered and its cooldown (0.2 s) is ready, triggering as many times as the energy covers | gem descriptions | data |
-| Trigger cost of fixed added cast time | `total_cast_time_+_ms` counts double: Comet (1 s base, +1 s fixed) costs 300 energy, not 200 | forum bug reports 3623092, 3860952; user | observed, maybe a bug GGG fixes |
+| Trigger cost of fixed added cast time | `total_cast_time_+_ms` counts double: Comet (1 s base, +1 s fixed) costs 300 energy, not 200 | game keyword text ("modifiers to Total use time are treated as though they were double the value"); user | data |
 | Infusions | fire / cold / lightning / verisium stacks, max 3 each (BaseMaximumInfusionCount + "maximum X infusion stacks"), 20 s (BaseInfusionDurationMs); gaining refreshes the duration | game constants | data |
 | Infusion use | a skill with `active_skill_consumes_a_X_infusion` uses its "-Infused" stat set when it consumes one; every impact consumes one (Spell Cascade: each impact, centre first; the centre's radius sets the spacing); missing element -> a Verisium one; none -> plain stat set; `chance_to_not_consume_infusion_%` keeps it | user (cascades eat separately, Verisium as any element) | user |
 | Infusion remnants | Siphon Elements: each ignite / shock inflicted, and each new freeze, has the gem's chance (5% + 0.1%/quality) to drop a remnant; Harmonic Remnants: chance for two; picked up after `--pickup` seconds | gem data; pickup delay a guess | data + guess |
@@ -373,7 +376,7 @@ Checked against PoB's defensive numbers for 131 public characters (`tools/corpus
 | Infused stat sets | "X-Infused" sets are alternatives used when an infusion is consumed, never parts of a normal use (infusions not modelled yet) | data | data |
 | Block | shield block (shown on the item) + flat, × increased block, capped at 50 + max block; lucky block rolls twice; blocked hits deal `base_block_%_damage_taken` | data / game text | data + guess (cap) |
 | Energy from melee hits / kills | Fire Spell on Hit: per monster power for each melee hit, scaled like crits; Reaper's Invocation: per monster power for each melee kill | gem stats; the scaling is taken to be the same as for crits | guess |
-| Energy from dodge rolls | Cast on Dodge: energy per unit travelled. The dodge roll is something the player presses (`Setup.dodgeRoll`): 3.7 m in 0.55 s plus "Dodge Roll distance" | gem stat; distance and time are a GUESS (not in the exported data) | guess |
+| Energy from dodge rolls | Cast on Dodge: energy per unit travelled. The dodge roll is something the player presses (`Setup.dodgeRoll`): 4.6 m in 0.75 s (not shortened by speed) plus "Dodge Roll distance" | gem stat; game files (skill DodgeRollPlayer: `dodge_roll_base_travel_distance` 46, cast time 750 ms) | data |
 | Energy from minion deaths | not modelled (Cast on Minion Death never triggers) | - | missing |
 | Unaffordable skills | a skill that costs more than the whole mana pool is never used | - | data |
 

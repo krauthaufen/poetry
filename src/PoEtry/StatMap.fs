@@ -360,6 +360,7 @@ module StatMap =
         | "empowered_attack_damage_+%" -> one (Mod.inc (Damage AllDamage) v |> Mod.whenever (SkillIs Attack) |> Mod.whenever (WhileBuff "EmpoweredAttacks"))
         | "warcry_speed_+%" -> one (Mod.inc Speed v |> Mod.whenever (SkillIs Warcry))
         | "warcry_cooldown_speed_+%" -> one (Mod.inc CooldownRecovery v |> Mod.whenever (SkillIs Warcry))
+        | "support_voranas_siege_hit_damage_+%_final_vs_isolated_enemies" -> one (Mod.more (Damage AllDamage) v |> Mod.whenever (EnemyHas "Isolated"))
         | "base_maximum_ward" -> one (Mod.base' (Named "Ward") v)
         | "maximum_ward_+%" -> one (Mod.inc (Named "Ward") v)
         | "ward_regeneration_rate_+%" -> one (Mod.inc (Named "WardRegen") v)

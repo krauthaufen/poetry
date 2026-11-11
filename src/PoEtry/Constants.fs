@@ -14,15 +14,20 @@ module Constants =
     /// (GameConstants BaseRageLossPerMinute, BaseRageLossDelayMs).
     let rageLossPerSecond = Map.find "BaseRageLossPerMinute" Tables.gameConstants / 60.0
     let rageLossDelay = Map.find "BaseRageLossDelayMs" Tables.gameConstants / 1000.0
-    /// Armour Break: broken armour comes back after this many seconds without more being broken,
-    /// and an enemy whose armour is fully broken takes this much increased physical damage from
-    /// hits (PoB CalcPerform: 20%). The duration is a GUESS (12 s).
+    /// Armour Break (game keyword text): armour at zero is Fully Broken for 12 seconds, and the
+    /// enemy takes 20% increased physical damage from hits.
+    /// A leech instance is recovered over this many seconds (keyword text).
+    let leechSeconds = 1.0
+    /// Player hits: physical damage and melee damage each cause 50% more Heavy Stun buildup,
+    /// multiplicative with each other (keyword text).
+    let playerPhysicalStunMore = 50.0
+    let playerMeleeStunMore = 50.0
     let armourBreakDuration = 12.0
     let fullyBrokenArmourTaken = 20.0
-    /// Dodge roll: distance in game units and seconds it takes. GUESS (about 3.7 m in 0.55 s);
-    /// the game's values are not in the exported data.
-    let dodgeRollDistance = 37.0
-    let dodgeRollSeconds = 0.55
+    /// Dodge roll: distance in game units and seconds it takes (game files, skill
+    /// DodgeRollPlayer: dodge_roll_base_travel_distance 46, cast time 750 ms, not modifiable).
+    let dodgeRollDistance = 46.0
+    let dodgeRollSeconds = 0.75
     /// Elemental resistances are lowered by 10% per act of the campaign: -60% in the endgame
     /// (PoB CalcSetup resistancePenalty "Endgame (-60%)"; shown in game on the character sheet).
     let endgameResistPenalty = -60.0
@@ -113,19 +118,17 @@ module Constants =
     /// Monster hits: more stun from melee and from physical damage (monster object stats).
     let monsterMeleeStunMore = mc "melee_hit_damage_stun_multiplier_+%_final_from_ot"
     let monsterPhysicalStunMore = mc "physical_hit_damage_stun_multiplier_+%_final_from_ot"
-    /// After a heavy stun the stun threshold is higher for a while (GameConstants
-    /// HeavyStunThresholdModifier / HeavyStunModifierDuration, and their "...Player" versions).
-    let heavyStunThresholdMore = gc "HeavyStunThresholdModifier"
-    let heavyStunThresholdSeconds = gc "HeavyStunModifierDuration"
-    let playerHeavyStunScale = gc "HeavyStunDamageScalePlayer"
-    let playerHeavyStunThresholdMore = gc "HeavyStunThresholdModifierPlayer"
-    let playerHeavyStunThresholdSeconds = gc "HeavyStunModifierDurationPlayer"
-    /// Heavy stun on the player: seconds stunned. GUESS: the monsters' own value (Monster.ot);
-    /// the player's is not in the exported data.
-    let playerHeavyStunDuration = Map.find "base_heavy_stun_duration_ms" Tables.monsterConstants / 1000.0
-    /// Stun buildup starts to decay this long after the last hit, by this share of the bar per second (Monster.ot poise_decay_*).
-    let poiseDecayDelay = Map.find "poise_decay_delay_ms" Tables.monsterConstants / 1000.0
-    let poiseDecayPerSecond = Map.find "poise_decay_%_per_second" Tables.monsterConstants
+    /// After a monster has been frozen, electrocuted, heavily stunned or pinned, its threshold
+    /// for that is higher for a while (GameConstants <X>ThresholdModifier, <X>ModifierDuration).
+    let afterBuildup a =
+        match a with
+        | Freeze -> gc "FreezeThresholdModifier", gc "FreezeModifierDuration"
+        | Electrocute -> gc "ElectrocuteThresholdModifier", gc "ElectrocuteModifierDuration"
+        | HeavyStun -> gc "HeavyStunThresholdModifier", gc "HeavyStunModifierDuration"
+        | Pin -> gc "PinThresholdModifier", gc "PinModifierDuration"
+        | _ -> 0.0, 0.0
+    /// A chill is at least this strong (keyword text; PoB ailmentData.Chill.min).
+    let chillMinEffect = 30.0
     /// Seconds a light stun interrupts the player. GUESS (no player constant in the data).
     let playerLightStunDuration = 0.35
 

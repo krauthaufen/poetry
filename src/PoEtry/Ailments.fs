@@ -49,7 +49,9 @@ module Ailments =
         | Shock -> Constants.shockDuration
         | Chill -> Constants.chillDuration
         | Freeze | Electrocute | HeavyStun | Pin -> Constants.buildupDuration a
-        | Daze | Maim | Blind | Hinder -> 4.0 // UNVERIFIED, see RULES.md
+        // game keyword text: Daze 8 s; Maim, Blind, Hinder 4 s
+        | Daze -> 8.0
+        | Maim | Blind | Hinder -> 4.0
 
     let magnitudeMult (ctx: Ctx) mods a =
         Mods.mult ctx [ AilmentMagnitude(Some a); AilmentMagnitude None ] mods
@@ -71,10 +73,9 @@ module Ailments =
     let poise (defender: Defender) a =
         let extra =
             match a with
-            | Freeze | Electrocute -> [ PoiseThreshold; AilmentThreshold ]
-            // raised for a while after a heavy stun
-            | HeavyStun -> [ PoiseThreshold; Named "HeavyStunThreshold" ]
-            | _ -> [ PoiseThreshold ]
+            // each is raised for a while after the monster has suffered it
+            | Freeze | Electrocute -> [ PoiseThreshold; AilmentThreshold; Named(Ailment.name a + "Threshold") ]
+            | _ -> [ PoiseThreshold; Named(Ailment.name a + "Threshold") ]
         Constants.poiseThreshold defender.Level * Mods.mult Ctx.empty extra defender.Mods
 
     let private chanceMods (ctx: Ctx) mods a =
@@ -121,7 +122,8 @@ module Ailments =
             let cold = source Chill
             let effect = Constants.chillEffectMultiplier * cold / threshold defender * magnitudeMult ctx mods Chill
             [ if effect >= 1.0 then
-                  yield Status(Chill, min Constants.chillMaxEffect effect, duration ctx mods Chill) ]
+                  // at least 30%, at most 50%
+                  yield Status(Chill, min Constants.chillMaxEffect (max Constants.chillMinEffect effect), duration ctx mods Chill) ]
 
         let flat =
             [ for a in [ Daze; Maim; Blind; Hinder ] do
@@ -135,7 +137,15 @@ module Ailments =
                       | Freeze | HeavyStun -> true
                       | Electrocute | Pin -> Mods.flag ctx (Named("Can" + Ailment.name a)) mods
                       | _ -> false
-                  let dmg = source a
+                  let dmg =
+                      match a with
+                      // heavy stun: physical damage and melee damage each build 50% more, and a
+                      // Dazed enemy takes 50% more stun buildup (keyword text)
+                      | HeavyStun ->
+                          (source a + Dmg.get Physical hit.Unmitigated * Constants.playerPhysicalStunMore / 100.0)
+                          * (if ctx.SkillTags.Contains Melee then 1.0 + Constants.playerMeleeStunMore / 100.0 else 1.0)
+                          * (if ctx.EnemyStatus.ContainsKey "Dazed" then 1.5 else 1.0)
+                      | _ -> source a
                   if enabled && dmg > 0.0 then
                       let pct =
                           dmg * Constants.buildupScale a / poise defender a * Mods.mult ctx [ Buildup a ] mods * 100.0
