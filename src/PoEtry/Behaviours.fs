@@ -513,6 +513,28 @@ module Behaviours =
                     { Hook = OnHit; Filter = Called skill.Name; Chance = 100.0; Reaction = IfEnemyHas(curseName, TriggerSkill name) })
             | Error _ -> None)
 
+    /// Demon Form: "You gain Demonflame every second you remain in demon form, causing your
+    /// Life to be lost at an ever-increasing rate. Maximum 10 Demonflame. Revert to human form
+    /// if you reach 1 Life". Cast speed while in the form, more spell damage per Demonflame.
+    /// The engine counts the Demonflame and takes the life (Sim.step); the buff carries the
+    /// numbers. Returns the skill (not pressed again while in the form), the rule and the mods.
+    let demonForm (db: GameDb) (charMods: ModDb) (setup: GemSetup) (skill: Skill) : (Skill * Rule list * Mod list) option =
+        let raw = Gems.rawStats db charMods { setup with Supports = [] }
+        let sum id = raw |> List.filter (fun (k, _) -> k = id) |> List.sumBy snd
+        let perStack = sum "demon_form_spell_damage_+%_final_per_stack"
+        if perStack <= 0.0 then None
+        else
+            let carried =
+                [ Mod.base' (Named "DemonLifeLossPerStack") (sum "demon_form_life_loss_per_minute_per_stack" / 60.0)
+                  Mod.base' (Named "DemonCooldown") (skill.Cooldown |> Option.defaultValue 0.0) ]
+                |> List.map (Mod.from skill.Name)
+            Some(
+                { skill with Mods = Mod.flag (Named "ToggleBuff:Demon Form") :: skill.Mods },
+                [ { Hook = OnUse; Filter = Called skill.Name; Chance = 100.0; Reaction = GrantBuff("Demon Form", 1e9, 1, carried) } ],
+                [ Mod.more (Damage AllDamage) perStack |> Mod.whenever (SkillIs Spell) |> Mod.whenever (PerStack("Demonflame", 1.0))
+                  Mod.inc Speed (sum "demon_form_grants_cast_speed_+%") |> Mod.whenever (SkillIs Spell) |> Mod.whenever (WhileBuff "Demon Form") ]
+                |> List.map (Mod.from skill.Name))
+
     /// Tempest Bell: "The Bell damages enemies on impact and can be Hit by your skills, creating a
     /// damaging shockwave". The bell stands for `bell_hit_limit` hits: each attack hit with another
     /// skill sets off the Shockwave part (at most one per `bell_shockwave_cooldown_ms`), the

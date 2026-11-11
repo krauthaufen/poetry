@@ -1388,6 +1388,8 @@ module Sim =
                 actor.Rotation |> List.filter (fun step ->
                     let s = skillOf actor step.Use
                     step.When v && ready st w.Time s && (corpses > 0 || not (needsCorpse s)) && built st s
+                    // a form one is in is not pressed again (that would end it)
+                    && (match partNamed s "ToggleBuff:" with Some buff -> not (st.Buffs.ContainsKey buff) | None -> true)
                     // a warp needs something to warp into: an enemy that can be culled, or a projectile
                     && (match warpsInto s with
                         | Some gem -> ballInFlight actor.Name gem w || (aimed env w |> Option.exists (fun e -> (status e).ContainsKey "Cullable"))
@@ -2424,6 +2426,32 @@ module Sim =
                             match aimed env w with
                             | Some other -> drop w |> schedule w.Time (Strike(owner, skill, 1.0, other.Def.Name))
                             | None -> drop w) w
+            // Demon Form: a Demonflame for every second in the form (at most 10), life lost for
+            // each; at 1 life the form ends and its cooldown starts
+            let w =
+                let name = env.Fight.Player.Name
+                let st = Map.find name w.Actors
+                match Map.tryFind "Demon Form" st.Buffs, w.Player with
+                | Some form, Some p ->
+                    let value stat = form.Mods |> List.sumBy (fun m -> if m.Stat = Named stat then m.Value else 0.0)
+                    let flames = min 10 (int (w.Time - (form.Expires - 1e9)))
+                    // the life lost since the last event, at the Demonflame held then
+                    let before = max 0 (min 10 (int (w.Time - dt - (form.Expires - 1e9))))
+                    let life = p.Life - value "DemonLifeLossPerStack" * float before * max 0.0 dt
+                    if life <= 1.0 then
+                        let skill = form.Mods |> List.tryPick (fun m -> if m.Source <> "" then Some m.Source else None) |> Option.defaultValue ""
+                        let back = w.Time + value "DemonCooldown"
+                        { w with Player = Some { p with Life = min p.Life 1.0 }; Counts = bump "demon form ended" w.Counts }
+                        |> updateActor name (fun st ->
+                            { st with
+                                Buffs = st.Buffs |> Map.remove "Demon Form" |> Map.remove "Demonflame"
+                                Cooldowns = Map.add skill back st.Cooldowns
+                                Recharges = Map.add skill [ back ] st.Recharges })
+                    else
+                        { w with Player = Some { p with Life = life } }
+                        |> updateActor name (fun st ->
+                            if flames > 0 then { st with Buffs = Map.add "Demonflame" { Name = "Demonflame"; Mods = []; Stacks = flames; Expires = infinity } st.Buffs } else st)
+                | _ -> w
             // rage: regenerated all the time, lost once none has been gained for a while
             let w =
                 let regen, loss, delay, _, _ = env.Rage

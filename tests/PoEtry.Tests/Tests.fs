@@ -299,6 +299,21 @@ let main _ =
         near 40.0 o.DamageBy.["Ball (hit)"]
         near 4000.0 o.DamageBy.["Warp (hit)"])
 
+    test "demon form: a Demonflame per second, life lost for each, the form ends at 1 life" (fun () ->
+        // 1000 life; 60 life per second per Demonflame: 60 + 120 + .. + 360 = 1260 by 7 s
+        let form = { Skill.make "Form" [ Spell ] with Hits = []; Cooldown = Some 5.0; Mods = [ Mod.flag (Named "ToggleBuff:Demon Form") ] }
+        let carried = [ Mod.base' (Named "DemonLifeLossPerStack") 60.0; Mod.base' (Named "DemonCooldown") 5.0 ] |> List.map (Mod.from "Form")
+        let more = Mod.more (Damage AllDamage) 10.0 |> Mod.whenever (PerStack("Demonflame", 1.0))
+        let player =
+            { Actor.make "Player" [ noIgnite; more ] [ form; fireSpell 100.0 ] with
+                Vitals = Some(PlayerStats.basic 1000.0 0.0)
+                Rules = [ { Hook = OnUse; Filter = Called "Form"; Chance = 100.0; Reaction = GrantBuff("Demon Form", 1e9, 1, carried) } ] }
+        let o = Sim.run { Fight.single (boss 1e12) player 8.5 with MaxTime = 8.5 } 1u
+        equal 1 o.Counts.["demon form ended"]
+        equal 1 o.Counts.["uses:Form"]
+        // bolts land at 2 .. 8 s with 2, 3, 4, 5, 6 Demonflame, then none
+        near (100.0 * (1.2 + 1.3 + 1.4 + 1.5 + 1.6 + 1.0 + 1.0)) o.DamageBy.["Bolt (hit)"])
+
     test "banner: attack hits build its Glory, then its aura lasts for the duration" (fun () ->
         // 200 Glory at 100% of 20 per hit: placed with the tenth hit (10 s) and the twentieth.
         // 4 s of 100% more damage: the hits at 11, 12 and 13 s are doubled, the one at 14 s is not
