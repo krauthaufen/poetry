@@ -104,6 +104,7 @@ module Items =
           // local crit is stored in hundredths of a percent
           CritChance = (b.CritChance + sum ((=) LocalCritChance) / 100.0) * (1.0 + sum ((=) LocalCritChanceInc) / 100.0)
           AttacksPerSecond = b.AttacksPerSecond * (1.0 + sum ((=) LocalAttackSpeedInc) / 100.0)
+          ReloadTime = b.ReloadTime / (1.0 + sum ((=) (LocalOther "local_reload_speed_+%")) / 100.0)
           Tags = weaponTags b }
 
     /// Turn parsed stats into mods + local stats + coverage.

@@ -62,6 +62,7 @@ let fight =
       Reach = infinity
       CascadeSpacing = 1.0
       BankedInvocations = 0.0
+      EnemyAuras = []
       Walls = []
       MaxTime = 120.0 }
 

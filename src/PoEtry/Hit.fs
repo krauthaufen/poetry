@@ -83,7 +83,11 @@ type Skill =
       /// ("base_<type>_damage_to_deal_per_minute"), for Duration seconds (x skill duration mods).
       Dots: Map<DamageType, float>
       /// Base duration of the skill's effect in seconds (0: none).
-      Duration: float }
+      Duration: float
+      /// Crossbow ammunition: bolts per load (0: the skill uses none) and seconds to reload
+      /// before speed modifiers. The cost is paid per load.
+      Clip: int
+      ReloadTime: float }
 
 module Skill =
     let make name tags =
@@ -104,7 +108,9 @@ module Skill =
           Cost = 0.0
           HitDelay = 0.0
           Dots = Map.empty
-          Duration = 0.0 }
+          Duration = 0.0
+          Clip = 0
+          ReloadTime = 0.0 }
 
     let ctx (skill: Skill) crit buffs enemyStatus =
         { Crit = crit

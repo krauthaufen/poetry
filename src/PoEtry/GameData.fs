@@ -81,6 +81,8 @@ type WeaponBase =
       Damage: Map<DamageType, Range>
       CritChance: float
       AttacksPerSecond: float
+      /// Crossbows: seconds to reload (0: no ammunition).
+      ReloadTime: float
       /// Base tags ("warstaff" marks a quarterstaff, "twohand", ...).
       BaseTags: Set<string> }
 
@@ -206,6 +208,7 @@ module GameData =
                       Damage = DamageType.all |> List.choose range |> Map.ofList
                       CritChance = Json.numField "CritChanceBase" w |> Option.defaultValue 5.0
                       AttacksPerSecond = Json.numField "AttackRateBase" w |> Option.defaultValue 1.0
+                      ReloadTime = Json.numField "ReloadTimeBase" w |> Option.defaultValue 0.0
                       BaseTags = Json.keys (Json.field "tags" j) |> Set.ofList }))
             |> Map.ofList
         | _ -> Map.empty

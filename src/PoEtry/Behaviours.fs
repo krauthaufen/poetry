@@ -130,6 +130,8 @@ module Behaviours =
             let enabled = g.Gems |> List.filter (fun x -> x.Enabled)
             match enabled |> List.tryFind (fun x -> not x.IsSupport && Gems.isMeta db x.Name) with
             | None -> None
+            // Blasphemy is an aura, not a trigger (see curseAuras)
+            | Some metaGem when Gems.data db metaGem.Name |> Option.exists (fun d -> d.Types.Contains "IsBlasphemy") -> None
             | Some metaGem ->
                 let supports = enabled |> List.filter (fun x -> x.IsSupport) |> List.map (fun x -> x.Name, x.Level)
                 let spells = enabled |> List.filter (fun x -> not x.IsSupport && x.Name <> metaGem.Name)
@@ -143,6 +145,8 @@ module Behaviours =
                         elif id.EndsWith "_per_monster_power_on_freeze" then Some(InflictsAilment(Freeze, v / 100.0))
                         elif id.EndsWith "_per_monster_power_on_shock" then Some(InflictsAilment(Shock, v / 100.0))
                         elif id.EndsWith "_per_monster_power_on_ignite" then Some(InflictsAilment(Ignite, v / 100.0))
+                        elif id.EndsWith "_per_monster_power_on_hit" then Some(MeleeHits(v / 100.0))
+                        elif id.EndsWith "_per_monster_power_on_melee_kill" then Some(MeleeKills(v / 100.0))
                         elif id.EndsWith "_centienergy_on_block" then Some(Blocks(v / 100.0))
                         elif id.EndsWith "_centienergy_per_10ms_base_cast_time" then Some(CastsSpells(v / 100.0))
                         else None)
@@ -383,6 +387,42 @@ module Behaviours =
             let effect = Mods.mult ctx [ Named(if isCurse then "CurseEffect" else "MarkEffect") ] all
             Some(name, duration, monster |> List.map (Mod.scaled effect), player |> List.map (Mod.scaled effect >> Mod.from skill.Name))
 
+    /// Blasphemy: the curses socketed with it are an aura. Every enemy has them all the time
+    /// (the aura's area is not simulated), with the gem's less curse effect
+    /// ("support_blasphemy_curse_effect_+%_final" of the support Blasphemy grants) and the
+    /// group's supports. Returns the debuffs and the mods the curses give the player.
+    let curseAuras (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) : (string * Mod list) list * Mod list =
+        let charMods = ModDb.ofList sheet.Mods
+        build.Groups
+        |> List.filter (fun g -> g.Enabled)
+        |> List.collect (fun g ->
+            let enabled = g.Gems |> List.filter (fun x -> x.Enabled)
+            match enabled |> List.tryFind (fun x -> not x.IsSupport && (Gems.data db x.Name |> Option.exists (fun d -> d.Types.Contains "IsBlasphemy"))) with
+            | None -> []
+            | Some aura ->
+                let less =
+                    Map.tryFind aura.Name db.Gems
+                    |> Option.map (fun gd -> gd.AdditionalEffects)
+                    |> Option.defaultValue []
+                    |> List.choose (fun id -> Map.tryFind id db.Skills)
+                    |> List.collect (fun sd -> sd.StatSets |> List.tryHead |> Option.map (fun set -> Gems.stats sd set aura.Level 0) |> Option.defaultValue [])
+                    |> List.filter (fun (id, _) -> id = "support_blasphemy_curse_effect_+%_final")
+                    |> List.sumBy snd
+                let supports = enabled |> List.filter (fun x -> x.IsSupport) |> List.map (fun x -> x.Name, x.Level)
+                enabled
+                |> List.filter (fun x -> not x.IsSupport && x.Name <> aura.Name)
+                |> List.choose (fun gem ->
+                    let setup = { Gem = gem.Name; Level = gem.Level; Quality = gem.Quality; StatSet = 1; Supports = supports }
+                    match Gems.skill db charMods None setup with
+                    | Ok (s, _) ->
+                        curseOf db charMods setup s
+                        |> Option.map (fun (name, _, monster, player) ->
+                            let k = 1.0 + less / 100.0
+                            (name, monster |> List.map (Mod.scaled k)), player |> List.map (Mod.scaled k))
+                    | Error _ -> None))
+        |> List.unzip
+        |> fun (auras, grants) -> auras, List.concat grants
+
     /// What a used skill does besides hitting, from its gem data:
     /// - "all elemental exposure magnitude" (Frost Bomb): exposure to fire, cold and lightning
     ///   for its secondary duration, x (1 + exposure effect);
@@ -452,6 +492,7 @@ module Behaviours =
                         { Damage = Map.ofList [ Physical, { Min = avg * (1.0 - m.DamageSpread); Max = avg * (1.0 + m.DamageSpread) } ]
                           CritChance = m.CritChance
                           AttacksPerSecond = 1.0 / max 0.05 m.AttackTime
+                          ReloadTime = 0.0
                           Tags = [] }
                     let skills =
                         m.SkillList

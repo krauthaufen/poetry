@@ -429,7 +429,10 @@ module Setup =
             if k <> 1.0 then [ Mod.more stat ((k - 1.0) * 100.0) |> Mod.from "aura" ] else []
         let auraMods = aura AilmentThreshold "EnemyAura:AilmentThreshold" @ aura PoiseThreshold "EnemyAura:PoiseThreshold"
         let enemies = if auraMods.IsEmpty then enemies else enemies |> List.map (fun e -> { e with Mods = e.Mods @ auraMods })
+        let curses, curseGrants = Behaviours.curseAuras c.Db c.Sheet c.Build
+        let player = if curseGrants.IsEmpty then player else { player with Mods = player.Mods @ curseGrants }
         { Enemies = enemies
+          EnemyAuras = curses
           Player = player
           Minions = c.Minions
           Targeting = o.Targeting

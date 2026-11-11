@@ -19,6 +19,8 @@ type Weapon =
     { Damage: Map<DamageType, Range>
       CritChance: float
       AttacksPerSecond: float
+      /// Crossbows: seconds to reload, local reload speed included (0: no ammunition).
+      ReloadTime: float
       Tags: SkillTag list }
 
 /// What happened to every stat that went into a skill or item.
@@ -265,6 +267,11 @@ module Gems =
             |> Option.orElse (skillOfGem db name)
         | _ -> skillOfGem db name
 
+    /// The shot a crossbow ammunition gem loads: the gem's additional granted skill.
+    let private shotOf (db: GameDb) (name: string) =
+        Map.tryFind name db.Gems |> Option.orElse (Map.tryFind (plain name) db.Gems)
+        |> Option.bind (fun g -> g.AdditionalEffects |> List.tryPick (fun id -> Map.tryFind id db.Skills))
+
     /// Persistent buffs (Berserk, Eternal Rage, heralds...): always on while reserved.
     /// Does a buff gem's stat affect the character (true) or only the skill itself?
     /// The game's own description says so: "Buff grants ...", "Grants ...", "... you ...".
@@ -304,12 +311,15 @@ module Gems =
               "SkillConsumesPowerChargesOnUse"; "HasUsageCondition"; "AppliesCurse"; "Curse"; "Mark"; "Limit"
               "CreatesMinion"; "Minion"; "Companion"; "CreatesCompanion"; "SummonsTotem"; "SummonsAttackTotem"; "Totem"
               "GeneratesInfusion"; "GeneratesRemnants"; "DamageOverTime"; "Grenade"; "Plant"; "Storm"
-              "SkillConsumesFrenzyChargesOnUse"; "SkillConsumesEnduranceChargesOnUse"; "Sustained"; "Shapeshift"; "Channel"; "Rain" ]
+              "SkillConsumesFrenzyChargesOnUse"; "SkillConsumesEnduranceChargesOnUse"; "Sustained"; "Shapeshift"; "Channel"; "Rain"
+              "CrossbowAmmoSkill" ]
 
     /// What a gem's skill does that the simulator has no model for: its skill types that are
     /// neither descriptive nor modelled ("Channel", "GainsStages", "Shapeshift", "Rain"...).
     let unmodelledTypes (db: GameDb) name =
         skillOfGem db name
+        // an ammunition gem is judged by the shot it loads
+        |> Option.map (fun d -> if d.Types.Contains "CrossbowAmmoSkill" then shotOf db name |> Option.defaultValue d else d)
         |> Option.map (fun d -> d.Types |> Set.filter (fun t -> not (descriptiveTypes.Contains t) && not (modelledTypes.Contains t)) |> Set.toList)
         |> Option.defaultValue []
 
@@ -427,7 +437,9 @@ module Gems =
                 | Some v when v > 0.0 -> Some(t, v / 60.0)
                 | _ -> None)
             |> Map.ofList
-          Duration = (statOf "base_skill_effect_duration" |> Option.defaultValue 0.0) / 1000.0 },
+          Duration = (statOf "base_skill_effect_duration" |> Option.defaultValue 0.0) / 1000.0
+          Clip = 0
+          ReloadTime = 0.0 },
         cov
 
     /// Build a simulator Skill from a socketed gem. `characterMods` are needed for
@@ -436,6 +448,26 @@ module Gems =
     let rec skill (db: GameDb) (characterMods: ModDb) (weapon: Weapon option) (setup: GemSetup) : Result<Skill * Coverage, string> =
         match skillOfGemFor db setup.Gem weapon with
         | None -> Error(sprintf "unknown gem %s" setup.Gem)
+        | Some ammo when ammo.Types.Contains "CrossbowAmmoSkill" ->
+            // A crossbow gem grants "Load X" (bolts per load, the cost) and the shot itself
+            // (gems.json additionalGrantedEffectId1): the shot is what is used, the load is
+            // its ammunition. Reloading takes the weapon's reload time.
+            match shotOf db setup.Gem with
+            | None -> Error(sprintf "%s has no shot skill" setup.Gem)
+            | Some shot ->
+                let shot = { shot with Levels = shot.Levels |> Map.map (fun lvl l -> { l with ManaCost = Map.tryFind lvl ammo.Levels |> Option.bind (fun a -> a.ManaCost) }) }
+                skillFromData db characterMods weapon setup shot
+                |> Result.map (fun (s, cov) ->
+                    let supportBolts =
+                        setup.Supports |> List.sumBy (fun (name, lvl) ->
+                            match skillOfGem db name with
+                            | Some sd when sd.Support -> sd.StatSets |> List.tryHead |> Option.map (fun set -> stats sd set lvl 0 |> List.sumBy (fun (id, v) -> if id = "base_number_of_crossbow_bolts" then v else 0.0)) |> Option.defaultValue 0.0
+                            | _ -> 0.0)
+                    let bolts =
+                        ammo.StatSets |> List.tryHead
+                        |> Option.map (fun set -> stats ammo set setup.Level 0 |> List.sumBy (fun (id, v) -> if id = "base_number_of_crossbow_bolts" then v else 0.0))
+                        |> Option.defaultValue 1.0
+                    { s with Clip = max 1 (int (bolts + supportBolts)); ReloadTime = weapon |> Option.map (fun w -> w.ReloadTime) |> Option.defaultValue 0.0 }, cov)
         | Some data -> skillFromData db characterMods weapon setup data
 
     /// A minion's skill: its values scale with the minion's level, not a gem level

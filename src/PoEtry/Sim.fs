@@ -70,6 +70,10 @@ type Rule =
 type EnergySource =
     | CritHits of perPower: float
     | InflictsAilment of ailment: Ailment * perPower: float
+    /// Energy per monster power for each melee hit (Fire Spell on Hit), scaled like crits.
+    | MeleeHits of perPower: float
+    /// Energy per monster power for each kill with a melee skill (Reaper's Invocation).
+    | MeleeKills of perPower: float
     /// Flat energy per block.
     | Blocks of energy: float
     /// Energy per 10 ms of base cast time of spells the player casts.
@@ -252,6 +256,9 @@ type Fight =
       /// Invocations start with this fraction of their maximum energy (banked while
       /// clearing before the fight; 0 = empty).
       BankedInvocations: float
+      /// Debuffs every enemy has for the whole fight (curses applied as an aura): name and
+      /// monster-side mods; curses are scaled by the enemy's "curse effect on self".
+      EnemyAuras: (string * Mod list) list
       MaxTime: float }
 
 module Fight =
@@ -265,6 +272,7 @@ module Fight =
           CascadeSpacing = 1.5
           Walls = []
           BankedInvocations = 1.0
+          EnemyAuras = []
           MaxTime = maxTime }
 
 /// A timed effect with stacks.
@@ -332,7 +340,11 @@ module Sim =
           Cooldowns: Map<string, float>
           /// Per skill: when its spent stored uses come back.
           Recharges: Map<string, float list>
-          Energy: Map<string, float> }
+          Energy: Map<string, float>
+          /// Bolts left per crossbow skill (missing: a full load), and the skills whose current
+          /// load hasn't been paid for yet (the cost is paid with the first shot of a load).
+          Ammo: Map<string, int>
+          LoadDue: Set<string> }
 
     type private EnemyState =
         { Def: EnemyDef
@@ -959,7 +971,7 @@ module Sim =
         let ctx = Skill.ctx skill false (buffStacks st) target
         skill.BaseTime / Mods.mult ctx [ Speed ] (skillDb env actor skill st)
 
-    let private onReadyUnlocked env rng name (w: World) =
+    let private onReadyUnlocked env (rng: Rng) name (w: World) =
         let actor = actorDef env name
         let st = Map.find name w.Actors
         let v = view env w st
@@ -979,7 +991,37 @@ module Sim =
                 match actor.Vitals with
                 | Some pools -> pools.Mana * Mods.sumBase costCtx [ Named "ExtraCostPercentOfMaxMana" ] db / 100.0
                 | None -> 0.0
-            let cost = (skill.Cost + extraCost) * Mods.mult costCtx [ ManaCost ] db / Mods.inc costCtx [ ManaCostEfficiency ] db
+            // crossbow ammunition: the cost is for loading, paid with the first shot of a new load
+            let ownCost = if skill.Clip > 0 && not (st.LoadDue.Contains skill.Name) then 0.0 else skill.Cost
+            let cost = (ownCost + extraCost) * Mods.mult costCtx [ ManaCost ] db / Mods.inc costCtx [ ManaCostEfficiency ] db
+            // after the last bolt of a load: reload (attack speed and reload speed shorten it;
+            // PoB: increases add up, more multiplies), unless the reload is instant
+            let reload (w: World) : World * float =
+                if skill.Clip <= 0 then w, 0.0
+                else
+                    let st = Map.find name w.Actors
+                    let ctx = { costCtx with Buffs = buffStacks st }
+                    let left = (Map.tryFind skill.Name st.Ammo |> Option.defaultValue skill.Clip)
+                    let kept = rng.Chance(Mods.sumBase ctx [ Named "KeepAmmoChance" ] db)
+                    let left = if kept then left else left - 1
+                    let w = updateActor name (fun st -> { st with Ammo = Map.add skill.Name left st.Ammo; LoadDue = st.LoadDue.Remove skill.Name }) w
+                    if left > 0 then w, 0.0
+                    else
+                        let speed = (1.0 + (Mods.sumInc ctx [ Speed ] db + Mods.sumInc ctx [ Named "ReloadSpeed" ] db) / 100.0) * Mods.more ctx [ Speed ] db * Mods.more ctx [ Named "ReloadSpeed" ] db
+                        let instant = rng.Chance(Mods.sumBase ctx [ Named "InstantReloadChance" ] db)
+                        let seconds = if instant then 0.0 else skill.ReloadTime / max 0.1 speed
+                        let w =
+                            updateActor name (fun st ->
+                                { st with
+                                    Ammo = Map.add skill.Name skill.Clip st.Ammo
+                                    LoadDue = st.LoadDue.Add skill.Name
+                                    Buffs = Map.add "ReloadedRecently" { Name = "ReloadedRecently"; Mods = []; Stacks = 1; Expires = w.Time + t + seconds + 4.0 } st.Buffs }) w
+                            |> schedule (w.Time + t + seconds + 4.0) Expire
+                        { w with Counts = bump ("reload:" + skill.Name) w.Counts }, seconds
+            let go (w: World) =
+                let w = startUse env rng actor skill t w
+                let w, extra = reload w
+                schedule (w.Time + t + extra) (Ready name) w
             // drink the mana flask when mana is getting low and it isn't already running
             let w =
                 match actor.ManaFlask, w.Player with
@@ -1000,9 +1042,7 @@ module Sim =
             | Some v, Some p when v.CostsLife ->
                 // Blood Magic: the cost is paid with life; a skill that would kill waits
                 if p.Life - cost >= 1.0 || cost <= 0.0 then
-                    { w with Player = Some { p with Life = p.Life - cost } }
-                    |> startUse env rng actor skill t
-                    |> schedule (w.Time + t) (Ready name)
+                    { w with Player = Some { p with Life = p.Life - cost } } |> go
                 else
                     let wait = max Constants.serverTick 0.25
                     { w with Player = Some { p with Starved = p.Starved + wait } } |> schedule (w.Time + wait) (Ready name)
@@ -1018,7 +1058,7 @@ module Sim =
                         { w with Player = Some { p with InfernalFlame = 0.0 }; Counts = bump "infernal flame burn" w.Counts }
                         |> takeDamage v (Map.ofList [ Fire, burn ])
                     else { w with Player = Some { p with InfernalFlame = flame } }
-                startUse env rng actor skill t w |> schedule (w.Time + t) (Ready name)
+                go w
             | Some v, Some p when p.Mana < cost ->
                 // not enough mana: wait until regeneration and leech have covered it
                 let rate =
@@ -1027,10 +1067,8 @@ module Sim =
                 let wait = max Constants.serverTick (if rate > 0.0 then (cost - p.Mana) / rate else 1.0)
                 { w with Player = Some { p with Starved = p.Starved + wait } } |> schedule (w.Time + wait) (Ready name)
             | Some _, Some p ->
-                { w with Player = Some { p with Mana = p.Mana - cost } }
-                |> startUse env rng actor skill t
-                |> schedule (w.Time + t) (Ready name)
-            | _ -> startUse env rng actor skill t w |> schedule (w.Time + t) (Ready name)
+                { w with Player = Some { p with Mana = p.Mana - cost } } |> go
+            | _ -> go w
         | None ->
             // Nothing usable: wait for the next cooldown, or a server tick.
             let next =
@@ -1227,6 +1265,8 @@ module Sim =
                                     |> List.sumBy (fun src ->
                                         match src with
                                         | CritHits per when hit.Crit -> per * power * ratio DamageType.all
+                                        | MeleeHits per when skill.Tags.Contains Melee -> per * power * ratio DamageType.all
+                                        | MeleeKills per when dead && skill.Tags.Contains Melee -> per * power
                                         | InflictsAilment (a, per) when newly a -> per * power * ratio (Ailments.scalesFromWith ctx mods a)
                                         | _ -> 0.0)
                                 if amount > 0.0 then gainEnergy env rng actor meta.Name (amount * meta.EnergyMult) w else w)
@@ -1777,7 +1817,9 @@ module Sim =
               Buffs = Map.empty
               Cooldowns = Map.empty
               Recharges = Map.empty
-              Energy = Map.empty }
+              Energy = Map.empty
+              Ammo = Map.empty
+              LoadDue = Set.empty }
         let w0 =
             { Player =
                 fight.Player.Vitals
@@ -1815,7 +1857,12 @@ module Sim =
                     d.Name,
                     { Def = d
                       Life = d.Life
-                      Debuffs = Map.empty
+                      Debuffs =
+                        fight.EnemyAuras
+                        |> List.map (fun (name, mods) ->
+                            let k = if name.StartsWith "Curse:" then Mods.more Ctx.empty [ Named "CurseEffectOnSelf" ] (ModDb.ofList d.Mods) else 1.0
+                            name, { Name = name; Mods = mods |> List.map (Mod.scaled k); Stacks = 1; Expires = infinity })
+                        |> Map.ofList
                       Dots = []
                       Buildup = Map.empty
                       Db = ModDb.ofList d.Mods })
