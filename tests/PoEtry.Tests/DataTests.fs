@@ -361,6 +361,25 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         near 70.0 (Behaviours.spiritUses db.Value (sheetOf plain) plain |> List.sumBy (fun u -> u.Flat))
         near 1.0 (Setup.loadWith db.Value treeJson plain Options.defaults).Vitals.StartLife)
 
+    test "parts for one state of the enemy; how many charges a skill consumes" (fun () ->
+        let crossbow = (Items.parse db.Value "Rarity: Normal\nAlloy Crossbow\n--------\n").Weapon
+        let spear = (Items.parse db.Value "Rarity: Normal\nHardwood Spear\n--------\n").Weapon
+        let flag name (sk: Skill) = Mods.flag Ctx.empty (Named name) (ModDb.ofList sk.Mods)
+        match Gems.skill db.Value ModDb.empty crossbow { Gem = "Fragmentation Rounds"; Level = 20; Quality = 0; StatSet = 1; Supports = [] } with
+        | Ok (s, _) ->
+            // the "Vs Frozen" explosion only happens against a frozen enemy, and takes the freeze
+            let vs = s.Parts |> List.find (fun p -> p.Name.EndsWith "Vs Frozen")
+            equal (box true) (box (flag "OnlyVs:Frozen" vs && flag "ConsumesVs" vs))
+            equal (box false) (box (flag "OnlyVs:Frozen" s))
+        | Error e -> failwith e
+        let count gem weapon =
+            match Gems.skill db.Value ModDb.empty weapon { Gem = gem; Level = 20; Quality = 0; StatSet = 1; Supports = [] } with
+            | Ok (s, _) -> Mods.sumBase Ctx.empty [ Named "ConsumeChargeCount" ] (ModDb.ofList s.Mods), s.Consumes
+            | Error e -> failwith e
+        // "Consumes a Frenzy Charge if you have one": one; "Consumes your Power Charges": all (0)
+        equal (box (1.0, Some "FrenzyCharge")) (box (count "Explosive Spear" spear))
+        equal (box 0.0) (box (fst (count "Falling Thunder" None))))
+
     test "low life only where the build keeps itself there; fewer enemies to be surrounded" (fun () ->
         let bonus = [ "30% increased Damage when on Low Life" ]
         let start b = (Setup.loadWith db.Value treeJson b Options.defaults).Vitals.StartLife

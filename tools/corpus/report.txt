@@ -531,8 +531,8 @@
   11  1% to 10%
   18  10% to 50%
   45  50% to 200%
-  35  2x to 10x
-  11  over 10x
+  37  2x to 10x
+   9  over 10x
 
 == per build
 001-abyssal-lich-comet                               Comet (pressed Spark)                        43011112 dps (theirs    7132055)  0 unknown, 0 unmapped, 14 unsimulated  energy shield 11001/11515
@@ -560,7 +560,7 @@
 023-sorceress-orb-of-storms                          Orb of Storms                                     122 dps (theirs       1020)  0 unknown, 9 unmapped, 14 unsimulated  armour 1266/1349  fire res 132/107
 024-spirit-walker-companion-zekoa-the-headcrusher    Wild Protector                                 460881 dps (theirs     448836)  0 unknown, 8 unmapped, 27 unsimulated  energy shield 1069/882  fire res 116/96  cold res 75/55  lightning res 102/70  chaos res 68/60
 025-stormweaver-living-bomb                          Living Bomb (pressed Raise Shield)               1165 dps (theirs     659332)  0 unknown, 13 unmapped, 27 unsimulated
-026-tactician-explosive-spear                        Explosive Spear                               4923717 dps (theirs     429164)  0 unknown, 8 unmapped, 28 unsimulated
+026-tactician-explosive-spear                        Explosive Spear                               2390775 dps (theirs     429164)  0 unknown, 8 unmapped, 28 unsimulated
 027-titan-resonating-shield                          Resonating Shield                                 317 dps (theirs         83)  0 unknown, 11 unmapped, 21 unsimulated  life 13296/15880  fire res 104/94  cold res 103/93  lightning res 114/104
 028-warbringer-shield-wall                           Shield Wall                                    267658 dps (theirs     607869)  0 unknown, 14 unmapped, 24 unsimulated  chaos res 74/70
 029-warrior-shield-wall                              Shield Wall                                       282 dps (theirs       2139)  0 unknown, 14 unmapped, 26 unsimulated
@@ -568,7 +568,7 @@
 031-witchhunter-earthshatter                         Earthshatter                                   705906 dps (theirs    1113933)  0 unknown, 13 unmapped, 22 unsimulated  fire res 134/126
 032-abyssal-lich-ice-nova                            Ice Nova                                      1472666 dps (theirs     559628)  0 unknown, 3 unmapped, 11 unsimulated  mana 1073/1040
 033-acolyte-of-chayula-raise-shield                  Raise Shield                                     1173 dps (theirs       1791)  0 unknown, 7 unmapped, 33 unsimulated  energy shield 5835/6224  evasion 19375/20846  deflection 20538/22096  block 48/57
-034-amazon-lightning-spear                           Lightning Spear                               9506616 dps (theirs    2782885)  0 unknown, 12 unmapped, 18 unsimulated  fire res 104/102
+034-amazon-lightning-spear                           Lightning Spear                               9428851 dps (theirs    2782885)  0 unknown, 12 unmapped, 18 unsimulated  fire res 104/102
 035-blood-mage-dark-consequences                     Despair                                        425650 dps (theirs          0)  0 unknown, 4 unmapped, 19 unsimulated
 036-chronomancer-glacial-lance                       Glacial Lance                                  663992 dps (theirs     423547)  0 unknown, 18 unmapped, 25 unsimulated  evasion 30156/34649  deflection 23220/26679
 037-deadeye-lightning-arrow                          Lightning Arrow                               1392101 dps (theirs    3391171)  0 unknown, 4 unmapped, 16 unsimulated  strength 61/65  intelligence 132/136
@@ -622,10 +622,10 @@
 085-witchhunter-plasma-blast                         Plasma Blast                                   399862 dps (theirs     328579)  0 unknown, 7 unmapped, 16 unsimulated  evasion 41308/59706  deflection 5453/7881
 086-abyssal-lich-bone-cage                           Bone Cage (pressed Thrashing Vines)            248439 dps (theirs     338343)  0 unknown, 9 unmapped, 19 unsimulated  energy shield 9358/10473
 087-acolyte-of-chayula-hand-of-chayula               Hand of Chayula (pressed Toxic Growth)          25741 dps (theirs      13205)  0 unknown, 29 unmapped, 27 unsimulated  chaos res 112/108
-088-amazon-primal-strikes                            Primal Strikes                                 701680 dps (theirs     358467)  0 unknown, 10 unmapped, 14 unsimulated
+088-amazon-primal-strikes                            Primal Strikes                                 714558 dps (theirs     358467)  0 unknown, 10 unmapped, 14 unsimulated
 089-blood-mage-living-bomb                           Living Bomb (pressed Coiling Bolts)            685530 dps (theirs    6997622)  0 unknown, 5 unmapped, 25 unsimulated
 090-chronomancer-hammer-of-the-gods                  Hammer of the Gods                              42120 dps (theirs     168525)  1 unknown, 17 unmapped, 26 unsimulated
-091-deadeye-lightning-spear                          Lightning Spear                              12181531 dps (theirs    4004076)  0 unknown, 7 unmapped, 20 unsimulated  strength 172/176  fire res 72/70  cold res 95/71  lightning res 84/72
+091-deadeye-lightning-spear                          Lightning Spear                              11912890 dps (theirs    4004076)  0 unknown, 7 unmapped, 20 unsimulated  strength 172/176  fire res 72/70  cold res 95/71  lightning res 84/72
 092-disciple-of-varashta-spiraling-conspiracy        Spiraling Conspiracy                           371290 dps (theirs     135574)  0 unknown, 9 unmapped, 18 unsimulated  fire res 113/91  cold res 120/105
 093-gemling-legionnaire-falling-thunder              Falling Thunder                             250925364 dps (theirs    1365072)  5 unknown, 7 unmapped, 15 unsimulated  dexterity 115/119
 094-infernalist-grim-pillars                         Grim Pillars (pressed Spark)                     3465 dps (theirs        336)  0 unknown, 1 unmapped, 10 unsimulated
@@ -645,7 +645,7 @@
 108-witchhunter-bow-shot                             Bow Shot                                         1599 dps (theirs        633)  0 unknown, 12 unmapped, 21 unsimulated  life 2330/2574  evasion 3921/2352  deflection 1608/2657  fire res 87/107  cold res 80/100  lightning res 77/97
 109-abyssal-lich-bonestorm                           Bonestorm (pressed Ball Lightning)            1421866 dps (theirs     189824)  0 unknown, 7 unmapped, 28 unsimulated  mana 808/783  energy shield 4778/5277
 110-acolyte-of-chayula-volcano                       Volcano                                           485 dps (theirs         87)  2 unknown, 24 unmapped, 27 unsimulated  energy shield 9864/10248  evasion 34502/32666  deflection 37608/35605
-111-amazon-fragmentation-rounds                      Fragmentation Rounds                           832528 dps (theirs      26215)  0 unknown, 13 unmapped, 17 unsimulated
+111-amazon-fragmentation-rounds                      Fragmentation Rounds                           170610 dps (theirs      26215)  0 unknown, 13 unmapped, 17 unsimulated
 112-blood-mage-doom-blast                            Elemental Weakness                               4171 dps (theirs          0)  0 unknown, 3 unmapped, 26 unsimulated
 113-chronomancer-reap                                Reap                                          1221123 dps (theirs    1322925)  0 unknown, 6 unmapped, 13 unsimulated
 114-deadeye-twister                                  Twister                                        312339 dps (theirs     471809)  0 unknown, 17 unmapped, 23 unsimulated  evasion 1597/1228

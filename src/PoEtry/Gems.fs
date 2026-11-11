@@ -513,6 +513,26 @@ module Gems =
              @ (if has "display_statset_no_hit_damage" && has "display_skill_poisons_without_hit" then
                     [ Mod.flag (Named "NoHitDamage"); Mod.base' (AilmentChance Poison) 100.0 ]
                 else [])
+             // "Consumes a Frenzy Charge if possible": one charge per use; "Consume 3 Endurance
+             // Charges": three; "Consumes your Power Charges", "Consume all": every one held
+             @ (let words = data.Description.Split([| ' '; ','; '.' |], System.StringSplitOptions.RemoveEmptyEntries) |> List.ofArray
+                let rec find (ws: string list) =
+                    match ws with
+                    | ("Consumes" | "Consume") :: n :: kind :: charge :: _ when (kind = "Power" || kind = "Frenzy" || kind = "Endurance") && charge.StartsWith "Charge" ->
+                        (match n with
+                         | "a" | "an" -> Some 1.0
+                         | _ -> (match System.Double.TryParse n with | true, v -> Some v | _ -> None))
+                    | _ :: rest -> find rest
+                    | [] -> None
+                match find words with
+                | Some n -> [ Mod.base' (Named "ConsumeChargeCount") n ]
+                | None -> [])
+             // a stat set for one state of the enemy ("Vs Frozen", "Vs Armour Broken", "Vs Dazed")
+             @ (if set.Label.StartsWith "Vs " then
+                    let state = match set.Label.Substring 3 with "Armour Broken" -> "FullyBrokenArmour" | other -> other.Replace(" ", "")
+                    [ Mod.flag (Named("OnlyVs:" + state)) ]
+                    @ (if data.Types.Contains "SkillConsumesFreeze" || data.Types.Contains "ConsumesFullyBrokenArmour" then [ Mod.flag (Named "ConsumesVs") ] else [])
+                else [])
              @ (if has "poison_duration_is_skill_duration" && burstDuration > 0.0 then [ Mod.override' (Named "BasePoisonDuration") burstDuration ] else []))
           Parts = []
           Consumes =

@@ -1046,7 +1046,13 @@ module Sim =
                 |> List.fold
                     (fun w (at, mult) ->
                         // every part of the skill strikes together
+                        // a "Frenzy-Charged" part happens only when the use has a charge to consume,
+                        // and then in place of the plain explosion
+                        let charged = match skill.Consumes with Some charge -> (Map.tryFind charge st.Buffs |> Option.map (fun e -> e.Stacks) |> Option.defaultValue 0) > 0 | None -> false
+                        let isCharged (p: Skill) = p.Name.EndsWith "-Charged"
+                        let hasCharged = skill.Parts |> List.exists isCharged
                         (skill :: skill.Parts)
+                        |> List.filter (fun p -> if isCharged p then charged else not (hasCharged && charged && p.Name.EndsWith ": Explosion"))
                         |> List.fold (fun w part -> schedule at (Strike(actor.Name, part.Name, mult, target.Def.Name)) w) w)
                     w
             // an attack the player makes while empowered by a warcry uses one empowerment up
@@ -1366,6 +1372,16 @@ module Sim =
                         let distance = max 0.0 (Vec.length e.Def.Position - e.Def.Size)
                         Hit.accuracyHitChance evasion (Hit.accuracyAtDistance distance accuracy)
                 | None -> 100.0
+            // a part that only happens against an enemy in some state ("Vs Frozen"): nothing otherwise;
+            // one that consumes the state takes it off
+            let onlyVs = skill.Mods |> List.tryPick (fun m -> match m.Stat with Named n when n.StartsWith "OnlyVs:" -> Some(n.Substring 7) | _ -> None)
+            let consumesVs = skill.Mods |> List.exists (fun m -> m.Stat = Named "ConsumesVs")
+            if (match onlyVs with Some st -> not (enemyStatus.ContainsKey st) | None -> false) then w
+            else
+            let w =
+                match onlyVs with
+                | Some st when consumesVs -> updateEnemy target (fun en -> { en with Debuffs = Map.remove st en.Debuffs }) w |> fun w -> { w with Counts = bump ("consumed:" + st) w.Counts }
+                | _ -> w
             if not (rng.Chance hitChance) then
                 { w with Counts = bump ("miss:" + skill.Name) w.Counts }
             else
@@ -2168,7 +2184,12 @@ module Sim =
                             | _ -> w
                         else w
                     else
-                        updateActor name (fun st -> { st with Buffs = Map.remove charge st.Buffs }) w
+                        // one charge, a set number, or all of them (0)
+                        let count = int (Mods.sumBase Ctx.empty [ Named "ConsumeChargeCount" ] (skillDb env actor (skillOf actor skillName) st))
+                        updateActor name (fun st ->
+                            match Map.tryFind charge st.Buffs with
+                            | Some e when count > 0 && e.Stacks > count -> { st with Buffs = Map.add charge { e with Stacks = e.Stacks - count } st.Buffs }
+                            | _ -> { st with Buffs = Map.remove charge st.Buffs }) w
                         |> fun w -> { w with Counts = bump ("consumed:" + charge) w.Counts }
             | GainStacks (name, r, n) ->
                 let actor = actorDef env name
