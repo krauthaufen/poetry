@@ -221,8 +221,9 @@ module Setup =
           Sheet = sheet
           Bases = bases
           // "per 100 maximum mana" (Archmage) reads this permanent stack count
-          MaxResources = Map.add "MaxMana100" (int (vitals.Mana / 100.0)) maxResources
-          Resources = (startResources |> Map.toList) @ [ "MaxMana100", int (vitals.Mana / 100.0) ]
+          // the character's own numbers as stacks, for "per 100 maximum Mana", "per 15 Strength"
+          MaxResources = maxResources |> Map.add "MaxMana100" (int (vitals.Mana / 100.0)) |> Map.add "Str" (int vitals.Str) |> Map.add "Dex" (int vitals.Dex) |> Map.add "Int" (int vitals.Int)
+          Resources = (startResources |> Map.toList) @ [ "MaxMana100", int (vitals.Mana / 100.0); "Str", int vitals.Str; "Dex", int vitals.Dex; "Int", int vitals.Int ]
           Vitals = vitals
           Periodics = periodics
           Cycles = cycles
@@ -430,6 +431,14 @@ module Setup =
         let heraldSkills, heraldRules = Behaviours.heralds db sheet c.Build
         let ashSkills, overkillBurns = Behaviours.heraldOfAsh db sheet c.Build
         let heraldSkills = heraldSkills @ ashSkills
+        // skills an item triggers on hit: built like a pressed gem, used only by their rule
+        let itemTriggered =
+            Behaviours.itemTriggers sheet (c.Vitals.Str, c.Vitals.Dex, c.Vitals.Int)
+            |> List.choose (fun (name, rule) ->
+                pressed c o name |> Option.map (fun p ->
+                    { p.Skill with Tags = p.Skill.Tags.Add Triggered; Cost = 0.0 }, { rule with Reaction = TriggerSkill p.Skill.Name }))
+        let heraldSkills = heraldSkills @ (itemTriggered |> List.map fst)
+        let heraldRules = heraldRules @ (itemTriggered |> List.map snd)
         let consumers =
             (used |> List.choose (fun (_, p) -> p.Infused)) @ (metas |> List.collect (fun (_, _, cs) -> cs))
         let grantRules =
@@ -506,6 +515,8 @@ module Setup =
         |> List.filter (fun g -> g.Enabled)
         |> List.filter (fun g -> not (g.Gems |> List.exists (fun x -> x.Enabled && not x.IsSupport && Gems.isMeta c.Db x.Name)))
         |> List.collect (fun g -> g.Gems |> List.filter (fun x -> x.Enabled && not x.IsSupport && not (Gems.isPersistentBuff c.Db x.Name)))
+        // a skill that is only ever triggered (by an item, a support, another skill) can't be pressed
+        |> List.filter (fun x -> not (Gems.data c.Db x.Name |> Option.exists (fun d -> d.Types.Contains "Triggered")))
         |> List.map (fun x -> x.Name)
         // and totems that use socketed skills: pressing them places the totem
         |> fun own ->

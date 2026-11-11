@@ -155,6 +155,21 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         near 0.0 (Mods.sumBase spell [ CritBonus ] db')
         near 8.0 (Mods.sumBase attack [ Named "LifeLeech" ] db'))
 
+    test "attributes scale stats; fire resistance mirrored to cold and lightning" (fun () ->
+        let helmet lines = item "Helmet" ([ "Energy Shield: 100"; "--------" ] @ lines)
+        let stats lines = stats { blank with Items = [ helmet lines ] }
+        let plain = stats []
+        // "1% increased Energy Shield per 2 Strength": Strength 40 more than without -> at least 20% more of the 100
+        let str = stats [ "+40 to Strength"; "1% increased Energy Shield per 2 Strength" ]
+        near (floor ((plain.Str + 40.0) / 2.0)) ((str.EnergyShield / plain.EnergyShield - 1.0) * 100.0)
+        // +50% fire resistance at 50% of its value: +25% cold and lightning; the cap moves with fire's
+        let res t (v: PlayerStats) = v.Resist.[t]
+        let mirrored = stats [ "+50% to Fire Resistance"; "+3% to Maximum Fire Resistance"
+                               "Modifiers to Fire Resistance also grant Cold and Lightning Resistance at 50% of their value"
+                               "Modifiers to Maximum Fire Resistance also grant Maximum Cold and Lightning Resistance"; "+150% to Cold Resistance" ]
+        near (res Lightning plain + 25.0) (res Lightning mirrored)
+        near 78.0 (res Cold mirrored))
+
     test "spell damage per 100 maximum mana counts the hundreds of mana" (fun () ->
         let ms = match StatMap.meaning "spell_damage_+%_per_100_maximum_mana" 3.0 with Mods ms -> ms | m -> failwithf "%A" m
         let db = ModDb.ofList ms

@@ -532,6 +532,19 @@ module Behaviours =
         @ [ Mod.inc Evasion (10.0 * Mods.inc Ctx.empty [ Named "TailwindEffect" ] db) |> Mod.whenever (PerStack("Tailwind", 1.0)) |> Mod.from "Tailwind"
             Mod.base' CritChance 0.5 |> Mod.whenever (PerEnemyStack("CriticalWeakness", 1.0)) |> Mod.from "Critical Weakness" ]
 
+    /// Skills an item triggers: "Hits with this Weapon have N% chance to Trigger X per M
+    /// Strength" is a "TriggerOnHit:X" stat; every hit of an attack the player uses rolls it.
+    /// Returns (skill name, rule).
+    let itemTriggers (sheet: CharacterSheet) (str: float, dex: float, int': float) : (string * Rule) list =
+        let db = ModDb.ofList sheet.Mods
+        let c = { Ctx.empty with Buffs = Map.ofList [ "Str", int str; "Dex", int dex; "Int", int int' ] }
+        sheet.Mods
+        |> List.choose (fun m -> match m.Stat with | Named n when n.StartsWith "TriggerOnHit:" -> Some n | _ -> None)
+        |> List.distinct
+        |> List.map (fun n ->
+            let skill = n.Substring 13
+            skill, { Hook = OnHit; Filter = WithTagNot(Attack, Triggered); Chance = min 100.0 (Mods.sumBase c [ Named n ] db); Reaction = TriggerSkill skill })
+
     /// Rules from "Rule:<hook>:<effect>:<seconds>" stats on the character (any skill, or the
     /// kind its condition names) and on a skill's own gems (that skill only).
     let keywordRules (sheet: CharacterSheet) (skills: Skill list) : Rule list =

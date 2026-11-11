@@ -47,6 +47,15 @@ module Defence =
               Instant = min 100.0 (Mods.sumBase c [ Named "FlaskInstant" ] db) / 100.0 })
 
     /// `resources`: current charges, motes, rage... (conditional defences read them).
+    /// A resistance before its cap: the modifiers' sum (chaos doubled by its keystone), what
+    /// "Modifiers to Fire Resistance also grant Cold and Lightning Resistance at N% of their
+    /// value" adds, and the campaign's elemental resistance penalty, complete in the endgame.
+    let uncappedResist (c: Ctx) (db: ModDb) (t: DamageType) =
+        let penalty = if DamageType.isElemental t then Constants.endgameResistPenalty else 0.0
+        let doubled = if t = Chaos && Mods.flag c (Named "ChaosResistDoubled") db then 2.0 else 1.0
+        let fromFire = if t = Cold || t = Lightning then Mods.sumBase c [ Resist Fire ] db * Mods.sumBase c [ Named "FireResToColdLightning" ] db / 100.0 else 0.0
+        Mods.sumBase c [ Resist t ] db * doubled + fromFire + penalty
+
     let computeWith (resources: Map<string, int>) (bases: Map<string, float * float * float>) (sheet: CharacterSheet) : PlayerStats =
         let db = ModDb.ofList sheet.Mods
         // "while wielding a Quarterstaff" and similar read the main hand
@@ -91,7 +100,7 @@ module Defence =
         let ci = Mods.flag c (Named "Keystone:Chaos Inoculation") db
         let flag n = Mods.flag c (Named n) db
         // Giant's Blood halves the life Strength gives
-        let lifePerStr = if flag "HalfLifeFromStrength" then 1.0 else 2.0
+        let lifePerStr = if flag "NoStrengthBonus" then 0.0 elif flag "HalfLifeFromStrength" then 1.0 else 2.0
         let bodyES = itemValue MaxEnergyShield ((=) "Body Armour")
         let lifeFull = pool MaxLife (baseLife + lifePerLevel * level + lifePerStr * str + bodyES * Mods.sumBase c [ Named "LifeFromBodyES" ] db / 100.0)
         // "X% of maximum Life converted to / gained as Energy Shield"
@@ -141,14 +150,12 @@ module Defence =
             // Chaos Inoculation: immune to chaos damage
             if t = Chaos && ci then t, 100.0
             else
+                let mirrored = t = Cold || t = Lightning
                 let cap =
                     match Mods.override' c (Named "MaxResistOverride") db with
                     | Some v -> v
-                    | None -> min playerResistCap (playerMaxResist + Mods.sumBase c [ MaxResist t ] db)
-                // the campaign's elemental resistance penalty, complete in the endgame
-                let penalty = if DamageType.isElemental t then Constants.endgameResistPenalty else 0.0
-                let doubled = if t = Chaos && Mods.flag c (Named "ChaosResistDoubled") db then 2.0 else 1.0
-                t, min cap (Mods.sumBase c [ Resist t ] db * doubled + penalty)
+                    | None -> min playerResistCap (playerMaxResist + Mods.sumBase c [ MaxResist t ] db + (if mirrored && Mods.flag c (Named "MaxFireResToColdLightning") db then Mods.sumBase c [ MaxResist Fire ] db else 0.0))
+                t, min cap (uncappedResist c db t)
         { Str = str
           Dex = dex
           Int = int'

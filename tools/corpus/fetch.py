@@ -71,7 +71,8 @@ Conversion poe.ninja -> official character API  (everything renamed / synthesize
                                       (no "icon"). Any other id becomes {"id": ..., "stats": []}
                                       and is counted in index.json under "unknown_overrides".
   passives.jewel_data                 NOT AVAILABLE, {} (official: socket -> {type, radius}).
-  passives.quest_stats                questStats.
+  passives.quest_stats                questStats, plus the stats of keystones poe.ninja lists
+                                      that data/game/tree.json doesn't have by name.
   metadata                            {"version": passiveTreeName, "source": "poe.ninja"};
                                       the official version string has a different format.
   top-level "ninja"                   sibling of "character", poe.ninja-only data that is handy
@@ -261,6 +262,24 @@ def conv_override(oid):
     return {"id": oid, "stats": []}, False
 
 
+_TREE = None
+
+
+def extra_keystones(raw):
+    """Stats of keystones poe.ninja lists that our tree data doesn't know by name (league
+    keystones such as Black Scythe Training): appended to quest_stats so they count."""
+    global _TREE
+    if _TREE is None:
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "data", "game", "tree.json")
+        _TREE = open(path, encoding="utf-8").read()
+    out = []
+    for k in raw.get("keystones") or []:
+        if '"%s"' % k.get("name") not in _TREE:
+            for st in k.get("stats") or []:
+                out += st.split("\n")
+    return out
+
+
 def convert(raw):
     """poe.ninja character reply -> ({"character": ..., "ninja": ...}, unknown override ids)."""
     unknown = []
@@ -290,7 +309,7 @@ def convert(raw):
             "specialisations": {"set1": s1, "set2": s2} if (s1 or s2) else {},
             "skill_overrides": overrides,
             "jewel_data": {},
-            "quest_stats": raw.get("questStats") or [],
+            "quest_stats": (raw.get("questStats") or []) + extra_keystones(raw),
         },
         "metadata": {"version": raw.get("passiveTreeName"), "source": "poe.ninja"},
     }

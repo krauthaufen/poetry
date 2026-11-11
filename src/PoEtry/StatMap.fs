@@ -139,6 +139,9 @@ module StatMap =
             | "for" :: "4" :: "seconds" :: "on" :: "crit" :: tail -> go (WhileBuff "CritRecently" :: acc) tail
             | ("while" | "if") :: "surrounded" :: tail -> go (WhileBuff "Surrounded" :: acc) tail
             | "per" :: "enemy" :: "elemental" :: "ailment" :: tail -> go (PerEnemyStack("ElementalAilments", 1.0) :: acc) tail
+            // "... per 15 strength": the character's attributes are stacks "Str" / "Dex" / "Int"
+            | "per" :: n :: ("strength" | "dexterity" | "intelligence" as attr) :: tail when n <> "" && n |> Seq.forall System.Char.IsDigit ->
+                go (PerStack((match attr with "strength" -> "Str" | "dexterity" -> "Dex" | _ -> "Int"), float n) :: acc) tail
             // "... if 10 red supports socketed", "... if majority blue supports socketed"
             | "if" :: "10" :: colour :: "supports" :: "socketed" :: tail -> go (WhileBuff("Supports10:" + colour) :: acc) tail
             | "if" :: "majority" :: colour :: "supports" :: "socketed" :: tail -> go (WhileBuff("SupportsMajority:" + colour) :: acc) tail
@@ -699,6 +702,9 @@ module StatMap =
         | "keystone_eternal_youth" -> Some(Mods [ Mod.flag (Named "LifeRechargesInsteadOfES"); Mod.more (Named "LifeFlaskAmount") (-v) ])
         // "All Damage is taken from Mana before Life; 50% less Mana Recovery Rate"
         | "keystone_mana_shield" -> Some(Mods [ Mod.base' (Named "DamageRemovedFromManaFirst") 100.0; Mod.more (Named "ManaRecoveryRate") (-v) ])
+        | "modifiers_to_fire_resistance_also_apply_to_cold_lightning_resistance_at_%_value" -> one (Mod.base' (Named "FireResToColdLightning") v)
+        | "modifiers_to_maximum_fire_resistance_apply_to_maximum_cold_and_lightning_resistance" -> one (Mod.flag (Named "MaxFireResToColdLightning"))
+        | "gain_no_inherent_bonus_from_strength" -> one (Mod.flag (Named "NoStrengthBonus"))
         | "keystone_blood_magic" -> one (Mod.flag (Named "BloodMagic"))
         // "Convert 100% of maximum Energy Shield to maximum Mana; Mana Costs are Doubled"
         | "keystone_eldritch_battery" -> Some(Mods [ Mod.base' (Named "ESConvertedToMana") v; Mod.more ManaCost 100.0 ])
@@ -850,6 +856,13 @@ module StatMap =
             let t = (typeWord t).Value
             let stat = if bound = "minimum" then AddedMin t else AddedMax t
             scopes (List.rev scope) |> Option.map (fun sc -> [ apply sc (Mod.base' stat v) ])
+        // "minimum added fire damage to attacks", "... to attacks and spells"
+        | "attacks" :: "to" :: "damage" :: t :: "added" :: [ bound ] when (typeWord t).IsSome && (bound = "minimum" || bound = "maximum") ->
+            let t = (typeWord t).Value
+            Some [ Mod.base' (if bound = "minimum" then AddedMin t else AddedMax t) v |> Mod.whenever (SkillIs Attack) ]
+        | "spells" :: "and" :: "attacks" :: "to" :: "damage" :: t :: "added" :: [ bound ] when (typeWord t).IsSome && (bound = "minimum" || bound = "maximum") ->
+            let t = (typeWord t).Value
+            Some [ Mod.base' (if bound = "minimum" then AddedMin t else AddedMax t) v ]
         | _ -> None
 
     /// "base reduce enemy <type> resistance %": penetration

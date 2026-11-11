@@ -139,11 +139,30 @@ module Items =
         |> List.fold
             (fun (mods, left) (line: string) ->
                 let l = line.Trim()
+                // "... per 2 Strength": the same line without it, once per so many of the attribute
+                let perAttribute =
+                    [ "Strength", "Str"; "Dexterity", "Dex"; "Intelligence", "Int" ]
+                    |> List.tryPick (fun (long, short) ->
+                        let i = l.LastIndexOf " per "
+                        if i > 0 && l.EndsWith(" " + long) then
+                            match System.Double.TryParse(l.Substring(i + 5, l.Length - i - 5 - long.Length - 1)) with
+                            | true, n when n > 0.0 -> Some(" per " + l.Substring(i + 5), PerStack(short, n))
+                            | _ -> None
+                        else None)
+                let conditional = conditional @ Option.toList perAttribute
                 let suffixed =
                     conditional |> List.tryPick (fun (suffix, cond) ->
                         if l.EndsWith suffix then
                             StatText.parse db.Text (l.Substring(0, l.Length - suffix.Length))
-                            |> Option.map (fun stats -> let ms, _, _ = interpret stats in ms |> List.map (Mod.whenever cond))
+                            |> Option.map (fun stats ->
+                                let ms, locals, _ = interpret stats
+                                // not on an item here: a line that reads as an item's own stat is the global one
+                                let fromLocals =
+                                    locals |> List.collect (fun l ->
+                                        match l with
+                                        | LocalOther id, v when id.StartsWith "local_" -> (match StatMap.meaning (id.Substring 6) v with | Mods m -> m | _ -> [])
+                                        | _ -> [])
+                                (if ms.IsEmpty then fromLocals else ms) |> List.map (Mod.whenever cond))
                         else None)
                 match suffixed with
                 | Some ms -> mods @ ms, left
@@ -311,6 +330,15 @@ module Items =
                                 | "local_poison_on_hit" -> Mods [ Mod.base' (AilmentChance Poison) 100.0 ]
                                 | "local_chaos_penetration_%" -> Mods [ Mod.base' (Penetration Chaos) v ]
                                 | "local_elemental_penetration_%" -> Mods (DamageType.elemental |> List.map (fun t -> Mod.base' (Penetration t) v))
+                                | _ when id.StartsWith "local_%_chance_to_trigger_" && id.Contains "_on_hit_with_this_weapon_per_" ->
+                                    // "Hits with this Weapon have 5% chance to Trigger Molten Shower per 25 Strength"
+                                    let words (x: string) = x.Split('_') |> Array.filter (fun w -> w <> "")
+                                    let skill = words (id.Substring(26, id.IndexOf "_on_hit_with_this_weapon_per_" - 26)) |> Array.map (fun w -> string (System.Char.ToUpperInvariant w.[0]) + w.Substring 1) |> String.concat " "
+                                    match words (id.Substring(id.IndexOf "_per_" + 5)) with
+                                    | [| n; attr |] ->
+                                        let a = match attr with "strength" -> "Str" | "dexterity" -> "Dex" | _ -> "Int"
+                                        Mods [ Mod.base' (Named("TriggerOnHit:" + skill)) v |> Mod.whenever (PerStack(a, float n)) ]
+                                    | _ -> Unmapped
                                 | _ -> StatMap.meaning (id.Substring 6) v
                             match known with
                             | Mods found ->

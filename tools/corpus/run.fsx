@@ -62,7 +62,7 @@ let runOne (path: string) : Result =
             let v = c.Vitals
             // uncapped, so a missing source shows as its exact value
             let sheetDb = ModDb.ofList c.Sheet.Mods
-            let res t = Mods.sumBase Ctx.empty [ Resist t ] sheetDb + (if DamageType.isElemental t then Constants.endgameResistPenalty else 0.0)
+            let res t = Defence.uncappedResist Ctx.empty sheetDb t
             let num key =
                 match key with
                 | "fireResistance" | "coldResistance" | "lightningResistance" | "chaosResistance" -> num key |> Option.map (fun r -> r + (num (key + "OverCap") |> Option.defaultValue 0.0))
