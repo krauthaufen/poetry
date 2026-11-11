@@ -10,6 +10,10 @@ module Constants =
         table.[(max 1 (min level table.Length)) - 1]
 
     // ---- crit ----
+    /// Dodge roll: distance in game units and seconds it takes. GUESS (about 3.7 m in 0.55 s);
+    /// the game's values are not in the exported data.
+    let dodgeRollDistance = 37.0
+    let dodgeRollSeconds = 0.55
     /// Elemental resistances are lowered by 10% per act of the campaign: -60% in the endgame
     /// (PoB CalcSetup resistancePenalty "Endgame (-60%)"; shown in game on the character sheet).
     let endgameResistPenalty = -60.0

@@ -74,6 +74,8 @@ type EnergySource =
     | MeleeHits of perPower: float
     /// Energy per monster power for each kill with a melee skill (Reaper's Invocation).
     | MeleeKills of perPower: float
+    /// Energy per game unit travelled while dodge rolling (Cast on Dodge).
+    | DodgeRolls of perUnit: float
     /// Flat energy per block.
     | Blocks of energy: float
     /// Energy per 10 ms of base cast time of spells the player casts.
@@ -942,6 +944,17 @@ module Sim =
                     let last = times |> List.map fst |> List.fold max w.Time
                     schedule (last + 1e-9) (ConsumeCharges(actor.Name, charge, skill.Name)) w
                 | None -> w
+            // Cast on Dodge: energy per unit travelled by a dodge roll
+            let w =
+                if useTime > 0.0 && skill.Tags.Contains(Tag "DodgeRoll") then
+                    let distance = Constants.dodgeRollDistance + Mods.sumBase ctx [ Named "DodgeRollDistance" ] mods
+                    actor.Metas
+                    |> List.fold
+                        (fun w meta ->
+                            let amount = meta.Sources |> List.sumBy (function DodgeRolls per -> per * distance | _ -> 0.0)
+                            if amount > 0.0 then gainEnergy env rng actor meta.Name (amount * meta.EnergyMult) w else w)
+                        w
+                else w
             // Spellslinger-style energy: per 10 ms of base cast time of spells the player casts
             let w =
                 if useTime > 0.0 && skill.Tags.Contains Spell then

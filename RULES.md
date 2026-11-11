@@ -269,6 +269,13 @@ Checked against PoB's defensive numbers for 131 public characters (`tools/corpus
 | Staged channels | Flameblast, Supercharged Slam, Detonating Arrow, Volcano: one use is the channel to the maximum number of stages (each takes the skill's own time) plus the release animation; the hit carries the per-stage more damage, gain as fire and radius | gem stats `*_maximum_stages`, `*_damage_+%_final_per_stage`, `*_radius_+_per_stage` | data; always channelling to full is a play-style assumption |
 | Other channels | used repeatedly, one hit per use time (Incinerate's fuel, Snipe's perfect timing, Rampage, shield skills: not modelled) | - | partial |
 
+### Shield attacks
+
+| Mechanic | Rule | Source | Confidence |
+|---|---|---|---|
+| Base damage | skills that hit with the shield (Resonating Shield, Shield Charge, Raise Shield, Parry) use `off_hand_weapon_minimum/maximum_physical_damage` plus `off_hand_..._added_physical_damage_per_N_shield_armour` (or evasion) x the shield's own armour / N | gem stats | data |
+| Active block, retaliation, parry | not modelled | - | missing |
+
 ### Curse auras
 
 | Mechanic | Rule | Source | Confidence |
@@ -328,7 +335,8 @@ Checked against PoB's defensive numbers for 131 public characters (`tools/corpus
 | Infused stat sets | "X-Infused" sets are alternatives used when an infusion is consumed, never parts of a normal use (infusions not modelled yet) | data | data |
 | Block | shield block (shown on the item) + flat, × increased block, capped at 50 + max block; lucky block rolls twice; blocked hits deal `base_block_%_damage_taken` | data / game text | data + guess (cap) |
 | Energy from melee hits / kills | Fire Spell on Hit: per monster power for each melee hit, scaled like crits; Reaper's Invocation: per monster power for each melee kill | gem stats; the scaling is taken to be the same as for crits | guess |
-| Energy from dodge rolls, minion deaths | not modelled (Cast on Dodge, Cast on Minion Death never trigger) | - | missing |
+| Energy from dodge rolls | Cast on Dodge: energy per unit travelled. The dodge roll is something the player presses (`Setup.dodgeRoll`): 3.7 m in 0.55 s plus "Dodge Roll distance" | gem stat; distance and time are a GUESS (not in the exported data) | guess |
+| Energy from minion deaths | not modelled (Cast on Minion Death never triggers) | - | missing |
 | Unaffordable skills | a skill that costs more than the whole mana pool is never used | - | data |
 
 ## Runic Ward, remnants, Infernal Flame

@@ -371,7 +371,17 @@ module Pob =
                 pick p |> Option.map (fun f ->
                     let inc = text.Split('\n') |> Array.tryPick (fun l -> if l.Contains "increased Charges gained" then (match System.Double.TryParse(l.Trim().Split('%').[0]) with | true, v -> Some v | _ -> None) else None)
                     f, inc |> Option.defaultValue 0.0))
-        { Mods = itemMods @ legacies @ radiusMods @ treeMods @ (extraMods |> List.map (sourced "quest"))
+        // the shield's own armour and evasion, for skills that hit with it
+        let shieldMods =
+            parsed |> List.collect (fun (slot, p) ->
+                if slot = "Weapon 2" then
+                    p.Defences |> List.choose (fun (st, v) ->
+                        match st with
+                        | Armour -> Some(Mod.base' (Named "ShieldArmour") v |> Mod.from slot)
+                        | Evasion -> Some(Mod.base' (Named "ShieldEvasion") v |> Mod.from slot)
+                        | _ -> None)
+                else [])
+        { Mods = itemMods @ shieldMods @ legacies @ radiusMods @ treeMods @ (extraMods |> List.map (sourced "quest"))
           MainHand = mainHand
           Weapons = Option.toList mainHand @ Option.toList swapHand
           ItemDefences = parsed |> List.filter (fun (slot, _) -> not (slot.Contains "Swap")) |> List.collect (fun (slot, p) -> p.Defences |> List.map (fun (st, v) -> slot, st, v))

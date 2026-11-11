@@ -314,7 +314,7 @@ module Gems =
               "CreatesMinion"; "Minion"; "Companion"; "CreatesCompanion"; "SummonsTotem"; "SummonsAttackTotem"; "Totem"
               "GeneratesInfusion"; "GeneratesRemnants"; "DamageOverTime"; "Grenade"; "Plant"; "Storm"
               "SkillConsumesFrenzyChargesOnUse"; "SkillConsumesEnduranceChargesOnUse"; "Sustained"; "Shapeshift"; "Channel"; "Rain"
-              "CrossbowAmmoSkill"; "GainsStages" ]
+              "CrossbowAmmoSkill"; "GainsStages"; "RequiresShield" ]
 
     /// What a gem's skill does that the simulator has no model for: its skill types that are
     /// neither descriptive nor modelled ("Channel", "GainsStages", "Shapeshift", "Rain"...).
@@ -336,7 +336,7 @@ module Gems =
         set.Stats |> List.contains "display_statset_hide_usage_stats" && not (set.Label.EndsWith "-Infused")
 
     /// One stat set of a skill as a simulator Skill.
-    let private buildSet altQuality (data: SkillData) (set: StatSetData) name tags level quality (supportStats: (string * float) list) (weapon: Weapon option) =
+    let private buildSet altQuality (data: SkillData) (set: StatSetData) name tags level quality (supportStats: (string * float) list) (weapon: Weapon option) (shieldArmour: float, shieldEvasion: float) =
         let gemLevel = Map.tryFind level data.Levels
         let ownStats = statsWith altQuality data set level quality
         // the skill's internal name, from all its stat sets
@@ -345,8 +345,27 @@ module Gems =
         let supportMods, supportCov = interpret None supportStats
         let mods, cov = ownMods @ supportMods, Coverage.merge ownCov supportCov
         let isAttack = data.Types.Contains "Attack"
+        // Shield attacks (Resonating Shield, Shield Charge, Raise Shield, Parry) hit with the
+        // shield: "off_hand_weapon_minimum/maximum_physical_damage" plus
+        // "off_hand_..._added_physical_damage_per_N_shield_armour" (or "..._evasion_rating").
+        let shieldDamage =
+            let sum (pred: string -> bool) = ownStats |> List.filter (fun (id, _) -> pred id) |> List.sumBy snd
+            let per (bound: string) =
+                ownStats |> List.sumBy (fun (id, v) ->
+                    let prefix = "off_hand_" + bound + "_added_physical_damage_per_"
+                    if id.StartsWith prefix then
+                        let rest = id.Substring(prefix.Length).Split('_')
+                        match System.Double.TryParse rest.[0] with
+                        | true, n when n > 0.0 -> v * floor ((if id.Contains "evasion" then shieldEvasion else shieldArmour) / n)
+                        | _ -> 0.0
+                    else 0.0)
+            let lo = sum ((=) "off_hand_weapon_minimum_physical_damage") + per "minimum"
+            let hi = sum ((=) "off_hand_weapon_maximum_physical_damage") + per "maximum"
+            if hi > 0.0 then Some(Map.ofList [ Physical, { Min = lo; Max = hi } ]) else None
+        let weapon = if shieldDamage.IsSome then None else weapon
         let baseDamage =
-            if isAttack then
+            if shieldDamage.IsSome then shieldDamage.Value
+            elif isAttack then
                 weapon |> Option.map (fun w -> w.Damage) |> Option.defaultValue Map.empty
             else
                 // a stat listed more than once adds up (infused sets list base damage twice)
@@ -550,12 +569,13 @@ module Gems =
                     |> List.unzip
                 let supportStats = List.concat supportStats
                 let alt = Mods.flag ctx (Named "AltQuality") characterMods
-                let main, cov = buildSet alt data set data.Name tags level quality supportStats weapon
+                let shield = Mods.sumBase Ctx.empty [ Named "ShieldArmour" ] characterMods, Mods.sumBase Ctx.empty [ Named "ShieldEvasion" ] characterMods
+                let main, cov = buildSet alt data set data.Name tags level quality supportStats weapon shield
                 let parts, partCov =
                     data.StatSets
                     |> List.filter (fun s -> s <> set && isPart s)
                     |> List.map (fun s ->
-                        let p, c = buildSet alt data s (data.Name + ": " + s.Label) tags level quality supportStats weapon
+                        let p, c = buildSet alt data s (data.Name + ": " + s.Label) tags level quality supportStats weapon shield
                         { p with Consumes = None }, c)
                     |> List.unzip
                 let cov = List.fold Coverage.merge cov (supportCov @ partCov)

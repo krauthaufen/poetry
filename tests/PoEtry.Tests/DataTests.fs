@@ -190,6 +190,20 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
             equal (box (AreaAroundSelf 60.0)) (box s.Delivery)
         | Error e -> failwith e)
 
+    test "gem: shield attacks hit with the shield, scaled by its armour" (fun () ->
+        let mods armour = ModDb.ofList [ Mod.base' (Named "ShieldArmour") armour ]
+        let build armour =
+            match Gems.skill db.Value (mods armour) None { Gem = "Resonating Shield"; Level = 20; Quality = 0; StatSet = 1; Supports = [] } with
+            | Ok (s, _) -> s
+            | Error e -> failwith e
+        // level 20: 103-155 physical, +5 to 7 per 15 armour on the shield; 0.8 s attack time
+        let bare, armoured = build 0.0, build 300.0
+        near 103.0 bare.BaseDamage.[Physical].Min
+        near 155.0 bare.BaseDamage.[Physical].Max
+        near (103.0 + 5.0 * 20.0) armoured.BaseDamage.[Physical].Min
+        near (155.0 + 7.0 * 20.0) armoured.BaseDamage.[Physical].Max
+        near 0.8 bare.BaseTime)
+
     test "Blasphemy: socketed curses become auras at the gem's reduced effect" (fun () ->
         let gem name support = { Name = name; Level = 20; Quality = 0; Enabled = true; IsSupport = support; StatSet = 1 }
         let group = { Label = ""; Slot = ""; Enabled = true; Gems = [ gem "Blasphemy" false; gem "Despair" false ] }

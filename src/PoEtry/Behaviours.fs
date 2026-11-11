@@ -147,6 +147,7 @@ module Behaviours =
                         elif id.EndsWith "_per_monster_power_on_ignite" then Some(InflictsAilment(Ignite, v / 100.0))
                         elif id.EndsWith "_per_monster_power_on_hit" then Some(MeleeHits(v / 100.0))
                         elif id.EndsWith "_per_monster_power_on_melee_kill" then Some(MeleeKills(v / 100.0))
+                        elif id.EndsWith "_centienergy_per_unit_travelled_while_dodge_rolling" then Some(DodgeRolls(v / 100.0))
                         elif id.EndsWith "_centienergy_on_block" then Some(Blocks(v / 100.0))
                         elif id.EndsWith "_centienergy_per_10ms_base_cast_time" then Some(CastsSpells(v / 100.0))
                         else None)

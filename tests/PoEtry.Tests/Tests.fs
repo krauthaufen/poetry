@@ -419,6 +419,16 @@ let main _ =
         let caster = { Actor.make "Player" [ noIgnite ] [ fireSpell 100.0; nova ] with Rotation = [ Actor.always "Bolt" ]; Metas = [ onHit ] }
         equal false ((Sim.run (Fight.single (boss 1e12) caster 5.5) 1u).Counts.ContainsKey "trigger:Nova"))
 
+    test "meta energy from dodge rolls: per unit rolled" (fun () ->
+        let roll = { Skill.make "Dodge Roll" [ Tag "DodgeRoll" ] with BaseTime = 0.5; Hits = [] }
+        let nova = { fireSpell 100.0 with Name = "Nova" }
+        // 37 units per roll at 1 energy per unit: 100 energy every third roll
+        let meta = { Meta.simple "On Dodge" 100.0 "Nova" with Sources = [ DodgeRolls 1.0 ] }
+        let player = { Actor.make "Player" [ noIgnite ] [ roll; nova ] with Rotation = [ Actor.always "Dodge Roll" ]; Metas = [ meta ] }
+        let o = Sim.run (Fight.single (boss 1e9) player 4.75) 1u
+        equal 10 o.Counts.["uses:Dodge Roll"]
+        equal 3 o.Counts.["trigger:Nova"])
+
     test "gem stats: a skill's internal name is not read as scope words" (fun () ->
         // Falling Thunder's stats start with "lightning_strike_": neither a lightning nor a Strike restriction
         let ids =

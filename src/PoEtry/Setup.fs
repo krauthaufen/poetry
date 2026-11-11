@@ -235,7 +235,18 @@ module Setup =
           /// Timed hits of one use (skills that keep hitting), instead of the skill's own.
           Pattern: (HitTiming * float) list option }
 
-    let pressed (c: Loaded) (o: Options) (gemName: string) : Pressed option =
+    /// The dodge roll as something the player can press (`Spam Setup.dodgeRoll`): it deals
+    /// nothing and takes its time; Cast on Dodge gains energy from the distance rolled.
+    let dodgeRoll = "Dodge Roll"
+
+    let rec pressed (c: Loaded) (o: Options) (gemName: string) : Pressed option =
+        if gemName = dodgeRoll then
+            Some
+                { Skill = { Skill.make dodgeRoll [ Tag "DodgeRoll" ] with BaseTime = Constants.dodgeRollSeconds; Hits = [] }
+                  Infused = None; GrantsVerisium = 0; Rules = []; Grants = []; Curse = None; Pattern = None }
+        else pressedGem c o gemName
+
+    and private pressedGem (c: Loaded) (o: Options) (gemName: string) : Pressed option =
         let db, sheet = c.Db, c.Sheet
         let charMods = ModDb.ofList sheet.Mods
         c.Build.Groups |> List.tryPick (fun g ->
@@ -471,7 +482,8 @@ module Setup =
                 all |> List.filter (fun (_, p) ->
                     p.Curse.IsNone && not p.Skill.Hits.IsEmpty
                     && (not p.Skill.BaseDamage.IsEmpty || p.Skill.Tags.Contains Attack || not p.Skill.Dots.IsEmpty || not p.Skill.Parts.IsEmpty))
-            (if damaging.IsEmpty then all else damaging) |> List.map fst
+            let rolls = Behaviours.metas c.Db c.Sheet c.Build o.Infused |> List.exists (fun (m, _, _) -> m.Sources |> List.exists (function DodgeRolls _ -> true | _ -> false))
+            ((if damaging.IsEmpty then all else damaging) |> List.map fst) @ (if rolls then [ dodgeRoll ] else [])
         candidates
         |> List.choose (fun g ->
             match pressed c o g with
