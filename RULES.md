@@ -188,7 +188,7 @@ Confidence levels:
 | Eternal Youth | life recharges like energy shield would; 50% less life flask recovery | data |
 | Mind Over Matter | all damage from mana before life; 50% less mana recovery | data |
 | Blood Magic | no mana; skills cost life (a use that would kill waits) | data |
-| Eldritch Battery | energy shield becomes mana (after its own increases); costs doubled | data; which increases apply is a guess |
+| Eldritch Battery | the energy shield on items (and flat energy shield) becomes base mana; increases to energy shield don't apply to it, increases to mana do; costs doubled | user ("converts only item ES, no increases apply"); that mana increases apply is our reading | user observation |
 | Unwavering Stance | cannot be light stunned | data |
 | Resolute Technique | never crit; accuracy doubled (accuracy not simulated yet) | data |
 | Dance with Death | 25% more skill speed with a one-handed weapon and empty off hand | data |

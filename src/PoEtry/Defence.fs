@@ -100,11 +100,14 @@ module Defence =
         let life = if ci then 1.0 else lifeFull - converted
         let itemPool = itemPoolIn c
         let esFull = itemPool MaxEnergyShield esFromBodyEvasion + converted + gainedAsES
-        // Eldritch Battery: energy shield becomes mana; Blood Magic: no mana at all
-        let esToMana = esFull * min 100.0 (Mods.sumBase c [ Named "ESConvertedToMana" ] db) / 100.0
+        // Eldritch Battery: "Convert 100% of maximum Energy Shield to maximum Mana". Only the
+        // energy shield on items (and flat amounts) converts, before any increases to energy
+        // shield (user); it becomes base mana. Blood Magic: no mana at all.
+        let esShare = min 100.0 (Mods.sumBase c [ Named "ESConvertedToMana" ] db) / 100.0
+        let esToMana = esShare * (itemValue MaxEnergyShield (fun _ -> true) + esFromBodyEvasion + Mods.sumBase c [ MaxEnergyShield ] db)
         let bloodMagic = flag "BloodMagic"
-        let mana = if bloodMagic then 0.0 else pool MaxMana (baseMana + manaPerLevel * level + 2.0 * int') + esToMana
-        let es = esFull - esToMana
+        let mana = if bloodMagic then 0.0 else pool MaxMana (baseMana + manaPerLevel * level + 2.0 * int' + esToMana)
+        let es = esFull * (1.0 - esShare)
         let onlyLeech = flag "OnlyLeechRecoversLife"
         let lifeRecharges = flag "LifeRechargesInsteadOfES"
         // "while you have Energy Shield"

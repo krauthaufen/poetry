@@ -421,7 +421,7 @@ module Setup =
                     Defence.flask "Mana" (ModDb.ofList sheet.Mods) sheet.ManaFlask }
 
     /// A fight against these enemies.
-    let fight (c: Loaded) (o: Options) (player: Actor) (enemies: EnemyDef list) : Fight =
+    let rec fight (c: Loaded) (o: Options) (player: Actor) (enemies: EnemyDef list) : Fight =
         // auras that weaken monsters near you (Overwhelming Presence); presence range is ignored
         let db = ModDb.ofList c.Sheet.Mods
         let aura stat name =
@@ -441,3 +441,30 @@ module Setup =
           BankedInvocations = o.Banked
           Walls = []
           MaxTime = o.MaxTime }
+
+    /// The skill gems the player could press: enabled active gems that aren't triggers,
+    /// persistent buffs or socketed in a trigger gem.
+    and pressable (c: Loaded) : string list =
+        c.Build.Groups
+        |> List.filter (fun g -> g.Enabled)
+        |> List.filter (fun g -> not (g.Gems |> List.exists (fun x -> x.Enabled && not x.IsSupport && Gems.isMeta c.Db x.Name)))
+        |> List.collect (fun g -> g.Gems |> List.filter (fun x -> x.Enabled && not x.IsSupport && not (Gems.isPersistentBuff c.Db x.Name)))
+        |> List.map (fun x -> x.Name)
+        |> List.distinct
+
+    /// The gem that deals the most damage when it is the one pressed (everything else
+    /// played by `auto`): a short fight per candidate against these enemies. For builds
+    /// whose damage comes from triggers this finds the skill that feeds them best.
+    and strongest (c: Loaded) (o: Options) (enemies: EnemyDef list) : string option =
+        let o = { o with MaxTime = min o.MaxTime 10.0 }
+        pressable c
+        |> List.choose (fun g ->
+            match pressed c o g with
+            | Some _ ->
+                let f = fight c o (player c o (auto c o g) None) enemies
+                let out = Sim.run f 1u
+                Some(g, (out.DamageBy |> Map.toList |> List.sumBy snd) / max 0.1 out.Duration)
+            | None -> None)
+        |> List.sortByDescending snd
+        |> List.tryHead
+        |> Option.map fst

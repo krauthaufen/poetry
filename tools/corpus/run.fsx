@@ -81,10 +81,9 @@ let runOne (path: string) : Result =
         | Some (mainGem, _, group) ->
             // a main skill socketed in a meta gem is triggered; press the most supported other skill
             let inMeta = group.Gems |> List.exists (fun x -> not x.IsSupport && Gems.isMeta db x.Name)
+            let boss = Encounter.boss 83 Rarity.defaults 30.0 |> List.map (fun e -> { e with Life = 1e13 })
             let pressedGem =
-                if inMeta || not (usable mainGem) then
-                    actives |> List.filter (fun (n, _, g) -> usable n && not (g.Gems |> List.exists (fun x -> not x.IsSupport && Gems.isMeta db x.Name)))
-                    |> List.sortByDescending (fun (_, k, _) -> k) |> List.tryHead |> Option.map (fun (n, _, _) -> n)
+                if inMeta || not (usable mainGem) || (Setup.pressed c o mainGem).IsNone then Setup.strongest c o boss
                 else Some mainGem
             // nothing to press: the minions fight alone
             match pressedGem |> Option.orElse (Some "") with
@@ -100,7 +99,7 @@ let runOne (path: string) : Result =
                         |> Option.bind (function Ok (_, cov) -> Some cov | Error _ -> None)
                     | None -> None
                 let player = Setup.player c o play None
-                let sum = Setup.fight c o player (Encounter.boss 83 Rarity.defaults 30.0 |> List.map (fun e -> { e with Life = 1e13 })) |> Summary.simulate 3
+                let sum = Setup.fight c o player boss |> Summary.simulate 3
                 let cov = c.Sheet.Coverage
                 let sk = skillCov |> Option.defaultValue Coverage.empty
                 { blank with

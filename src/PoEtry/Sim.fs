@@ -1059,6 +1059,11 @@ module Sim =
                         |> takeDamage v (Map.ofList [ Fire, burn ])
                     else { w with Player = Some { p with InfernalFlame = flame } }
                 go w
+            | Some v, Some p when p.Mana < cost && cost > v.Mana ->
+                // costs more than the whole mana pool: this skill can never be used
+                { w with Counts = bump ("cannot afford:" + skill.Name) w.Counts }
+                |> updateActor name (fun st -> { st with Cooldowns = Map.add skill.Name infinity st.Cooldowns })
+                |> schedule (w.Time + Constants.serverTick) (Ready name)
             | Some v, Some p when p.Mana < cost ->
                 // not enough mana: wait until regeneration and leech have covered it
                 let rate =
@@ -1072,7 +1077,7 @@ module Sim =
         | None ->
             // Nothing usable: wait for the next cooldown, or a server tick.
             let next =
-                st.Cooldowns |> Map.toList |> List.map snd |> List.filter (fun t -> t > w.Time)
+                st.Cooldowns |> Map.toList |> List.map snd |> List.filter (fun t -> t > w.Time && t < infinity)
                 |> function
                     | [] -> w.Time + Constants.serverTick
                     | ts -> List.min ts

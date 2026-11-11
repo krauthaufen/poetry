@@ -233,7 +233,8 @@ module Pob =
             if l.StartsWith "Allocates " then
                 let name = l.Substring 10
                 tree |> Map.tryPick (fun id n -> if n.Name = name && (n.IsNotable || n.IsKeystone) then Some id else None)
-            else None)
+            // a line that is just a keystone's name grants that keystone ("Eldritch Battery")
+            else tree |> Map.tryPick (fun id n -> if n.IsKeystone && n.Name = l then Some id else None))
 
     /// Character mods from equipped items and allocated passives.
     let character (db: GameDb) (tree: Map<int, TreeNode>) (jewelSlots: int list) (build: PobBuild) : CharacterSheet =
@@ -248,6 +249,10 @@ module Pob =
                 | Some o when reflects text && not (reflects o) -> slot, o
                 | _ -> slot, text)
         let extraNodes = allocatedByItems tree (List.map snd items)
+        // those keystone lines are now passives, not item lines
+        let items =
+            let keystones = tree |> Map.toList |> List.choose (fun (_, n) -> if n.IsKeystone then Some n.Name else None) |> Set.ofList
+            items |> List.map (fun (slot, text) -> slot, text.Split('\n') |> Array.filter (fun l -> not (keystones.Contains(l.Trim()))) |> String.concat "\n")
         // a passive allocated on the tree and by an item still counts once
         let build = { build with TreeNodes = List.distinct (build.TreeNodes @ extraNodes) }
         // Radius jewels: "Notable / Small Passive Skills in Radius also grant X" gives X once per
