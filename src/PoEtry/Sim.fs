@@ -217,7 +217,8 @@ type Actor =
       /// The actor only acts while the player has this buff (a totem while it stands).
       ActiveWhile: string option
       Infusions: Infusions option
-      Archons: Archon list }
+      Archons: Archon list
+      Charms: Charm list }
 
 module Actor =
     let make name mods skills =
@@ -241,7 +242,8 @@ module Actor =
           WardRemnants = None
           ActiveWhile = None
           Infusions = None
-          Archons = [] }
+          Archons = []
+          Charms = [] }
 
     let always skill = { Use = skill; When = fun _ -> true }
 
@@ -391,7 +393,9 @@ module Sim =
           Recoups: (float * float * string) list
           /// Stunned or frozen: no action before this time.
           LockedUntil: float
-          FreezeBuildup: float }
+          FreezeBuildup: float
+          /// Charges per charm (by its buff name).
+          CharmCharges: Map<string, float> }
 
     type private World =
         { Player: PlayerState option
@@ -635,7 +639,18 @@ module Sim =
         | _ -> w
 
     /// Recovery and damage over time on the player during dt (ending now).
-    let private recover (stats: PlayerStats option) (flask: ManaFlask option) dt (w: World) =
+    let private recover (stats: PlayerStats option) (flask: ManaFlask option) (charms: Charm list) dt (w: World) =
+        let w =
+            match w.Player with
+            | Some p when dt > 0.0 && charms |> List.exists (fun c -> c.ChargesPerSecond > 0.0) ->
+                { w with
+                    Player =
+                        Some
+                            { p with
+                                CharmCharges =
+                                    charms |> List.fold (fun (m: Map<string, float>) c ->
+                                        Map.add c.Buff (min c.MaxCharges ((Map.tryFind c.Buff m |> Option.defaultValue 0.0) + c.ChargesPerSecond * c.ChargeGainMult * dt)) m) p.CharmCharges } }
+            | _ -> w
         let w =
             match flask, w.Player with
             | Some f, Some p when dt > 0.0 ->
@@ -1145,6 +1160,39 @@ module Sim =
                 |> schedule (w.Time + secs) Expire)
             w
 
+    /// Something that uses charms happened to the player ("Frozen", "Hit:Fire", "KillRare"...).
+    /// A charm for it that is running, or has the charges to be used now, answers; returns
+    /// whether the occurrence is prevented (immunity charms).
+    let private charm (env: Env) (key: string) (w: World) : World * bool =
+        let player = env.Fight.Player
+        match player.Vitals, w.Player with
+        | Some pools, Some p when not player.Charms.IsEmpty ->
+            let st = Map.find player.Name w.Actors
+            player.Charms
+            |> List.filter (fun c -> c.Trigger = key)
+            |> List.fold
+                (fun (w: World, prevented) c ->
+                    let running = Map.tryFind c.Buff st.Buffs |> Option.exists (fun e -> e.Expires > w.Time)
+                    let charges = match w.Player with Some p -> Map.tryFind c.Buff p.CharmCharges |> Option.defaultValue 0.0 | None -> 0.0
+                    if running then w, prevented || c.Prevents
+                    elif charges >= c.ChargesPerUse && c.ChargesPerUse > 0.0 then
+                        let w =
+                            updateActor player.Name (fun st -> { st with Buffs = Map.add c.Buff { Name = c.Buff; Mods = []; Stacks = 1; Expires = w.Time + c.Duration } st.Buffs }) w
+                            |> schedule (w.Time + c.Duration) Expire
+                        { w with
+                            Player =
+                                w.Player |> Option.map (fun p ->
+                                    { p with
+                                        CharmCharges = Map.add c.Buff (charges - c.ChargesPerUse) p.CharmCharges
+                                        Life = min (max p.Life pools.Life) (p.Life + (if pools.Life > 1.0 then c.LifeOnUse * pools.LifeRecoveryRate else 0.0))
+                                        Mana = min (max p.Mana pools.Mana) (p.Mana + c.ManaOnUse * pools.ManaRecoveryRate)
+                                        LastHit = (if c.StartsRecharge then -1e9 else p.LastHit) })
+                            Counts = bump ("charm:" + c.Name) w.Counts },
+                        prevented || c.Prevents
+                    else w, prevented)
+                (w, false)
+        | _ -> w, false
+
     /// One hit on one enemy.
     let private hitEnemy env (rng: Rng) (actor: Actor) (skill: Skill) mult (target: string) (w: World) =
         let e = w.Enemies.[target]
@@ -1380,6 +1428,20 @@ module Sim =
                             let put k n (b: Map<string, Effect>) = if n > 0 then Map.add k { Name = k; Mods = []; Stacks = n; Expires = infinity } b else Map.remove k b
                             let buffs = values |> List.fold (fun b (t, n) -> put (key t) n b) st.Buffs
                             { st with Buffs = put "Resonance" (values |> List.sumBy snd) buffs }) w
+                // charms: charges from kills, and the ones used by killing a rare or unique monster
+                let w =
+                    if not dead || env.Fight.Player.Charms.IsEmpty then w
+                    else
+                        let w =
+                            { w with
+                                Player =
+                                    w.Player |> Option.map (fun p ->
+                                        { p with
+                                            CharmCharges =
+                                                env.Fight.Player.Charms |> List.fold (fun (m: Map<string, float>) c ->
+                                                    let gain = (RarityCharges.flaskChargesPerKill e.Def.Rarity + (if rng.Chance c.ChargeOnKillChance then 1.0 else 0.0)) * c.ChargeGainMult
+                                                    Map.add c.Buff (min c.MaxCharges ((Map.tryFind c.Buff m |> Option.defaultValue 0.0) + gain)) m) p.CharmCharges }) }
+                        if e.Def.Rarity = Rare || e.Def.Rarity = Unique then fst (charm env "KillRare" w) else w
                 let w = markRecently actor.Name true hit.Crit dead w
                 let w = react env rng actor OnHit skill (Some target) w
                 if hit.Crit then react env rng actor OnCrit skill (Some target) w else w
@@ -1582,6 +1644,8 @@ module Sim =
                             d * (Map.tryFind t v.TakenMult |> Option.defaultValue 1.0) * (1.0 + shocked / 100.0)
                               * (if blocked then v.BlockedDamageTaken / 100.0 else 1.0))
                     let w = takeDamage pools taken { w with Player = Some p } |> fun w -> { w with Player = w.Player |> Option.map (fun p -> { p with LastHit = w.Time }) }
+                    // charms used when a hit of their damage type is taken (they help from the next hit on)
+                    let w = taken |> Map.fold (fun w t d -> if d > 0.0 then fst (charm env ("Hit:" + DamageType.name t) w) else w) w
                     let w = if crit then { w with Counts = bump "enemy:crit" w.Counts } else w
                     let w =
                         updateActor env.Fight.Player.Name (fun st ->
@@ -1605,10 +1669,15 @@ module Sim =
                                 { w with
                                     Player = w.Player |> Option.map (fun p -> { p with LockedUntil = max p.LockedUntil (w.Time + seconds) })
                                     Counts = bump ("player:" + what) w.Counts }
+                            // a charm for this may stop it (and is used up doing so)
+                            let unlessCharm key (apply: World -> World) (w: World) =
+                                let w, prevented = charm env key w
+                                if prevented then { w with Counts = bump ("charm prevented:" + key) w.Counts } else apply w
                             // ignite: strongest only
                             let w =
                                 let fire = get Fire
                                 if fire > 0.0 && rng.Chance(min 100.0 (fire / thr * Constants.igniteChanceMultiplier)) && not (avoided "Ignite") then
+                                  w |> unlessCharm "Ignited" (fun w ->
                                     let dps =
                                         fire * Constants.ignitePercentPerSecond / 100.0 * effect "Ignite"
                                         * (1.0 - (Map.tryFind Fire v.Resist |> Option.defaultValue 0.0) / 100.0) * (Map.tryFind Fire v.TakenMult |> Option.defaultValue 1.0)
@@ -1618,26 +1687,26 @@ module Sim =
                                             w.Player |> Option.map (fun p ->
                                                 let stronger = p.Dots |> List.exists (fun (u, d, t) -> t = Fire && u > w.Time && d >= dps)
                                                 if stronger then p else { p with Dots = (until, dps, Fire) :: (p.Dots |> List.filter (fun (_, _, t) -> t <> Fire)) })
-                                        Counts = bump "player:Ignited" w.Counts }
+                                        Counts = bump "player:Ignited" w.Counts })
                                 else w
                             let w =
                                 let lightning = get Lightning
                                 if lightning > 0.0 && rng.Chance(min 100.0 (lightning / thr * Constants.shockChanceMultiplier)) && not (avoided "Shock") then
-                                    buff "Shocked" [ Mod.base' (Named "ShockTaken") (Constants.baseShockMagnitude * effect "Shock") ] (Constants.playerShockDuration * lasts "Shock") w
+                                    w |> unlessCharm "Shocked" (buff "Shocked" [ Mod.base' (Named "ShockTaken") (Constants.baseShockMagnitude * effect "Shock") ] (Constants.playerShockDuration * lasts "Shock"))
                                 else w
                             let w =
                                 let cold = get Cold
                                 let chill = Constants.chillEffectMultiplier * cold / thr * effect "Chill"
                                 let w =
                                     if chill >= 1.0 && not (avoided "Chill") then
-                                        buff "Chilled" [ Mod.more Speed (-(min Constants.chillMaxEffect chill)) ] (Constants.playerChillDuration * lasts "Chill") w
+                                        w |> unlessCharm "Slowed" (buff "Chilled" [ Mod.more Speed (-(min Constants.chillMaxEffect chill)) ] (Constants.playerChillDuration * lasts "Chill"))
                                     else w
                                 // freeze builds up with cold damage; full: frozen
                                 match w.Player with
                                 | Some p when cold > 0.0 && not (avoided "Freeze") ->
                                     let buildup = p.FreezeBuildup + cold * Constants.playerFreezeScale / max 1.0 v.FreezeThreshold * 100.0
                                     if buildup >= 100.0 then
-                                        { w with Player = Some { p with FreezeBuildup = 0.0 } } |> lock (Constants.playerFreezeDuration * lasts "Freeze") "Frozen"
+                                        { w with Player = Some { p with FreezeBuildup = 0.0 } } |> unlessCharm "Frozen" (lock (Constants.playerFreezeDuration * lasts "Freeze") "Frozen")
                                     else { w with Player = Some { p with FreezeBuildup = buildup } }
                                 | _ -> w
                             // light stun: chance from the hit's size against the stun threshold
@@ -1647,7 +1716,7 @@ module Sim =
                                 |> fun d -> if atk.Melee then d * (1.0 + Constants.monsterMeleeStunMore / 100.0) else d
                             let stunChance = min 100.0 (stunDamage / max 1.0 v.StunThreshold * 100.0)
                             if stunChance >= Constants.playerLightStunMinimum && rng.Chance stunChance && not (rng.Chance v.AvoidStun) then
-                                lock Constants.playerLightStunDuration "Stunned" w
+                                w |> unlessCharm "Stunned" (lock Constants.playerLightStunDuration "Stunned")
                             else w
                     let w =
                         { w with
@@ -1735,7 +1804,7 @@ module Sim =
     let private step env rng (w: World) =
         let (KeyValue ((t, sq), ev)) = Seq.head w.Queue
         let dt = t - w.Time
-        let w = { w with Queue = Map.remove (t, sq) w.Queue } |> advance t |> recover env.Fight.Player.Vitals env.Fight.Player.ManaFlask dt
+        let w = { w with Queue = Map.remove (t, sq) w.Queue } |> advance t |> recover env.Fight.Player.Vitals env.Fight.Player.ManaFlask env.Fight.Player.Charms dt
         if allDead w || (w.Player |> Option.exists (fun p -> p.Died.IsSome)) then
             w
         else
@@ -1888,7 +1957,8 @@ module Sim =
                       Dots = []
                       Recoups = []
                       LockedUntil = 0.0
-                      FreezeBuildup = 0.0 })
+                      FreezeBuildup = 0.0
+                      CharmCharges = fight.Player.Charms |> List.map (fun c -> c.Buff, c.MaxCharges) |> Map.ofList })
               Time = 0.0
               Enemies =
                 fight.Enemies

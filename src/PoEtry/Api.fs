@@ -128,8 +128,10 @@ module Api =
                 | Some name when name.Contains "{0}" ->
                     let values = Json.list (Json.field "values" p) |> List.choose (fun v -> Json.list (Some v) |> List.tryHead |> Option.bind Json.str)
                     let filled = values |> List.indexed |> List.fold (fun (t: string) (i, v) -> t.Replace(sprintf "{%d}" i, v)) (stripMarkup name)
-                    if filled.StartsWith "Recovers" || filled.StartsWith "Consumes" then Some("Flask: " + filled) else None
+                    if filled.StartsWith "Recovers" || filled.StartsWith "Consumes" || filled.StartsWith "Lasts" then Some("Flask: " + filled) else None
                 | _ -> None)
+        // a charm's effect while it lasts
+        let utility = Json.list (Json.field "utilityMods" item) |> List.choose Json.str |> List.map (fun l -> "Utility: " + stripMarkup l)
         let radius = property "Radius" item |> Option.map (fun r -> "Radius: " + r) |> Option.toList
         // runes, soul cores, idols in the item's sockets ("per Socket filled")
         let filled =
@@ -139,7 +141,7 @@ module Api =
                 Json.field "support" s <> Some(JBool true) && not (props |> List.exists (fun n -> n = "Level" || n = "Cost" || n.Contains "Support")))
             |> List.length
         let sockets = (if filled > 0 then [ sprintf "Sockets filled: %d" filled ] else []) @ (if Json.field "corrupted" item = Some(JBool true) then [ "Corrupted" ] else [])
-        [ "Rarity: " + get "rarity"; get "name"; get "typeLine"; "--------" ] @ quality @ defences @ templated @ radius @ sockets @ [ "--------" ] @ modLines item
+        [ "Rarity: " + get "rarity"; get "name"; get "typeLine"; "--------" ] @ quality @ defences @ templated @ radius @ sockets @ [ "--------" ] @ utility @ modLines item
         |> String.concat "\n"
 
     let private gemLevel (gem: Json) =

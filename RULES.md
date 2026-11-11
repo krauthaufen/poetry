@@ -174,7 +174,7 @@ Checked against PoB's defensive numbers for 131 public characters (`tools/corpus
 | Weapon set passives | passives allocated with weapon set points count only while that set is in use; the sheet is shown for set one | API `specialisations`; PoB counts them differently in some builds | data |
 | Gem quality | only what the API shows; a gem without the property has none | API | data |
 | Doubled chaos resistance, maximum resistance override, life from body armour energy shield, armour from mana / boots energy shield, evasion from helmet energy shield, deflection from armour, "per 10 Intelligence", "per Corrupted Item", Grand Spectrum | as their text says | game text | data |
-| Charms | not simulated: PoB counts a charm's resistance as always on, we count none | - | missing |
+| Charms | used by themselves when their condition occurs (frozen, stunned, ignited, shocked, slowed, a hit of their damage type, killing a rare or unique), if they have the charges; the effect ("Utility" lines: resistances...) lasts for the charm's duration; immunity charms stop the occurrence that used them and any other while they last. Charges: from kills like flasks, per second, and by chance on kill. Life / mana on use and "Energy Shield Recharge starts on use" apply. Not modelled: Guard, "Possessed by Spirit", consecrated ground, armour during effect. PoB counts a charm's resistance as always on | game item text | data; charge gain per kill taken from flasks (guess) |
 | Block | capped at 50% + maximum block (poe.ninja shows it uncapped) | Character.ot | data |
 | Runic Ward | item values x increases; PoB 0.23 does not know this league's ward items, so it is unchecked | game item text | guess |
 

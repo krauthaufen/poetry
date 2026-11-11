@@ -355,6 +355,23 @@ let main _ =
         // first hit lands at 1 s; 9.5 s of ticking
         near 950.0 o.DamageBy.["Drain (chaos over time)"])
 
+    test "charms: used when their condition occurs, preventing it while they have charges" (fun () ->
+        let thawing =
+            { Name = "Thawing Charm"; Trigger = "Frozen"; Buff = "Charm1"; Prevents = true; Duration = 3.0; ChargesPerUse = 40.0; MaxCharges = 80.0
+              ChargesPerSecond = 0.0; ChargeOnKillChance = 0.0; ChargeGainMult = 1.0; LifeOnUse = 0.0; ManaOnUse = 0.0; StartsRecharge = false }
+        let fight charms time =
+            let player = { Actor.make "Player" [ noIgnite ] [ idle ] with Vitals = Some(PlayerStats.basic 1e6 0.0); Charms = charms }
+            Sim.run (Fight.single (attacker Cold 60000.0 1.0) player time) 1u
+        // threshold 500000: each hit builds 24%, so a freeze would come with every 5th hit
+        let bare = fight [] 30.5
+        if not (bare.Counts.ContainsKey "player:Frozen") then failwith "no freeze without the charm"
+        // two uses' worth of charges: the first two freezes are stopped, the third gets through
+        let o = fight [ thawing ] 30.5
+        equal 2 o.Counts.["charm:Thawing Charm"]
+        if o.Counts.["charm prevented:Frozen"] < 2 then failwith "the charm should have prevented the freezes it was used on"
+        if not (o.Counts.ContainsKey "player:Frozen") then failwith "out of charges, the next freeze should land"
+        if o.Counts.["player:Frozen"] >= bare.Counts.["player:Frozen"] then failwith "the charm made no difference")
+
     test "crossbow: a load of bolts, then a reload" (fun () ->
         // 2 bolts per load, 0.5 s per shot, 1 s reload: two shots every 2 s
         let shot = { Skill.make "Shot" [ Attack; Projectile ] with BaseDamage = Map.ofList [ Physical, Range.fixedAt 10.0 ]; BaseTime = 0.5; Clip = 2; ReloadTime = 1.0 }

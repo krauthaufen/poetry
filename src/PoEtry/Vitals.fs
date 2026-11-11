@@ -12,6 +12,30 @@ type ManaFlask =
       /// Share (0..1) of the recovery applied at once ("X% of Flask Recovery applied Instantly").
       Instant: float }
 
+/// A charm: used by itself when its condition occurs, if it has the charges; its effect
+/// lasts for its duration. While it lasts the condition can't occur again (immunity charms),
+/// and the occurrence that used it is prevented.
+type Charm =
+    { Name: string
+      /// What uses it: "Frozen", "Stunned", "Ignited", "Shocked", "Slowed", "Bleeding", "Poisoned",
+      /// "KillRare", "Hit:Fire", "Hit:Cold", "Hit:Lightning", "Hit:Chaos".
+      Trigger: string
+      /// The buff on the player while it lasts; its other effects are sheet mods conditional on it.
+      Buff: string
+      /// The charm stops its trigger (immunity to freeze, "cannot be stunned").
+      Prevents: bool
+      Duration: float
+      ChargesPerUse: float
+      MaxCharges: float
+      ChargesPerSecond: float
+      /// Chance (%) to gain a charge on any kill, and the multiplier on charges gained.
+      ChargeOnKillChance: float
+      ChargeGainMult: float
+      LifeOnUse: float
+      ManaOnUse: float
+      /// "Energy Shield Recharge starts on use".
+      StartsRecharge: bool }
+
 /// The player's pools, defences and recovery, computed from the character sheet.
 type PlayerStats =
     { Str: float

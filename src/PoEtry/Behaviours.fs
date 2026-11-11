@@ -388,6 +388,60 @@ module Behaviours =
             let effect = Mods.mult ctx [ Named(if isCurse then "CurseEffect" else "MarkEffect") ] all
             Some(name, duration, monster |> List.map (Mod.scaled effect), player |> List.map (Mod.scaled effect >> Mod.from skill.Name))
 
+    /// Charms from the equipped items (API layout: "Flask: Lasts N Seconds", "Flask: Consumes N
+    /// of M Charges on use", "Utility: <effect>", "Used when you ..."). Returns the charms and
+    /// the sheet mods their effects are (conditional on the charm's buff).
+    let charms (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) : Charm list * Mod list =
+        let sheetDb = ModDb.ofList sheet.Mods
+        let durationInc = Mods.inc Ctx.empty [ Named "CharmDuration" ] sheetDb
+        let gainInc = Mods.sumInc Ctx.empty [ Named "CharmChargesGained" ] sheetDb
+        let numbers (l: string) =
+            l.Split(' ') |> Array.choose (fun w -> match System.Double.TryParse(w.Trim(',').TrimEnd('%')) with | true, v -> Some v | _ -> None) |> List.ofArray
+        build.Items
+        |> List.filter (fun (_, text) -> text.Contains "Flask: Lasts")
+        |> List.mapi (fun i (_, text) ->
+            let lines = text.Split('\n') |> Array.map (fun l -> l.Trim()) |> List.ofArray
+            let find (start: string) = lines |> List.tryFind (fun l -> l.StartsWith start)
+            let first (start: string) = find start |> Option.bind (numbers >> List.tryHead)
+            let ownLine (part: string) = lines |> List.tryFind (fun l -> l.Contains part && not (l.StartsWith "Flask:") && not (l.StartsWith "Utility:")) |> Option.bind (numbers >> List.tryHead)
+            let trigger =
+                match find "Used when you " |> Option.map (fun l -> l.Substring 14) with
+                | Some "become Frozen" -> "Frozen"
+                | Some "become Stunned" -> "Stunned"
+                | Some "become Ignited" -> "Ignited"
+                | Some "become Shocked" -> "Shocked"
+                | Some "start Bleeding" -> "Bleeding"
+                | Some "become Poisoned" -> "Poisoned"
+                | Some "are affected by a Slow" -> "Slowed"
+                | Some "kill a Rare or Unique enemy" -> "KillRare"
+                | Some t when t.StartsWith "take " && t.EndsWith " damage from a Hit" -> "Hit:" + t.Split(' ').[1]
+                | _ -> ""
+            let name = lines |> List.tryFind (fun l -> l.Contains "Charm") |> Option.defaultValue "Charm"
+            let buff = sprintf "Charm%d" (i + 1)
+            let utility = lines |> List.filter (fun l -> l.StartsWith "Utility: ") |> List.map (fun l -> l.Substring 9)
+            let prevents = utility |> List.exists (fun l -> l.StartsWith "Grants Immunity" || l = "Cannot be Stunned" || l.Contains "unaffected by Slows")
+            let stats, _ = StatText.parseLines db.Text utility
+            let mods, _, _ = Items.interpret stats
+            let consumes = find "Flask: Consumes" |> Option.map numbers |> Option.defaultValue []
+            let perUse, maxC = (match consumes with [ a; b ] -> a, b | _ -> 0.0, 0.0)
+            { Name = name
+              Trigger = trigger
+              Buff = buff
+              Prevents = prevents
+              Duration = (first "Flask: Lasts" |> Option.defaultValue 0.0) * durationInc
+              ChargesPerUse = perUse
+              MaxCharges = maxC
+              ChargesPerSecond = ownLine "Charges per Second" |> Option.defaultValue 0.0
+              ChargeOnKillChance = ownLine "Chance to gain a Charge when you kill an enemy" |> Option.defaultValue 0.0
+              ChargeGainMult = 1.0 + ((ownLine "increased Charges gained" |> Option.defaultValue 0.0) + gainInc) / 100.0
+              LifeOnUse = ownLine "Life when Used" |> Option.defaultValue 0.0
+              ManaOnUse = ownLine "Mana when Used" |> Option.defaultValue 0.0
+              StartsRecharge = lines |> List.exists (fun l -> l.Contains "Energy Shield Recharge starts on use") },
+            mods |> List.map (Mod.whenever (WhileBuff buff) >> Mod.from name))
+        |> List.filter (fun (c, _) -> c.Trigger <> "" && c.Duration > 0.0)
+        |> List.unzip
+        |> fun (cs, ms) -> cs, List.concat ms
+
     /// Blasphemy: the curses socketed with it are an aura. Every enemy has them all the time
     /// (the aura's area is not simulated), with the gem's less curse effect
     /// ("support_blasphemy_curse_effect_+%_final" of the support Blasphemy grants) and the
@@ -512,7 +566,8 @@ module Behaviours =
                         Gems.rawStats db charMods { Gem = gem.Name; Level = gem.Level; Quality = gem.Quality; StatSet = 1; Supports = [] }
                         |> List.tryPick (fun (k, v) -> if k.EndsWith "_pack_size" then Some(int v) else None)
                         |> Option.defaultValue 1
-                    if ordered.IsEmpty then [], [ sprintf "%s: none of the minion's skills could be built" gem.Name ]
+                    // a minion without any damaging skill (a healer) simply doesn't fight
+                    if ordered.IsEmpty then [], []
                     else
                         [ for i in 1 .. count ->
                             let name = if count > 1 then sprintf "%s %d" m.Name i else m.Name

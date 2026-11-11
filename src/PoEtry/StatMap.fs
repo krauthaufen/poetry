@@ -269,6 +269,8 @@ module StatMap =
         | "%_chance_for_crossbow_reload_to_be_instant" -> one (Mod.base' (Named "InstantReloadChance") v)
         | "crossbow_attack_%_chance_to_not_consume_ammo_if_reloaded_recently" -> one (Mod.base' (Named "KeepAmmoChance") v |> Mod.whenever (WhileBuff "ReloadedRecently"))
         | "dodge_roll_base_travel_distance" -> one (Mod.base' (Named "DodgeRollDistance") v)
+        | "charm_charges_gained_+%" -> one (Mod.inc (Named "CharmChargesGained") v)
+        | "charm_duration_+%" -> one (Mod.inc (Named "CharmDuration") v)
         | "base_maximum_ward" -> one (Mod.base' (Named "Ward") v)
         | "maximum_ward_+%" -> one (Mod.inc (Named "Ward") v)
         | "ward_regeneration_rate_+%" -> one (Mod.inc (Named "WardRegen") v)

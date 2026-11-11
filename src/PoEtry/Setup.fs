@@ -92,6 +92,7 @@ type Loaded =
       Periodics: Periodic list
       Cycles: Cycle list
       MoteMaxima: (string * int) list
+      Charms: Charm list
       /// Persistent minions, and notes on minion skills left out.
       Minions: Actor list
       MinionNotes: string list }
@@ -121,6 +122,9 @@ module Setup =
         let build = if o.Bonded then { build with Config = Map.add "bonded" "1" build.Config } else build
         let build = dropGems o.Without build
         let sheet = Pob.character db tree (Tree.jewelSlots treeJson) build |> fun s -> Pob.withPersistentBuffs db s build
+        // charms: their effects are sheet mods that hold while the charm lasts
+        let charms, charmMods = Behaviours.charms db sheet build
+        let sheet = { sheet with Mods = sheet.Mods @ charmMods }
         let bases = Defence.classBases treeJson
         // motes: base maximum from the mote-granting gem's description stat
         let moteBase =
@@ -216,6 +220,7 @@ module Setup =
           Periodics = periodics
           Cycles = cycles
           MoteMaxima = moteMax
+          Charms = charms
           Minions = fst minionActors
           MinionNotes = snd minionActors }
 
@@ -432,6 +437,7 @@ module Setup =
             ParallelUses = not o.SequentialUses
             WardRemnants = Behaviours.wardRemnants db sheet c.Build o.Pickup
             Archons = [ Behaviours.elementalArchon sheet ]
+            Charms = (if o.Immortal || o.NoFlask then [] else c.Charms)
             ManaFlask =
                 if o.Immortal || o.NoFlask then None
                 else
