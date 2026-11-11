@@ -26,7 +26,9 @@ type Rng(seed: uint32) =
         s3 <- step ()
 
     member _.NextUInt() : uint32 =
-        let result = rotl (s1 * 5u) 7 * 9u
+        // The products are masked to 32 bits by hand: JavaScript multiplies as floating point and
+        // does not wrap, which left the result up to nine times too large there.
+        let result = (rotl ((s1 * 5u) &&& 0xFFFFFFFFu) 7 * 9u) &&& 0xFFFFFFFFu
         let t = s1 <<< 9
         s2 <- s2 ^^^ s0
         s3 <- s3 ^^^ s1

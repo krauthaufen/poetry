@@ -46,6 +46,15 @@ let main _ =
         near 20.0 r.[Cold].Max
         near 60.0 r.[Fire].Max)
 
+    test "the random numbers are the same stream on every platform, and uniform" (fun () ->
+        // xoshiro128** from seed 1: the same four numbers on .NET and in JavaScript
+        let r = Rng 1u
+        equal [ 3028752090u; 1821319296u; 1022962477u; 864284253u ] [ for _ in 1 .. 4 -> r.NextUInt() ]
+        let r = Rng 7u
+        let xs = [ for _ in 1 .. 20000 -> r.Float() ]
+        equal true (xs |> List.forall (fun x -> x >= 0.0 && x < 1.0))
+        near 0.5 (List.average xs |> fun m -> System.Math.Round(m, 1)))
+
     test "inevitable critical hits: every hit crits, with 30% less bonus per re-roll" (fun () ->
         // 50% crit chance, +100% bonus on top of the base: a first-roll crit deals x3
         let skill = { fireSpell 100.0 with BaseCrit = 50.0 }
