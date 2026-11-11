@@ -259,6 +259,12 @@ module StatMap =
         | "no_inherent_mana_regeneration" -> one (Mod.flag (Named "NoInherentManaRegen"))
         | "regenerate_mana_equal_to_x%_of_life_per_minute" -> one (Mod.base' (Named "ManaRegenPercentOfLife") (v / 60.0))
         | "energy_shield_delay_-%_while_affected_by_archon" -> one (Mod.inc (Named "ESRechargeFaster") v |> Mod.whenever (WhileBuff "Elemental Archon"))
+        | "maximum_life_mana_and_energy_shield_+%" -> Some(Mods [ Mod.inc MaxLife v; Mod.inc MaxMana v; Mod.inc MaxEnergyShield v ])
+        // Grand Spectrum: "per socketed Grand Spectrum"
+        | "maximum_life_+%_per_stackable_unique_jewel" -> one (Mod.inc MaxLife v |> Mod.whenever (PerStack("GrandSpectrum", 1.0)))
+        | "double_evasion_rating_if_you_havent_been_hit_recently" -> one (Mod.more Evasion 100.0 |> Mod.whenever (Not(WhileBuff "BeenHitRecently")))
+        | "evasion_rating_%_to_gain_as_armour" -> one (Mod.base' (Named "EvasionGainedAsArmour") v)
+        | "armour_+_per_1_boots_energy_shield" -> one (Mod.base' (Named "ArmourPerBootsES") v)
         | "base_maximum_ward" -> one (Mod.base' (Named "Ward") v)
         | "maximum_ward_+%" -> one (Mod.inc (Named "Ward") v)
         | "ward_regeneration_rate_+%" -> one (Mod.inc (Named "WardRegen") v)

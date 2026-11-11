@@ -109,9 +109,10 @@ module Defence =
         let lifeRecharges = flag "LifeRechargesInsteadOfES"
         // "while you have Energy Shield"
         let cES = if es > 0.0 then { c with Buffs = Map.add "HasEnergyShield" 1 c.Buffs } else c
-        let armour = itemPoolIn cES Armour 0.0 + mana * Mods.sumBase c [ Named "ManaGainedAsArmour" ] db / 100.0
+        let armour = itemPoolIn cES Armour (itemValue MaxEnergyShield ((=) "Boots") * Mods.sumBase c [ Named "ArmourPerBootsES" ] db) + mana * Mods.sumBase c [ Named "ManaGainedAsArmour" ] db / 100.0
         // Character.ot base_evasion_rating = 7
         let evasion = itemPoolIn cES Evasion (7.0 + itemValue MaxEnergyShield ((=) "Helmet") * Mods.sumBase c [ Named "EvasionPerHelmetES" ] db)
+        let armour = armour + evasion * Mods.sumBase c [ Named "EvasionGainedAsArmour" ] db / 100.0
         // Iron Reflexes: all evasion becomes armour
         let armour, evasion = if Mods.flag c (Named "EvasionToArmour") db then armour + evasion, 0.0 else armour, evasion
         let named n = Mods.sumBase c [ Named n ] db
@@ -131,6 +132,7 @@ module Defence =
             evasion * Mods.sumBase c [ Named "DeflectionPercentOfEvasion" ] db / 100.0
             + armour * Mods.sumBase c [ Named "DeflectionPercentOfArmour" ] db / 100.0
             + Mods.sumBase c [ Deflection ] db
+            |> fun d -> d * Mods.mult c [ Deflection ] db
         let resist t =
             // Chaos Inoculation: immune to chaos damage
             if t = Chaos && ci then t, 100.0

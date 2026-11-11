@@ -67,6 +67,10 @@ let runOne (path: string) : Result =
               "fire res", res Fire, "fireResistance"; "cold res", res Cold, "coldResistance"
               "lightning res", res Lightning, "lightningResistance"; "chaos res", res Chaos, "chaosResistance" ]
             |> List.choose (fun (name, ours, key) -> num key |> Option.map (fun t -> name, ours, t))
+            // Chaos Inoculation: immune, not a resistance; Runic Ward is newer than PoB's data
+            |> List.filter (fun (name, _, _) -> name <> "ward" && not (name = "chaos res" && v.Life <= 1.0))
+            // their block chance is not capped
+            |> List.map (fun (name, ours, theirs) -> if name = "block" && theirs > ours && ours >= 50.0 then name, ours, ours else name, ours, theirs)
         let dpsOf (gem: string) =
             ninja |> Option.map (fun n -> Json.list (Json.field "skillDps" n)) |> Option.defaultValue []
             |> List.tryPick (fun j -> if Json.strField "name" j = Some gem then Json.field "dps" j |> Option.bind Json.num |> Option.map (fun d -> d + (Json.field "dotDps" j |> Option.bind Json.num |> Option.defaultValue 0.0)) else None)

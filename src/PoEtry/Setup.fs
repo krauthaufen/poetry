@@ -169,8 +169,10 @@ module Setup =
             build.Items
             |> List.filter (fun (slot, text) -> not (slot.StartsWith "Flask" || slot.StartsWith "Charm" || slot.StartsWith "Jewel" || slot.Contains "Swap") && text.Split('\n') |> Array.exists (fun l -> l.Trim() = "Corrupted"))
             |> List.length
+        let spectrums = build.Items |> List.filter (fun (slot, text) -> slot.StartsWith "Jewel" && text.Contains "Grand Spectrum") |> List.length
         let maxResources =
-            (Pob.maxResources sheet @ moteMax @ o.MaxOverrides @ ((equipmentFlags @ supportFlags) |> List.map (fun f -> f, 1)) @ (if corrupted > 0 then [ "CorruptedItems", corrupted ] else []))
+            (Pob.maxResources sheet @ moteMax @ o.MaxOverrides @ ((equipmentFlags @ supportFlags) |> List.map (fun f -> f, 1)) @ (if corrupted > 0 then [ "CorruptedItems", corrupted ] else [])
+             @ (if spectrums > 0 then [ "GrandSpectrum", spectrums ] else []))
             |> Map.ofList
         let startResources =
             maxResources
