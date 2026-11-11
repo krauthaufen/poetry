@@ -1,30 +1,30 @@
 
 == affix mods: 2724 distinct stats, 9551 occurrences
-  simulated        650 stats   5562 occurrences (58.2%)
-  inert              7 stats      7 occurrences ( 0.1%)
+  simulated        676 stats   5685 occurrences (59.5%)
+  inert              6 stats      6 occurrences ( 0.1%)
   local            473 stats   1145 occurrences (12.0%)
-  not-offensive    108 stats    366 occurrences ( 3.8%)
+  not-offensive    102 stats    289 occurrences ( 3.0%)
   structural        25 stats     50 occurrences ( 0.5%)
-  unsimulated      873 stats   1598 occurrences (16.7%)
-  unmapped         588 stats    823 occurrences ( 8.6%)
+  unsimulated      863 stats   1565 occurrences (16.4%)
+  unmapped         579 stats    811 occurrences ( 8.5%)
 
 == passive tree: 1392 distinct stats, 5907 occurrences
-  simulated        536 stats   3953 occurrences (66.9%)
-  inert             10 stats     23 occurrences ( 0.4%)
+  simulated        569 stats   4023 occurrences (68.1%)
+  inert              8 stats     19 occurrences ( 0.3%)
   local              0 stats      0 occurrences ( 0.0%)
-  not-offensive     29 stats     74 occurrences ( 1.3%)
+  not-offensive     20 stats     62 occurrences ( 1.0%)
   structural        20 stats    327 occurrences ( 5.5%)
-  unsimulated      505 stats   1092 occurrences (18.5%)
-  unmapped         292 stats    438 occurrences ( 7.4%)
+  unsimulated      489 stats   1048 occurrences (17.7%)
+  unmapped         286 stats    428 occurrences ( 7.2%)
 
 == skill and support gems: 2476 distinct stats, 9440 occurrences
-  simulated        397 stats   2840 occurrences (30.1%)
+  simulated        408 stats   2881 occurrences (30.5%)
   inert              4 stats      4 occurrences ( 0.0%)
   local              0 stats      0 occurrences ( 0.0%)
-  not-offensive     31 stats     68 occurrences ( 0.7%)
-  structural       323 stats   3119 occurrences (33.0%)
-  unsimulated      765 stats   2012 occurrences (21.3%)
-  unmapped         956 stats   1397 occurrences (14.8%)
+  not-offensive     27 stats     47 occurrences ( 0.5%)
+  structural       322 stats   3107 occurrences (32.9%)
+  unsimulated      763 stats   2010 occurrences (21.3%)
+  unmapped         952 stats   1391 occurrences (14.7%)
 
 text lines with no stat template: 174 (affix + tree)
 
@@ -40,7 +40,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  minimum_added_lightning_damage_while_you_have_avians_might   [condition never true: WhileBuff "YouHaveAviansMight"]
     1  maximum_added_lightning_damage_while_you_have_avians_might   [condition never true: WhileBuff "YouHaveAviansMight"]
     1  evasion_rating_+%_while_phasing   [condition never true: WhileBuff "Phasing"]
-    1  evasion_rating_+%_while_onslaught_is_active   [condition never true: WhileBuff "OnslaughtIsActive"]
     1  spell_damage_+%_while_no_mana_reserved   [condition never true: WhileBuff "NoManaReserved"]
 
 ### unsimulated
@@ -54,7 +53,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
    15  thorns_maximum_base_physical_damage   [thorns]
    13  base_slow_potency_+%   [slows]
    13  base_life_leech_rate_+%   [life / recovery]
-   11  summon_totem_cast_speed_+%   [totems]
    11  hand_wraps_attack_damage_+%_final_on_low_mana   [mana / recovery]
    11  allies_in_presence_life_regeneration_rate_per_minute   [life / recovery]
    10  minion_elemental_resistance_%   [minion stats beyond damage and speed]
@@ -73,7 +71,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     7  add_frenzy_charge_on_kill_%_chance   [charges]
     7  movement_velocity_+%_when_on_low_life   [movement]
     7  totem_life_+%   [totems]
-    6  arcane_surge_effect_on_self_+%   [effects on self]
     6  grenade_skill_cooldown_speed_+%   [cooldowns]
     6  base_mana_leech_rate_+%   [mana / recovery]
     6  minion_commanded_skill_damage_+%   [minion stats beyond damage and speed]
@@ -84,7 +81,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     5  generate_x_charges_for_charms_per_minute   [charges]
     5  thorns_damage_+%   [thorns]
     5  damaging_ailments_deal_damage_+%_faster   [faster ailments]
-    5  mark_use_speed_+%   [mark effect]
     5  base_all_ailment_duration_+%   [durations]
     5  life_gained_on_attack_hit_if_crit_recently   [life / recovery]
     5  base_spell_cooldown_speed_+%   [cooldowns]
@@ -103,7 +99,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     4  attack_added_physical_damage_%_of_maximum_life   [life / recovery]
     4  minion_movement_speed_+%   [minion stats beyond damage and speed]
     4  base_chaos_damage_taken_per_minute   [damage taken]
-    4  onslaught_buff_duration_on_kill_ms   [durations]
     4  recover_life_%_on_enemy_death_in_presence   [life / recovery]
     4  physical_damage_taken_on_minion_death   [minion stats beyond damage and speed]
     4  base_skill_cost_life_instead_of_mana_%   [life / recovery]
@@ -151,7 +146,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     2  explode_enemies_for_10%_life_as_physical_on_kill_chance_%   [life / recovery]
     2  explode_enemies_for_25%_life_as_chaos_on_kill_chance_%   [life / recovery]
     2  reduce_enemy_chaos_resistance_with_weapons_%   [defences]
-    2  marked_enemy_damage_taken_+%   [damage taken]
     2  projectile_chance_to_fork_%   [projectile count / speed / chaining]
     2  damage_vs_cursed_enemies_per_enemy_curse_+%   [curse effect]
     2  life_regeneration_per_minute_%_while_frozen   [life / recovery]
@@ -475,7 +469,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  deal_double_damage_to_enemies_on_full_life   [life / recovery]
     1  ignites_and_chill_apply_elemental_resistance_+   [defences]
     1  elemental_damage_resisted_by_lowest_elemental_resistance   [defences]
-    1  enemies_damage_taken_+%_while_cursed   [damage taken]
     1  low_mana_threshold_%_override   [mana / recovery]
     1  unarmed_attack_area_of_effect_+1%_per_X_intelligence   [area of effect]
     1  ward_%_to_recover_on_reaching_maximum_rage   [rage]
@@ -642,7 +635,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  totem_elemental_resistance_%   [totems]
     1  travel_skills_poison_reflected_to_self_up_to_5_poisons   [effects on self]
     1  skill_area_of_effect_when_unarmed_+%   [area of effect]
-    1  onslaught_on_crit_duration_ms   [durations]
     1  main_hand_attacks_with_this_weapon_minimum_added_physical_damage_per_1%_block_chance   [defences]
     1  main_hand_attacks_with_this_weapon_maximum_added_physical_damage_per_1%_block_chance   [defences]
     1  gain_min_physical_thorns_damage_equal_to_x_times_your_runic_tempering_stacks   [thorns]
@@ -702,7 +694,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  skills_from_corrupted_gems_cost_life_instead_of_%_mana_cost   [life / recovery]
     1  critical_strikes_ignore_lightning_resistance   [defences]
     1  culling_strike_enemies_on_block   [defences]
-    1  culling_strike_threshold_+%   [stun / ailment threshold]
     1  coil_of_undoing_curse_magnitude_+%_final   [curse effect]
     1  unique_no_curse_delay   [curse effect]
     1  curse_ignores_curse_limit   [curse effect]
@@ -731,7 +722,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  resist_all_elements_%_per_power_charge   [charges]
     1  intimidate_enemy_on_block_for_duration_ms   [durations]
     1  enemies_in_presence_have_fire_resistance_%   [defences]
-    1  enemies_in_presence_gain_critical_weakness_every_second_for_seconds   [presence / allies]
     1  enemies_in_your_presence_gain_a_stack_of_gruelling_madness_every_second   [presence / allies]
     1  monsters_in_your_presence_have_additional_power_equal_to_their_gruelling_madness_stacks   [presence / allies]
     1  enemies_in_presence_non_skill_base_all_damage_%_to_gain_as_chaos   [presence / allies]
@@ -908,7 +898,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  thorns_proc_off_any_hit   [thorns]
     1  totem_%_maximum_life_inflicted_as_aoe_fire_damage_when_hit   [totems]
     1  unique_two_handed_weapon_lightning_stun_multiplier_+%_final   [stun / ailment threshold]
-    1  unholy_might_while_you_have_no_energy_shield   [energy shield / recovery]
     1  corpses_in_your_area_of_effect_explode_dealing_%_maximum_life_physical_damage_on_warcry   [area of effect]
     1  vaal_skill_effect_duration_+%   [durations]
     1  unique_volkuurs_clutch_poison_duration_+%_final   [durations]
@@ -929,7 +918,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     6  base_number_of_skeletons_allowed
     5  player_gain_rampage_stacks
     5  trap_throwing_speed_+%
-    4  withered_magnitude_+%
     4  base_melee_critical_strike_chance_while_unarmed_%
     4  essence_grants_additional_attributes
     4  ignore_hexproof
@@ -1163,8 +1151,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  critical_strike_chance_+%_per_stackable_unique_jewel
     1  global_critical_strike_mulitplier_+_per_green_socket_on_item
     1  critical_strikes_deal_no_damage
-    1  culling_strike_on_burning_enemies
-    1  crits_have_culling_strike
     1  damage_+%_vs_hindered_enemies
     1  deal_no_non_elemental_damage
     1  deal_no_non_physical_damage
@@ -1291,7 +1277,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  non_skill_base_all_damage_%_to_gain_as_lightning_per_50_ward_cost
     1  gain_onslaught_while_you_have_fortify
     1  chance_to_gain_onslaught_on_kill_%
-    1  onslaught_time_granted_on_kill_ms
     1  abyssal_wasting_also_hinders
     1  abyssal_wasting_effect_+%
     1  enemies_killed_while_afflicted_by_abyssal_wasting_have_%_chance_to_grant_you_onslaught_for_3_seconds
@@ -1334,7 +1319,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  additive_spell_damage_modifiers_apply_to_attack_damage_at_150%_value
     1  spell_damage_+%_per_10_int
     1  your_spells_are_disabled
-    1  spells_have_culling_strike
     1  chilled_ground_on_freeze_%_chance_for_3_seconds
     1  chilled_ground_when_hit_with_attack_%
     1  consecrate_ground_on_shatter_%_chance_for_3_seconds
@@ -1438,13 +1422,11 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  chance_to_load_a_bolt_on_killing_an_enemy_%
     1  projectiles_from_spells_fork
     1  number_of_additional_chains_for_spell_projectiles
-    1  lose_all_tailwind_when_hit
     1  unique_mace_fire_damage_with_mace_skills_%_to_convert_to_cold
     1  maximum_chance_to_evade_is_50%
     1  maximum_physical_damage_reduction_is_50%
     1  banner_resource_maximum_+
     1  melee_damage_+%_vs_heavy_stunned_enemies
-    1  minions_have_unholy_might
     1  deflection_rating_+%_while_moving
     1  poison_effect_+%_vs_non_poisoned_enemies
     1  spell_skill_%_chance_to_fire_8_additional_projectiles_in_nova
@@ -1479,7 +1461,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  spear_skills_inflict_bloodstone_lance_on_hit
     1  spell_crit_bonus_+%_per_spell_crit_recently
     1  additive_spell_damage_modifiers_apply_to_attack_damage
-    1  spells_have_x%_chance_inflict_withered_on_hit
     1  lineage_support_gem_limit_+
     1  gain_tailwind_on_critical_hit
     1  temporal_chains_gem_level_+
@@ -1492,7 +1473,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  unique_quill_rain_damage_+%_final
     1  enemies_withered_by_you_take_+%_increased_elemental_damage_from_your_hits
     1  wither_never_expires
-    1  withered_on_hit_for_4_seconds_%_chance
     1  flasks_dispel_burning
     1  vaal_skill_critical_strike_chance_+%
     1  vaal_skill_critical_strike_multiplier_+
@@ -1511,18 +1491,14 @@ skill types: 183, engine reads 123; unhandled by gem count:
 ### not-offensive
    55  light_radius_+%
    48  base_item_found_rarity_+%
-   38  base_spirit
-   25  spirit_+%
    17  base_mana_reservation_efficiency_+%
    16  base_projectile_speed_+%
    11  gold_+%_from_enemies
-    8  base_reservation_efficiency_+%
     7  global_item_attribute_requirements_+%
     5  experience_gain_+%
     4  num_charm_slots
     4  fish_quantity_+%
     4  fish_rarity_+%
-    4  base_spirit_reservation_efficiency_+%
     3  fishing_lure_type
     3  blood_footprints_from_item
     3  spirit_+_if_at_least_200_strength
@@ -1550,7 +1526,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  celestial_footprints_from_item
     1  conductivity_no_reservation
     1  reservation_efficiency_+%_of_herald_skills
-    1  reservation_efficiency_+%_of_meta_skills
     1  despair_no_reservation
     1  elemental_weakness_no_reservation
     1  enfeeble_no_reservation
@@ -1611,7 +1586,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  light_radius_additive_modifiers_apply_to_area_%_value
     1  take_physical_damage_equal_to_%_total_unmet_strength_requirements_on_attack
     1  reservation_efficiency_+%_of_remnant_skills
-    1  spirit_does_not_exist
     1  spell_damage_+%_per_10_spirit
     1  ascendancy_beidats_will_spirit_+_per_X_maximum_life
     1  strength_can_satisfy_dexterity_and_intelligence_requirements_of_melee_weapons_and_skills
@@ -2098,10 +2072,8 @@ skill types: 183, engine reads 123; unhandled by gem count:
 ### inert
     6  attack_damage_+%_while_ally_in_presence   [condition never true: WhileBuff "AllyInPresence"]
     5  armour_+%_while_stationary   [condition never true: WhileBuff "Stationary"]
-    3  spell_damage_+%_while_you_have_arcane_surge   [condition never true: WhileBuff "YouHaveArcaneSurge"]
     2  spell_damage_+%_while_es_full   [condition never true: WhileBuff "EsFull"]
     2  damage_+%_if_have_crit_in_past_8_seconds   [condition never true: WhileBuff "CritInPast8Seconds"]
-    1  area_of_effect_+%_while_you_have_arcane_surge   [condition never true: WhileBuff "YouHaveArcaneSurge"]
     1  minion_damage_+%_while_you_have_at_least_two_different_active_offerings   [condition never true: WhileBuff "YouHaveAtLeastTwoDifferentActiveOfferings"]
     1  energy_shield_delay_-%_while_affected_by_archon   [condition never true: WhileBuff "Elemental Archon"]
     1  non_skill_base_all_damage_%_to_gain_as_fire_while_on_ground_fire_burn   [condition never true: WhileBuff "OnGroundFireBurn"]
@@ -2116,7 +2088,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
    17  movement_speed_penalty_+%_while_performing_action   [movement]
    15  companion_maximum_life_+%   [companions]
    14  base_skill_cost_life_instead_of_mana_%   [life / recovery]
-   13  summon_totem_cast_speed_+%   [totems]
    13  glory_generation_+%   [glory]
    13  base_debuff_slow_magnitude_+%   [slows]
    11  curse_effect_on_self_+%   [curse effect]
@@ -2125,7 +2096,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
    10  global_armour_evasion_energy_shield_while_in_presence_of_companion_+%   [companions]
     9  base_life_cost_+%   [life / recovery]
     9  debuff_time_passed_+%   [debuffs]
-    8  arcane_surge_effect_on_self_+%   [effects on self]
     8  minion_command_skill_cooldown_speed_+%   [minion stats beyond damage and speed]
     8  base_stun_recovery_+%   [stun / ailment threshold]
     7  minion_chaos_resistance_%   [minion stats beyond damage and speed]
@@ -2149,7 +2119,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     5  minion_resummon_speed_+%   [minion stats beyond damage and speed]
     5  life_regeneration_rate_+%_while_stationary   [life / recovery]
     5  grenade_skill_cooldown_speed_+%   [cooldowns]
-    5  culling_strike_threshold_+%   [stun / ailment threshold]
     5  parry_skill_effect_duration_+%   [durations]
     5  energy_shield_delay_-%_while_shapeshifted   [energy shield / recovery]
     5  companion_%_damage_as_chaos   [companions]
@@ -2163,7 +2132,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     4  ancestral_boosted_area_of_effect_+%   [area of effect]
     4  minion_additional_physical_damage_reduction_%   [minion stats beyond damage and speed]
     4  curse_delay_+%   [curse effect]
-    4  mark_use_speed_+%   [mark effect]
     4  gain_maximum_frenzy_charges_on_frenzy_charge_gained_%_chance   [charges]
     4  minion_commanded_skill_damage_+%   [minion stats beyond damage and speed]
     4  warcry_monster_power_+%   [warcries]
@@ -2212,7 +2180,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     3  banner_aura_effect_+%   [aura effect]
     2  flasks_%_chance_to_not_consume_charges   [charges]
     2  critical_hit_chance_+%_against_enemies_entered_your_presence_recently   [presence / allies]
-    2  hit_damage_stun_multiplier_+%_vs_enemies_at_close_range   [stun / ailment threshold]
     2  totem_additional_physical_damage_reduction_%   [totems]
     2  armour_+%_if_you_havent_been_hit_recently   [defences]
     2  allies_in_presence_life_regeneration_rate_per_minute_equal_to_your_maximum_life_%   [life / recovery]
@@ -2223,7 +2190,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     2  minion_base_maximum_lightning_damage_resistance_%   [minion stats beyond damage and speed]
     2  hit_damage_stun_multiplier_+%_if_youve_shapeshifted_to_animal_recently   [stun / ailment threshold]
     2  ailment_duration_+%_vs_beasts   [durations]
-    2  freeze_applies_cold_resistance_+   [defences]
     2  active_block_maximum_distance_+%   [defences]
     2  penetrate_elemental_resistance_%_while_shapeshifted   [defences]
     2  totems_attack_speed_+%_per_active_totem   [totems]
@@ -2281,7 +2247,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  chance_to_not_consume_glory_%   [glory]
     1  elemental_damage_taken_%_recouped_as_life   [life / recovery]
     1  body_armour_grants_armour_%_applies_to_fire_cold_lightning_damage   [defences]
-    1  base_enemy_critical_strike_chance_+%_against_self   [effects on self]
     1  enemies_affected_by_your_hazards_recently_have_+%_armour   [defences]
     1  enemies_affected_by_your_hazards_recently_have_+%_evasion_rating   [defences]
     1  movement_speed_penalty_+%_while_performing_fire_skills   [movement]
@@ -2295,7 +2260,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  aura_grant_%_base_main_hand_attack_damage_to_nearby_allies   [aura effect]
     1  mana_regeneration_rate_+%_while_moving   [mana / recovery]
     1  body_armour_grants_glory_generation_+%   [glory]
-    1  defend_with_%_armour_against_critical_strikes   [defences]
     1  jagged_ground_duration_+%   [durations]
     1  life_leeched_from_hits_also_leeches_same_amount_to_companions   [life / recovery]
     1  critical_hit_damage_+%_against_enemies_exited_your_presence_recently   [presence / allies]
@@ -2311,7 +2275,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  energy_shield_+_per_8_helmet_armour   [energy shield / recovery]
     1  spell_damage_+%_per_100_maximum_mana   [mana / recovery]
     1  evasion_rating_+%_if_energy_shield_recharge_started_in_past_2_seconds   [energy shield / recovery]
-    1  defend_with_%_armour_against_ranged_attacks   [defences]
     1  totems_spells_cast_speed_+%_per_active_totem   [totems]
     1  block_chance_+%_while_surrounded   [defences]
     1  stun_and_ailment_threshold_+%_while_surrounded   [stun / ailment threshold]
@@ -2345,7 +2308,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  body_armour_grants_unaffected_by_damaging_ailments   [defences]
     1  keystone_charge_cycle   [charges]
     1  leech_also_recovers_based_on_chaos_damage_as_well   [life / recovery]
-    1  grant_unholy_might_to_self_while_not_on_low_mana   [mana / recovery]
     1  allies_in_presence_have_unholy_might_while_you_not_on_low_mana   [mana / recovery]
     1  mana_degeneration_%_per_minute_not_in_grace   [mana / recovery]
     1  poison_duration_+%_against_slowed_enemies   [durations]
@@ -2368,7 +2330,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  unique_volkuurs_clutch_poison_duration_+%_final   [durations]
     1  gain_max_rage_on_rage_gain_from_hit_%_chance   [rage]
     1  cannot_be_blinded_while_on_full_life   [life / recovery]
-    1  culling_strike_threshold_+%_vs_immobilised_enemies   [stun / ailment threshold]
     1  life_regeneration_rate_+%_while_using_life_flask   [flasks]
     1  life_leech_also_recovers_based_on_elemental_damage_types   [life / recovery]
     1  hit_damage_remove_from_mana_before_life_while_mana_higher_than_life   [life / recovery]
@@ -2406,7 +2367,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  life_regeneration_rate_per_minute_%_if_used_life_flask_in_past_10_seconds   [flasks]
     1  life_regeneration_rate_per_minute_%_if_have_been_hit_recently   [life / recovery]
     1  explode_enemies_for_10%_life_as_fire_on_kill_with_empowered_attacks_chance_%   [empowered attacks]
-    1  culling_strike_threshold_+%_vs_rare_or_unique_monsters   [stun / ailment threshold]
     1  electrocuted_enemy_damage_taken_+%   [damage taken]
     1  minion_life_regeneration_rate_per_minute_%   [minion stats beyond damage and speed]
     1  ascendancy_beidats_gaze_mana_+_per_X_maximum_life   [life / recovery]
@@ -2446,7 +2406,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  maximum_fire_damage_resistance_+%_while_shapeshifted   [defences]
     1  stun_threshold_+%_while_shapeshifted   [stun / ailment threshold]
     1  gain_archon_elemental_when_energy_shield_recharge_starts   [energy shield / recovery]
-    1  non_damaging_ailment_effect_+%_on_self   [effects on self]
     1  blind_enemies_when_they_stun_you   [stun / ailment threshold]
     1  gain_X_instilling_fire_when_charge_is_consumed   [charges]
     1  gain_X_instilling_cold_when_charge_is_consumed   [charges]
@@ -2458,7 +2417,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  base_thorns_critical_strike_chance   [thorns]
     1  on_banner_expiry_recover_%_of_required_glory   [glory]
     1  inflict_withered_for_x_seconds_on_unwithered_enemies_when_they_enter_your_presence   [presence / allies]
-    1  base_mana_cost_efficiency_+%_of_mark_skills   [mark effect]
     1  movement_speed_+%_if_used_a_mark_recently   [mark effect]
     1  enemies_in_presence_cooldown_recovery_+%   [cooldowns]
     1  physical_damage_prevented_recouped_as_life_%   [life / recovery]
@@ -2542,7 +2500,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  recover_%_maximum_mana_on_charm_use   [charms]
     1  ascendancy_shaman_spell_damage_+%_final_per_2_rage   [rage]
     1  gain_physical_thorns_damage_equal_to_x%_of_maximum_life_while_shapeshifted   [thorns]
-    1  passive_overwhelming_strike_hit_damage_stun_multiplier_+%_final_with_crits   [stun / ailment threshold]
     1  modifiers_to_fire_resistance_also_apply_to_cold_lightning_resistance_at_%_value   [defences]
     1  arcane_surge_mana_regen_modifier_on_you_applies_to_life_regen_instead   [life / recovery]
     1  ascendancy_shaman_reactive_growth_elemental_damage_taken_+%_final   [damage taken]
@@ -2580,7 +2537,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  gain_endurance_charge_on_heavy_stunning_rare_or_unique_enemy   [charges]
     1  ignore_armour_movement_penalties   [movement]
     1  remnant_recover_%_life_on_pickup   [life / recovery]
-    1  marked_enemy_damage_taken_+%   [damage taken]
     1  heavy_stun_poise_decay_rate_+%   [stun / ailment threshold]
     1  puppet_master_duration_+%   [durations]
     1  body_armour_grants_base_armour_applies_to_chaos_damage   [defences]
@@ -2635,11 +2591,9 @@ skill types: 183, engine reads 123; unhandled by gem count:
     3  spells_impale_on_hit_%_chance
     3  parry_damage_+%
     3  puppet_master_effect_+%
-    3  gain_arcane_surge_on_crit_%_chance
     3  critical_hit_bleeding_effect_+%
     3  enemies_you_blind_have_critical_strike_chance_+%
     3  base_chance_to_not_consume_corpse_%
-    3  withered_magnitude_+%
     3  ballista_critical_hit_chance_+%
     3  ballista_hit_damage_immobilisation_multiplier_+%
     3  number_of_additional_totems_allowed
@@ -2706,7 +2660,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  aggravate_bleeding_when_inflicted_vs_enemies_on_jagged_ground_chance_%
     1  decimating_strike
     1  phylactery_jewel_socket_effect_+%
-    1  bow_attacks_have_culling_strike
     1  faster_bleed_%
     1  gain_X_volatility_on_inflicting_elemental_ailment
     1  immune_to_volatility_damage
@@ -2749,8 +2702,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  grenade_skill_number_of_additional_projectiles
     1  warcries_debilitate_enemies_for_1_second
     1  gain_arcane_surge_on_reverting_if_you_were_shapeshifted_x_seconds
-    1  gain_tailwind_stack_on_skill_use
-    1  lose_all_tailwind_when_hit
     1  small_passives_effect_+%
     1  warcries_inflict_x_critical_weakness_on_enemies
     1  maximum_volatility_allowed
@@ -2774,7 +2725,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  skill_speed_+%_against_bloodlusting_enemies
     1  incision_effect_+%
     1  ascendancy_non_unique_jewel_radius_+%
-    1  culling_strike_vs_marked_enemy
     1  drain_focus_%_of_damage_dealt_on_hit
     1  focus_decay_%_per_minute
     1  ascendancy_ritualist_damage_+%_final_vs_enemies_affected_by_blood_boil
@@ -2916,28 +2866,19 @@ skill types: 183, engine reads 123; unhandled by gem count:
     4  spell_skill_projectile_speed_+%
     4  reservation_efficiency_+%_of_minion_skills
     3  reservation_efficiency_+%_of_companion_skills
-    3  spirit_+%
     2  num_charm_slots
-    2  reservation_efficiency_+%_of_meta_skills
     1  lose_%_of_infernal_flame_on_reaching_max
     1  lose_%_of_max_infernal_flame_per_minute
     1  tactician_spirit_reservation_+%_final_for_permanent_buffs
     1  spirit_+_per_empty_charm_slot
     1  num_additional_skill_slots
-    1  body_armour_grants_spirit_+%
     1  cannot_be_light_stunned_if_you_have_been_stunned_recently
-    1  base_spirit_reservation_efficiency_+%
     1  ignore_attribute_requirements_for_gloves
-    1  spirit_does_not_exist
     1  ascendancy_beidats_will_spirit_+_per_X_maximum_life
     1  gem_requirements_can_be_satisfied_by_highest_attribute
     1  reservation_efficiency_+%_of_skills_per_socketed_idol
-    1  base_spirit
     1  armour_+_from_%_strength_requirements_from_boots_gloves_helmets
     1  cannot_be_light_stunned_if_have_not_been_hit_recently
-    1  +1_spirit_per_X_energy_shield_on_body_armour
-    1  +1_spirit_per_X_evasion_rating_on_body_armour
-    1  cannot_gain_spirit_from_equipment
 
 ### local
 
@@ -3507,7 +3448,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  warcry_echo_area_of_effect_+%_final_per_repeat   [area of effect]
     1  can_only_damage_low_life_enemies   [life / recovery]
     1  minion_elemental_resistance_%   [minion stats beyond damage and speed]
-    1  support_empowered_culling_strike   [empowered attacks]
     1  skill_has_empowered_spark_support   [empowered attacks]
     1  support_ground_effect_area_of_effect_+%_final_per_second   [area of effect]
     1  support_ground_effect_area_of_effect_+%_final_per_second_max   [area of effect]
@@ -3695,7 +3635,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  active_skill_requires_X_frenzy_charges   [charges]
     1  wing_blast_chance_to_gain_power_charge_on_stun_%   [charges]
     1  wither_channeled_move_targeting_area_X_units_per_second   [area of effect]
-    1  skill_withering_presence_frequency_ms   [presence / allies]
     1  wolf_warcry_buff_cold_damage_min_per_5_power_up_to_cap   [warcries]
     1  wolf_warcry_buff_cold_damage_max_per_5_power_up_to_cap   [warcries]
     1  wolf_warcry_empowered_attack_cold_damage_min_per_5_power_up_to_cap   [warcries]
@@ -3836,7 +3775,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     2  thunderfist_number_of_bolts_delays
     2  thunderfist_bolt_delay_ms
     2  crossbow_ammo_skill_does_not_transition
-    2  spells_have_culling_strike
     2  number_of_tornados_allowed
     2  active_skill_never_freeze_shock_ignite
     2  blazing_cluster_subsequent_targeting_radius
@@ -3900,7 +3838,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     2  support_combo_finisher_required_number_of_combo_stacks
     2  repeat_last_step_of_combo_attack
     2  cannot_consume_impale
-    2  support_culling_strike_vs_rare_or_unique_enemy
     2  support_culmination_damage_+%_final_per_combo_stack
     2  support_stronger_ignites_ignite_effect_+%_final
     2  support_deadly_poison_poison_effect_+%_final
@@ -3983,7 +3920,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  flock_damage_over_time_+%_final_per_tangmazu_raven_in_owners_flock
     1  archon_of_chayula_spawn_chaos_tornado_interval_ms
     1  archon_of_chayula_physical_and_chaos_damage_+%_final
-    1  archon_of_chayula_withered_on_hit_for_4_seconds_%_chance
     1  archon_of_chayula_tornado_attack_interval_ms
     1  storm_begin_slowing_down_when_at_X_units_from_target
     1  storm_end_slowing_down_when_at_X_units_from_target
@@ -4526,7 +4462,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  support_djinn_lineage_damage_+%_final_per_different_command_in_last_8_seconds
     1  instability_on_critical_%_chance
     1  support_volcanic_eruption_%_chance_to_trigger_vs_ignited_enemies
-    1  support_voranas_siege_hit_damage_+%_final_vs_isolated_enemies
     1  support_warcries_empower_x_additional_per_5_total_ice_crystals_or_fragments_destroyed
     1  support_warcries_explode_ice_crystals
     1  support_warcries_detonate_your_ice_fragments
@@ -4675,10 +4610,8 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  wyvern_devour_max_extra_corpses_to_consume
 
 ### not-offensive
-   16  base_reservation_efficiency_+%
     7  active_skill_projectile_speed_+%_final
     6  base_projectile_speed_+%
-    3  base_spirit_reservation_efficiency_+%
     3  support_faster_projectiles_projectile_speed_+%_final
     2  always_light_stun
     2  ignore_shapeshift_talisman_requirement
@@ -4688,7 +4621,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     2  support_slower_projectiles_projectile_speed_+%_final
     2  skill_no_cost_or_reservation
     1  totem_has_ancestral_warrior_spirit
-    1  blasphemy_base_spirit_reservation_per_socketed_curse
     1  command_target_rarity_prioritisation_radius
     1  rapidshot_requiem_base_buff_count_requirement
     1  summoned_monsters_no_drops_or_experience
@@ -4696,7 +4628,6 @@ skill types: 183, engine reads 123; unhandled by gem count:
     1  skill_raging_spirit_per_x_radius
     1  active_block_light_stun_threshold_+%_final
     1  spirit_vessel_damage_+%_final_per_skill_socketed_in_meta_gem
-    1  first_X_minions_have_0_base_spirit_reservation
     1  skill_reserves_X_life_permyriad_per_spirit_instead_of_spirit
     1  support_ignite_protection_spirit_cost_ignite_duration_on_self_+%_final
     1  difficulty_of_meeting_conditional_requirement_+%
