@@ -428,6 +428,15 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
             | r -> failwithf "%A" r
         | Error e -> failwith e)
 
+    test "Spearfield: the spears' explosions are what hits; fresh spears deal 80% less" (fun () ->
+        let spear = (Items.parse db.Value "Rarity: Normal\nHardwood Spear\n--------\n").Weapon
+        match Gems.skill db.Value ModDb.empty spear { Gem = "Spearfield"; Level = 20; Quality = 0; StatSet = 1; Supports = [] } with
+        | Ok (s, _) ->
+            let boom = s.Parts |> List.find (fun p -> p.Name.EndsWith "Explosion")
+            near 4.0 (boom.Mods |> List.sumBy (fun m -> if m.Stat = Named "SeqHits" then m.Value else 0.0))
+            equal true (boom.Mods |> List.exists (fun m -> m.Stat = Damage AllDamage && m.Kind = More && m.Value = -80.0))
+        | Error e -> failwith e)
+
     test "perfect timing: the perfect hit replaces the normal one; the release follows the channel" (fun () ->
         let flag name (sk: Skill) = Mods.flag { Ctx.empty with SkillName = sk.Name } (Named name) (ModDb.ofList sk.Mods)
         let mace = (Items.parse db.Value "Rarity: Normal\nAkoyan Club\n--------\n").Weapon

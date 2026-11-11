@@ -376,6 +376,9 @@ module Gems =
               ("Shred", "Final Strike"), [ "Seq:5/6"; "Hits:2" ]
               // "Simultaneously fires a Physical Projectile and a Chaos Projectile"
               ("Coiling Bolts", "Chaos"), [ "Part" ]
+              // the spears a standing enemy touches explode at once (four of them: guess)
+              // and, set off within half a second of appearing, deal 80% less
+              ("Spearfield", "Explosion"), [ "Part"; "Hits:4"; "Less:80" ]
               // the eruption happens once; the sprays that follow rain down around the volcano
               ("Volcano", ""), [ "Once" ]
               ("Volcano", "Projectiles"), [ "Rain" ]
@@ -424,6 +427,7 @@ module Gems =
             elif c.StartsWith "Seq:" then
                 let parts = (c.Substring 4).Split '/'
                 [ Mod.flag (Named("SeqSteps:" + parts.[0])); Mod.base' (Named "SeqLength") (float parts.[1]) ]
+            elif c.StartsWith "Less:" then [ Mod.more (Damage AllDamage) (-(float (c.Substring 5))) ]
             elif c = "Once" then [ Mod.flag (Named "OncePerUse") ]
             elif c.StartsWith "Hits:" then [ Mod.base' (Named "SeqHits") (float (c.Substring 5)) ]
             elif c = "Charge" then [ Mod.flag (Named "OnlyWithCharge") ]
