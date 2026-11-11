@@ -7,7 +7,7 @@ and the community dat schema. Used for data PoB does not export.
 cd tools/gamefiles
 npm install
 npx pathofexile-dat                       # reads config.json, writes tables/English/*.json
-python3 gen_rarity.py tables/English > ../../src/PoEsie/RarityData.fs
+python3 gen_rarity.py tables/English > ../../src/PoEtry/RarityData.fs
 ```
 
 Update the game in Steam first to read the current patch. `config.json` points at the install.

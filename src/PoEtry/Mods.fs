@@ -1,4 +1,4 @@
-namespace PoEsie
+namespace PoEtry
 
 /// Which damage a "X damage" modifier applies to.
 type DamageScope =

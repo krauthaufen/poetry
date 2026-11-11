@@ -1,4 +1,4 @@
-namespace PoEsie
+namespace PoEtry
 
 /// Deterministic, portable PRNG (xoshiro128**). Only 32-bit xor/shift/rotate and
 /// multiplications by 5 and 9, so it produces identical streams on .NET and in

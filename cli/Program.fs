@@ -1,4 +1,4 @@
-/// poesie <build.xml | build code file> [options]
+/// poetry <build.xml | build code file> [options]
 ///   --group N        socket group to simulate (default: the build's main group)
 ///   --runs N         Monte Carlo runs (default 500)
 ///   --time S         fight length in seconds (default 60)
@@ -36,11 +36,11 @@
 ///   --cascade-spacing K  distance between cascade impacts as a multiple of the radius (default 1.5, user observation)
 ///   --suite          run the standard scenarios (pack, pack + 2 rares, surrounded, boss) and print a table
 ///   --data DIR       exported game data (default: data/game next to the repo)
-module PoEsie.Cli
+module PoEtry.Cli
 
 open System
 open System.IO
-open PoEsie
+open PoEtry
 
 /// PoB build codes: url-safe base64 of zlib-compressed XML.
 let decodeBuildCode (code: string) =
@@ -73,7 +73,7 @@ let private top n (xs: 'a list) = xs |> List.countBy id |> List.sortByDescending
 let main argv =
     match List.ofArray argv with
     | [] ->
-        printfn "usage: poesie <build.xml | build-code-file> [--group N] [--runs N] [--time S] [--life X] [--level L] [--res X]"
+        printfn "usage: poetry <build.xml | build-code-file> [--group N] [--runs N] [--time S] [--life X] [--level L] [--res X]"
         1
     | file :: rest ->
         let o = opts rest

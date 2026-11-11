@@ -1,4 +1,4 @@
-namespace PoEsie
+namespace PoEtry
 
 /// A flask as equipped (values as the game shows them).
 type ManaFlask =

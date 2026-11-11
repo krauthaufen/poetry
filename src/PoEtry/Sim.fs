@@ -1,4 +1,4 @@
-namespace PoEsie
+namespace PoEtry
 
 /// When a hit of a skill use lands.
 type HitTiming =

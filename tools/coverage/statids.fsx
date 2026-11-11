@@ -1,5 +1,5 @@
-#r "../../src/PoEsie/bin/Release/net8.0/PoEsie.dll"
-open PoEsie
+#r "../../src/PoEtry/bin/Release/net8.0/PoEtry.dll"
+open PoEtry
 let dir = __SOURCE_DIRECTORY__ + "/../../data/game/"
 let read f = System.IO.File.ReadAllText(dir + f)
 let index = StatText.build [ read "statdesc_stat_descriptions.json"; read "statdesc_passive_skill_stat_descriptions.json" ]

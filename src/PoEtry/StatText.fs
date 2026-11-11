@@ -1,4 +1,4 @@
-namespace PoEsie
+namespace PoEtry
 
 /// Turns item / passive text back into game stat ids, using the game's own
 /// stat description templates (the files the game uses to render those lines).

@@ -1,4 +1,4 @@
-namespace PoEsie
+namespace PoEtry
 
 /// The five damage types, declared in PoE2's conversion order.
 /// Damage only ever converts to a type further down this list.

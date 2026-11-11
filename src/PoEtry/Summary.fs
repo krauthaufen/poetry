@@ -1,4 +1,4 @@
-namespace PoEsie
+namespace PoEtry
 
 type Stats =
     { Mean: float

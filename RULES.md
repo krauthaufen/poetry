@@ -1,4 +1,4 @@
-# PoEsie rules ledger
+# PoEtry rules ledger
 
 Every mechanic the engine implements, where the formula came from, and how much we trust it.
 Mechanics are only as good as this file. When an in-game test confirms or refutes one, update it here and add a test.

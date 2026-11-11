@@ -1,4 +1,4 @@
-namespace PoEsie
+namespace PoEtry
 
 /// What the game itself shows for a weapon (API "properties"), for checking our maths.
 type DisplayedWeapon =

@@ -1,7 +1,7 @@
 // How much item / passive text the reverse parser understands.
 // dotnet fsi tools/coverage/text.fsx
-#r "../../src/PoEsie/bin/Release/net8.0/PoEsie.dll"
-open PoEsie
+#r "../../src/PoEtry/bin/Release/net8.0/PoEtry.dll"
+open PoEtry
 let dir = __SOURCE_DIRECTORY__ + "/../../data/game/"
 let read f = System.IO.File.ReadAllText(dir + f)
 let sw = System.Diagnostics.Stopwatch.StartNew()

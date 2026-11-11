@@ -1,7 +1,7 @@
 
 == affix mods: 2724 distinct stats, 9551 occurrences
-  simulated        576 stats   5303 occurrences (55.5%)
-  inert             22 stats     28 occurrences ( 0.3%)
+  simulated        591 stats   5324 occurrences (55.7%)
+  inert              7 stats      7 occurrences ( 0.1%)
   local            487 stats   1221 occurrences (12.8%)
   not-offensive    108 stats    366 occurrences ( 3.8%)
   structural        19 stats     31 occurrences ( 0.3%)
@@ -9,8 +9,8 @@
   unmapped         609 stats    898 occurrences ( 9.4%)
 
 == passive tree: 1392 distinct stats, 5907 occurrences
-  simulated        461 stats   3687 occurrences (62.4%)
-  inert             31 stats     87 occurrences ( 1.5%)
+  simulated        483 stats   3752 occurrences (63.5%)
+  inert              9 stats     22 occurrences ( 0.4%)
   local              0 stats      0 occurrences ( 0.0%)
   not-offensive     29 stats     74 occurrences ( 1.3%)
   structural        14 stats    307 occurrences ( 5.2%)
@@ -18,44 +18,29 @@
   unmapped         314 stats    501 occurrences ( 8.5%)
 
 == skill and support gems: 2476 distinct stats, 9440 occurrences
-  simulated        353 stats   2569 occurrences (27.2%)
+  simulated        355 stats   2582 occurrences (27.4%)
   inert              4 stats      4 occurrences ( 0.0%)
   local              0 stats      0 occurrences ( 0.0%)
   not-offensive     33 stats     70 occurrences ( 0.7%)
   structural       208 stats   1800 occurrences (19.1%)
-  unsimulated      786 stats   2148 occurrences (22.8%)
-  unmapped        1092 stats   2849 occurrences (30.2%)
+  unsimulated      785 stats   2141 occurrences (22.7%)
+  unmapped        1091 stats   2843 occurrences (30.1%)
 
 text lines with no stat template: 174 (affix + tree)
 
-skill types: 183, engine reads 35; unhandled by gem count:
-  AttackInPlace 488, Triggerable 417, Damage 299, UsableWhileMoving 206, ProjectilesFromUser 177, Totemable 143, RangedAttack 140, MirageArcherCanUse 130, Cooldown 128, Trappable 126, Mineable 120, HasReservation 119, OngoingSkill 100, InbuiltTrigger 94, AreaSpell 87, Multicastable 83, MeleeSingleTarget 82, Unleashable 65, Limit 65, SkillGrantedBySupport 54, CreatesMinion 43, Cascadable 40, Sustained 37, NoAttackOrCastTime 33, CreatesGroundEffect 30, ConsumesCharges 28, ProjectileSpeed 26, DamageOverTime 25, Barrageable 25, GroundTargetedProjectile 24, ProjectileNoCollision 24, UsableWhileShapeshifted 23, CanHaveMultipleOngoingSkillInstances 22, Spear 22, ProjectileNumber 21, DetonatesAfterTime 21, Triggers 20, Shapeshift 20, Movement 20, HasUsageCondition 19, Invokable 18, CrossbowAmmoSkill 17, CrossbowSkill 17, GeneratesEnergy 17, Aura 16, EmpowersOtherSkill 16, NonWeaponAttack 16, ReservesManually 15, GeneratesCharges 15, CannotChain 14, MinionsCanExplode 14, Rain 13, UsableWhileMounted 13, CommandableMinion 13, AffectsPresence 12, SkillConsumesFrenzyChargesOnUse 12, TargetsDestructibleCorpses 12, Detonator 12, CreatesFissure 11, Jumping 11, Instant 11, Companion 11, MinionsAreUndamagable 10, CreatesCompanion 10, ReserveInAllSets 9, GainsStages 9, CanCancelActions 9, UseGlobalStats 9, Wind 9, CreatesUndeadMinion 9, MultipleReservation 9, CreatesSkeletonMinion 8, SkillConsumesEnduranceChargesOnUse 7, Storm 7, UsedByProxy 7, Necrotic 7, Bear 7, CommandsMinions 7, Hazard 7, ProjectilesNumberModifiersNotApplied 7, ManualCooldownConsumption 7, CanBecomeArrowRain 7, SkillConsumesFreeze 7, Wolf 7, AffectedByCooldownRate 6, DegenOnlySpellDamage 6, Banner 6, Wyvern 6, SummonsAttackTotem 5, ConsumesRage 5, Orb 5, SkillConsumesShock 5, InteractsWithElementalGround 5, Wall 5, IceCrystal 5, RequiresShield 5, ActiveBlock 5, RequiresCharges 4, UsedByTotem 4, CannotSpiritStrike 4, Palm 4, InstantNoRepeatWhenHeld 4, CannotTerrainChain 4, ToggleSpawnedObjectTargetable_DefaultOn 4, ConsumesFullyBrokenArmour 4, PerformsFinalStrike 4, ObjectDurability 4, TotemsAreBallistae 3, AttackInPlaceIsDefault 3, SkillConsumesBleeding 3, Offering 3, CanCreateStoneElementals 3, SkillConsumesIgnite 3, IndeterminateEmpowermentAmount 3, GamepadDeflectable 3, ToggleSpawnedObjectTargetable_DefaultOff 3, PerfectTiming 3, TotemCastsAlone 3, CannotConsumeCharges 2, DodgeReplacement 2, CreatesGroundRune 2, TargetsDestructibleRareCorpses 2, SkillConsumesParried 2, Guard 2, Nature 2, SingleMainProjectile 2, CausesBurning 2, GamepadDoNotForceSkillAtLocation 2, InstantShiftAttackForLeftMouse 2, ComboStacking 2, CannotCreateJaggedGround 2, SingleLevelSkill 2, IsBlasphemy 1, ProjectileSpiral 1, HasSeals 1, RemnantCannotBeShared 1, DualWieldOnly 1, GamepadDoNotChannelSkillAtLocation 1, RequiresOffHandNotWeapon 1, RequiresBuckler 1, Aegis 1, CreatesDemonMinion 1, NoDualWield 1, SpecialAncestralBoost 1, FixedCastTime 1, PersistentShowsCastTime 1, FrozenSpite 1, UsedByClone 1
+skill types: 183, engine reads 120; unhandled by gem count:
+  CreatesGroundEffect 30, DetonatesAfterTime 21, Movement 20, CrossbowAmmoSkill 17, EmpowersOtherSkill 16, GeneratesCharges 15, MinionsCanExplode 14, CommandableMinion 13, AffectsPresence 12, TargetsDestructibleCorpses 12, Detonator 12, CreatesFissure 11, Jumping 11, MinionsAreUndamagable 10, CreatesUndeadMinion 9, CreatesSkeletonMinion 8, CommandsMinions 7, Hazard 7, ManualCooldownConsumption 7, CanBecomeArrowRain 7, SkillConsumesFreeze 7, DegenOnlySpellDamage 6, Banner 6, ConsumesRage 5, Orb 5, SkillConsumesShock 5, InteractsWithElementalGround 5, Wall 5, IceCrystal 5, RequiresShield 5, ActiveBlock 5, ConsumesFullyBrokenArmour 4, PerformsFinalStrike 4, ObjectDurability 4, TotemsAreBallistae 3, SkillConsumesBleeding 3, Offering 3, CanCreateStoneElementals 3, SkillConsumesIgnite 3, IndeterminateEmpowermentAmount 3, PerfectTiming 3, CannotConsumeCharges 2, DodgeReplacement 2, CreatesGroundRune 2, TargetsDestructibleRareCorpses 2, SkillConsumesParried 2, Guard 2, CausesBurning 2, ComboStacking 2, CannotCreateJaggedGround 2, IsBlasphemy 1, ProjectileSpiral 1, HasSeals 1, RemnantCannotBeShared 1, DualWieldOnly 1, RequiresOffHandNotWeapon 1, RequiresBuckler 1, Aegis 1, CreatesDemonMinion 1, NoDualWield 1, SpecialAncestralBoost 1, FixedCastTime 1, FrozenSpite 1
 
 
 ## affix mods
 
 ### inert
-    5  damage_+%_while_leeching   [condition never true: WhileBuff "Leeching"]
-    2  damage_+%_while_shapeshifted   [condition never true: WhileBuff "Shapeshifted"]
-    2  skill_speed_+%_while_shapeshifted   [condition never true: WhileBuff "Shapeshifted"]
-    1  evasion_rating_+%_while_leeching   [condition never true: WhileBuff "Leeching"]
-    1  accuracy_rating_while_at_maximum_frenzy_charges   [condition never true: WhileBuff "AtMaximumFrenzyCharges"]
     1  minimum_added_cold_damage_while_you_have_avians_might   [condition never true: WhileBuff "YouHaveAviansMight"]
     1  maximum_added_cold_damage_while_you_have_avians_might   [condition never true: WhileBuff "YouHaveAviansMight"]
     1  minimum_added_lightning_damage_while_you_have_avians_might   [condition never true: WhileBuff "YouHaveAviansMight"]
     1  maximum_added_lightning_damage_while_you_have_avians_might   [condition never true: WhileBuff "YouHaveAviansMight"]
     1  evasion_rating_+%_while_phasing   [condition never true: WhileBuff "Phasing"]
-    1  global_critical_strike_multiplier_+_while_you_have_no_frenzy_charges   [condition never true: WhileBuff "YouHaveNoFrenzyCharges"]
-    1  chaos_damage_+%_while_affected_by_herald_of_agony   [condition never true: WhileBuff "AffectedByHeraldOfAgony"]
-    1  fire_damage_+%_while_affected_by_herald_of_ash   [condition never true: WhileBuff "AffectedByHeraldOfAsh"]
-    1  cold_damage_+%_while_affected_by_herald_of_ice   [condition never true: WhileBuff "AffectedByHeraldOfIce"]
-    1  physical_damage_+%_while_affected_by_herald_of_purity   [condition never true: WhileBuff "AffectedByHeraldOfPurity"]
-    1  lightning_damage_+%_while_affected_by_herald_of_thunder   [condition never true: WhileBuff "AffectedByHeraldOfThunder"]
-    1  skill_area_of_effect_+%_while_no_frenzy_charges   [condition never true: WhileBuff "NoFrenzyCharges"]
-    1  cold_damage_+%_while_off_hand_is_empty   [condition never true: WhileBuff "OffHandIsEmpty"]
-    1  damage_while_no_frenzy_charges_+%   [condition never true: WhileBuff "NoFrenzyCharges"]
     1  evasion_rating_+%_while_onslaught_is_active   [condition never true: WhileBuff "OnslaughtIsActive"]
-    1  non_skill_base_physical_damage_%_to_gain_as_chaos_while_at_maximum_power_charges   [condition never true: WhileBuff "AtMaximumPowerCharges"]
     1  spell_damage_+%_while_no_mana_reserved   [condition never true: WhileBuff "NoManaReserved"]
 
 ### unsimulated
@@ -1687,37 +1672,15 @@ skill types: 183, engine reads 35; unhandled by gem count:
 ## passive tree
 
 ### inert
-   13  damage_+%_while_in_presence_of_companion   [condition never true: WhileBuff "InPresenceOfCompanion"]
-    8  damage_+%_while_shapeshifted   [condition never true: WhileBuff "Shapeshifted"]
     6  attack_damage_+%_while_ally_in_presence   [condition never true: WhileBuff "AllyInPresence"]
     5  armour_+%_while_stationary   [condition never true: WhileBuff "Stationary"]
-    5  elemental_damage_+%_while_shapeshifted   [condition never true: WhileBuff "Shapeshifted"]
-    5  skill_speed_+%_while_shapeshifted   [condition never true: WhileBuff "Shapeshifted"]
-    4  armour_evasion_+%_while_leeching   [condition never true: WhileBuff "Leeching"]
-    4  damage_+%_vs_immobilised_enemies_while_shapeshifted   [condition never true: WhileBuff "Shapeshifted"]
-    4  armour_+%_while_shapeshifted   [condition never true: WhileBuff "Shapeshifted"]
     3  spell_damage_+%_while_you_have_arcane_surge   [condition never true: WhileBuff "YouHaveArcaneSurge"]
-    3  accuracy_rating_+%_while_shapeshifted   [condition never true: WhileBuff "Shapeshifted"]
-    3  critical_strike_chance_+%_while_shapeshifted   [condition never true: WhileBuff "Shapeshifted"]
-    2  attack_speed_+%_while_leeching   [condition never true: WhileBuff "Leeching"]
     2  spell_damage_+%_while_es_full   [condition never true: WhileBuff "EsFull"]
     2  damage_+%_if_have_crit_in_past_8_seconds   [condition never true: WhileBuff "CritInPast8Seconds"]
-    2  attack_speed_+%_while_in_presence_of_companion   [condition never true: WhileBuff "InPresenceOfCompanion"]
-    2  physical_damage_+%_while_shapeshifted   [condition never true: WhileBuff "Shapeshifted"]
-    1  damage_+%_while_leeching   [condition never true: WhileBuff "Leeching"]
     1  area_of_effect_+%_while_you_have_arcane_surge   [condition never true: WhileBuff "YouHaveArcaneSurge"]
-    1  non_skill_base_all_damage_%_to_gain_as_cold_while_shapeshifted   [condition never true: WhileBuff "Shapeshifted"]
     1  minion_damage_+%_while_you_have_at_least_two_different_active_offerings   [condition never true: WhileBuff "YouHaveAtLeastTwoDifferentActiveOfferings"]
-    1  cold_damage_+%_while_affected_by_herald_of_ice   [condition never true: WhileBuff "AffectedByHeraldOfIce"]
-    1  fire_damage_+%_while_affected_by_herald_of_ash   [condition never true: WhileBuff "AffectedByHeraldOfAsh"]
-    1  lightning_damage_+%_while_affected_by_herald_of_thunder   [condition never true: WhileBuff "AffectedByHeraldOfThunder"]
-    1  non_skill_base_all_damage_%_to_gain_as_lightning_while_shapeshifted   [condition never true: WhileBuff "Shapeshifted"]
-    1  non_skill_base_all_damage_%_to_gain_as_fire_while_shapeshifted   [condition never true: WhileBuff "Shapeshifted"]
-    1  chaos_damage_+%_while_affected_by_herald_of_plague   [condition never true: WhileBuff "AffectedByHeraldOfPlague"]
-    1  physical_damage_+%_while_affected_by_herald_of_blood   [condition never true: WhileBuff "AffectedByHeraldOfBlood"]
     1  non_skill_base_all_damage_%_to_gain_as_fire_while_on_ground_fire_burn   [condition never true: WhileBuff "OnGroundFireBurn"]
     1  projectile_damage_+%_with_spears_while_there_no_enemies_surrounding_you   [condition never true: WhileBuff "ThereNoEnemiesSurroundingYou"]
-    1  hit_damage_stun_multiplier_+%_while_shapeshifted   [condition never true: WhileBuff "Shapeshifted"]
 
 ### unsimulated
    35  presence_area_+%   [area of effect]
@@ -2645,7 +2608,6 @@ skill types: 183, engine reads 35; unhandled by gem count:
     8  fixed_projectile_spread   [projectile count / speed / chaining]
     8  projectile_speed_variation_+%   [projectile count / speed / chaining]
     7  cannot_consume_power_frenzy_endurance_charges   [charges]
-    7  base_totem_duration   [totems]
     7  base_totem_range   [totems]
     7  totem_chaos_resistance_%   [totems]
     7  active_skill_base_tertiary_area_of_effect_radius   [area of effect]
@@ -3472,7 +3434,6 @@ skill types: 183, engine reads 35; unhandled by gem count:
     7  ignores_proximity_shield
     7  base_combo_stacks_decay_delay_ms
     6  active_skill_has_%_standard_scaling_attack_damage
-    6  base_number_of_totems_allowed
     6  global_maim_on_hit
     6  crushing_blow
     6  skill_cannot_be_frozen

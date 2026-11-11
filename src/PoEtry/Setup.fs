@@ -1,4 +1,4 @@
-namespace PoEsie
+namespace PoEtry
 
 /// How the player plays: a priority list. The first step whose skill is ready and whose
 /// condition holds is used. Skills are named by gem; each brings its own socket group's

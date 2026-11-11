@@ -1,4 +1,4 @@
-namespace PoEsie
+namespace PoEtry
 
 type ParsedItem =
     { Name: string

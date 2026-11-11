@@ -1,13 +1,13 @@
 // What the simulator understands of ALL game data, not of one build.
-//   dotnet fsi tools/census/census.fsx      (after building src/PoEsie in Release)
+//   dotnet fsi tools/census/census.fsx      (after building src/PoEtry in Release)
 // Every stat on affix mods, passive nodes and skill / support gems is classified:
 //   simulated   maps to mods whose stat the engine reads
 //   inert       maps to mods, but nothing outside the stat mapping reads that stat
 //   local / not-offensive / structural / unsimulated / unmapped   as StatMap says
 // and every skill type flag is checked against the engine source.
 // Writes tools/census/census.txt; prints the summary.
-#r "../../src/PoEsie/bin/Release/net8.0/PoEsie.dll"
-open PoEsie
+#r "../../src/PoEtry/bin/Release/net8.0/PoEtry.dll"
+open PoEtry
 
 let root = __SOURCE_DIRECTORY__ + "/../../"
 let dir = root + "data/game/"
@@ -15,7 +15,7 @@ let read f = System.IO.File.ReadAllText(dir + f)
 
 // ---- engine source: which stats are actually read ----
 let engineFiles =
-    System.IO.Directory.GetFiles(root + "src/PoEsie", "*.fs")
+    System.IO.Directory.GetFiles(root + "src/PoEtry", "*.fs")
     |> Array.filter (fun f ->
         let n = System.IO.Path.GetFileName f
         n <> "StatMap.fs" && n <> "StatText.fs" && n <> "Tables.fs" && n <> "RarityData.fs")

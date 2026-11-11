@@ -2,7 +2,7 @@
 --
 -- PoB generates Data/Skills, Data/Gems, Data/Bases, Data/StatDescriptions from the
 -- game's .dat files. We take only that data: PoB's hand-written semantics
--- (statMap, skill functions) are dropped, PoEsie has its own.
+-- (statMap, skill functions) are dropped, PoEtry has its own.
 --
 -- Usage: lua export.lua <PoB src dir> <out dir>
 

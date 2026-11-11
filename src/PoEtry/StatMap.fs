@@ -1,4 +1,4 @@
-namespace PoEsie
+namespace PoEtry
 
 /// Stats that modify the item they're on rather than the character.
 type LocalStat =

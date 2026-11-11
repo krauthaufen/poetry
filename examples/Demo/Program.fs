@@ -3,7 +3,7 @@
 /// that lowers fire resistance, and a minion. Shows the pieces fitting together.
 module Demo
 
-open PoEsie
+open PoEtry
 
 let bolt =
     { Skill.make "Arc Bolt" [ Spell; Projectile ] with

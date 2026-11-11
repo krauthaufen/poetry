@@ -1,4 +1,4 @@
-namespace PoEsie
+namespace PoEtry
 
 /// What a single hit does to the target besides its damage.
 type Inflict =

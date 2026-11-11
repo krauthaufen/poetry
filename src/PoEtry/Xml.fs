@@ -1,4 +1,4 @@
-namespace PoEsie
+namespace PoEtry
 
 /// Minimal XML reader (elements, attributes, text), enough for PoB build files.
 /// Hand-written for the same reason as Json: identical on .NET and Fable.

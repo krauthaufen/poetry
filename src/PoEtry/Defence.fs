@@ -1,4 +1,4 @@
-namespace PoEsie
+namespace PoEtry
 
 module Defence =
     /// Class base attributes from tree.json ("classes": name, base_str, base_dex, base_int).

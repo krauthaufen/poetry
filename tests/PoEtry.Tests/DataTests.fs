@@ -1,8 +1,8 @@
 /// Tests against the exported game data (data/game). Expected values are read off
 /// the raw data or worked out by hand, never taken from PoB's output.
-module PoEsie.DataTests
+module PoEtry.DataTests
 
-open PoEsie
+open PoEtry
 
 #if !FABLE_COMPILER
 let private db =

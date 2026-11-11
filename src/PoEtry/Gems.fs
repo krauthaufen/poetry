@@ -1,4 +1,4 @@
-namespace PoEsie
+namespace PoEtry
 
 /// Everything loaded from data/game.
 type GameDb =

@@ -1,4 +1,4 @@
-namespace PoEsie
+namespace PoEtry
 
 /// SVG drawings of a skill use's geometry: walls, enemies, player, impact point and
 /// projectile flights (bounces included).

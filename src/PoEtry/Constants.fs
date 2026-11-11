@@ -1,4 +1,4 @@
-namespace PoEsie
+namespace PoEtry
 
 /// Named game constants. Each one says where it comes from; see RULES.md for
 /// how confident we are in the mechanic that uses it.

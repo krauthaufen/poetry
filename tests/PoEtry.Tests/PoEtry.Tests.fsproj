@@ -8,6 +8,6 @@
     <Compile Include="Tests.fs" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\src\PoEsie\PoEsie.fsproj" />
+    <ProjectReference Include="..\..\src\PoEtry\PoEtry.fsproj" />
   </ItemGroup>
 </Project>

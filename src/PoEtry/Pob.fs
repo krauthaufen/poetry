@@ -1,4 +1,4 @@
-namespace PoEsie
+namespace PoEtry
 
 /// A gem in a PoB socket group.
 type PobGem =
@@ -15,7 +15,7 @@ type PobGroup =
       Enabled: bool
       Gems: PobGem list }
 
-/// The parts of a PoB build PoEsie uses. Only PoB's *inputs* are read (items, tree,
+/// The parts of a PoB build PoEtry uses. Only PoB's *inputs* are read (items, tree,
 /// gems, level); none of PoB's computed numbers.
 type PobBuild =
     { Level: int

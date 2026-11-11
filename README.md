@@ -1,4 +1,4 @@
-# PoEsie
+# PoEtry
 
 An event-driven Path of Exile 2 combat simulator. It plays out a fight hit by hit, with timing, triggers, meta-gem energy, ailment stacks, minions and Monte Carlo variance, instead of averaging everything into one DPS number.
 
@@ -8,29 +8,29 @@ Written in F#: functional, readable, and portable. It runs on .NET and is kept c
 
 | File | What |
 |---|---|
-| `src/PoEsie/Types.fs` | damage types, ranges, skill tags, ailments |
-| `src/PoEsie/Mods.fs` | modifiers (base / increased / more / flag / override), conditions, the stat-indexed `ModDb` |
-| `src/PoEsie/Tables.fs` | GENERATED game tables (monster life/armour/thresholds, GameConstants) |
-| `src/PoEsie/Constants.fs` | named constants with their sources |
-| `src/PoEsie/Hit.fs` | one hit: base, conversion, gain, roll, crit, inc/more, armour, resist, penetration |
-| `src/PoEsie/Ailments.fs` | what a hit inflicts: ignite/bleed/poison, shock/chill, buildup ailments, flat-chance ailments |
-| `src/PoEsie/Sim.fs` | the discrete-event engine: actors, rotations, rules (on use/hit/crit/inflict), buffs, debuffs, meta gems, DoT integration |
-| `src/PoEsie/Summary.fs` | Monte Carlo: TTK / DPS percentiles, damage share, uptimes, event counts |
-| `src/PoEsie/Json.fs`, `Xml.fs` | dependency-free readers (same behaviour on .NET and Fable) |
-| `src/PoEsie/GameData.fs` | typed skills, gems, weapon bases from `data/game` |
-| `src/PoEsie/StatText.fs` | item / passive text → game stat ids, by reversing the game's own stat description templates |
-| `src/PoEsie/StatMap.fs` | game stat id → modifiers. **The simulator's knowledge of what stats mean.** Reads ids word by word; unknown words → Unmapped, never guessed |
-| `src/PoEsie/Gems.fs` | gem + level + quality + supports (+ weapon) → `Skill` |
-| `src/PoEsie/Character.fs` | items (game Ctrl+C or PoB format, local weapon mods) and passive tree → modifiers |
-| `src/PoEsie/Pob.fs` | read a PoB build's inputs (items, tree, gems). Never its computed numbers |
-| `cli/` | `poesie-sim build.xml`: coverage report + simulation of a socket group |
+| `src/PoEtry/Types.fs` | damage types, ranges, skill tags, ailments |
+| `src/PoEtry/Mods.fs` | modifiers (base / increased / more / flag / override), conditions, the stat-indexed `ModDb` |
+| `src/PoEtry/Tables.fs` | GENERATED game tables (monster life/armour/thresholds, GameConstants) |
+| `src/PoEtry/Constants.fs` | named constants with their sources |
+| `src/PoEtry/Hit.fs` | one hit: base, conversion, gain, roll, crit, inc/more, armour, resist, penetration |
+| `src/PoEtry/Ailments.fs` | what a hit inflicts: ignite/bleed/poison, shock/chill, buildup ailments, flat-chance ailments |
+| `src/PoEtry/Sim.fs` | the discrete-event engine: actors, rotations, rules (on use/hit/crit/inflict), buffs, debuffs, meta gems, DoT integration |
+| `src/PoEtry/Summary.fs` | Monte Carlo: TTK / DPS percentiles, damage share, uptimes, event counts |
+| `src/PoEtry/Json.fs`, `Xml.fs` | dependency-free readers (same behaviour on .NET and Fable) |
+| `src/PoEtry/GameData.fs` | typed skills, gems, weapon bases from `data/game` |
+| `src/PoEtry/StatText.fs` | item / passive text → game stat ids, by reversing the game's own stat description templates |
+| `src/PoEtry/StatMap.fs` | game stat id → modifiers. **The simulator's knowledge of what stats mean.** Reads ids word by word; unknown words → Unmapped, never guessed |
+| `src/PoEtry/Gems.fs` | gem + level + quality + supports (+ weapon) → `Skill` |
+| `src/PoEtry/Character.fs` | items (game Ctrl+C or PoB format, local weapon mods) and passive tree → modifiers |
+| `src/PoEtry/Pob.fs` | read a PoB build's inputs (items, tree, gems). Never its computed numbers |
+| `cli/` | `poetry-sim build.xml`: coverage report + simulation of a socket group |
 | `RULES.md` | **every mechanic, its source and how far we trust it** |
 
 ## Run
 
 ```bash
-dotnet run --project tests/PoEsie.Tests          # test suite (.NET)
-dotnet fable tests/PoEsie.Tests -o out/js && node out/js/Tests.js   # same suite in JS (add {"type":"module"} package.json in out/js)
+dotnet run --project tests/PoEtry.Tests          # test suite (.NET)
+dotnet fable tests/PoEtry.Tests -o out/js && node out/js/Tests.js   # same suite in JS (add {"type":"module"} package.json in out/js)
 dotnet run -c Release --project examples/Demo    # illustrative build, 2000 fights
 dotnet run -c Release --project cli -- examples/builds/spark-test.xml --data data/game --hits 3
 ```
@@ -42,7 +42,7 @@ dotnet run -c Release --project cli -- examples/builds/spark-test.xml --data dat
 ```bash
 # needs a Lua 5.2 interpreter (lua.org source, `make posix`)
 lua tools/export/export.lua <PoB>/src data/game [treeVersion]
-python3 tools/gen_tables.py <PoB>/src/Data/Misc.lua > src/PoEsie/Tables.fs
+python3 tools/gen_tables.py <PoB>/src/Data/Misc.lua > src/PoEtry/Tables.fs
 dotnet fsi tools/coverage/text.fsx      # how much item / tree text parses
 dotnet fsi tools/coverage/statids.fsx   # how many stat ids have a meaning
 ```

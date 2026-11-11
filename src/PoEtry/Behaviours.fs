@@ -1,4 +1,4 @@
-namespace PoEsie
+namespace PoEtry
 
 /// Per-skill behaviour that stats alone don't describe. Each entry says where its
 /// rules come from; numbers are read from the gem's stats.

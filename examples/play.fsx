@@ -1,7 +1,7 @@
 // A play style is an F# program: load a character, say how it's played, pick fights.
 //   dotnet fsi examples/play.fsx <character.json>
-#r "../src/PoEsie/bin/Release/net8.0/PoEsie.dll"
-open PoEsie
+#r "../src/PoEtry/bin/Release/net8.0/PoEtry.dll"
+open PoEtry
 
 let data = __SOURCE_DIRECTORY__ + "/../data/game/"
 let read (f: string) = System.IO.File.ReadAllText(data + f)

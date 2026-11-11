@@ -1,4 +1,4 @@
-namespace PoEsie
+namespace PoEtry
 
 /// Projectile behaviour of a skill. Distances in game units (10 = 1 metre).
 type ProjectileShape =

@@ -1,4 +1,4 @@
-namespace PoEsie
+namespace PoEtry
 
 /// Minimal JSON reader. Hand-written so it behaves the same on .NET and under Fable,
 /// with no dependencies.

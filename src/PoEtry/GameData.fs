@@ -1,4 +1,4 @@
-namespace PoEsie
+namespace PoEtry
 
 /// Typed views of the exported game data (data/game/*.json, see tools/export).
 

@@ -1,4 +1,4 @@
-namespace PoEsie
+namespace PoEtry
 
 /// 2D position in game units (10 units = 1 metre). The player stands at the origin
 /// facing +X.

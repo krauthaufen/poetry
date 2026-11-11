@@ -1,7 +1,7 @@
 /// Dependency-free test runner, so the suite also runs under Fable.
-module PoEsie.Tests
+module PoEtry.Tests
 
-open PoEsie
+open PoEtry
 
 let mutable private failures = 0
 let mutable private passed = 0
