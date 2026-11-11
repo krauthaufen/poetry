@@ -363,6 +363,8 @@ module Pob =
             Coverage.merge cov (Coverage.merge cov1 cov2)
         let extraStats, extraUnknown = StatText.parseLines db.Text build.ExtraLines
         let extraMods, _, extraCov = Items.interpret extraStats
+        let extraRescued, extraUnknown = Items.rescue db extraUnknown
+        let extraMods = extraMods @ extraRescued
         let flaskOf (pick: ParsedItem -> (float * float * float * float) option) =
             build.Items
             |> List.filter (fun (slot, _) -> slot.StartsWith "Flask")

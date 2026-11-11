@@ -106,7 +106,8 @@ module Defence =
         let esShare = min 100.0 (Mods.sumBase c [ Named "ESConvertedToMana" ] db) / 100.0
         let esToMana = esShare * (itemValue MaxEnergyShield (fun _ -> true) + esFromBodyEvasion + Mods.sumBase c [ MaxEnergyShield ] db)
         let bloodMagic = flag "BloodMagic"
-        let mana = if bloodMagic then 0.0 else pool MaxMana (baseMana + manaPerLevel * level + 2.0 * int' + esToMana)
+        let helmetMana = itemValue Armour ((=) "Helmet") * Mods.sumBase c [ Named "ManaPerHelmetArmour" ] db
+        let mana = if bloodMagic then 0.0 else pool MaxMana (baseMana + manaPerLevel * level + 2.0 * int' + esToMana + floor helmetMana)
         let es = esFull * (1.0 - esShare)
         let onlyLeech = flag "OnlyLeechRecoversLife"
         let lifeRecharges = flag "LifeRechargesInsteadOfES"
@@ -183,7 +184,7 @@ module Defence =
                     let v = Mods.sumBase c [ Named(sprintf "TakenAs:%s:%s" (DamageType.name from) (DamageType.name into)) ] db
                     if v > 0.0 then yield from, into, v ]
           // "X% faster start of Energy Shield Recharge"
-          ESRechargeDelay = Constants.energyShieldRechargeDelay / max 0.1 (Mods.inc c [ Named "ESRechargeFaster" ] db)
+          ESRechargeDelay = max 0.0 (Constants.energyShieldRechargeDelay + named "ESRechargeDelayFlat") / max 0.1 (Mods.inc c [ Named "ESRechargeFaster" ] db)
           ESRegen = (es * named "ESRegenPercent" / 100.0 + (if regenToES then lifeRegen else 0.0)) * esRecovery
           ManaBeforeLife = named "DamageRemovedFromManaFirst"
           BypassES = named "BypassES"

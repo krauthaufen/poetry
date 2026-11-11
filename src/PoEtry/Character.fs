@@ -121,6 +121,48 @@ module Items =
                 | Unmapped -> mods, locals, { cov with Unmapped = cov.Unmapped @ [ id, v ] })
             ([], [], Coverage.empty)
 
+    /// Lines the stat descriptions don't cover on their own: a known line with a condition
+    /// appended ("... for each Corrupted Item Equipped"), a few lines with rules of their own,
+    /// and lines about building the character that do nothing in a fight.
+    /// Returns the mods and the lines still not understood.
+    let rescue (db: GameDb) (unknown: string list) : Mod list * string list =
+        let number (l: string) = l.Split(' ') |> Array.tryPick (fun w -> match System.Double.TryParse(w.TrimStart('+').TrimEnd('%')) with | true, v -> Some v | _ -> None)
+        let numbers (l: string) = l.Split(' ') |> Array.choose (fun w -> match System.Double.TryParse(w.TrimStart('+').TrimEnd('%')) with | true, v -> Some v | _ -> None) |> List.ofArray
+        let inert (l: string) =
+            [ "Passive Skill Point"; "Triple Attribute requirements"; "Can tattoo Runes"; "additional Rune-only sockets"
+              "Reservation Efficiency of Companion Skills"; "Reservation Efficiency of non-Companion Skills"
+              "For each colour of Socketed Support Gem"; "Movement Speed Penalty from using Skills" ]
+            |> List.exists l.Contains
+            || ((l.EndsWith " socket" || l.EndsWith " sockets") && l.Length < 30)
+        let conditional =
+            [ " for each Corrupted Item Equipped", PerStack("CorruptedItems", 1.0) ]
+        unknown
+        |> List.fold
+            (fun (mods, left) (line: string) ->
+                let l = line.Trim()
+                let suffixed =
+                    conditional |> List.tryPick (fun (suffix, cond) ->
+                        if l.EndsWith suffix then
+                            StatText.parse db.Text (l.Substring(0, l.Length - suffix.Length))
+                            |> Option.map (fun stats -> let ms, _, _ = interpret stats in ms |> List.map (Mod.whenever cond))
+                        else None)
+                match suffixed with
+                | Some ms -> mods @ ms, left
+                | None ->
+                    if inert l then mods, left
+                    elif l.EndsWith "to base Energy Shield Recharge delay" then
+                        mods @ (number l |> Option.map (fun v -> Mod.base' (Named "ESRechargeDelayFlat") v) |> Option.toList), left
+                    elif l = "Red: Hits against you have no Critical Damage Bonus" then
+                        mods @ [ Mod.base' (Named "LessCritDamageTaken") 100.0 |> Mod.whenever (WhileBuff "SupportsMajority:red") ], left
+                    elif l.StartsWith "Blue: Skills have " && l.EndsWith "% less cost" then
+                        mods @ (number l |> Option.map (fun v -> Mod.more ManaCost -v |> Mod.whenever (WhileBuff "SupportsMajority:blue")) |> Option.toList), left
+                    elif l.Contains "to maximum Mana per " && l.EndsWith "Item Armour on Equipped Helmet" then
+                        match numbers l with
+                        | [ a; b ] when b > 0.0 -> mods @ [ Mod.base' (Named "ManaPerHelmetArmour") (a / b) ], left
+                        | _ -> mods, left @ [ line ]
+                    else mods, left @ [ line ])
+            ([], [])
+
     /// Replace "(lo-hi)" ranges by the value at position r (0..1), as PoB's {range:r} means.
     let private applyRange (r: float) (line: string) =
         let sb = System.Text.StringBuilder()
@@ -202,6 +244,8 @@ module Items =
         let context = if baseName.IsSome || hasLocalDefences then StatText.ItemLocal else StatText.Global
         let stats, unknown = StatText.parseLinesIn context db.Text candidates
         let mods, locals, cov = interpret stats
+        let rescued, unknown = rescue db unknown
+        let mods = mods @ rescued
         // Other item-local stats. Some only change what the item already displays (its
         // defences, requirements, sockets, quality) or how it can be crafted: nothing to add.
         // The rest act when the item is used: a weapon's ("Leeches 8% of Physical Damage as
@@ -393,7 +437,8 @@ module Tree =
                         keystoneLines |> List.collect (fun (k, start, ms) -> if k = node.Name && l.StartsWith start then ms |> List.map (Mod.from node.Name) else []))
                 let stats, unknown = StatText.parseLines db.Text relevant
                 let ms, _, c = Items.interpret stats
-                let ms = (ms @ lineMods) |> List.map (fun m -> if m.Source = "" then Mod.from ("tree: " + node.Name) m else m)
+                let rescued, unknown = Items.rescue db unknown
+                let ms = (ms @ rescued @ lineMods) |> List.map (fun m -> if m.Source = "" then Mod.from ("tree: " + node.Name) m else m)
                 let unknown = unknown |> List.map (fun l -> sprintf "%s: %s" node.Name l)
                 mods @ ms, Coverage.merge cov { c with UnknownText = c.UnknownText @ unknown })
             ([], Coverage.empty)

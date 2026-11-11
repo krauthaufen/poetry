@@ -70,7 +70,12 @@ module Api =
                 | JStr s -> Some s
                 | JObj _ -> Json.strField "description" m
                 | _ -> None))
-        |> List.collect (fun l -> (stripMarkup l).Split('\n') |> List.ofArray)
+        |> List.collect (fun l ->
+            // a wrapped "Bonded:" line keeps its mark on every part, so the parts stay together
+            let parts = (stripMarkup l).Split('\n') |> List.ofArray
+            match parts with
+            | first :: rest when first.StartsWith "Bonded: " -> first :: (rest |> List.map (fun p -> "Bonded: " + p))
+            | _ -> parts)
         |> resolveBonded item
 
     let private property name (item: Json) =
