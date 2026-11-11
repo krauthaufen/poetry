@@ -275,7 +275,10 @@ module Pob =
                     [ "Notable Passive Skills in Radius also grant ", true; "Small Passive Skills in Radius also grant ", false ]
                     |> List.tryPick (fun (prefix, notable) -> if l.StartsWith prefix then Some(notable, l.Substring prefix.Length) else None)
                 // lines about the jewel itself, with no effect of their own
-                let inert (l: string) = l.Contains "Passives in Radius of" || l.Trim() = "without being connected to your tree"
+                let inert (l: string) =
+                    l.Contains "Passives in Radius of" || l.Trim() = "without being connected to your tree"
+                    // The Adorned: read where the jewels' modifiers are scaled
+                    || l.Contains "increased Effect of Jewel Socket Passive Skills" || l.Trim() = "containing Corrupted Magic Jewels"
                 let grants = lines |> List.choose grant
                 let rest = lines |> List.filter (fun l -> (grant l).IsNone && not (inert l))
                 let mods =
@@ -389,6 +392,15 @@ module Pob =
                 else
                     let v = m.Value * (1.0 + pct / 100.0)
                     { m with Value = if m.Value = System.Math.Truncate m.Value then System.Math.Truncate v else v }
+            // The Adorned: "N% increased Effect of Jewel Socket Passive Skills containing Corrupted Magic Jewels"
+            let adorned =
+                build.Items |> List.sumBy (fun (slot, text) ->
+                    if not (slot.StartsWith "Jewel ") then 0.0
+                    else
+                        text.Split('\n') |> Array.sumBy (fun l ->
+                            let l = l.Trim()
+                            let k = l.IndexOf "% increased Effect of Jewel Socket Passive Skills"
+                            if k > 0 then (match System.Double.TryParse(l.Substring(0, k)) with | true, v -> v | _ -> 0.0) else 0.0))
             let slotEffect (slot: string) (text: string) =
                 if slot = "Ring 1" || slot = "Ring 2" || slot = "Amulet" then effect slot
                 elif slot = "Ring3" || slot = "Ring 3" then effect "Ring 3"
@@ -398,11 +410,14 @@ module Pob =
                         match System.Int32.TryParse(slot.Substring 6) with
                         | true, n -> (if n < 1000 then List.tryItem n jewelSlots else Some n) |> Option.bind (fun id -> Map.tryFind id tree)
                         | _ -> None
-                    match socket with
-                    | Some n when n.Ascendancy <> "" -> effect "AscendancyJewel"
-                    | _ -> 0.0
+                    let lines = text.Split('\n') |> Array.map (fun l -> l.Trim())
+                    let corruptedMagic = adorned > 0.0 && Array.contains "Rarity: Magic" lines && Array.contains "Corrupted" lines
+                    (match socket with
+                     | Some n when n.Ascendancy <> "" -> effect "AscendancyJewel"
+                     | _ -> 0.0)
+                    + (if corruptedMagic then adorned else 0.0)
                 else 0.0
-            let texts = Map.ofList items
+            let texts = Map.ofList build.Items
             itemMods |> List.collect (fun (slot, ms) -> ms |> List.map (scale (slotEffect slot (Map.tryFind slot texts |> Option.defaultValue "")))),
             smallMods |> List.map (scale (effect "SmallPassives"))
         let treeMods = smallMods @ treeMods

@@ -75,6 +75,18 @@ module Defence =
             { Ctx.empty with
                 Buffs = wielding |> List.fold (fun m b -> Map.add b 1 m) resources
                 SkillTags = if setTwo then Set.singleton (Tag "WeaponSet2") else Set.empty }
+        // "Evasion Rating from Equipped Helmet, Gloves and Boots is doubled", "from Equipped Body Armour is halved"
+        let sheet =
+            let double = Mods.flag c (Named "DoubleEvasionHelmetGlovesBoots") db
+            let halve = Mods.flag c (Named "HalveEvasionBodyArmour") db
+            if not double && not halve then sheet
+            else
+                { sheet with
+                    ItemDefences =
+                        sheet.ItemDefences |> List.map (fun (slot, s, v) ->
+                            if s = Evasion && double && (slot = "Helmet" || slot = "Gloves" || slot = "Boots") then slot, s, v * 2.0
+                            elif s = Evasion && halve && slot = "Body Armour" then slot, s, v / 2.0
+                            else slot, s, v) }
         let bStr, bDex, bInt = Map.tryFind (baseClass sheet.ClassName) bases |> Option.defaultValue (0.0, 0.0, 0.0)
         let attr k b = (b + Mods.sumBase c [ Attribute k ] db) * Mods.mult c [ Attribute k ] db |> floor
         let str, dex, int' = attr "Str" bStr, attr "Dex" bDex, attr "Int" bInt

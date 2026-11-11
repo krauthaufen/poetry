@@ -315,6 +315,8 @@ module Items =
                         elif id = "local_ring_duplicate_other_ring" then ms, c
                         // "+X to Spirit": part of a sceptre's own Spirit, a plain bonus on anything else
                         elif id = "local_spirit" && not (lines |> List.exists (fun l -> l.StartsWith "Spirit:")) then ms @ [ Mod.base' (Named "Spirit") v ], c
+                        // "20% increased Spirit" likewise: local on a sceptre, global on anything else
+                        elif id = "local_spirit_+%" && not (lines |> List.exists (fun l -> l.StartsWith "Spirit:")) then ms @ [ Mod.inc (Named "Spirit") v ], c
                         elif shown then ms, c
                         else
                             // local stats with a name of their own; the rest read like the same stat without "local_"

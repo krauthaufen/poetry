@@ -60,20 +60,25 @@ let runOne (path: string) : Result =
             |> Option.orElse (actives |> List.filter (fun (n, _, _) -> usable n) |> List.sortByDescending (fun (_, k, _) -> k) |> List.tryHead)
         // the sheet is compared with PoB's quest rewards, not the game's: PoB does not know the newer
         // ones, and the comparison is about our arithmetic, not about whose input is right
+        let setTwo = ninja |> Option.bind (Json.field "pobSecondWeaponSet") = Some(JBool true)
         let cs =
             match ninja |> Option.bind (Json.field "pobQuestStats") with
             | Some (JArr lines) ->
                 let ignored = Json.list (ninja |> Option.bind (Json.field "pobIgnoredNodes")) |> List.choose Json.num |> List.map int
                 let overrides = ignored |> List.fold (fun m id -> Map.add id [] m) build.TreeOverrides
                 // and with the weapon set PoB had in hand
-                let setTwo = ninja |> Option.bind (Json.field "pobSecondWeaponSet") = Some(JBool true)
                 Setup.loadWith db treeJson { build with ExtraLines = lines |> List.choose Json.str; TreeOverrides = overrides } { o with SheetSetTwo = setTwo }
             | _ -> c
         let sheet =
             let v = cs.Vitals
             // uncapped, so a missing source shows as its exact value
             let sheetDb = ModDb.ofList cs.Sheet.Mods
-            let res t = Defence.uncappedResist Ctx.empty sheetDb t
+            // PoB counts a charm's resistance as always on; ours is there while the charm is
+            let charmsOn =
+                { Ctx.empty with
+                    Buffs = [ 1 .. 3 ] |> List.fold (fun m i -> Map.add (sprintf "Charm%d" i) 1 m) cs.MaxResources
+                    SkillTags = if setTwo then Set.singleton (Tag "WeaponSet2") else Set.empty }
+            let res t = Defence.uncappedResist charmsOn sheetDb t
             let num key =
                 match key with
                 | "fireResistance" | "coldResistance" | "lightningResistance" | "chaosResistance" -> num key |> Option.map (fun r -> r + (num (key + "OverCap") |> Option.defaultValue 0.0))
@@ -86,7 +91,8 @@ let runOne (path: string) : Result =
               "lightning res", res Lightning, "lightningResistance"; "chaos res", res Chaos, "chaosResistance" ]
             |> List.choose (fun (name, ours, key) -> num key |> Option.map (fun t -> name, ours, t))
             // Chaos Inoculation: immune, not a resistance; Runic Ward is newer than PoB's data
-            |> List.filter (fun (name, _, _) -> name <> "ward" && not (name = "chaos res" && v.Life <= 1.0))
+            // (PoB still shows the life under Chaos Inoculation and the mana under Blood Magic)
+            |> List.filter (fun (name, _, _) -> name <> "ward" && not ((name = "chaos res" || name = "life") && v.Life <= 1.0) && not (name = "mana" && v.Mana <= 0.0))
             // their block chance is not capped
             |> List.map (fun (name, ours, theirs) -> if name = "block" && theirs > ours && ours >= 50.0 then name, ours, ours else name, ours, theirs)
         let dpsOf (gem: string) =

@@ -733,7 +733,8 @@ module Behaviours =
 
     let spiritTotal (sheet: CharacterSheet) (build: PobBuild) =
         let db = ModDb.ofList sheet.Mods
-        let c = { Ctx.empty with Buffs = Map.ofList [ "CorruptedItems", corruptedItems build ] }
+        let spectrums = build.Items |> List.filter (fun (slot, text) -> slot.StartsWith "Jewel" && text.Contains "Grand Spectrum") |> List.length
+        let c = { Ctx.empty with Buffs = Map.ofList [ "CorruptedItems", corruptedItems build; "GrandSpectrum", spectrums ] }
         let sheet = { sheet with ItemDefences = sheet.ItemDefences |> List.filter (fun (s, _, _) -> not (s.Contains "Swap")) }
         let item stat slot = sheet.ItemDefences |> List.sumBy (fun (s, st, v) -> if st = stat && (slot = "" || s = slot) then v else 0.0)
         let per name stat = match Mods.sumBase c [ Named name ] db with | n when n > 0.0 -> floor (item stat "Body Armour" / n) | _ -> 0.0
@@ -741,8 +742,30 @@ module Behaviours =
         let setOne = sheet.ItemDefences |> List.sumBy (fun (s, st, v) -> if st = Named "Spirit" && s.StartsWith "Weapon" then v else 0.0)
         let setTwo = Mods.sumBase c [ Named "SpiritOnSetTwo" ] db
         let fromItems = if Mods.flag c (Named "NoSpiritFromEquipment") db then 0.0 else item (Named "Spirit") "" - setOne + max setOne setTwo
+        // "+40 to Spirit for each of your empty Charm slots": slots from the belt ("Has 2 Charm
+        // Slots") and "+1 Charm Slot" lines, three at most, less the charms worn
+        let emptyCharmSlots =
+            let count (text: string) =
+                text.Split('\n') |> Array.sumBy (fun l ->
+                    let w = l.Trim().Split(' ')
+                    if (l.Contains "Charm Slot") && w.Length >= 3 then
+                        (if w.[0] = "Has" then (match System.Double.TryParse w.[1] with | true, v -> v | _ -> 0.0)
+                         elif w.[0].StartsWith "+" then (match System.Double.TryParse(w.[0].Substring 1) with | true, v -> v | _ -> 0.0)
+                         else 0.0)
+                    else 0.0)
+            let slots = (build.Items |> List.sumBy (fun (slot, text) -> if slot.Contains "Swap" then 0.0 else count text)) + (build.ExtraLines |> List.sumBy count)
+            let worn = build.Items |> List.filter (fun (_, text) -> text.Contains "Flask: Lasts") |> List.length
+            max 0.0 (min 3.0 slots - float worn)
+        // from the sheet's own numbers (Setup puts them on the sheet as "Sheet:Life", "Sheet:Dex", ...):
+        // "+25 to Spirit while you have at least 200 Dexterity", "+1 to Maximum Spirit per 25 Maximum Life"
+        let own name = Mods.sumBase c [ Named("Sheet:" + name) ] db
+        let fromSheet =
+            ([ "Str"; "Dex"; "Int" ] |> List.sumBy (fun a -> if own a >= 200.0 then Mods.sumBase c [ Named(sprintf "SpiritIfAtLeast|%s|200" a) ] db else 0.0))
+            + (match Mods.sumBase c [ Named "SpiritPerLife" ] db with
+               | per when per > 0.0 -> floor (own "Life" / per)
+               | _ -> 0.0)
         if Mods.flag c (Named "NoSpirit") db then 0.0 else
-        (Mods.sumBase c [ Named "Spirit" ] db + fromItems + per "SpiritPerBodyES" MaxEnergyShield + per "SpiritPerBodyEvasion" Evasion)
+        (Mods.sumBase c [ Named "Spirit" ] db + Mods.sumBase c [ Named "SpiritPerEmptyCharmSlot" ] db * emptyCharmSlots + fromSheet + fromItems + per "SpiritPerBodyES" MaxEnergyShield + per "SpiritPerBodyEvasion" Evasion)
         * Mods.mult c [ Named "Spirit" ] db
         |> floor
 

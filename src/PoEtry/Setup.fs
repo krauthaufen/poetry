@@ -190,6 +190,13 @@ module Setup =
                 | "PowerCharge", Some c -> c
                 | _ when o.StartEmpty && k <> "PowerCharge" && k <> "Rage" -> 0
                 | _ -> n)
+        // the sheet's own life and attributes, for Spirit that depends on them
+        let sheet =
+            let v = Defence.computeWith startResources bases sheet
+            { sheet with Mods = sheet.Mods @ ([ "Life", v.Life; "Str", v.Str; "Dex", v.Dex; "Int", v.Int ] |> List.map (fun (k, x) -> Mod.base' (Named("Sheet:" + k)) x |> Mod.from "sheet")) }
+        // total Spirit as a stack count, for "per 1 Spirit"
+        let spirit = int (Behaviours.spiritTotal sheet build)
+        let maxResources, startResources = Map.add "Spirit" spirit maxResources, Map.add "Spirit" spirit startResources
         let vitals = Defence.computeWith (if o.SheetSetTwo then Map.add "WeaponSetTwo" 1 startResources else startResources) bases sheet
         // accuracy: 6 per level above the first and 6 per Dexterity (Character.ot, PoB AccuracyPerDexBase)
         let sheet =

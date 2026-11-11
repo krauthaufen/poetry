@@ -192,6 +192,47 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         // "15% more Maximum Life" is the Titan's stat here, not a monster rarity's
         near (plain.Life * 1.15) (stats { blank with ExtraLines = [ "15% more Maximum Life" ] }).Life)
 
+    test "The Adorned, Grand Spectrum resistances, doubled evasion from helmet, gloves and boots" (fun () ->
+        // a corrupted magic jewel counts for 100% more beside The Adorned; a rare or uncorrupted one does not
+        let jewel n rarity corrupted = sprintf "Jewel %d" n, String.concat "\n" ([ "Rarity: " + rarity; "Test Ruby"; "--------" ] @ (if corrupted then [ "Corrupted" ] else []) @ [ "--------"; "+10 to Strength" ])
+        let adorned = "Jewel 3", "Rarity: Unique\nThe Adorned\nDiamond\n--------\n100% increased Effect of Jewel Socket Passive Skills\ncontaining Corrupted Magic Jewels"
+        let plain = stats blank
+        near (plain.Str + 30.0) (stats { blank with Items = [ jewel 0 "Magic" true; jewel 1 "Rare" true; jewel 2 "Magic" false ] }).Str
+        near (plain.Str + 40.0) (stats { blank with Items = [ jewel 0 "Magic" true; jewel 1 "Rare" true; jewel 2 "Magic" false; adorned ] }).Str
+        // "+7% to all Elemental Resistances per socketed Grand Spectrum": two of them give 2 x 2 x 7
+        let spectrum n = sprintf "Jewel %d" n, "Rarity: Unique\nGrand Spectrum\nSapphire\n--------\n+7% to all Elemental Resistances per socketed Grand Spectrum"
+        let b = { blank with Items = [ spectrum 0; spectrum 1 ] }
+        let c = Setup.loadWith db.Value treeJson b Options.defaults
+        near (resist Cold plain + 28.0) (resist Cold c.Vitals)
+        // evasion from helmet doubled, from body armour halved
+        let helmet = item "Helmet" [ "Evasion Rating: 100" ]
+        let body = item "Body Armour" [ "Evasion Rating: 100" ]
+        let lines = [ "Evasion Rating from Equipped Helmet, Gloves and Boots is doubled"; "Evasion Rating from Equipped Body Armour is halved" ]
+        let before = stats { blank with Items = [ helmet; body ] }
+        let after = stats { blank with Items = [ helmet; body ]; ExtraLines = lines }
+        near 50.0 (after.Evasion - before.Evasion))
+
+    test "spirit: less Spirit, per empty charm slot, per life, at 200 of an attribute, per Spirit" (fun () ->
+        let quest = [ "+100 to Spirit" ]
+        let total b = (Setup.loadWith db.Value treeJson b Options.defaults).Spirit
+        near 100.0 (total { blank with ExtraLines = quest })
+        // Lord of the Wilds (61942): 50% less Spirit
+        near 50.0 (total { blank with ExtraLines = quest; TreeNodes = [ 61942 ] })
+        // a belt with 2 charm slots and the quest's third, one charm worn: 2 empty x 40
+        let belt = item "Belt" [ "Has 2 Charm Slots" ]
+        let charm = "Charm 1", "Rarity: Magic\nTest Charm\n--------\nFlask: Lasts 3 Seconds\nUsed when you become Frozen"
+        let slots = quest @ [ "+1 Charm Slot"; "+40 to Spirit for each of your empty Charm slots" ]
+        near 180.0 (total { blank with ExtraLines = slots; Items = [ belt; charm ] })
+        // "+25 to Spirit while you have at least 200 Dexterity"
+        let dex n = quest @ [ sprintf "+%d to Dexterity" n; "+25 to Spirit while you have at least 200 Dexterity" ]
+        near 100.0 (total { blank with ExtraLines = dex 100 })
+        near 125.0 (total { blank with ExtraLines = dex 200 })
+        // "20% increased Spirit" on a body armour is global; "+2 to Armour per 1 Spirit"
+        let body = item "Body Armour" [ "Armour: 100"; "--------"; "20% increased Spirit" ]
+        near 120.0 (total { blank with ExtraLines = quest; Items = [ body ] })
+        let armour b = (Setup.loadWith db.Value treeJson b Options.defaults).Vitals.Armour
+        near 200.0 (armour { blank with ExtraLines = quest @ [ "+2 to Armour per 1 Spirit" ] } - armour { blank with ExtraLines = quest }))
+
     test "the sheet of the second weapon set counts its weapons, not the first set's" (fun () ->
         let b = { blank with Items = [ item "Weapon 1" [ "+30 to Strength" ]; item "Weapon 1 Swap" [ "+10 to Strength" ]
                                        "Weapon 2", "Rarity: Rare\nTest Shield\n--------\nArmour: 200"

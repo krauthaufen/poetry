@@ -142,6 +142,8 @@ module StatMap =
             // "... per 15 strength": the character's attributes are stacks "Str" / "Dex" / "Int"
             | "per" :: n :: ("strength" | "dexterity" | "intelligence" as attr) :: tail when n <> "" && n |> Seq.forall System.Char.IsDigit ->
                 go (PerStack((match attr with "strength" -> "Str" | "dexterity" -> "Dex" | _ -> "Int"), float n) :: acc) tail
+            // "per 20 Spirit": the character's total Spirit as stacks
+            | "per" :: n :: "spirit" :: tail when n <> "" && n |> Seq.forall System.Char.IsDigit -> go (PerStack("Spirit", float n) :: acc) tail
             // "... if 10 red supports socketed", "... if majority blue supports socketed"
             | "if" :: "10" :: colour :: "supports" :: "socketed" :: tail -> go (WhileBuff("Supports10:" + colour) :: acc) tail
             | "if" :: "majority" :: colour :: "supports" :: "socketed" :: tail -> go (WhileBuff("SupportsMajority:" + colour) :: acc) tail
@@ -162,6 +164,8 @@ module StatMap =
             | "per" :: c :: "charge" :: tail when c = "power" || c = "frenzy" || c = "endurance" ->
                 go (PerStack(titleCase [ c; "charge" ], 1.0) :: acc) tail
             | "per" :: "rage" :: tail -> go (PerStack("Rage", 1.0) :: acc) tail
+            // Grand Spectrum: "per socketed Grand Spectrum"
+            | "per" :: "stackable" :: "unique" :: "jewel" :: tail -> go (PerStack("GrandSpectrum", 1.0) :: acc) tail
             | "with" :: c :: "charges" :: tail when c = "power" || c = "frenzy" || c = "endurance" ->
                 go (WhileBuff(titleCase [ c; "charge" ]) :: acc) tail
             | "when" :: "charged" :: tail -> go (WhileBuff "PowerCharge" :: acc) tail
@@ -264,6 +268,22 @@ module StatMap =
         | "energy_shield_delay_-%_while_affected_by_archon" -> one (Mod.inc (Named "ESRechargeFaster") v |> Mod.whenever (WhileBuff "Elemental Archon"))
         | "maximum_life_mana_and_energy_shield_+%" -> Some(Mods [ Mod.inc MaxLife v; Mod.inc MaxMana v; Mod.inc MaxEnergyShield v ])
         // Grand Spectrum: "per socketed Grand Spectrum"
+        // Lord of the Wilds: "50% less Spirit", "Non-Minion Skills have 50% less Reservation Efficiency"
+        | "keystone_lord_of_the_wilds" ->
+            Some(Mods [ Mod.more (Named "Spirit") -v; Mod.more (Named "ReservationEfficiency") -v |> Mod.whenever (Not(SkillIs(Tag "Type:Minion"))) ])
+        // read by Behaviours.spiritTotal from the sheet's own numbers
+        | "spirit_+_if_at_least_200_dexterity" -> one (Mod.base' (Named "SpiritIfAtLeast|Dex|200") v)
+        | "spirit_+_if_at_least_200_intelligence" -> one (Mod.base' (Named "SpiritIfAtLeast|Int|200") v)
+        | "spirit_+_if_at_least_200_strength" -> one (Mod.base' (Named "SpiritIfAtLeast|Str|200") v)
+        // Beidat's Will: "+1 to Maximum Spirit per 25 Maximum Life" (the value is the 25)
+        | "ascendancy_beidats_will_spirit_+_per_X_maximum_life" -> one (Mod.base' (Named "SpiritPerLife") v)
+        | "spirit_+_per_empty_charm_slot" -> one (Mod.base' (Named "SpiritPerEmptyCharmSlot") v)
+        | "armour_+_per_1_spirit" -> one (Mod.base' Armour v |> Mod.whenever (PerStack("Spirit", 1.0)))
+        | "double_evasion_rating_from_gloves_helmets_boots" -> one (Mod.flag (Named "DoubleEvasionHelmetGlovesBoots"))
+        | "halve_evasion_rating_from_body" -> one (Mod.flag (Named "HalveEvasionBodyArmour"))
+        | "resist_all_elements_%_per_power_charge" -> Some(Mods(DamageType.elemental |> List.map (fun t -> Mod.base' (Resist t) v |> Mod.whenever (PerStack("PowerCharge", 1.0)))))
+        | "elemental_resistance_%_per_stackable_unique_jewel" -> Some(Mods(DamageType.elemental |> List.map (fun t -> Mod.base' (Resist t) v |> Mod.whenever (PerStack("GrandSpectrum", 1.0)))))
+        | "spirit_+%_per_stackable_unique_jewel" -> one (Mod.inc (Named "Spirit") v |> Mod.whenever (PerStack("GrandSpectrum", 1.0)))
         | "maximum_life_+%_per_stackable_unique_jewel" -> one (Mod.inc MaxLife v |> Mod.whenever (PerStack("GrandSpectrum", 1.0)))
         | "double_evasion_rating_if_you_havent_been_hit_recently" -> one (Mod.more Evasion 100.0 |> Mod.whenever (Not(WhileBuff "BeenHitRecently")))
         | "evasion_rating_%_to_gain_as_armour" -> one (Mod.base' (Named "EvasionGainedAsArmour") v)
