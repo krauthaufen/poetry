@@ -56,12 +56,25 @@ module Defence =
         let fromFire = if t = Cold || t = Lightning then Mods.sumBase c [ Resist Fire ] db * Mods.sumBase c [ Named "FireResToColdLightning" ] db / 100.0 else 0.0
         Mods.sumBase c [ Resist t ] db * doubled + fromFire + penalty
 
+    /// What the items of the active weapon set show: the other set's weapons are put away.
+    let activeSet (setTwo: bool) (defences: (string * Stat * float) list) =
+        defences |> List.choose (fun (slot, s, v) ->
+            if slot.Contains "Swap" then (if setTwo then Some(slot.Replace(" Swap", ""), s, v) else None)
+            elif setTwo && slot.StartsWith "Weapon" then None
+            else Some(slot, s, v))
+
     let computeWith (resources: Map<string, int>) (bases: Map<string, float * float * float>) (sheet: CharacterSheet) : PlayerStats =
         let db = ModDb.ofList sheet.Mods
         // "while wielding a Quarterstaff" and similar read the main hand
         let wielding =
             sheet.MainHand |> Option.map (fun w -> w.Tags |> List.choose (function Tag _ -> None | t -> Some(sprintf "Wielding%A" t))) |> Option.defaultValue []
-        let c = { Ctx.empty with Buffs = wielding |> List.fold (fun m b -> Map.add b 1 m) resources }
+        // the sheet of weapon set one, or of set two when asked for ("WeaponSetTwo")
+        let setTwo = Map.containsKey "WeaponSetTwo" resources
+        let sheet = { sheet with ItemDefences = activeSet setTwo sheet.ItemDefences }
+        let c =
+            { Ctx.empty with
+                Buffs = wielding |> List.fold (fun m b -> Map.add b 1 m) resources
+                SkillTags = if setTwo then Set.singleton (Tag "WeaponSet2") else Set.empty }
         let bStr, bDex, bInt = Map.tryFind (baseClass sheet.ClassName) bases |> Option.defaultValue (0.0, 0.0, 0.0)
         let attr k b = (b + Mods.sumBase c [ Attribute k ] db) * Mods.mult c [ Attribute k ] db |> floor
         let str, dex, int' = attr "Str" bStr, attr "Dex" bDex, attr "Int" bInt

@@ -170,6 +170,37 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         near (res Lightning plain + 25.0) (res Lightning mirrored)
         near 78.0 (res Cold mirrored))
 
+    test "effect of small passives, of an item's bonuses; per armour on an item; a character's \"more Life\"" (fun () ->
+        // Hulking Form (30115): 50% increased effect of Small Passive Skills. "+8 to Strength" (34202)
+        // becomes +12; the "+5 to any Attribute" node (10100) stays +5
+        let withNodes nodes = stats { blank with TreeNodes = nodes; TreeOverrides = Map.ofList [ 10100, [ "+5 to Strength" ] ] }
+        let plain = stats blank
+        near (plain.Str + 13.0) (withNodes [ 34202; 10100 ]).Str
+        near (plain.Str + 17.0) (withNodes [ 34202; 10100; 30115 ]).Str
+        // "+5 to Strength" at 50% more effect is +7: the game's stats are whole numbers
+        let ring slot = item slot [ "+5 to Strength"; "+20 to Intelligence" ]
+        let left = stats { blank with Items = [ ring "Ring 1"; ring "Ring 2" ]; ExtraLines = [ "50% increased bonuses gained from left Equipped Ring" ] }
+        near (plain.Str + 7.0 + 5.0) left.Str
+        near (plain.Int + 30.0 + 20.0) left.Int
+        // a quiver is the item in the off hand with Quiver in its text
+        let quiver = "Weapon 2", "Rarity: Rare\nTest Quiver\nBroadhead Quiver\n--------\n+10 to Dexterity"
+        near (plain.Dex + 13.0) (stats { blank with Items = [ quiver ]; ExtraLines = [ "30% increased bonuses gained from Equipped Quiver" ] }).Dex
+        // "+1 to maximum Life per 8 Item Armour on Equipped Helmet": 100 armour -> +12
+        let helmet lines = item "Helmet" ([ "Armour: 100"; "--------" ] @ lines)
+        let bare = stats { blank with Items = [ helmet [] ] }
+        near (bare.Life + 12.0) (stats { blank with Items = [ helmet [ "+1 to maximum Life per 8 Armour on Equipped Helmet" ] ] }).Life
+        // "15% more Maximum Life" is the Titan's stat here, not a monster rarity's
+        near (plain.Life * 1.15) (stats { blank with ExtraLines = [ "15% more Maximum Life" ] }).Life)
+
+    test "the sheet of the second weapon set counts its weapons, not the first set's" (fun () ->
+        let b = { blank with Items = [ item "Weapon 1" [ "+30 to Strength" ]; item "Weapon 1 Swap" [ "+10 to Strength" ]
+                                       "Weapon 2", "Rarity: Rare\nTest Shield\n--------\nArmour: 200"
+                                       "Weapon 2 Swap", "Rarity: Rare\nOther Shield\n--------\nArmour: 50" ] }
+        let one = stats b
+        let two = Defence.computeWith (Map.ofList [ "WeaponSetTwo", 1 ]) bases (sheetOf b)
+        near 20.0 (one.Str - two.Str)
+        near 4.0 (one.Armour / two.Armour))
+
     test "spell damage per 100 maximum mana counts the hundreds of mana" (fun () ->
         let ms = match StatMap.meaning "spell_damage_+%_per_100_maximum_mana" 3.0 with Mods ms -> ms | m -> failwithf "%A" m
         let db = ModDb.ofList ms

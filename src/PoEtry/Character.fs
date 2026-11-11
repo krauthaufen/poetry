@@ -21,6 +21,8 @@ type TreeNode =
       IsKeystone: bool
       IsNotable: bool
       IsJewelSocket: bool
+      /// The ascendancy the node belongs to, "" on the main tree.
+      Ascendancy: string
       /// Position on the tree (tools/treegeo.py); 0, 0 if unknown.
       X: float
       Y: float }
@@ -410,6 +412,7 @@ module Tree =
                           IsKeystone = Json.field "isKeystone" j = Some(JBool true)
                           IsNotable = Json.field "isNotable" j = Some(JBool true)
                           IsJewelSocket = Json.field "isJewelSocket" j = Some(JBool true)
+                          Ascendancy = Json.strField "ascendancyName" j |> Option.defaultValue ""
                           X = Json.numField "x" j |> Option.defaultValue 0.0
                           Y = Json.numField "y" j |> Option.defaultValue 0.0 }
                     )

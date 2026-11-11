@@ -58,10 +58,21 @@ let runOne (path: string) : Result =
         let main =
             actives |> List.filter (fun (n, _, _) -> wanted.EndsWith(slug n)) |> List.sortByDescending (fun (n, _, _) -> n.Length) |> List.tryHead
             |> Option.orElse (actives |> List.filter (fun (n, _, _) -> usable n) |> List.sortByDescending (fun (_, k, _) -> k) |> List.tryHead)
+        // the sheet is compared with PoB's quest rewards, not the game's: PoB does not know the newer
+        // ones, and the comparison is about our arithmetic, not about whose input is right
+        let cs =
+            match ninja |> Option.bind (Json.field "pobQuestStats") with
+            | Some (JArr lines) ->
+                let ignored = Json.list (ninja |> Option.bind (Json.field "pobIgnoredNodes")) |> List.choose Json.num |> List.map int
+                let overrides = ignored |> List.fold (fun m id -> Map.add id [] m) build.TreeOverrides
+                // and with the weapon set PoB had in hand
+                let setTwo = ninja |> Option.bind (Json.field "pobSecondWeaponSet") = Some(JBool true)
+                Setup.loadWith db treeJson { build with ExtraLines = lines |> List.choose Json.str; TreeOverrides = overrides } { o with SheetSetTwo = setTwo }
+            | _ -> c
         let sheet =
-            let v = c.Vitals
+            let v = cs.Vitals
             // uncapped, so a missing source shows as its exact value
-            let sheetDb = ModDb.ofList c.Sheet.Mods
+            let sheetDb = ModDb.ofList cs.Sheet.Mods
             let res t = Defence.uncappedResist Ctx.empty sheetDb t
             let num key =
                 match key with
@@ -70,7 +81,7 @@ let runOne (path: string) : Result =
             [ "life", v.Life, "life"; "mana", v.Mana, "mana"; "energy shield", v.EnergyShield, "energyShield"
               "strength", v.Str, "strength"; "dexterity", v.Dex, "dexterity"; "intelligence", v.Int, "intelligence"
               "armour", v.Armour, "armour"; "evasion", v.Evasion, "evasionRating"; "deflection", v.Deflection, "deflectionRating"
-              "block", v.Block, "blockChance"; "ward", v.Ward, "ward"; "spirit", c.Spirit, "spirit"
+              "block", v.Block, "blockChance"; "ward", v.Ward, "ward"; "spirit", cs.Spirit, "spirit"
               "fire res", res Fire, "fireResistance"; "cold res", res Cold, "coldResistance"
               "lightning res", res Lightning, "lightningResistance"; "chaos res", res Chaos, "chaosResistance" ]
             |> List.choose (fun (name, ours, key) -> num key |> Option.map (fun t -> name, ours, t))

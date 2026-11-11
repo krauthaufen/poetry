@@ -82,6 +82,8 @@ Conversion poe.ninja -> official character API  (everything renamed / synthesize
                                       pathOfBuildingExport. `breakdowns` is dropped (raw only).
 """
 import argparse
+import base64
+import html
 import json
 import math
 import os
@@ -92,6 +94,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import zlib
 
 BASE = "https://poe.ninja/poe2/api"
 UA = "build-corpus-fetch/0.1"
@@ -259,25 +262,75 @@ def conv_override(oid):
     if m:
         name = ATTR[m.group(1)]
         return {"id": oid, "name": name, "granted" + name: 5, "stats": ["+5 to [%s]" % name]}, True
+    # an ascendancy lets attribute nodes grant something else ("Attribute Passive Skills can
+    # instead grant ..."): the choices are the lines of that notable, in the tree data
+    m = re.match(r"[a-z]+_alternate_generic_attribute_(\w+)$", oid or "")
+    if m:
+        word = {"damage": "Damage", "defences": "Armour", "cost_efficiency": "Cost Efficiency"}.get(m.group(1))
+        for line in re.findall(r"Attribute Passive Skills can instead grant ([^\"]*)", tree_text()):
+            if word and word in line:
+                return {"id": oid, "name": line, "stats": [line], "alternate": True}, True
     return {"id": oid, "stats": []}, False
 
 
 _TREE = None
 
 
-def extra_keystones(raw):
-    """Stats of keystones poe.ninja lists that our tree data doesn't know by name (league
-    keystones such as Black Scythe Training): appended to quest_stats so they count."""
+def tree_text():
     global _TREE
     if _TREE is None:
         path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "data", "game", "tree.json")
         _TREE = open(path, encoding="utf-8").read()
+    return _TREE
+
+
+def extra_keystones(raw):
+    """Stats of keystones poe.ninja lists that our tree data doesn't know by name (league
+    keystones such as Black Scythe Training): appended to quest_stats so they count."""
     out = []
     for k in raw.get("keystones") or []:
-        if '"%s"' % k.get("name") not in _TREE:
+        if '"%s"' % k.get("name") not in tree_text():
             for st in k.get("stats") or []:
                 out += st.split("\n")
     return out
+
+
+# PoB's own quest rewards (its Data/QuestRewards "Stat" entries, on by default). The game has
+# added rewards since, so poe.ninja's PoB numbers are worked out with these, not with questStats.
+POB_QUESTS = [
+    ("Act 1ClearfellBeira", "+10% to Cold Resistance"),
+    ("Act 1FreythornKing In The Mists", "+30 to Spirit"),
+    ("Act 1Ogham ManorCandlemass", "+20 to maximum Life"),
+    ("Act 2Spires of DesharSisters of Garukhan Shrine", "+10% to Lightning Resistance"),
+    ("Act 3Azak BogIgnagduk", "+30 to Spirit"),
+    ("Act 3Jiquani's MachinariumBlackjaw", "+10% to Fire Resistance"),
+    ("Act 4Eye of HinekoraSilent Hall", "5% increased maximum Mana"),
+    ("Interlude 2Khari CrossingMolten Shrine", "5% increased maximum Life"),
+    ("Interlude 3Kriar VillageLythara", "+40 to Spirit"),
+]
+
+
+def pob_quest_stats(raw):
+    """The quest reward lines poe.ninja's PoB build has switched on, or None without an export."""
+    code = raw.get("pathOfBuildingExport")
+    if not code:
+        return None
+    try:
+        xml = zlib.decompress(base64.urlsafe_b64decode(code)).decode("utf-8", "replace")
+    except Exception:
+        return None
+    off, lines = set(), []
+    for tag in re.findall(r"<Input [^>]*>", xml):
+        name = re.search(r'name="quest([^"]*)"', tag)
+        if not name:
+            continue
+        key = html.unescape(name.group(1))
+        if 'boolean="false"' in tag:
+            off.add(key)
+        text = re.search(r'string="([^"]*)"', tag)
+        if text and text.group(1) != "None":
+            lines += [l.strip() for l in html.unescape(text.group(1)).split("\n") if l.strip()]
+    return [st for key, st in POB_QUESTS if key not in off] + lines + extra_keystones(raw)
 
 
 def convert(raw):
@@ -316,6 +369,14 @@ def convert(raw):
     ninja = {k: raw.get(k) for k in (
         "account", "defensiveStats", "keystones", "passiveCounts", "baseClass", "useSecondWeaponSet",
         "enableBondedMods", "lastSeenUtc", "updatedUtc", "lastCheckedUtc", "pathOfBuildingExport")}
+    ninja["pobQuestStats"] = pob_quest_stats(raw)
+    # PoB does not model an ascendancy's alternative attribute nodes: they grant nothing there
+    ninja["pobIgnoredNodes"] = [int(h) for h, o in overrides.items() if o.get("alternate")]
+    try:
+        xml = zlib.decompress(base64.urlsafe_b64decode(raw.get("pathOfBuildingExport") or "")).decode("utf-8", "replace")
+        ninja["pobSecondWeaponSet"] = 'useSecondWeaponSet="true"' in (re.search(r"<ItemSet[^>]*>", xml) or [""])[0]
+    except Exception:
+        ninja["pobSecondWeaponSet"] = False
     ninja["skillDps"] = [d for grp in raw.get("skills") or [] for d in grp.get("dps") or []]
     return {"character": character, "ninja": ninja}, unknown
 

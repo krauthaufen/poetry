@@ -275,6 +275,11 @@ module StatText =
         | None -> None
         | Some variants ->
             let readings = variants |> List.choose (fun v -> read v numbers)
+            // the same words also describe monsters and maps ("15% more maximum Life" is a
+            // rarity's life too): a character's line is read as a character's stat first
+            let readings =
+                let foreign (stats: (string * float) list) = stats |> List.exists (fun (s, _) -> s.StartsWith "monster_" || s.StartsWith "map_")
+                (readings |> List.filter (foreign >> not)) @ (readings |> List.filter foreign)
             let preferred =
                 match context with
                 | ItemLocal -> readings |> List.tryFind isLocal

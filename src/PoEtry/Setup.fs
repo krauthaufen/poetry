@@ -29,6 +29,8 @@ type Options =
       ChargeGen: float
       /// Observed resource maxima override computed ones.
       MaxOverrides: (string * int) list
+      /// Show the character sheet (pools, defences) with the second weapon set in hand.
+      SheetSetTwo: bool
       /// Start with this many power charges instead of the maximum.
       StartPowerCharges: int option
       /// Start with no resources except power charges and rage.
@@ -62,6 +64,7 @@ module Options =
           Bonded = false
           ChargeGen = 5.0
           MaxOverrides = []
+          SheetSetTwo = false
           StartPowerCharges = None
           StartEmpty = false
           ChargeSkip = None
@@ -187,7 +190,7 @@ module Setup =
                 | "PowerCharge", Some c -> c
                 | _ when o.StartEmpty && k <> "PowerCharge" && k <> "Rage" -> 0
                 | _ -> n)
-        let vitals = Defence.computeWith startResources bases sheet
+        let vitals = Defence.computeWith (if o.SheetSetTwo then Map.add "WeaponSetTwo" 1 startResources else startResources) bases sheet
         // accuracy: 6 per level above the first and 6 per Dexterity (Character.ot, PoB AccuracyPerDexBase)
         let sheet =
             { sheet with

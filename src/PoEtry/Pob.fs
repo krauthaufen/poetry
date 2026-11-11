@@ -350,22 +350,74 @@ module Pob =
             |> Option.map (fun w -> { w with Tags = Tag "WeaponSet2" :: w.Tags })
         // A weapon's local mods are already in its Weapon; only its global mods go to the sheet.
         let sourced (source: string) (m: Mod) = if m.Source = "" then Mod.from source m else m
-        let itemMods = parsed |> List.collect (fun (slot, p) -> p.Mods |> List.map (slotCondition slot >> sourced (slot + ": " + p.Name)))
+        let itemMods = parsed |> List.map (fun (slot, p) -> slot, p.Mods |> List.map (slotCondition slot >> sourced (slot + ": " + p.Name)))
         let itemCov =
             parsed
             |> List.map (fun (slot, p) -> { p.Coverage with UnknownText = p.Coverage.UnknownText |> List.map (fun l -> slot + ": " + l) })
             |> List.fold Coverage.merge Coverage.empty
         let tree = build.TreeOverrides |> Map.fold (fun t id stats -> match Map.tryFind id t with Some n -> Map.add id { n with Stats = stats } t | None -> t) tree
-        let treeMods, treeCov =
-            let common, cov = Tree.mods db tree build.TreeNodes
-            let set1, cov1 = Tree.mods db tree build.TreeNodesSet1
-            let set2, cov2 = Tree.mods db tree build.TreeNodesSet2
-            common @ (set1 |> List.map (Mod.whenever (Not setTwo))) @ (set2 |> List.map (Mod.whenever setTwo)),
-            Coverage.merge cov (Coverage.merge cov1 cov2)
         let extraStats, extraUnknown = StatText.parseLines db.Text build.ExtraLines
         let extraMods, _, extraCov = Items.interpret extraStats
         let extraRescued, extraUnknown = Items.rescue db extraUnknown
         let extraMods = extraMods @ extraRescued
+        // small passives apart: "increased effect of Small Passive Skills" scales only them
+        let isSmall id =
+            match Map.tryFind id tree with
+            // not the "+5 to any Attribute" nodes: they are not Small Passive Skills in this sense
+            | Some n -> not n.IsNotable && not n.IsKeystone && not n.IsJewelSocket && n.Ascendancy = "" && n.Name <> "Attribute"
+            | None -> false
+        let smallMods, treeMods, treeCov =
+            let split ids cond =
+                let small, cs = Tree.mods db tree (ids |> List.filter isSmall)
+                let rest, cr = Tree.mods db tree (ids |> List.filter (isSmall >> not))
+                small |> List.map cond, rest |> List.map cond, Coverage.merge cs cr
+            let s0, r0, c0 = split build.TreeNodes id
+            let s1, r1, c1 = split build.TreeNodesSet1 (Mod.whenever (Not setTwo))
+            let s2, r2, c2 = split build.TreeNodesSet2 (Mod.whenever setTwo)
+            s0 @ s1 @ s2, r0 @ r1 @ r2, Coverage.merge c0 (Coverage.merge c1 c2)
+        // "increased effect of Small Passive Skills", "increased bonuses gained from Equipped
+        // Quiver / Rings and Amulets / left Ring", "increased Effect of bonuses gained from
+        // Socketed Jewel" (an ascendancy's jewel socket): the mods of that source count for more.
+        // The game's stats are whole numbers, so a scaled value is cut off (+5 at 50% is +7).
+        let itemMods, smallMods =
+            let everything = (itemMods |> List.collect snd) @ smallMods @ treeMods @ extraMods
+            let effect (what: string) =
+                everything |> List.sumBy (fun m -> if m.Stat = Named("EffectOf:" + what) && m.Kind = Inc && m.Conds.IsEmpty then m.Value else 0.0)
+            let scale (pct: float) (m: Mod) =
+                let isEffect = match m.Stat with Named n -> n.StartsWith "EffectOf:" | _ -> false
+                if pct = 0.0 || isEffect || not (m.Kind = Base || m.Kind = Inc || m.Kind = More) then m
+                else
+                    let v = m.Value * (1.0 + pct / 100.0)
+                    { m with Value = if m.Value = System.Math.Truncate m.Value then System.Math.Truncate v else v }
+            let slotEffect (slot: string) (text: string) =
+                if slot = "Ring 1" || slot = "Ring 2" || slot = "Amulet" then effect slot
+                elif slot = "Ring3" || slot = "Ring 3" then effect "Ring 3"
+                elif slot = "Weapon 2" && text.Contains "Quiver" then effect "Quiver"
+                elif slot.StartsWith "Jewel " then
+                    let socket =
+                        match System.Int32.TryParse(slot.Substring 6) with
+                        | true, n -> (if n < 1000 then List.tryItem n jewelSlots else Some n) |> Option.bind (fun id -> Map.tryFind id tree)
+                        | _ -> None
+                    match socket with
+                    | Some n when n.Ascendancy <> "" -> effect "AscendancyJewel"
+                    | _ -> 0.0
+                else 0.0
+            let texts = Map.ofList items
+            itemMods |> List.collect (fun (slot, ms) -> ms |> List.map (scale (slotEffect slot (Map.tryFind slot texts |> Option.defaultValue "")))),
+            smallMods |> List.map (scale (effect "SmallPassives"))
+        let treeMods = smallMods @ treeMods
+        // "+1 to maximum Life per 8 Item Armour on Equipped Helmet": a flat amount from what
+        // that item shows (StatMap names them PerItemDefence|target|slot|defence|per)
+        let perItemDefence (ms: Mod list) =
+            ms |> List.map (fun m ->
+                match m.Stat with
+                | Named n when n.StartsWith "PerItemDefence|" ->
+                    let p = n.Split '|'
+                    let stat (s: string) = match s with | "MaxLife" -> MaxLife | "MaxEnergyShield" -> MaxEnergyShield | "Evasion" -> Evasion | _ -> Armour
+                    let shown = parsed |> List.sumBy (fun (slot, it) -> if slot = p.[2] then it.Defences |> List.sumBy (fun (st, v) -> if st = stat p.[3] then v else 0.0) else 0.0)
+                    { m with Stat = stat p.[1]; Value = m.Value * floor (shown / float p.[4]) }
+                | _ -> m)
+        let itemMods, treeMods = perItemDefence itemMods, perItemDefence treeMods
         let flaskOf (pick: ParsedItem -> (float * float * float * float) option) =
             build.Items
             |> List.filter (fun (slot, _) -> slot.StartsWith "Flask")
@@ -391,7 +443,8 @@ module Pob =
         { Mods = itemMods @ shieldMods @ legacies @ radiusMods @ treeMods @ (extraMods |> List.map (sourced "quest"))
           MainHand = mainHand
           Weapons = Option.toList mainHand @ Option.toList swapHand
-          ItemDefences = parsed |> List.filter (fun (slot, _) -> not (slot.Contains "Swap")) |> List.collect (fun (slot, p) -> p.Defences |> List.map (fun (st, v) -> slot, st, v))
+          // the second weapon set's items keep their "... Swap" slot: Defence picks the set
+          ItemDefences = parsed |> List.collect (fun (slot, p) -> p.Defences |> List.map (fun (st, v) -> slot, st, v))
           ManaFlask = flaskOf (fun p -> p.ManaFlask)
           LifeFlask = flaskOf (fun p -> p.LifeFlask)
           Level = build.Level

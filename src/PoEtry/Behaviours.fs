@@ -734,6 +734,7 @@ module Behaviours =
     let spiritTotal (sheet: CharacterSheet) (build: PobBuild) =
         let db = ModDb.ofList sheet.Mods
         let c = { Ctx.empty with Buffs = Map.ofList [ "CorruptedItems", corruptedItems build ] }
+        let sheet = { sheet with ItemDefences = sheet.ItemDefences |> List.filter (fun (s, _, _) -> not (s.Contains "Swap")) }
         let item stat slot = sheet.ItemDefences |> List.sumBy (fun (s, st, v) -> if st = stat && (slot = "" || s = slot) then v else 0.0)
         let per name stat = match Mods.sumBase c [ Named name ] db with | n when n > 0.0 -> floor (item stat "Body Armour" / n) | _ -> 0.0
         // a sceptre's Spirit counts for the weapon set it is in: the set that gives more is taken
