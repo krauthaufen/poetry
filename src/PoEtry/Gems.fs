@@ -312,7 +312,7 @@ module Gems =
               "CreatesMinion"; "Minion"; "Companion"; "CreatesCompanion"; "SummonsTotem"; "SummonsAttackTotem"; "Totem"
               "GeneratesInfusion"; "GeneratesRemnants"; "DamageOverTime"; "Grenade"; "Plant"; "Storm"
               "SkillConsumesFrenzyChargesOnUse"; "SkillConsumesEnduranceChargesOnUse"; "Sustained"; "Shapeshift"; "Channel"; "Rain"
-              "CrossbowAmmoSkill" ]
+              "CrossbowAmmoSkill"; "GainsStages" ]
 
     /// What a gem's skill does that the simulator has no model for: its skill types that are
     /// neither descriptive nor modelled ("Channel", "GainsStages", "Shapeshift", "Rain"...).
@@ -383,7 +383,35 @@ module Gems =
         let flagOf id = statOf id |> Option.exists (fun v -> v <> 0.0)
         let allStats = ownStats @ supportStats
         let flagAny id = allStats |> List.exists (fun (s, v) -> s = id && v <> 0.0)
-        let radius = statOf "active_skill_base_area_of_effect_radius"
+        // Channelled skills that gain stages (Flameblast, Supercharged Slam, Detonating Arrow,
+        // Volcano): one use is the channel to full stages and the release. Each stage takes the
+        // skill's own time; the release carries the per-stage damage and radius.
+        let stages =
+            if not (data.Types.Contains "Channel") then 0.0
+            else
+                ownStats
+                |> List.tryPick (fun (id, v) ->
+                    if [ "_maximum_stages"; "_max_stages"; "_max_number_of_stages"; "_maximum_number_of_stages" ] |> List.exists (fun (e: string) -> id.EndsWith e) then Some v else None)
+                |> Option.defaultValue 0.0
+        let staged = stages > 1.0
+        let perStage (endings: string list) =
+            ownStats |> List.filter (fun (id, _) -> endings |> List.exists (fun (e: string) -> id.EndsWith e)) |> List.sumBy snd
+        let stageMods =
+            if not staged then []
+            else
+                let more = perStage [ "damage_+%_final_per_stage"; "damage_+%_final_per_stack" ] * stages + perStage [ "damage_+%_final_per_additional_stage" ] * (stages - 1.0)
+                let gainFire = perStage [ "all_damage_%_to_gain_as_fire_per_stage" ] * stages
+                [ if more <> 0.0 then yield Mod.more (Damage AllDamage) more |> Mod.from "stages"
+                  if gainFire > 0.0 then
+                      for t in DamageType.all do
+                          if t <> Fire then yield Mod.base' (GainAs(t, Fire)) gainFire |> Mod.from "stages" ]
+        let mods = mods @ stageMods
+        let time =
+            if staged then time * stages + (statOf "channel_skill_end_animation_duration_override_ms" |> Option.defaultValue 0.0) / 1000.0 else time
+        let radius =
+            let r = statOf "active_skill_base_area_of_effect_radius"
+            let extra = if staged then perStage [ "radius_+_per_stage" ] * stages else 0.0
+            if extra > 0.0 then Some((r |> Option.defaultValue 0.0) + extra) else r
         let perCharge =
             ownStats
             |> List.tryPick (fun (id, v) -> if id.EndsWith "_number_of_projectiles_per_power_charge" then Some("PowerCharge", int v) else None)

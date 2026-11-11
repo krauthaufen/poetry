@@ -262,6 +262,13 @@ Checked against PoB's defensive numbers for 131 public characters (`tools/corpus
 | Not consuming ammunition | chance while "reloaded recently" (4 s) | stat text | data |
 | Heat, barrage timing, grenades' own rules | not modelled | - | missing |
 
+### Channelling and stages
+
+| Mechanic | Rule | Source | Confidence |
+|---|---|---|---|
+| Staged channels | Flameblast, Supercharged Slam, Detonating Arrow, Volcano: one use is the channel to the maximum number of stages (each takes the skill's own time) plus the release animation; the hit carries the per-stage more damage, gain as fire and radius | gem stats `*_maximum_stages`, `*_damage_+%_final_per_stage`, `*_radius_+_per_stage` | data; always channelling to full is a play-style assumption |
+| Other channels | used repeatedly, one hit per use time (Incinerate's fuel, Snipe's perfect timing, Rampage, shield skills: not modelled) | - | partial |
+
 ### Curse auras
 
 | Mechanic | Rule | Source | Confidence |

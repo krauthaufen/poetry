@@ -181,6 +181,15 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         | Ok (s, _) -> equal (box 100) (box s.Clip)
         | Error e -> failwith e)
 
+    test "gem: a staged channel is one use to full stages" (fun () ->
+        match Gems.skill db.Value ModDb.empty None { Gem = "Flameblast"; Level = 20; Quality = 0; StatSet = 1; Supports = [] } with
+        | Ok (s, _) ->
+            // 10 stages of 0.25 s and a 0.6 s release; 75% more damage and 6 units of radius per stage
+            near (10.0 * 0.25 + 0.6) s.BaseTime
+            near 8.5 (Mods.mult { Ctx.empty with SkillTags = s.Tags } [ Damage AllDamage ] (ModDb.ofList s.Mods))
+            equal (box (AreaAroundSelf 60.0)) (box s.Delivery)
+        | Error e -> failwith e)
+
     test "Blasphemy: socketed curses become auras at the gem's reduced effect" (fun () ->
         let gem name support = { Name = name; Level = 20; Quality = 0; Enabled = true; IsSupport = support; StatSet = 1 }
         let group = { Label = ""; Slot = ""; Enabled = true; Gems = [ gem "Blasphemy" false; gem "Despair" false ] }
