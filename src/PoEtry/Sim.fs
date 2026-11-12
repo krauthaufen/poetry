@@ -1037,6 +1037,19 @@ module Sim =
     let private built (st: ActorState) (skill: Skill) =
         requirements skill |> List.forall (fun (key, n) -> (Map.tryFind key st.Energy |> Option.defaultValue 0.0) >= n - 1e-9)
 
+    /// A skill that works for a fixed time once what it needs has built up (Requiem: 12 s,
+    /// then 30 s until it is charged again): (seconds it lasts, seconds to recharge).
+    let private window (skill: Skill) =
+        let own name = skill.Mods |> List.sumBy (fun m -> if m.Stat = Named name && m.Kind = Base then m.Value else 0.0)
+        let secs = own "WindowSeconds"
+        if secs > 0.0 then Some(secs, own "WindowRecharge") else None
+    /// Is its window shut (the next use opens one)?
+    let private windowShut (st: ActorState) now (skill: Skill) =
+        (window skill).IsSome && now >= (Map.tryFind ("Window:" + skill.Name) st.Energy |> Option.defaultValue -1.0)
+    /// Can it be used: inside its window, or charged for the next.
+    let private windowOk (st: ActorState) now (skill: Skill) =
+        not (windowShut st now skill) || now >= (Map.tryFind ("WindowNext:" + skill.Name) st.Energy |> Option.defaultValue 0.0)
+
     let private ready (st: ActorState) now (skill: Skill) =
         Map.tryFind skill.Name st.Cooldowns |> Option.forall (fun t -> t <= now)
 
@@ -1562,7 +1575,10 @@ module Sim =
                 match actor.Vitals with
                 | Some pools -> pools.Mana * Mods.sumBase costCtx [ Named "ExtraCostPercentOfMaxMana" ] db / 100.0
                 | None -> 0.0
-            let ownCost = if skill.Clip > 0 && not (st.LoadDue.Contains skill.Name) then 0.0 else skill.Cost
+            // (a skill with a window: the cost is for opening it)
+            let ownCost =
+                if (window skill).IsSome then (if windowShut st w.Time skill then skill.Cost else 0.0)
+                elif skill.Clip > 0 && not (st.LoadDue.Contains skill.Name) then 0.0 else skill.Cost
             // a channel: its cost per second for as long as this use takes; what it costs to
             // start is paid when the channel begins, not with every use that continues it
             let ownCost =
@@ -1586,6 +1602,8 @@ module Sim =
                     step.When v && ready st w.Time s && (corpses > 0 || not (needsCorpse s)) && built st s
                     // a form one is in is not pressed again (that would end it)
                     && (match partNamed s "ToggleBuff:" with Some buff -> not (st.Buffs.ContainsKey buff) | None -> true)
+                    // a skill with a window waits until it is charged again
+                    && windowOk st w.Time s
                     // a warp needs something to warp into: an enemy that can be culled, or a projectile
                     && (match warpsInto s with
                         | Some gem -> ballInFlight actor.Name gem w || (aimed env w |> Option.exists (fun e -> (status e).ContainsKey "Cullable"))
@@ -1622,7 +1640,10 @@ module Sim =
                 | Some pools -> pools.Mana * Mods.sumBase costCtx [ Named "ExtraCostPercentOfMaxMana" ] db / 100.0
                 | None -> 0.0
             // crossbow ammunition: the cost is for loading, paid with the first shot of a new load
-            let ownCost = if skill.Clip > 0 && not (st.LoadDue.Contains skill.Name) then 0.0 else skill.Cost
+            // (a skill with a window: the cost is for opening it)
+            let ownCost =
+                if (window skill).IsSome then (if windowShut st w.Time skill then skill.Cost else 0.0)
+                elif skill.Clip > 0 && not (st.LoadDue.Contains skill.Name) then 0.0 else skill.Cost
             let ownCost =
                 if skill.CostPerSecond <= 0.0 then ownCost
                 else (if st.LastUsed = skill.Name then 0.0 else ownCost) + skill.CostPerSecond * t
@@ -1652,6 +1673,14 @@ module Sim =
                             |> schedule (w.Time + t + seconds + 4.0) Expire
                         { w with Counts = bump ("reload:" + skill.Name) w.Counts }, seconds
             let go (w: World) =
+                // the use that opens a window: it lasts so long, and charges again after it
+                let w =
+                    match window skill with
+                    | Some (secs, recharge) when windowShut st w.Time skill ->
+                        { w with Counts = bump ("window:" + skill.Name) w.Counts }
+                        |> updateActor name (fun st ->
+                            { st with Energy = st.Energy |> Map.add ("Window:" + skill.Name) (w.Time + secs) |> Map.add ("WindowNext:" + skill.Name) (w.Time + secs + recharge) })
+                    | _ -> w
                 let w = startUse env rng actor skill t w
                 let w, extra = reload w
                 schedule (w.Time + t + extra) (Ready name) w

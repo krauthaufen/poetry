@@ -429,6 +429,9 @@ module Gems =
               // the eruption happens once; the sprays that follow rain down around the volcano
               ("Volcano", ""), [ "Once" ]
               ("Volcano", "Projectiles"), [ "Rain" ]
+              // "Anguish impacts within a 2.4 metre radius of the target", each with its own impact radius
+              ("Requiem", "Requiem"), [ "Rain" ]
+              ("Requiem", ""), [ "Rain" ]
               // "sprays a cone of ice shards when it hits a target": on from that target
               ("Ice Shot", "Shards"), [ "Behind" ]
               // one use, several strikes: five stabs before the final one; both gouges hit
@@ -727,7 +730,7 @@ module Gems =
                         // a rain over the skill's area, each projectile with its own small impact
                         Rain =
                             match statOf "active_skill_base_area_of_effect_radius", statOf "active_skill_base_secondary_area_of_effect_radius" with
-                            | Some a, Some b when count >= 2 && ((data.Types.Contains "Rain" && b < a) || rains) -> Some(max a b, min a b)
+                            | Some a, Some b when (count >= 2 && data.Types.Contains "Rain" && b < a) || rains -> Some(max a b, min a b)
                             | _ -> None
                         Explosion = if data.Types.Contains "Area" && not (List.contains "is_area_damage" set.Stats) then radius else None }
             else
@@ -842,6 +845,17 @@ module Gems =
                         ammo.StatSets |> List.tryHead
                         |> Option.map (fun set -> stats ammo set setup.Level 0 |> List.sumBy (fun (id, v) -> if id = "base_number_of_crossbow_bolts" then v else 0.0))
                         |> Option.defaultValue 1.0
+                    let ammoStats = ammo.StatSets |> List.tryHead |> Option.map (fun set -> stats ammo set setup.Level 0) |> Option.defaultValue []
+                    let pick (ending: string) = ammoStats |> List.tryPick (fun (id, v) -> if id.EndsWith ending && v > 0.0 then Some v else None)
+                    match pick "_active_duration_ms", pick "_buff_count_requirement", pick "_number_of_stacks_per_minute" with
+                    | Some ms, Some needed, Some perMinute when ammoStats |> List.exists (fun (id, v) -> id = "crossbow_ammo_has_no_ammo" && v <> 0.0) ->
+                        // "Does not use Ammunition": it works for a fixed time once enough has built
+                        // up ("Requires 100 anguish to use", "Accumulates 3.33 anguish per second")
+                        { s with
+                            Clip = 0
+                            ReloadTime = 0.0
+                            Mods = Mod.base' (Named "WindowSeconds") (ms / 1000.0) :: Mod.base' (Named "WindowRecharge") (needed / (perMinute / 60.0)) :: s.Mods }, cov
+                    | _ ->
                     { s with Clip = max 1 (int (bolts + supportBolts)); ReloadTime = weapon |> Option.map (fun w -> w.ReloadTime) |> Option.defaultValue 0.0 }, cov)
         | Some data -> skillFromData db characterMods weapon setup data
 

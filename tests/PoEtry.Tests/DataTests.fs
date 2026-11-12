@@ -432,6 +432,19 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
             equal (box (AreaAtTarget 20.0)) (box s.Delivery)
         | Error e -> failwith e)
 
+    test "Requiem: no ammunition; 12 s of shots once 100 anguish has built up at 200 a minute" (fun () ->
+        let crossbow = (Items.parse db.Value "Rarity: Normal\nMakeshift Crossbow\n--------\n").Weapon
+        match Gems.skill db.Value ModDb.empty crossbow { Gem = "Requiem"; Level = 20; Quality = 0; StatSet = 1; Supports = [] } with
+        | Ok (s, _) ->
+            let value name = s.Mods |> List.sumBy (fun m -> if m.Stat = Named name then m.Value else 0.0)
+            equal (12.0, 30.0) (value "WindowSeconds", value "WindowRecharge")
+            equal (0, 0.0) (s.Clip, s.ReloadTime)
+            // each shot comes down within 2.4 m of the target and hits what is within 1.6 m of that
+            match s.Delivery with
+            | Projectiles p -> equal (Some(24.0, 16.0)) p.Rain
+            | d -> failwithf "%A" d
+        | Error e -> failwith e)
+
     test "Ice Shot: the shards spring from the enemy hit and cannot hit it" (fun () ->
         let bow = (Items.parse db.Value "Rarity: Normal\nWarmonger Bow\n--------\n").Weapon
         match Gems.skill db.Value ModDb.empty bow { Gem = "Ice Shot"; Level = 20; Quality = 0; StatSet = 1; Supports = [] } with
