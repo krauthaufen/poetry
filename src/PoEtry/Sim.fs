@@ -2713,6 +2713,7 @@ module Sim =
                     :: [ for a in 0 .. 2 do
                             for k in 1 .. arms ->
                                 Vec.scale (float k * r * env.Fight.CascadeSpacing) (Vec.ofAngle (turn + float a * 2.0 * System.Math.PI / 3.0)) ]
+                let w = if w.Tracing then { w with Shown = Used(w.Time, name, sk.Name, centres |> List.map (fun c -> Ring(c, r, 0.0))) :: w.Shown } else w
                 let w =
                     centres
                     |> List.fold
@@ -2737,6 +2738,7 @@ module Sim =
                         let step = if k = 0 then centreR * env.Fight.CascadeSpacing else step
                         let rr = if k = 0 then centreR else Geometry.radius r (areaMult * Mods.more ctx [ Named "CascadeArea" ] mods)
                         let centre = Vec.add primary.Position (Vec.scale (float k * step) axis)
+                        let w = if w.Tracing then { w with Shown = Used(w.Time, name, sk.Name, [ Ring(centre, rr, 0.0) ]) :: w.Shown } else w
                         let w =
                             living
                             |> List.filter (fun e -> Vec.dist centre e.Position <= rr + e.Size)
@@ -2749,9 +2751,12 @@ module Sim =
                 let ctx, mods, areaMult, delivery = shape sk
                 let strike (w: World) =
                     match delivery, elapsed with
-                    | _ when direct -> (if primary.Name = aimedAt then hitEnemy env rng actor sk mult aimedAt w else w)
+                    | _ when direct ->
+                        let w = if w.Tracing then { w with Shown = Used(w.Time, name, sk.Name, [ Line(Vec.zero, primary.Position) ]) :: w.Shown } else w
+                        (if primary.Name = aimedAt then hitEnemy env rng actor sk mult aimedAt w else w)
                     | Projectiles p, None when p.Passing > 0.0 && p.HitInterval > 0.0 ->
                         // what is inside the projectiles as they travel: every hit at its own time
+                        let w = if w.Tracing then { w with Shown = Used(w.Time, name, sk.Name, [ Flight [ Vec.zero; primary.Position ] ]) :: w.Shown } else w
                         Geometry.dwellHits rng env.Fight.Walls p env.Fight.Reach areaMult primary living
                         |> List.fold (fun w (t, target) ->
                             if t <= 0.0 then hitEnemy env rng actor sk mult target w
@@ -2759,6 +2764,7 @@ module Sim =
                     | Projectiles p, Some t when p.Passing > 0.0 ->
                         // where the projectile is by now, on its way towards where it was aimed
                         let at = Vec.scale (p.Speed * t) (Vec.ofAngle (Vec.angle primary.Position))
+                        let w = if w.Tracing then { w with Shown = Used(w.Time, name, sk.Name, [ Ring(at, Geometry.radius p.Passing areaMult, 0.0) ]) :: w.Shown } else w
                         living |> List.filter (Geometry.within at (Geometry.radius p.Passing areaMult)) |> List.map (fun e -> e.Name)
                         |> List.fold (fun w target -> hitEnemy env rng actor sk mult target w) w
                     | _ when w.Tracing ->
