@@ -112,8 +112,6 @@ module Constants =
     // ---- player recovery ----
     /// GameConstants EffectiveMaxDamageForLeech: a hit leeches as if it dealt at most this much.
     let effectiveMaxDamageForLeech = Map.find "EffectiveMaxDamageForLeech" Tables.gameConstants
-    /// Leech recovers at most this % of maximum mana per second (PoE convention; guess for PoE2).
-    let maxManaLeechRate = 20.0
     /// Seconds without being hit before energy shield recharges (PoB EnergyShieldRechargeDelay).
     let energyShieldRechargeDelay = 4.0
 
@@ -141,15 +139,16 @@ module Constants =
     /// Seconds a light stun interrupts the player. GUESS (no player constant in the data).
     let playerLightStunDuration = 0.35
 
-    /// Blinded monsters have this much less accuracy. The buff (BuffDefinitions "blinded":
-    /// accuracy_rating_+%_final_from_blinded) carries no base value in the data; GUESS.
+    /// "Being Blinded causes 20% less Accuracy Rating and Evasion Rating" (wiki, Blind; the
+    /// buff in BuffDefinitions carries no base value).
     let blindAccuracyLess = 20.0
 
     /// Maim: maim_movement_speed_+%_final -30 (BuffTemplates LabyrinthTrapMaim; base value not in data).
     let maimSlow = 30.0
     /// Maim also gives 15% reduced Evasion Rating (wiki, Maim).
     let maimEvasionReduced = 15.0
-    /// Hinder: hinder_movement_speed_+%_final; no value in the data, GUESS.
+    /// "Hinder is a Debuff that Slows movement speed by 30% unless otherwise specified" (wiki,
+    /// Hinder; no value in the data).
     let hinderSlow = 30.0
 
     /// Meta gem trigger cost: fixed added cast time (`total_cast_time_+_ms`, Comet +1 s)

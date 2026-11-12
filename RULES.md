@@ -45,7 +45,6 @@ Confidence levels:
 | Penetration | lowers resist, but never below 0 (or below the "can penetrate down to a minimum of X" floor); does nothing to resist already at or below the floor | CalcOffence.lua `calcPenResist` (minPen = 0); floor: game text | pob + data |
 | Armour | reduction = A / (A + 10 × damage), using that hit's physical damage, plus flat physical reduction, capped at 75% for monsters | CalcDefence.lua `armourReductionF`; Monster.ot cap | pob + data |
 | Damage taken | (1 + Σinc taken) × Π more taken; scopes as for damage | CalcOffence.lua ~4060 | pob |
-| Hit chance | 100% unless a `HitChance` override is given. Accuracy vs evasion is not modelled yet. | — | guess |
 
 ### Armour Break
 
@@ -135,7 +134,7 @@ Confidence levels:
 | Spark | every spark is flown: a fan from the player that widens by 15 degrees per spark (three: a 30 degree cone; 25 or more: a circle), the cold-infused one a full circle at a random angle to the enemy. A spark keeps its heading but zigzags inside a band 20 units wide (`spark_pathing_width_bounds`), a new sideways offset every 20 units, for 2 s at 100 units per second (200 units). A wall ends it (the player's Spark lacks `spark_projectile_bounces_off_walls`). Sparks of one cast hit the same enemy at most once every 0.66 s (`spark_min_time_between_target_clearing_ms`): one that may not hit passes through, one that hits is gone | game tables (GrantedEffectStatSets, Projectiles), gem text; user: cone widening with the number, gone on hit. The 15 degrees and the zigzag step are guesses | data / guess |
 | Full circle from the player | a nova of projectiles is not aimed: its first projectile lies at a random angle to the enemy | geometry | guess |
 | Damage per target | rolled independently for every enemy hit | — | guess |
-| Per-skill motion (Spark wandering, Ice Shot shards from the impact point, Frost Bomb pulses) | not modelled yet: needs per-skill behaviours | — | missing |
+| Per-skill motion | flown per skill, each with its own row: Spark (wandering), Twister (dwelling), Ball Lightning (passing), Ice Shot's shards and Ice Fragments (from the impact), Spearfield, Volcano, Requiem and Hailstorm Rounds (landing at random in their area) | the skills' rows | — |
 | Resistances "treated as negated" | positive elemental resist counts as its negative, rolled per hit for a chance | game text | guess (interaction with penetration/exposure order) |
 | Weapon set | set one is assumed active ("in weapon set two" mods are off) | modelling choice | — |
 | "Recently" | hit / crit / kill recently = within 4 s, plus "crit in the past 8 s"; tracked by the engine from actual events | PoE convention (4 s) | pob |
@@ -164,7 +163,7 @@ Confidence levels:
 | Energy shield recharge | 12.5% per second after 4 s without being hit | Character.ot 750 per minute; PoB delay 4 s | data + pob |
 | Skill cost | gem level cost × support cost multipliers (`manaMultiplier`, percent more) × increased cost / (1 + cost efficiency) | skill data; PoB SupportManaMultiplier | data (efficiency formula: guess) |
 | Not enough mana | the use waits until regeneration and leech cover it | — | modelling choice |
-| Mana leech | % of physical attack damage dealt, each hit counted as at most 40,000 damage, from **one enemy per hit event** (the largest instance), recovered at most 20% of max mana per second | GameConstants EffectiveMaxDamageForLeech; one enemy and rate cap: user | data + user |
+| Mana leech | % of physical attack damage dealt, each hit counted as at most 40,000 damage, from **one enemy per hit event** (the largest instance), recovered over one second; only the strongest instance runs | GameConstants EffectiveMaxDamageForLeech; wiki Leech; one enemy: user | data + user |
 | Mana on kill | flat and % of max mana per kill, also for damage-over-time kills? no: hit kills only | game text | guess (DoT kills) |
 | Monster hits | 1.5 × level damage × (1/4.4 normal/magic/rare, 4/4.4 unique) × rarity damage modifier, every 1.5 s, 40% physical / 20% each element | PoB enemy presets; rarity mod from Mods.dat | pob heuristic + guess |
 | Monster movement | walk towards the player at 3.5 m/s until within 0.8 m; frozen / stunned / electrocuted / pinned don't move; maimed and hindered 30% slower; chilled slower by its magnitude | maim −30% from BuffTemplates; hinder, speed, range: guesses | guess |
@@ -177,7 +176,7 @@ Confidence levels:
 | Item defences | armour pieces and weapons are read in local context (their "increased" lines are local and already in the shown values, runes included); jewellery, jewels, tree and quest rewards in global context | game text is identical for local and global variants | data |
 | Body armour scoped | "increased Evasion / Energy Shield from Equipped Body Armour" scale that item's values; "+1 ES per X Item Evasion on Equipped Body Armour" reads the scaled body evasion | game text | guess (order) |
 | Keystones | handled by name: Chaos Inoculation = maximum life 1, chaos immunity, no life regeneration | game text | data |
-| Not modelled | life flasks and charms, life leech, block, evade-based crit, monster skills and phases, ranged monsters, other keystones | — | missing |
+| Not modelled | monster skills and phases, ranged monsters, monsters moving (they stand where the encounter puts them) | — | missing |
 
 ### The character sheet
 
@@ -394,7 +393,7 @@ The game's standard buffs and debuffs, with the numbers of its keyword text. Sta
 | An explosion per ailment consumed | Elemental Sundering deals nothing by itself: a cold, fire or lightning explosion for a Frozen, Ignited or Shocked enemy, taking the ailment. Snap likewise needs one of the three and takes it. Acidic Concoction's burst needs Poison and takes it. Frost Darts' ice chunks need a Chilled or Frozen target, their lodged explosion a Cold Infusion; Fireball's firebolts a Fire Infusion; Ember Fusillade's beams a Lightning Infusion | descriptions | data / guess |
 | Forms that spend something | Furious Slam spends 10 Rage when it has them and is then the Enraged slam instead of the plain one. Rend with a Power Charge to consume is the Lightning-Charged slash instead of the plain one (its buff lasting beyond the use is not modelled) | `bear_slam_spend_X_rage_for_stronger_slam`, stat sets, descriptions | data / guess |
 | Crushing Fear | its shockwave happens when the skill kills an enemy, where that enemy stood; never against a lone boss | description | guess |
-| Frost Bomb's exposure | 20% Elemental Exposure at once and 2% more with every pulse of the orb, up to 50%; each lasts the secondary duration, the strongest applies. A pulse every 0.25 s is assumed (not in the data), so one bomb reaches its cap as it detonates | "Initially applies {0}% Elemental Exposure and {1}% Exposure per pulse, up to a maximum of {2}%" (`active_skill_all_elemental_exposure_compounding_magnitude`, `_cap`) | data / guess |
+| Frost Bomb's exposure | 20% Elemental Exposure at once and 2% more with every pulse of the orb, up to 50%; each lasts the secondary duration, the strongest applies. A pulse every 0.25 s is assumed (not in the data), so one bomb reaches its cap as it detonates; in the game the pulses speed up over the orb's life ("Frost Bomb's pulses accelerate over time; the pulse rate cannot be modified", wiki Frost Bomb), so the early exposure is somewhat overstated | "Initially applies {0}% Elemental Exposure and {1}% Exposure per pulse, up to a maximum of {2}%" (`active_skill_all_elemental_exposure_compounding_magnitude`, `_cap`) | data / guess |
 | Sniper's Mark | the mark's extra critical damage bonus is for the next critical hit on the marked enemy only: that hit takes the mark off and grants a Frenzy Charge. The mark is put on again when its cooldown allows. PoB keeps the bonus on every crit | description ("The next Critical Hit the target receives Activates the Mark, Consuming it") | data |
 | Volleys | a skill that comes down in a number of volleys hits once with each (Supporting Fire's Death From Above: six, over its whole area). The first comes down as the use ends, the others 0.75 s apart (4.75 s for all six; the delay shrinks with the minion's attack speed, which it should not) | `*_number_of_volleys`, `*_volley_delay_ms` | data |
 | Offerings | Pain Offering: for its 6 s every minion deals 58% increased damage and attacks and casts 29% faster (level 20). Soul Offering: 77% increased spell damage for the player while it stands. Both are kept up; the skeleton they take is not removed. Bone Offering is not modelled | `pain_offering_*`, `power_offering_buff_spell_damage_+%` | data |
@@ -510,7 +509,7 @@ The game's standard buffs and debuffs, with the numbers of its keyword text. Sta
 | Powered by Verisium | grants 4 Verisium infusions per cast, capped at 3 (one wasted); Ward cost not deducted (TODO) | gem data, user | data |
 | Fights start with infusions | every consumed element and Verisium start at maximum x `--banked` (picked up while clearing) | user | user |
 | Infusion-generating skills | a non-persistent skill with types GeneratesInfusion + GeneratesRemnants and one element (Frost Bomb) drops a remnant of that element per use, at detonation (`base_skill_detonation_time` x Short Fuse) + pickup; Harmonic Remnants: chance for two | gem data + description, user | data |
-| Frost Bomb exposure | `active_skill_all_elemental_exposure_magnitude` to fire, cold and lightning on use, x (1 + exposure effect), for `base_secondary_skill_effect_duration`; compounding per pulse ignored (Short Fuse orb lives 0.8 s) | gem data | data |
+| Frost Bomb exposure | `active_skill_all_elemental_exposure_magnitude` to fire, cold and lightning on use, x (1 + exposure effect), for `base_secondary_skill_effect_duration`; the pulses add to it (see Frost Bomb's exposure) | gem data | data |
 | Atziri's Impatience | "Lose 25% of maximum Life, Mana and Energy Shield when you use Supported Skills": applied on use, life floors at 1 | stat description | data |
 | Stored cooldown uses | gem level `storedUses`, doubled by Second Wind; each use recharges independently ("just two cooldowns"); `--sequential-uses` for one after another | user (poedb describes sequential) | user |
 | Verisium in the rotation | cast when ready, but only while Verisium infusions are below maximum | player behaviour | guess |
