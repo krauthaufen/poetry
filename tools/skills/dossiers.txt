@@ -1061,9 +1061,8 @@
   set Damage over Time base_skill_effect_duration=1000 pvp_skill_dot_attack_time_override_ms=2000  | spell_minimum_base_physical_damage spell_maximum_base_physical_damage can_perform_skill_while_moving global_bleed_on_hit precise_cursor_targeting_uses_contact_point_height_offset spell_damage_modifiers_apply_to_skill_dot
   play: spam Exsanguinate
   built Exsanguinate                       x1.00, 1.00s, cd None x1, cost 0 +0/s, hits [(1.0, 1.0)], single
-        part Exsanguinate: Damage over Time x1.00, hits [(1.0, 1.0)]
-  fight: 21 dps; Exsanguinate (hit) 100%, Exsanguinate: Damage over Time (hit) 0%
-         crits:Exsanguinate 2, crits:Exsanguinate: Damage over Time 2, hits:Exsanguinate 14, hits:Exsanguinate: Damage over Time 14, uses:Exsanguinate 15
+  fight: 21 dps; Exsanguinate (hit) 100%
+         crits:Exsanguinate 2, hits:Exsanguinate 14, uses:Exsanguinate 15
 
 #### Eye of Winter   [Cold Cooldown Damage InteractsWithElementalGround Projectile ProjectileSpiral SingleMainProjectile Spell]
   Fire a single Eye Projectile which does not Hit enemies. The Eye constantly releases damaging shard Projectiles in a spiral as it flies. If the Eye passes over an Elemental Ground Surface or Orb, it will take on that surface's effect causing shards to deal more damage of the corresponding Type.
@@ -1195,9 +1194,8 @@
   set Projectile Damage number_of_allowed_firewalls=3 firewall_attached_projectile_effect_mtx=1 console_cast_on_self_custom_range=15 active_skill_energy_generated_+%_final=-50  | spell_minimum_base_fire_damage spell_maximum_base_fire_damage base_fire_damage_to_deal_per_minute flame_wall_minimum_added_fire_damage flame_wall_maximum_added_fire_damage flame_wall_minimum_added_lightning_damage_to_add_to_projectile flame_wall_maximum_added_lightning_damage_to_add_to_projectile wall_maximum_length base_skill_effect_duration is_area_damage can_perform_skill_while_moving active_skill_consumes_a_lightning_infusion
   play: spam Flame Wall
   built Flame Wall                         x1.00, 1.00s, cd None x1, cost 111 +0/s, hits [(1.0, 1.0)], single
-        part Flame Wall: Projectile Damage x1.00, hits [(1.0, 1.0)]
-  fight: 176 dps; Flame Wall (hit) 77%, Flame Wall (fire over time) 23%, Flame Wall: Projectile Damage (hit) 0%
-         crits:Flame Wall 2, crits:Flame Wall: Projectile Damage 2, hits:Flame Wall 14, hits:Flame Wall: Projectile Damage 14, uses:Flame Wall 15
+  fight: 178 dps; Flame Wall (hit) 78%, Flame Wall (fire over time) 22%
+         crits:Flame Wall 3, hits:Flame Wall 14, uses:Flame Wall 15
   types without a model: CausesBurning, Wall
 
 #### Flameblast   [Area AreaSpell Channel Cooldown Damage Fire GainsStages Nova Spell]
@@ -1576,9 +1574,9 @@
   level 20: cost Some 193.0 (per minute None), cooldown None xNone, multiplier None, crit None
   set Ammunition       action_allowed_queue_time_override_ms=1000 active_skill_reload_speed_+%_final=150  | base_number_of_crossbow_bolts active_skill_cannot_manually_reload action_can_be_used_in_aiming_stance action_can_be_used_in_upward_aiming_stance can_perform_skill_while_moving base_deal_no_damage crossbow_ammo_skill_has_passive_reloading can_be_used_instantly_in_any_set
   play: spam Hailstorm Rounds
-  built Hailstorm Rounds                   x2.28, 1.07s, cd None x1, cost 193 +0/s, hits [(1.0, 1.0)], 1 projectiles, pierce 0, chain 0
-  fight: 36 dps; Hailstorm Rounds (hit) 100%
-         crits:Hailstorm Rounds 2, hits:Hailstorm Rounds 13, uses:Hailstorm Rounds 14
+  built Hailstorm Rounds                   x2.28, 1.07s, cd None x1, cost 193 +0/s, hits [(1.0, 1.0)], 0 projectiles, pierce 0, chain 0
+  fight: 42 dps; Hailstorm Rounds (hit) 100%
+         consumed:StoredBolts 13, gained:StoredBolts 26, hits:Hailstorm Rounds 22, uses:Hailstorm Rounds 14
 
 #### Hammer of the Gods   [Area Attack Duration HasUsageCondition Melee Slam]   needs: One Hand Mace / Two Hand Mace
   Build Glory by Heavy Stunning enemies. When you have maximum Glory you may entreat the Ancestors to crush your enemies, manifesting a massive hammer that falls from the sky onto your target, Slamming into the ground after a short duration and dealing immense damage based on your weapon.
@@ -2685,8 +2683,8 @@ Purple Flames of Chayula for a duration.
   set Compose Requiem  action_allowed_queue_time_override_ms=1000 rapidshot_requiem_number_of_stacks_per_minute=200 rapidshot_requiem_base_buff_count_requirement=100 rapidshot_requiem_active_duration_ms=12000  | action_can_be_used_in_aiming_stance can_perform_skill_while_moving base_deal_no_damage crossbow_ammo_skill_does_not_transition crossbow_ammo_has_no_ammo can_be_used_instantly_in_any_set
   play: spam Requiem
   built Requiem                            x9.36, 0.15s, cd None x1, cost 150 +0/s, hits [(1.0, 1.0)], 1 projectiles, pierce 0, chain 0
-  fight: 154 dps; Requiem (hit) 100%
-         crits:Requiem 2, hits:Requiem 17, reload:Requiem 18, uses:Requiem 18
+  fight: 481 dps; Requiem (hit) 100%
+         crits:Requiem 3, hits:Requiem 60, uses:Requiem 60, window:Requiem 1
 
 #### Resonating Shield   [ActiveBlock Area Attack Channel Melee NonWeaponAttack Physical RequiresShield Sustained]   needs: Armoured Shield
   Repeatedly hammer your Shield with your weapon causing damaging shockwaves in an area around you. Enemies hit by the shockwave lose Armour for a duration. While Channelling Resonating Shield, your Shield is raised and you will Block all incoming Blockable hits.

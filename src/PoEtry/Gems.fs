@@ -938,6 +938,11 @@ module Gems =
                     |> List.map (fun s ->
                         let p, c = buildSet alt data s (data.Name + ": " + s.Label) tags level quality supportStats weapon shield
                         { p with Consumes = None }, c)
+                    // a spell set whose own damage is nothing at this level (Exsanguinate's "Damage over
+                    // Time": 0 to 0; its damage over time is the Bleeding) is not a hit
+                    |> List.filter (fun (p, _) ->
+                        let declared = data.StatSets |> List.exists (fun s -> data.Name + ": " + s.Label = p.Name && s.Stats |> List.exists (fun (id: string) -> id.StartsWith "spell_minimum_base_"))
+                        not (declared && not (data.Types.Contains "Attack") && p.Dots.IsEmpty && p.BaseDamage |> Map.forall (fun _ r -> r.Max <= 0.0)))
                     |> List.unzip
                 // "Channelling this Skill for longer makes the initial eruption more violent": the
                 // eruption's own spray has so many more projectiles per stage after the first
