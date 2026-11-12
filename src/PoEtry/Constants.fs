@@ -114,6 +114,10 @@ module Constants =
     /// brought up to a minion's and then 25% more ("server side mod added in 0.3", PoB
     /// SpectreBeastDamageFixup; not in the data).
     let spectreDamageFixup = 1.25
+    /// Seconds until killed minions are revived: every reviving minion gem in the data has
+    /// minion_base_resummon_time_ms = 12000; taken for the ones without the stat as well
+    /// (a guess for those). The wiki's Minion page says 7.5 s.
+    let minionReviveSeconds = 12.0
 
     // ---- charges and rage ----
     /// GameConstants BaseMaximumRage; Character.ot max_*_charges.
@@ -127,6 +131,8 @@ module Constants =
     let effectiveMaxDamageForLeech = Map.find "EffectiveMaxDamageForLeech" Tables.gameConstants
     /// Seconds without being hit before energy shield recharges (PoB EnergyShieldRechargeDelay).
     let energyShieldRechargeDelay = 4.0
+    /// Energy shield recharged per second, percent of the maximum (as the player's, Defence).
+    let energyShieldRechargePercent = 12.5
 
     // ---- ailments and stuns on the player (GameConstants "...Player") ----
     let playerChillDuration = gc "BaseChillDurationPlayer"

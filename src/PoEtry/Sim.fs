@@ -118,6 +118,9 @@ type EnergySource =
     | Blocks of energy: float
     /// Energy per 10 ms of base cast time of spells the player casts.
     | CastsSpells of perTenMs: float
+    /// Energy when one of the actor's reviving minions is killed, per unit of the minion's
+    /// power (its life as a multiple of an ordinary monster's).
+    | MinionDeaths of perPower: float
 
 /// "Cast on ..." gems trigger on reaching maximum energy; Invocations bank energy and are
 /// used to spend it, possibly several triggers at once.
@@ -247,6 +250,24 @@ type Cycle =
       Period: float
       Variants: Mod list list }
 
+/// What a minion has to lose, and how it comes back.
+type MinionBody =
+    { Life: float
+      EnergyShield: float
+      Armour: float
+      Evasion: float
+      /// Percent, by damage type.
+      Resist: Map<DamageType, float>
+      /// It fights at the monster (true) or from where the player stands.
+      Melee: bool
+      /// Seconds until a killed minion is revived (counted from the last death, see the
+      /// engine); None: it is gone for good.
+      Revive: float option
+      /// Its power for effects that count it (its life as a multiple of a monster's).
+      Power: float
+      /// Life regenerated per second.
+      LifeRegen: float }
+
 /// The player or a minion.
 type Actor =
     { Name: string
@@ -285,6 +306,8 @@ type Actor =
       Banners: Banner list
       /// The actor only acts while the player has this buff (a totem while it stands).
       ActiveWhile: string option
+      /// A minion that can be hurt and killed. None: nothing can happen to the actor.
+      Body: MinionBody option
       Infusions: Infusions option
       Archons: Archon list
       Charms: Charm list
@@ -313,6 +336,7 @@ module Actor =
           ManaRemnants = None
           Banners = []
           ActiveWhile = None
+          Body = None
           Infusions = None
           Archons = []
           Charms = []
@@ -404,8 +428,10 @@ module Sim =
         | ConsumeCharges of actor: string * charge: string * skill: string
         /// A cycle picks its next variant.
         | CycleTick of actor: string * cycle: string
-        /// A monster hits at the player.
+        /// A monster hits at the player or one of the minions.
         | EnemyAttack of enemy: string
+        /// Killed minions come back, if no other has died since this was set.
+        | ReviveMinions of at: float
         | PeriodicTick of actor: string * periodic: string
         /// A ward remnant's ward arrives.
         | WardArrives of amount: float
@@ -442,7 +468,13 @@ module Sim =
           /// detonator is used): part name -> how many wait.
           Pending: Map<string, int>
           /// The critical hit roll (0..1) of the last use of each skill and its parts.
-          CritRolls: Map<string, float> }
+          CritRolls: Map<string, float>
+          /// A minion's life and energy shield, when it was last hit, and whether it is out of
+          /// the fight (killed, or not summoned).
+          Life: float
+          Shield: float
+          HitAt: float
+          Gone: bool }
 
     type private EnemyState =
         { Def: EnemyDef
@@ -518,7 +550,9 @@ module Sim =
           /// they appeared, life of one crystal, how many, gone at). Newest first.
           Crystals: (string * string * string * float * float * int * float) list
           /// Evasion entropy of each defender: (value 0..99, time of the last attempted hit).
-          Entropy: Map<string, float * float> }
+          Entropy: Map<string, float * float>
+          /// Killed minions are revived at this time; how many have died since the last revival.
+          Revival: (float * int) option }
 
     /// Fixed for the whole fight: mod dbs built once, buffs layered on per event.
     type private Env =
@@ -2478,7 +2512,7 @@ module Sim =
     /// A monster's hit at the player: evasion, deflection, armour, resistances, then
     /// energy shield and life. Frozen / stunned / electrocuted monsters don't act; chill
     /// slows them; blind lowers their accuracy.
-    let private enemyAttack env (rng: Rng) name (w: World) =
+    let private attackPlayer env (rng: Rng) name (w: World) =
         let e = w.Enemies.[name]
         match e.Def.Attack, env.Fight.Player.Vitals, w.Player with
         | Some atk, Some pools, Some p when e.Life > 0.0 && p.Died.IsNone ->
@@ -2666,6 +2700,123 @@ module Sim =
         | _ -> w
 
     /// Mark "<what>Recently" for 4 s (gained / consumed charges...).
+    /// When killed minions come back: `seconds` after the first death; each further death
+    /// while they wait adds a n-th of that for the n-th death, and never more than the full
+    /// time from now. `waiting`: the time set so far and the deaths counted.
+    let nextRevival (now: float) (seconds: float) (waiting: (float * int) option) : float * int =
+        match waiting with
+        | Some (at, n) when at > now -> min (now + seconds) (at + seconds / float (n + 1)), n + 1
+        | _ -> now + seconds, 1
+
+    /// A minion is killed: it leaves the fight; a reviving one comes back with the others
+    /// once none has died for its revive time. Each further death while they wait adds less:
+    /// the n-th adds a n-th of the time, and never more than the full time from now.
+    let private killMinion env (rng: Rng) (minion: Actor) (w: World) =
+        let body = minion.Body.Value
+        let player = env.Fight.Player
+        let w = updateActor minion.Name (fun st -> { st with Gone = true; Life = 0.0; Shield = 0.0 }) w
+        let w = { w with Counts = bump "minion:died" w.Counts } |> markStatus player.Name "MinionDiedRecently"
+        match body.Revive with
+        | None -> w
+        | Some seconds ->
+            // "gains Energy when one of your Persistent Minions is Killed"
+            let w =
+                player.Metas
+                |> List.fold
+                    (fun w meta ->
+                        let amount = meta.Sources |> List.sumBy (fun src -> match src with MinionDeaths per -> per * body.Power | _ -> 0.0)
+                        if amount > 0.0 then gainEnergy env rng player meta.Name (amount * meta.EnergyMult) w else w)
+                    w
+            let at, n = nextRevival w.Time seconds w.Revival
+            { w with Revival = Some(at, n) } |> schedule at (ReviveMinions at)
+
+    let private reviveMinions env (at: float) (w: World) =
+        match w.Revival with
+        | Some (t, _) when abs (t - at) < 1e-9 ->
+            env.Fight.Minions
+            |> List.fold
+                (fun w m ->
+                    match m.Body with
+                    | Some b when b.Revive.IsSome && (Map.find m.Name w.Actors).Gone ->
+                        updateActor m.Name (fun st -> { st with Gone = false; Life = b.Life; Shield = b.EnergyShield; HitAt = w.Time }) w
+                        |> schedule w.Time (Ready m.Name)
+                        |> fun w -> { w with Counts = bump "minion:revived" w.Counts }
+                    | _ -> w)
+                { w with Revival = None }
+        | _ -> w
+
+    /// Mitigated damage onto a minion: energy shield first (chaos removes twice as much),
+    /// then life. Before that it has recovered since it was last hit: its life regeneration,
+    /// and its energy shield recharge once the delay has passed.
+    let private hurtMinion env (rng: Rng) (minion: Actor) (damage: Map<DamageType, float>) (w: World) =
+        let body = minion.Body.Value
+        let st = Map.find minion.Name w.Actors
+        let since = w.Time - max 0.0 st.HitAt
+        let life = min body.Life (st.Life + body.LifeRegen * since)
+        let shield =
+            let recharging = since - Constants.energyShieldRechargeDelay
+            if recharging > 0.0 then min body.EnergyShield (st.Shield + body.EnergyShield * Constants.energyShieldRechargePercent / 100.0 * recharging) else st.Shield
+        let shield, rest =
+            damage
+            |> Map.fold
+                (fun (es, rest) t d ->
+                    let k = if t = Chaos then 2.0 else 1.0
+                    let absorbed = min d (es / k)
+                    es - absorbed * k, rest + d - absorbed)
+                (shield, 0.0)
+        let life = life - rest
+        let w = updateActor minion.Name (fun st -> { st with Life = life; Shield = shield; HitAt = w.Time }) w
+        if life <= 0.0 then killMinion env rng minion w else w
+
+    /// A monster's hit at a minion: evasion, armour against physical damage, resistances.
+    let private attackMinion env (rng: Rng) name (minion: Actor) (w: World) =
+        let e = w.Enemies.[name]
+        let atk = e.Def.Attack.Value
+        let body = minion.Body.Value
+        let st = status e
+        let stopped = [ "Frozen"; "HeavilyStunned"; "Electrocuted" ] |> List.exists st.ContainsKey
+        let chill = e.Debuffs |> Map.tryFind "Chilled" |> Option.map (fun x -> x.Mods |> List.sumBy (fun m -> m.Value)) |> Option.defaultValue 0.0
+        let debuffs = (defender e).Mods
+        let actionSpeed = max 0.1 (Mods.more Ctx.empty [ Named "ActionSpeed" ] debuffs)
+        let dealt = max 0.0 (Mods.more Ctx.empty [ Named "DamageDealt" ] debuffs)
+        let next = atk.Interval / max 0.1 (1.0 - chill / 100.0) / actionSpeed
+        let w = schedule (w.Time + next) (EnemyAttack name) w
+        if stopped then { w with Counts = bump "enemy:stopped" w.Counts }
+        else
+            let accuracy = atk.Accuracy * (if st.ContainsKey "Blinded" then 1.0 - Constants.blindAccuracyLess / 100.0 else 1.0)
+            let hitChance = Vitals.monsterHitChance body.Evasion accuracy
+            let landed, w = lands rng minion.Name hitChance w
+            if not landed then { w with Counts = bump "minion:evaded" w.Counts }
+            else
+                let crit = rng.Chance atk.CritChance && not (hitChance < 100.0 && rng.Chance(100.0 - hitChance))
+                let critMult = if crit then 1.0 + Constants.monsterBaseCritBonus / 100.0 else 1.0
+                let taken =
+                    atk.Damage
+                    |> Map.map (fun t d ->
+                        let d = d * dealt * critMult
+                        match t with
+                        | Physical -> d * (1.0 - Vitals.armourReduction body.Armour d / 100.0)
+                        | t -> d * (1.0 - (Map.tryFind t body.Resist |> Option.defaultValue 0.0) / 100.0))
+                hurtMinion env rng minion taken { w with Counts = bump "minion:hit" w.Counts }
+
+    /// A monster's attack goes at the player or at one of the minions in its reach, each as
+    /// likely as the other. A melee minion fights at the monster; the others stand where the
+    /// player does.
+    let private enemyAttack env (rng: Rng) name (w: World) =
+        let e = w.Enemies.[name]
+        let minions = env.Fight.Minions |> List.filter (fun m -> m.Body.IsSome && not (Map.find m.Name w.Actors).Gone)
+        match e.Def.Attack with
+        | Some atk when e.Life > 0.0 && env.Fight.Minions |> List.exists (fun m -> m.Body.IsSome) ->
+            let playerUp = env.Fight.Player.Vitals.IsSome && (w.Player |> Option.exists (fun p -> p.Died.IsNone))
+            let inRange = Vec.length e.Def.Position - e.Def.Size <= atk.Range + 1e-6
+            let reachable = minions |> List.filter (fun m -> m.Body.Value.Melee || inRange)
+            let n = reachable.Length + (if playerUp && inRange then 1 else 0)
+            let pick = if n > 0 then int (rng.Float() * float n) else 0
+            if pick < reachable.Length then attackMinion env rng name reachable.[pick] w
+            elif playerUp then attackPlayer env rng name w
+            else schedule (w.Time + atk.Interval) (EnemyAttack name) w
+        | _ -> attackPlayer env rng name w
+
     let private onPeriodic env (rng: Rng) actorName periodicName (w: World) =
         let actor = actorDef env actorName
         match actor.Periodics |> List.tryFind (fun p -> p.Name = periodicName) with
@@ -2879,12 +3030,16 @@ module Sim =
                                     if on then (if b.ContainsKey k then b else Map.add k { Name = k; Mods = []; Stacks = 1; Expires = infinity } b)
                                     else Map.remove k b) st.Buffs }) w
                 | _ -> w
+            let gone name = Map.tryFind name w.Actors |> Option.exists (fun st -> st.Gone)
             match ev with
+            // a minion that is out of the fight does nothing, and what it had begun is lost
+            | Ready name | Strike (name, _, _, _) | PassingStrike (name, _, _, _, _) | DirectHit (name, _, _, _) when gone name -> w
             | Ready name -> onReady env rng name w
             | Strike (name, skill, mult, aimedAt) -> onStrike env rng name skill mult aimedAt None false w
             | PassingStrike (name, skill, mult, aimedAt, elapsed) -> onStrike env rng name skill mult aimedAt (Some elapsed) false w
             | DirectHit (name, skill, mult, enemy) -> onStrike env rng name skill mult enemy None true w
             | EnemyAttack name -> enemyAttack env rng name w
+            | ReviveMinions at -> reviveMinions env at w
             | PeriodicTick (name, periodic) -> onPeriodic env rng name periodic w
             | ManaArrives amount ->
                 match env.Fight.Player.Vitals, env.Fight.Player.ManaRemnants, w.Player with
@@ -3018,7 +3173,11 @@ module Sim =
               RageAt = 0.0
               RageCarry = 0.0
               Pending = Map.empty
-              CritRolls = Map.empty }
+              CritRolls = Map.empty
+              Life = 0.0
+              Shield = 0.0
+              HitAt = -1e9
+              Gone = false }
         let w0 =
             { Player =
                 fight.Player.Vitals
@@ -3106,7 +3265,8 @@ module Sim =
                                         | _ -> res
                                     | _ -> res)
                                 res
-                    a.Name, { empty with Buffs = res; Energy = banked })
+                    let life, shield = match a.Body with Some b -> b.Life, b.EnergyShield | None -> 0.0, 0.0
+                    a.Name, { empty with Buffs = res; Energy = banked; Life = life; Shield = shield })
                 |> Map.ofList
               Queue = Map.empty
               Seq = 0
@@ -3118,7 +3278,8 @@ module Sim =
               Bombs = []
               Agonies = []
               Crystals = []
-              Entropy = Map.empty }
+              Entropy = Map.empty
+              Revival = None }
             |> fun w -> actors |> List.fold (fun w a -> schedule 0.0 (Ready a.Name) w) w
             |> fun w -> actors |> List.fold (fun w a -> a.Cycles |> List.fold (fun w c -> schedule 0.0 (CycleTick(a.Name, c.Name)) w) w) w
             |> fun w -> actors |> List.fold scheduleResourceTimers w
@@ -3126,7 +3287,7 @@ module Sim =
                 // periodic actions start at a random point of their first period
                 actors |> List.fold (fun w a -> a.Periodics |> List.fold (fun w p -> schedule (rng.Float() * p.Every) (PeriodicTick(a.Name, p.Name)) w) w) w
             |> fun w ->
-                if fight.Player.Vitals.IsNone then w
+                if fight.Player.Vitals.IsNone && fight.Minions |> List.forall (fun m -> m.Body.IsNone) then w
                 else
                     // monsters start attacking at random points in their first interval
                     fight.Enemies

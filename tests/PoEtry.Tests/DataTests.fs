@@ -436,6 +436,27 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         near (90.019996643066 * 0.7 * 0.7) s.Damage.[Physical].Min
         near (204.03999328613 / 90.019996643066 * 1.25) fixup)
 
+    test "minions: body from the minion columns; the owner's minion mods; energy shield as a share of life" (fun () ->
+        // checked against PoB on corpus 047: a level 62 Skeletal Frost Mage with 86% increased
+        // minion life has 4760 life and 452 energy shield (MinionLife at 62 is 5682, x 0.53,
+        // 15% of it as energy shield), 1692 armour and 619 evasion (a monster's of its level)
+        let mage = db.Value.Minions.["RaisedSkeletonFrostMage"]
+        let b = Behaviours.minionBody mage 62 [ Mod.inc MaxLife 86.0; Mod.base' (Resist Fire) 90.0 ] (Some 12.0)
+        near 4760.0 (floor b.Life)
+        near 452.0 (round b.EnergyShield)
+        near 1692.0 b.Armour
+        near 619.0 b.Evasion
+        equal false b.Melee
+        // resistances are capped at 75%
+        near 75.0 b.Resist.[Fire]
+        near 0.53 b.Power
+        // "Minions Revive 50% faster"
+        near 8.0 (Behaviours.minionBody mage 62 [ Mod.inc (Named "MinionReviveSpeed") 50.0 ] (Some 12.0)).Revive.Value
+        // what the stats mean
+        let mods id v = match StatMap.meaning id v with Mods ms -> ms | m -> failwithf "%s -> %A" id m
+        equal (box [ { Mod.inc MaxLife 20.0 with Stat = ForMinions MaxLife } ]) (box (mods "minion_maximum_life_+%" 20.0))
+        equal 3 (mods "minion_elemental_resistance_%" 10.0).Length)
+
     test "Frost Wall: a row of Ice Crystals; the cast itself hits nothing" (fun () ->
         match Gems.skill db.Value ModDb.empty None { Gem = "Frost Wall"; Level = 20; Quality = 0; StatSet = 1; Supports = [] } with
         | Ok (s, _) ->

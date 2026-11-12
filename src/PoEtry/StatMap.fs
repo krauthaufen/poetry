@@ -733,6 +733,11 @@ module StatMap =
         | "base_cast_speed_+%" -> one (Mod.inc Speed v |> Mod.whenever (SkillIs Spell))
         | "skill_speed_+%" -> one (Mod.inc Speed v)
         | "action_speed_+%" -> one (Mod.inc Speed v)
+        | "minion_elemental_resistance_%" -> Some(Mods(DamageType.elemental |> List.map (fun t -> Mod.base' (ForMinions(Resist t)) v)))
+        | "minion_chaos_resistance_%" -> one (Mod.base' (ForMinions(Resist Chaos)) v)
+        | "minion_maximum_all_elemental_resistances_%" -> Some(Mods(DamageType.elemental |> List.map (fun t -> Mod.base' (ForMinions(MaxResist t)) v)))
+        | "minion_resummon_speed_+%" -> one (Mod.inc (ForMinions(Named "MinionReviveSpeed")) v)
+        | "minion_maximum_life_%_to_gain_as_maximum_energy_shield" -> one (Mod.base' (ForMinions(Named "LifeAsExtraEnergyShield")) v)
         | "minion_attack_speed_+%" -> one (Mod.inc (ForMinions Speed) v |> Mod.whenever (SkillIs Attack))
         | "minion_cast_speed_+%" -> one (Mod.inc (ForMinions Speed) v |> Mod.whenever (SkillIs Spell))
         | "minion_attack_and_cast_speed_+%" -> one (Mod.inc (ForMinions Speed) v)
@@ -1302,7 +1307,14 @@ module StatMap =
                         match m with
                         | Mods ms -> Some(Mods(ms |> List.map (fun x -> match x.Stat with ForMinions _ -> x | st -> { x with Stat = ForMinions st })))
                         | _ -> None
-                    if id.StartsWith "allies_in_presence_" then direct (id.Substring 19) value |> Option.bind wrapMinions
+                    // what minions have: "minion_maximum_life_+%", "minion_elemental_resistance_%"
+                    let minionOwn =
+                        if id.StartsWith "minion_" then
+                            let rest = id.Substring 7
+                            explicit rest value |> Option.orElse (explicit ("base_" + rest) value) |> Option.orElse (defensive rest value) |> Option.bind wrapMinions
+                        else None
+                    if minionOwn.IsSome then minionOwn
+                    elif id.StartsWith "allies_in_presence_" then direct (id.Substring 19) value |> Option.bind wrapMinions
                     elif id.StartsWith "you_and_allies_in_presence_" then
                         match direct (id.Substring 27) value with
                         | Some (Mods ms as own) -> (match wrapMinions own with Some (Mods ws) -> Some(Mods(ms @ ws)) | _ -> Some own)

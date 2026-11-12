@@ -840,6 +840,56 @@ let main _ =
         // bites land at 1 .. 5 s: those at 1 and 2 s are within the three seconds
         near (2.0 * 150.0 + 3.0 * 100.0) o.DamageBy.["Bite (hit)"])
 
+    // ---- minions that can be killed ----
+    let body life revive =
+        { Life = life; EnergyShield = 0.0; Armour = 0.0; Evasion = 0.0; Resist = Map.empty; Melee = true; Revive = revive; Power = 0.55; LifeRegen = 0.0 }
+
+    test "minions: a monster kills a minion, it is revived after its revive time and killed again" (fun () ->
+        // the player can't be hurt, so every attack (60 a second) goes at the skeleton with 100
+        // life: it dies with the second hit, is back 5 s later, takes the hit of that moment...
+        let skeleton = { Actor.make "Skeleton" [ noIgnite; sure ] [ strike "Bite" 100.0 ] with Body = Some(body 100.0 (Some 5.0)) }
+        let f = { Fight.single (attacker Physical 60.0 1.0) (Actor.make "Player" [ noIgnite ] [ idle ]) 20.0 with MaxTime = 20.0; Minions = [ skeleton ] }
+        let o = Sim.run f 1u
+        // deaths at t0 + 1, + 7, + 13, + 19 (t0 < 1: the first attack); back at + 6, + 12, + 18
+        equal 4 o.Counts.["minion:died"]
+        equal 3 o.Counts.["minion:revived"]
+        // it stands for about a second each time: a bite or two, not twenty
+        let bites = o.DamageBy.["Bite (hit)"]
+        if bites < 100.0 || bites > 800.0 then failwithf "bites %g" bites)
+
+    test "minions: one that does not revive is gone for good; its resistances and armour count" (fun () ->
+        let spirit = { Actor.make "Spirit" [ noIgnite; sure ] [ strike "Bite" 100.0 ] with Body = Some(body 100.0 None) }
+        let run enemy b = Sim.run { Fight.single enemy (Actor.make "Player" [ noIgnite ] [ idle ]) 10.0 with MaxTime = 10.0; Minions = [ { spirit with Body = Some b } ] } 1u
+        let o = run (attacker Physical 60.0 1.0) (body 100.0 None)
+        equal 1 o.Counts.["minion:died"]
+        equal false (o.Counts.ContainsKey "minion:revived")
+        // 75% fire resistance: 15 a hit, it lasts seven hits and the fight has at most ten
+        let o = run (attacker Fire 60.0 1.0) { body 100.0 None with Resist = Map.ofList [ Fire, 75.0 ] }
+        equal 1 o.Counts.["minion:died"]
+        let o = run (attacker Fire 60.0 2.0) { body 100.0 None with Resist = Map.ofList [ Fire, 75.0 ] }
+        equal false (o.Counts.ContainsKey "minion:died"))
+
+    test "minions: the revive timer; a later death adds a n-th of it, at most the full time from now" (fun () ->
+        equal (6.0, 1) (Sim.nextRevival 0.0 6.0 None)
+        // a second death right away: the full time from now is less than 6 + 6/2
+        equal (6.1, 2) (Sim.nextRevival 0.1 6.0 (Some(6.0, 1)))
+        // a second death just before they would be back: 6 + 6/2
+        equal (9.0, 2) (Sim.nextRevival 5.0 6.0 (Some(6.0, 1)))
+        // a third: + 6/3
+        equal (11.0, 3) (Sim.nextRevival 8.9 6.0 (Some(9.0, 2)))
+        // after they are back the count starts again
+        equal (26.0, 1) (Sim.nextRevival 20.0 6.0 (Some(9.0, 2))))
+
+    test "minions: a reviving minion's death gives Cast on Minion Death energy by its power" (fun () ->
+        // 50 energy per power, the skeleton has 0.55: 27.5 a death, 55 needed: every second death
+        let nova = { fireSpell 100.0 with Name = "Nova"; Tags = Set.ofList [ Spell; Triggered ] }
+        let meta = { Meta.simple "On Death" 55.0 "Nova" with Sources = [ MinionDeaths 50.0 ] }
+        let player = { Actor.make "Player" [ noIgnite ] [ idle; nova ] with Rotation = [ Actor.always idle.Name ]; Metas = [ meta ] }
+        let skeleton = { Actor.make "Skeleton" [ noIgnite; sure ] [ strike "Bite" 100.0 ] with Body = Some(body 100.0 (Some 5.0)) }
+        let o = Sim.run { Fight.single (attacker Physical 60.0 1.0) player 20.0 with MaxTime = 20.0; Minions = [ skeleton ] } 1u
+        equal 4 o.Counts.["minion:died"]
+        equal 2 o.Counts.["trigger:Nova"])
+
     test "hexblast: waits until a curse is half expired, detonates it, and then has nothing to detonate" (fun () ->
         let hex = { fireSpell 0.0 with Name = "Hex"; BaseDamage = Map.empty; Cooldown = Some 100.0 }
         let blast = { fireSpell 500.0 with Name = "Blast"; Mods = [ Mod.flag (Named "DetonatesCurse") ] }

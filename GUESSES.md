@@ -18,7 +18,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
    whose description or behaviour changed.
 5. Go through the lists below; the wiki's version history of a skill says what changed.
 
-## Rules (85)
+## Rules (87)
 
 ### Hit damage
 
@@ -81,6 +81,8 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | Light stun on the player | game constants; formula a guess | guess |
 | Skills | game data | data; choice of skill is a guess |
 | Count | 1 per gem, or the gem's pack size; how many a build reserves spirit for is unknown from the API | | guess, usually too low |
+| Who a monster attacks | monster tags are data; who is attacked is not known | guess |
+| Death and revival | time: game data (the wiki says 7.5 s); the rule for further deaths: wiki Minion | data; 12 s for gems without the stat is a guess |
 | Totems | gem data | data; the simplifications are guesses |
 | Trinity | gem data | guess |
 | Aftershock | stat text | guess (same damage and area) |
@@ -150,10 +152,11 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 |---|---|---|
 | Ward remnants | data; overflow: user | data + user + guess |
 
-## Constants (6)
+## Constants (7)
 
 | Constant | Value | What it stands for |
 |---|---|---|
+| `minionReviveSeconds` | `12.0` | Seconds until killed minions are revived: every reviving minion gem in the data has minion_base_resummon_time_ms = 12000; taken for the ones without the stat as well (a guess for those). The wiki's Minion page says 7.5 s. |
 | `playerLightStunDuration` | `0.35` | Seconds a light stun interrupts the player. GUESS (no player constant in the data). |
 | `orbPulseInterval` | `0.25` | Seconds between the pulses of a Frost Bomb (its exposure grows with each): not in the data; 0.25 s lets one bomb reach its cap just as it detonates. A guess. |
 | `iceCrystalWidth` | `8.0` | Width (units) of one Ice Crystal of a wall: a wall has one per so much of its length (Frost Wall, 5.6 m: seven). Not in the data. A guess. |

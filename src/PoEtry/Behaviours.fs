@@ -252,6 +252,9 @@ module Behaviours =
                         elif id.EndsWith "_per_monster_power_on_ignite" then Some(InflictsAilment(Ignite, v / 100.0))
                         elif id.EndsWith "_per_monster_power_on_hit" then Some(MeleeHits(v / 100.0))
                         elif id.EndsWith "_per_monster_power_on_melee_kill" then Some(MeleeKills(v / 100.0))
+                        // "gain 1 energy per X% of the minion's relative defensiveness": a minion
+                        // with the life of an ordinary monster (100%) gives 100 / X
+                        elif id.EndsWith "_gain_1_energy_per_X_minion_relative_defensiveness_%" && v > 0.0 then Some(MinionDeaths(100.0 / v))
                         elif id.EndsWith "_centienergy_per_unit_travelled_while_dodge_rolling" then Some(DodgeRolls(v / 100.0))
                         elif id.EndsWith "_centienergy_on_block" then Some(Blocks(v / 100.0))
                         elif id.EndsWith "_centienergy_per_10ms_base_cast_time" then Some(CastsSpells(v / 100.0))
@@ -1251,6 +1254,31 @@ module Behaviours =
           Tags = [] },
         fixup
 
+    /// A minion's body: life of its level (DefaultMonsterStats MinionLife) x the monster's
+    /// life multiplier, a share of it as energy shield instead; armour and evasion of a
+    /// monster of its level x the monster's multipliers; its resistances. "Minions have ..."
+    /// mods of the owner apply. Resistances are capped at 75% plus what raises the maximum.
+    let minionBody (m: MinionData) (level: int) (minionMods: Mod list) (revive: float option) : MinionBody =
+        let db = ModDb.ofList minionMods
+        let mult stat = Mods.mult Ctx.empty [ stat ] db
+        let baseLife = floor (Constants.allyLife level * m.Life)
+        let life = baseLife * (1.0 - m.EnergyShield) * mult MaxLife
+        { Life = life
+          EnergyShield = baseLife * m.EnergyShield * mult MaxEnergyShield + life * Mods.sumBase Ctx.empty [ Named "LifeAsExtraEnergyShield" ] db / 100.0
+          Armour = Constants.monsterArmour level * m.Armour * mult Armour
+          Evasion = Constants.monsterEvasion level * m.Evasion * mult Evasion
+          Resist =
+            DamageType.all
+            |> List.filter (fun t -> t <> Physical)
+            |> List.map (fun t ->
+                let own = Map.tryFind t m.Resist |> Option.defaultValue 0.0
+                t, min (75.0 + Mods.sumBase Ctx.empty [ MaxResist t ] db) (own + Mods.sumBase Ctx.empty [ Resist t ] db))
+            |> Map.ofList
+          Melee = not m.Ranged
+          Revive = revive |> Option.map (fun s -> s / Mods.inc Ctx.empty [ Named "MinionReviveSpeed" ] db)
+          Power = m.Life
+          LifeRegen = life * Mods.sumBase Ctx.empty [ LifeRegenPercent ] db / 100.0 }
+
     /// Persistent minions of a build as actors. Each minion is the monster its gem names
     /// (skills' minion list; "Spectre: X" / "Companion: X" by monster name) at the gem's level:
     /// its attacks use "weapon" damage = monster damage of that level x the monster's damage
@@ -1308,9 +1336,15 @@ module Behaviours =
                     // a minion without any damaging skill (a healer) simply doesn't fight
                     if ordered.IsEmpty then [], []
                     else
+                        // killed, it is revived after the gem's revive time
+                        let revive =
+                            Gems.rawStats db charMods { Gem = gem.Name; Level = gem.Level; Quality = gem.Quality; StatSet = 1; Supports = [] }
+                            |> List.tryPick (fun (k, v) -> if k = "minion_base_resummon_time_ms" then Some(v / 1000.0) else None)
+                            |> Option.defaultValue Constants.minionReviveSeconds
+                        let body = minionBody m level minionMods (Some revive)
                         [ for i in 1 .. count ->
                             let name = if count > 1 then sprintf "%s %d" m.Name i else m.Name
-                            Actor.make name minionMods ordered ],
+                            { Actor.make name minionMods ordered with Body = Some body } ],
                         []))
         |> List.concat
         |> List.unzip

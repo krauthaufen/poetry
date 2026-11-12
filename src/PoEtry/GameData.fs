@@ -71,7 +71,15 @@ type MinionData =
       DamageSpread: float
       AttackTime: float
       CritChance: float
-      SkillList: string list }
+      SkillList: string list
+      /// Share of its life it has as energy shield instead; armour and evasion as multiples
+      /// of a monster's of its level; resistances in percent.
+      EnergyShield: float
+      Armour: float
+      Evasion: float
+      Resist: Map<DamageType, float>
+      /// It fights from a distance (tagged ranged or caster and not melee).
+      Ranged: bool }
 
 type GemData =
     { GameId: string
@@ -168,7 +176,14 @@ module GameData =
                   DamageSpread = num "damageSpread" 0.2
                   AttackTime = num "attackTime" 1.0
                   CritChance = num "critChance" 5.0
-                  SkillList = Json.list (Json.field "skillList" j) |> List.choose Json.str })
+                  SkillList = Json.list (Json.field "skillList" j) |> List.choose Json.str
+                  EnergyShield = num "energyShield" 0.0
+                  Armour = num "armour" 1.0
+                  Evasion = num "evasion" 1.0
+                  Resist = Map.ofList [ Fire, num "fireResist" 0.0; Cold, num "coldResist" 0.0; Lightning, num "lightningResist" 0.0; Chaos, num "chaosResist" 0.0 ]
+                  Ranged =
+                    (let tags = Json.list (Json.field "monsterTags" j) |> List.choose Json.str
+                     not (List.contains "melee" tags) && (List.contains "ranged" tags || List.contains "caster" tags)) })
         | _ -> Map.empty
 
     /// skills.json: grantedEffectId -> skill.

@@ -271,7 +271,12 @@ Checked against PoB's defensive numbers for 131 public characters (`tools/corpus
 | Owner's mods | "Minions deal / have ..." mods apply | | partial |
 | Count | 1 per gem, or the gem's pack size; how many a build reserves spirit for is unknown from the API | | guess, usually too low |
 | Accuracy | minions that attack always hit | wiki Minion; PoB "Minions no longer need Accuracy as of patch 0.3.0" | data |
-| Not modelled | temporary minions (zombies, raging spirits), minion life and death, auras from minions | | todo |
+| Body | life: DefaultMonsterStats MinionLife of its level x the monster's life multiplier, the monster's energy shield share of it as energy shield instead; armour and evasion: a monster's of its level x the monster's multipliers; the monster's resistances, capped at 75% plus raised maximums. "Minions have ..." mods apply (life, resistances, armour, evasion, energy shield, life regeneration) | game data; life, energy shield, armour and evasion match PoB on corpus 047 | data |
+| Who a monster attacks | each attack goes at the player or one of the minions in the monster's reach, each as likely as the other. A melee minion fights at the monster; one tagged ranged or caster (and not melee) stands where the player does | monster tags are data; who is attacked is not known | guess |
+| A hit on a minion | evasion against the monster's accuracy, armour against physical damage, resistances; energy shield first (chaos removes twice as much), then life. Its energy shield recharges like the player's (after 4 s, 12.5% a second), its life only by "Minions regenerate" | as for the player; "Reviving Minions heal after avoiding damage for a short time" (wiki) has no numbers and is not modelled | partial |
+| Death and revival | a killed minion does nothing and loses what it had begun. Persistent minions come back together once none has died for the gem's revive time (minion_base_resummon_time_ms: 12 s on every gem that has it; the same for those without). Each further death while they wait adds a n-th of that time for the n-th death, never more than the full time from now. "Minions Revive x% faster" divides the time | time: game data (the wiki says 7.5 s); the rule for further deaths: wiki Minion | data; 12 s for gems without the stat is a guess |
+| Cast on Minion Death | a persistent minion's death gives 100 / X energy per unit of its power (cast_on_minion_death_gain_1_energy_per_X_minion_relative_defensiveness_% = 2: 50), its power being the monster's life multiplier (Skeletal Sniper 0.55: 27.5) | game data; power = life multiplier checked against the wiki's table (tested in 0.5.5d) | data |
+| Not modelled | temporary minions (zombies, raging spirits), auras from minions, minions taking damage for the player, what a minion's death does besides energy | | todo |
 
 ### Totems, curses, buffs, damage over time
 
@@ -528,7 +533,7 @@ The game's standard buffs and debuffs, with the numbers of its keyword text. Sta
 | Block | shield block (shown on the item) + flat, × increased block, capped at 50 + max block; lucky block rolls twice; blocked hits deal `base_block_%_damage_taken` | data / game text | data + guess (cap) |
 | Energy from melee hits / kills | Fire Spell on Hit: per monster power for each melee hit, scaled like crits; Reaper's Invocation: per monster power for each melee kill | gem stats; the scaling is taken to be the same as for crits | guess |
 | Energy from dodge rolls | Cast on Dodge: energy per unit travelled. The dodge roll is something the player presses (`Setup.dodgeRoll`): 4.6 m in 0.75 s (not shortened by speed) plus "Dodge Roll distance" | gem stat; game files (skill DodgeRollPlayer: `dodge_roll_base_travel_distance` 46, cast time 750 ms) | data |
-| Energy from minion deaths | not modelled (Cast on Minion Death never triggers) | - | missing |
+| Energy from minion deaths | see Minions: Cast on Minion Death | game data | data |
 | Unaffordable skills | a skill that costs more than the whole mana pool is never used | - | data |
 
 ## Runic Ward, remnants, Infernal Flame
