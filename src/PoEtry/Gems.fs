@@ -747,7 +747,11 @@ module Gems =
           // a skill that comes down in several volleys (Death From Above: six) hits with each
           Hits =
             (match ownStats |> List.tryPick (fun (id, v) -> if id.EndsWith "_number_of_volleys" && v > 1.0 then Some(int v) else None) with
-             | Some n when not held -> [ for k in 1 .. n -> float k / float n, 1.0 ]
+             | Some n when not held ->
+                 // "..._volley_delay_ms" apart, the first as the use ends (as shares of the use time)
+                 match ownStats |> List.tryPick (fun (id, v) -> if id.EndsWith "_volley_delay_ms" && v > 0.0 then Some(v / 1000.0) else None) with
+                 | Some delay when time > 0.0 -> [ for k in 1 .. n -> 1.0 + float (k - 1) * delay / time, 1.0 ]
+                 | _ -> [ for k in 1 .. n -> float k / float n, 1.0 ]
              | _ -> heldHits)
           Delivery = delivery
           // A part that only poisons ("display_statset_no_hit_damage", "skill poisons without

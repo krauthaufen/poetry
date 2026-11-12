@@ -413,6 +413,14 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
             | d -> failwithf "%A" d
         | Error e -> failwith e)
 
+    test "Death From Above: six volleys, the first as the use ends, 0.75 s apart" (fun () ->
+        match Gems.minionSkill db.Value ModDb.empty None "DeathFromAboveDaemonMinion" 80.0 [] with
+        | Ok (s, _) ->
+            equal 6 s.Hits.Length
+            near 1.0 (fst s.Hits.Head)
+            near (0.75 / s.BaseTime) (fst s.Hits.[1] - fst s.Hits.[0])
+        | Error e -> failwith e)
+
     test "Ice Shot: the shards spring from the enemy hit and cannot hit it" (fun () ->
         let bow = (Items.parse db.Value "Rarity: Normal\nWarmonger Bow\n--------\n").Weapon
         match Gems.skill db.Value ModDb.empty bow { Gem = "Ice Shot"; Level = 20; Quality = 0; StatSet = 1; Supports = [] } with
