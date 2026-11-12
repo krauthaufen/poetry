@@ -47,10 +47,13 @@ type Msg =
     | Toggle of int
     /// A click on the tree, at this place of it.
     | Click of V3d
-    | Grab of V3d
-    /// (with where the camera was when the pointer's place on the tree was worked out)
-    | Drag of V3d * V3d
-    | Release
+    /// The place of the tree under a pointer that came down, with where the camera was when
+    /// it was worked out.
+    /// The page's size, as the bridge in index.html answers `__window`.
+    | Sized of Fetched
+    | PointerDown of Event
+    | PointerMove of Event
+    | PointerUp of Event
     | Zoom of V3d * V3d * float
 
 type Model =
@@ -87,6 +90,18 @@ type Model =
       /// between allocated passives, and the ascendancy's class art.
       AscendancyWeb : Buffer<V3f>
       Path : Buffer<V3f>
+      /// Texture coordinates for those three and for `Web` (all zero: the shader they are
+      /// drawn with asks for them, and iOS Safari draws nothing for a mesh that lacks an
+      /// input its shader names, where Chrome does).
+      /// Whether the tree's data has arrived, and how many vertices all its connections have
+      /// together. A mesh keeps the number of vertices it was made with (the toy gives its
+      /// draw call once), so the meshes are only made once there is something to draw, and
+      /// the path's has always that many vertices, the unused ones all in one point.
+      Loaded : bool
+      Capacity : int
+      WebUv : Buffer<V2f>
+      AscendancyWebUv : Buffer<V2f>
+      PathUv : Buffer<V2f>
       Art : string
       Links : Link[]
       Neighbours : Map<int, int list>
@@ -102,19 +117,32 @@ type Model =
       Camera : Camera
       Near : float
       Far : float
-      /// The point of the tree held while dragging; whether the pointer has moved since.
-      Held : V3d option
-      Moved : bool }
+      /// The pointers that are down on the tree (mouse, or one or two fingers), by id, where
+      /// they are on the page; how far they have moved since the first came down (a pointer
+      /// let go without having moved is a click).
+      Touches : (int * V2d) list
+      Travel : float
+      /// The page's size in its own pixels (0 until the bridge has said), asked again with
+      /// every pointer that comes down (`Asked` counts them), so that a turned phone or a
+      /// resized window is followed.
+      Page : V2d
+      Asked : int
+      /// A click that could not be placed yet (the page's size was not known).
+      Pending : V2d option
+      /// (for checks) what the last click did.
+      Note : string }
 
 let init : Model =
     { Build = ""; Scenario = "boss"; Status = "locating"; Title = ""; Class = ""; Ascendancy = ""; Tab = "character"
       Pools = []; Defences = []; Resistances = []; Minions = []
       NotUnderstood = 0; Fighting = false; Gem = ""; Dps = []; Shares = []
-      Passives = [||]; Ascendancies = []; Shown = []; AscendancyWeb = Data.pack (Data.ofList ([] : V3f list)); Path = Data.pack (Data.ofList ([] : V3f list)); Art = ""; Links = [||]; Neighbours = Map.empty; Web = Data.pack (Data.ofList ([] : V3f list)); Allocated = Set.empty; Edited = false
+      Passives = [||]; Ascendancies = []; Shown = []; AscendancyWeb = Data.pack (Data.ofList ([] : V3f list)); Path = Data.pack (Data.ofList ([] : V3f list))
+      Loaded = false; Capacity = 0
+      WebUv = Data.pack (Data.ofList ([] : V2f list)); AscendancyWebUv = Data.pack (Data.ofList ([] : V2f list)); PathUv = Data.pack (Data.ofList ([] : V2f list)); Art = ""; Links = [||]; Neighbours = Map.empty; Web = Data.pack (Data.ofList ([] : V3f list)); Allocated = Set.empty; Edited = false
       Centre = V2d (0.0, 0.0); Height = 9000.0
       Camera = { Sky = V3d (0.0, 1.0, 0.0); Location = V3d (0.0, 0.0, 7794.2); Forward = V3d (0.0, 0.0, -1.0); Up = V3d (0.0, 1.0, 0.0); Right = V3d (1.0, 0.0, 0.0) }
       Near = 7000.0; Far = 8600.0
-      Held = None; Moved = false }
+      Touches = []; Travel = 0.0; Page = V2d (0.0, 0.0); Asked = 0; Pending = None; Note = "" }
 
 /// The camera straight above the centre, so far up that `Height` of the tree is seen through
 /// its 60 degree lens; the depth range close around the tree's plane (its layers are a unit
@@ -169,8 +197,12 @@ let private ribbon (width : float) (at : Map<int, V2d>) (edge : float list) : V3
 /// How much smaller an ascendancy is drawn than it is laid out, and how big its class art
 /// and the ring around it are, in widths of its background (pob-web's PassiveTree).
 let private ascendancyScale = 0.8025
-let private artSize = 1500.0 * 2.14
+let private artSize = 1500.0 * 2.36
 let private ringSize = 1500.0 * 2.675
+
+/// As many zero texture coordinates as a mesh has vertices.
+let private noUv (vertices : V3f list) : Buffer<V2f> =
+    Data.pack (Data.ofList (vertices |> List.map (fun _ -> V2f (0.0f, 0.0f))))
 
 /// The tree as fetched (web/public/tree.json, see tools/export/tree_ui.py).
 let private readTree (j : Json) (m : Model) : Model =
@@ -224,6 +256,7 @@ let private readTree (j : Json) (m : Model) : Model =
         |> List.map (fun p ->
             let q = (V2d (p.X, p.Y) - middleOf.[p.Ascendancy]) * ascendancyScale
             { p with X = q.X; Y = q.Y })
+    let web = edges |> List.filter (fun e -> own e = "") |> List.collect (ribbon 14.0 at)
     let shown = (passives |> List.filter (fun p -> p.Kind <> "start" && p.Ascendancy = "")) @ ascended
     { m with
         Passives = Array.ofList passives
@@ -232,16 +265,22 @@ let private readTree (j : Json) (m : Model) : Model =
         Links = Array.ofList (links @ ascendedLinks)
         Neighbours = nodes |> List.map (fun n -> Json.int (Json.field "id" n), (Json.field "to" n |> Json.list |> List.map Json.int)) |> Map.ofList
         // (packed here: a buffer is one value to the view, where a list would be followed element by element)
-        Web = Data.pack (Data.ofList (edges |> List.filter (fun e -> own e = "") |> List.collect (ribbon 14.0 at))) }
+        Web = Data.pack (Data.ofList web)
+        WebUv = noUv web
+        Loaded = true
+        // (room for some 400 connections; a character has 150 passives at most)
+        Capacity = 24000 }
 
 /// The connections between allocated passives, as one mesh.
 let private paths (m : Model) : Model =
-    { m with
-        Path =
-            Data.pack (Data.ofList (
-                List.ofArray m.Links
-                |> List.filter (fun l -> (l.Of = "" || l.Of = m.Ascendancy) && m.Allocated.Contains l.A && m.Allocated.Contains l.B)
-                |> List.collect (fun l -> l.Ribbon))) }
+    let ribbons =
+        List.ofArray m.Links
+        |> List.filter (fun l -> (l.Of = "" || l.Of = m.Ascendancy) && m.Allocated.Contains l.A && m.Allocated.Contains l.B)
+        |> List.collect (fun l -> l.Ribbon)
+    // (always `Capacity` vertices: what is left over lies in one point and draws nothing)
+    let ribbons = List.truncate m.Capacity ribbons
+    let padded = ribbons @ List.replicate (max 0 (m.Capacity - ribbons.Length)) (V3f (0.0f, 0.0f, 0.0f))
+    { m with Path = Data.pack (Data.ofList padded); PathUv = noUv padded }
 
 /// The character's ascendancy, once the tree and the character are both there: the game's
 /// character data names it as the class ("Spirit Walker"); else the one its allocated
@@ -253,9 +292,11 @@ let private settle (m : Model) : Model =
             match List.ofArray m.Passives |> List.tryFind (fun p -> p.Ascendancy <> "" && m.Allocated.Contains p.Id) with
             | Some p -> { m with Ascendancy = p.Ascendancy }
             | None -> m
+    let web = List.ofArray m.Links |> List.filter (fun l -> l.Of <> "" && l.Of = m.Ascendancy) |> List.collect (fun l -> l.Ribbon)
     { m with
         Art = (match m.Ascendancies |> List.tryFind (fun a -> a.Called = m.Ascendancy) with Some a -> a.Art | None -> "")
-        AscendancyWeb = Data.pack (Data.ofList (List.ofArray m.Links |> List.filter (fun l -> l.Of <> "" && l.Of = m.Ascendancy) |> List.collect (fun l -> l.Ribbon))) }
+        AscendancyWeb = Data.pack (Data.ofList web)
+        AscendancyWebUv = noUv web }
     |> paths
 
 /// Whether a passive is drawn: the tree's own, the character's ascendancy's, and a hidden
@@ -277,22 +318,26 @@ let private open' (m : Model) (asc : Map<int, string>) (id : int) =
     | None -> false
 
 /// Allocating a passive takes the shortest way to it from what is allocated; deallocating
-/// one drops it and all that then hangs loose from the start.
+/// one drops it and all that then comes loose from the start.
 let private toggle (id : int) (m : Model) : Model =
     let asc = List.ofArray m.Passives |> List.map (fun p -> p.Id, p.Ascendancy) |> Map.ofList
     let starts = List.ofArray m.Passives |> List.filter (fun p -> p.Kind = "start") |> List.map (fun p -> p.Id) |> Set.ofList
+    let ascStarts = List.ofArray m.Passives |> List.filter (fun p -> p.Kind = "ascstart" && p.Ascendancy = m.Ascendancy) |> List.map (fun p -> p.Id) |> Set.ofList
     let next (i : int) = Map.tryFind i m.Neighbours |> Option.defaultValue [] |> List.filter (fun n -> open' m asc n && not (starts.Contains n))
     if m.Allocated.Contains id then
-        let left = m.Allocated.Remove id
-        // what still hangs on a start (the class' own start is whichever touches the allocated)
-        let seeds = left |> Set.filter (fun i -> (Map.tryFind i m.Neighbours |> Option.defaultValue [] |> List.exists starts.Contains) || (asc.[i] <> "" && (List.ofArray m.Passives |> List.exists (fun p -> p.Id = i && p.Kind = "ascstart"))))
-        let rec grow (seen : Set<int>) (front : int list) =
-            match front with
-            | [] -> seen
-            | i :: rest ->
-                let more = next i |> List.filter (fun n -> left.Contains n && not (seen.Contains n))
-                grow (more |> List.fold (fun s n -> Set.add n s) seen) (rest @ more)
-        { m with Allocated = grow seeds (Set.toList seeds); Edited = true }
+        // what hangs on a start (the class' own start is whichever touches the allocated)
+        let hanging (all : Set<int>) =
+            let seeds = all |> Set.filter (fun i -> ascStarts.Contains i || (Map.tryFind i m.Neighbours |> Option.defaultValue [] |> List.exists (fun n -> starts.Contains n || ascStarts.Contains n)))
+            let rec grow (seen : Set<int>) (front : int list) =
+                match front with
+                | [] -> seen
+                | i :: rest ->
+                    let more = next i |> List.filter (fun n -> all.Contains n && not (seen.Contains n))
+                    grow (more |> List.fold (fun s n -> Set.add n s) seen) (rest @ more)
+            grow seeds (Set.toList seeds)
+        // what was loose before stays (passives a jewel or an item allocates without a way to them)
+        let loose = Set.difference m.Allocated (hanging m.Allocated) |> Set.remove id
+        { m with Allocated = Set.union (hanging (m.Allocated.Remove id)) loose; Edited = true }
     else
         // breadth first from the passive towards anything allocated (or a start to begin from)
         let rec search (seen : Map<int, int>) (front : int list) =
@@ -300,7 +345,7 @@ let private toggle (id : int) (m : Model) : Model =
             | [] -> None
             | i :: rest ->
                 let near = Map.tryFind i m.Neighbours |> Option.defaultValue []
-                if m.Allocated.Contains i || (near |> List.exists starts.Contains && m.Allocated.IsEmpty) then Some (i, seen)
+                if m.Allocated.Contains i || ascStarts.Contains i || near |> List.exists ascStarts.Contains || (near |> List.exists starts.Contains && m.Allocated.IsEmpty) then Some (i, seen)
                 else
                     let more = next i |> List.filter (fun n -> not (seen.ContainsKey n))
                     search (more |> List.fold (fun s n -> Map.add n i s) seen) (rest @ more)
@@ -320,6 +365,43 @@ let private short (v : float) =
 
 let private row (label : string) (v : float) = { Label = label; Value = sprintf "%.0f" v }
 
+// ---- pointers on the tree ----
+
+/// The tree starts this far down the page (the header above it).
+let private top = 64.0
+
+/// The tree's width and height on the page: all of it below the header.
+let private size (m : Model) : V2d = V2d (m.Page.X, m.Page.Y - top)
+
+/// The place of the tree at a point of the page, for a view with this centre and height.
+/// (`Height` of the tree is what the 60 degree lens sees across the control's width.)
+let private placeAt (m : Model) (centre : V2d) (height : float) (p : V2d) : V2d =
+    let s = size m
+    let u = height / s.X
+    V2d (centre.X + (p.X - s.X / 2.0) * u, centre.Y - (p.Y - top - s.Y / 2.0) * u)
+
+/// One pointer moved from `before` to `now`: with a single pointer down the tree follows it;
+/// with two, the place between them stays between them and the view grows or shrinks with
+/// their distance (panning and zooming at once).
+let private gesture (id : int) (before : V2d) (now : V2d) (m : Model) : Model =
+    let touches = m.Touches |> List.map (fun (i, p) -> if i = id then i, now else i, p)
+    let travel = m.Travel + abs (now.X - before.X) + abs (now.Y - before.Y)
+    let m = { m with Touches = touches; Travel = travel }
+    if m.Page.X <= 0.0 then m
+    else
+        match m.Touches |> List.filter (fun (i, _) -> i <> id) with
+        | [] ->
+            let u = m.Height / (size m).X
+            look { m with Centre = V2d (m.Centre.X - (now.X - before.X) * u, m.Centre.Y + (now.Y - before.Y) * u) }
+        | (_, other) :: _ ->
+            let span (a : V2d) (b : V2d) = sqrt ((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y))
+            let between (a : V2d) (b : V2d) = V2d ((a.X + b.X) / 2.0, (a.Y + b.Y) / 2.0)
+            let height = max 600.0 (min 60000.0 (m.Height * span before other / max 1.0 (span now other)))
+            let held = placeAt m m.Centre m.Height (between before other)
+            // the centre for which `held` is under the new place between the fingers
+            let at = placeAt m (V2d (0.0, 0.0)) height (between now other)
+            look { m with Height = height; Centre = V2d (held.X - at.X, held.Y - at.Y) }
+
 let rec update (msg : Msg) (m : Model) : Model =
     match msg with
     | Located href ->
@@ -332,9 +414,6 @@ let rec update (msg : Msg) (m : Model) : Model =
         match r.Status, Native.parseJson r.Text with
         | 200, Ok j -> settle (readTree j m)
         | s, _ -> { m with Status = "the passive tree could not be read (status " + string s + ")" }
-    // (the click that ends a drag allocates nothing)
-    | Toggle _ when m.Moved -> m
-    | Click _ when m.Moved -> m
     // the passive under the click: the nearest one whose frame covers the place (the
     // character's own ascendancy is drawn in the middle, over the tree's passives there)
     | Click p ->
@@ -345,26 +424,45 @@ let rec update (msg : Msg) (m : Model) : Model =
             |> List.tryHead
         // (the ascendancy's lie over the tree's own there: they come first)
         match near (m.Shown |> List.filter (fun q -> q.Ascendancy <> "" && visible m q)) |> Option.orElse (near (m.Shown |> List.filter (visible m))) with
-        | Some q -> paths { toggle q.Id m with Fighting = true }
-        | None -> m
+        | Some q ->
+            let had = m.Allocated.Contains q.Id
+            let m' = toggle q.Id m
+            paths { m' with Fighting = true; Note = sprintf "%s %d %s was %b: %d to %d" m.Note q.Id q.Name had m.Allocated.Count m'.Allocated.Count + " lost " + (Set.difference m.Allocated m'.Allocated |> Set.toList |> List.map (fun i -> m.Passives |> Array.tryFind (fun p -> p.Id = i) |> Option.map (fun p -> sprintf "%d %s %s [%s]" i p.Kind p.Name p.Ascendancy) |> Option.defaultValue (string i + " unknown")) |> String.concat "; ") + " asc=" + m.Ascendancy }
+        | None -> { m with Note = m.Note + " nothing there" }
     | Toggle id -> paths { toggle id m with Fighting = true }
-    | Grab p -> { m with Held = Some p; Moved = false }
-    // A place on the tree comes from the last frame drawn. While dragging, the model is ahead
-    // of that frame: a place worked out under an older camera would move the view again by
-    // what it has already moved, and it would swing away. Such an event waits for its frame.
-    | Drag (_, eye) when abs (eye.X - m.Centre.X) + abs (eye.Y - m.Centre.Y) > m.Height / 1e5 -> m
+    // A place on the tree comes from the last frame drawn; under an older camera than the
+    // model's it is no use.
     | Zoom (_, eye, _) when abs (eye.X - m.Centre.X) + abs (eye.Y - m.Centre.Y) > m.Height / 1e5 -> m
-    | Drag (p, _) ->
-        match m.Held with
-        | Some held ->
-            let d = V2d (held.X - p.X, held.Y - p.Y)
-            if abs d.X + abs d.Y < m.Height / 400.0 then m else look { m with Centre = m.Centre + d; Moved = true }
+    | Sized r ->
+        match Native.parseJson r.Text with
+        | Ok j when Json.number (Json.field "width" j) > 0.0 ->
+            let m = { m with Page = V2d (Json.number (Json.field "width" j), Json.number (Json.field "height" j)) }
+            // a click that waited for this
+            match m.Pending with
+            | Some p ->
+                let q = placeAt m m.Centre m.Height p
+                update (Click (V3d (q.X, q.Y, 0.0))) { m with Pending = None }
+            | None -> m
+        | _ -> m
+    | PointerDown e ->
+        let others = m.Touches |> List.filter (fun (i, _) -> i <> e.PointerId)
+        let m = { m with Touches = (e.PointerId, e.Position) :: others }
+        if others.IsEmpty then { m with Travel = 0.0; Asked = m.Asked + 1 } else m
+    | PointerMove e ->
+        match m.Touches |> List.tryFind (fun (i, _) -> i = e.PointerId) with
+        | Some (_, before) -> gesture e.PointerId before e.Position m
         | None -> m
-    // letting go without having moved is a click on the place held
-    | Release ->
-        match m.Held with
-        | Some p when not m.Moved -> update (Click p) { m with Held = None }
-        | _ -> { m with Held = None }
+    | PointerUp e ->
+        let left = m.Touches |> List.filter (fun (i, _) -> i <> e.PointerId)
+        let lifted = { m with Touches = left }
+        // let go without having moved, and the only one down: a click on that place (kept
+        // for later while the control's size is unknown)
+        if m.Touches.Length = 1 && left.IsEmpty && m.Travel < 8.0 then
+            if m.Page.X > 0.0 then
+                let p = placeAt m m.Centre m.Height e.Position
+                update (Click (V3d (p.X, p.Y, 0.0))) lifted
+            else { lifted with Pending = Some e.Position }
+        else lifted
     | Zoom (p, _, wheel) ->
         // towards the point under the pointer
         let k = if wheel > 0.0 then 1.15 else 1.0 / 1.15
@@ -472,6 +570,9 @@ let tree (m : Model) : Node<Msg> =
     renderControl {
         Dom.Style [ Css.Position "absolute"; Css.Left "0"; Css.Top "64px"; Css.Width "100%"; Css.Height "calc(100% - 64px)"; Css.TouchAction "none"; Css.UserSelect "none"
                     Css.Prop ("visibility", (if m.Tab = "tree" then "visible" else "hidden")) ]
+        Dom.OnPointerDown PointerDown
+        Dom.OnPointerMove PointerMove
+        Dom.OnPointerUp PointerUp
         RenderControl.Perspective (60.0, m.Near, m.Far)
         RenderControl.Camera m.Camera
         sg {
@@ -485,9 +586,6 @@ let tree (m : Model) : Node<Msg> =
                 // by pixel would draw every sprite once more on each pointer move (and with
                 // thousands of them the canvas came out empty for two frames after each)
                 Sg.Intersectable (ProxyBox (V3d (-0.5, -0.5, -0.000001), V3d (0.5, 0.5, 0.000001)))
-                Sg.OnPointerDown (fun e -> Grab e.WorldPosition)
-                Sg.OnPointerMove (fun e -> Drag (e.WorldPosition, e.Eye))
-                Sg.OnPointerUp (fun _ -> Release)
                 Sg.OnScroll (fun e -> Zoom (e.WorldPosition, e.Eye, e.Wheel.Y))
                 quad
             }
@@ -496,20 +594,22 @@ let tree (m : Model) : Node<Msg> =
             sg {
                 Sg.Shader { Shaders.flat }
                 Sg.NoEvents true
-                sg {
-                    Sg.Uniform ("Color", V4d (0.227, 0.227, 0.306, 1.0))
-                    mesh Topology.Triangles { Mesh.Attribute ("Positions", m.Web) }
-                }
-                sg {
-                    Sg.Uniform ("Color", V4d (0.227, 0.227, 0.306, 1.0))
-                    Sg.Translate (0.0, 0.0, 0.6)
-                    mesh Topology.Triangles { Mesh.Attribute ("Positions", m.AscendancyWeb) }
-                }
-                sg {
-                    Sg.Uniform ("Color", V4d (0.686, 0.376, 0.145, 1.0))
-                    Sg.Translate (0.0, 0.0, 0.7)
-                    mesh Topology.Triangles { Mesh.Attribute ("Positions", m.Path) }
-                }
+                if m.Loaded then
+                    sg {
+                        Sg.Uniform ("Color", V4d (0.227, 0.227, 0.306, 1.0))
+                        mesh Topology.Triangles { Mesh.Attribute ("Positions", m.Web); Mesh.Attribute ("DiffuseColorCoordinates", m.WebUv) }
+                    }
+                    sg {
+                        Sg.Uniform ("Color", V4d (0.686, 0.376, 0.145, 1.0))
+                        Sg.Translate (0.0, 0.0, 0.7)
+                        mesh Topology.Triangles { Mesh.Attribute ("Positions", m.Path); Mesh.Attribute ("DiffuseColorCoordinates", m.PathUv) }
+                    }
+                if m.Art <> "" then
+                    sg {
+                        Sg.Uniform ("Color", V4d (0.227, 0.227, 0.306, 1.0))
+                        Sg.Translate (0.0, 0.0, 0.6)
+                        mesh Topology.Triangles { Mesh.Attribute ("Positions", m.AscendancyWeb); Mesh.Attribute ("DiffuseColorCoordinates", m.AscendancyWebUv) }
+                    }
             }
             // the character's ascendancy in the middle: its class art and the ring around it
             sg {
@@ -567,6 +667,7 @@ let view (m : Model) : Node<Msg> =
             if m.Title <> "" then span { Dom.Fetch (fightUrl m, Fought) }
         }
         span { Dom.Fetch ("tree.json", TreeData) }
+        span { Dom.Fetch ("__window?" + string m.Asked, Sized) }
         header {
             h1 { "PoEtry" }
             div { Dom.Class "title"; Dom.Attr ("data-check", "title"); m.Title }
@@ -576,6 +677,8 @@ let view (m : Model) : Node<Msg> =
             }
             if m.Tab = "tree" then
                 div { Dom.Class "points"; Dom.Attr ("data-check", "points"); sprintf "%d passives" m.Allocated.Count }
+            // (for checks: what is known of the control's size, and the pointers down)
+            div { Dom.Attr ("data-check", "pointer"); Dom.Style [ Css.Display "none" ]; sprintf "%.0fx%.0f touches %d travel %.0f" m.Page.X m.Page.Y m.Touches.Length m.Travel + " | " + m.Note }
             if not m.Dps.IsEmpty then
                 div { Dom.Class "headline"; Dom.Attr ("data-check", "dps"); m.Dps.Head.Value + " DPS" }
             div { Dom.Class "status"; Dom.Attr ("data-check", "status"); status m }

@@ -19,6 +19,8 @@
       const answer = (text, status = 200) => new Response(text, { status, headers: { "content-type": "application/json" } });
       window.fetch = async (input, init) => {
         const url = typeof input === "string" ? input : input.url;
+        // the page's own size, for the tree's pointer gestures
+        if (url.indexOf("__window") >= 0) return answer(JSON.stringify({ width: window.innerWidth, height: window.innerHeight }));
         const at = url.indexOf("__sim?");
         if (at < 0) return plain(input, init);
         // everything after "build=" is the character's url, whatever it contains
