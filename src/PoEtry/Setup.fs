@@ -579,6 +579,7 @@ module Setup =
             HitPattern = used |> List.choose (fun (_, p) -> p.Pattern |> Option.map (fun pat -> p.Skill.Name, pat)) |> Map.ofList
             Rules =
                 grantRules @ (used |> List.collect (fun (_, p) -> p.Rules)) @ heraldRules @ Behaviours.keywordRules sheet pressedSkills
+                @ fst (Behaviours.summons db sheet c.Build pressedSkills)
                 @ (match Behaviours.ghostDance db sheet c.Build with
                    | Some (_, percent) when percent > 0.0 ->
                        let rate = c.Vitals.Evasion * percent / 100.0 * Mods.mult Ctx.empty [ Named "ESRecoveryRate" ] (ModDb.ofList sheet.Mods)
@@ -610,7 +611,7 @@ module Setup =
             Cycles = c.Cycles
             Vitals = (if o.Immortal then None else Some c.Vitals)
             VitalsAt = Some(fun current -> Defence.computeWith current c.Bases sheet)
-            Periodics = c.Periodics
+            Periodics = c.Periodics @ snd (Behaviours.summons db sheet c.Build pressedSkills)
             MaxResources = Map.fold (fun m k v -> Map.add k v m) c.MaxResources infusionMaxima
             ResourceDurations = Map.fold (fun m k v -> Map.add k v m) (Behaviours.chargeDurations sheet) (Behaviours.infusionDurations db sheet c.Build)
             KeptChargesPause = o.KeptChargesPause

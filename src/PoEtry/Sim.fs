@@ -25,6 +25,8 @@ type SkillFilter =
     | WithTag of SkillTag
     /// Has the first tag but not the second (attacks that aren't a herald's own).
     | WithTagNot of has: SkillTag * hasNot: SkillTag
+    /// Has all of the first tags and none of the second.
+    | WithTags of has: SkillTag list * hasNot: SkillTag list
     | Called of string
 
 type Hook =
@@ -58,6 +60,8 @@ type Reaction =
     | RemoveBuff of name: string
     /// A buff on every minion (an offering).
     | GrantMinionBuff of name: string * duration: float * mods: Mod list
+    /// Temporary minions of a pool appear for `duration` seconds (infinity: until killed).
+    | Summon of pool: string * count: int * duration: float
     /// Take a debuff off the enemy concerned (a mark that has been activated).
     | RemoveDebuff of name: string
     /// Stacks of a resource (infusions from Powered by Verisium), capped at its maximum.
@@ -213,6 +217,8 @@ type PeriodicAction =
     | GainTimedBuff of buff: string * chance: float * duration: float * maxStacks: int * mods: Mod list
     /// The player recovers this much life at once (Time of Need).
     | HealLife of amount: float
+    /// Temporary minions of a pool appear (see Reaction.Summon).
+    | SummonMinions of pool: string * count: int * duration: float
 
 /// Mana Remnants: a remnant on a critical hit against an enemy with an elemental ailment (at
 /// most one per `CritCooldown` seconds) and by chance on killing one; collected, each gives
@@ -308,6 +314,9 @@ type Actor =
       ActiveWhile: string option
       /// A minion that can be hurt and killed. None: nothing can happen to the actor.
       Body: MinionBody option
+      /// A temporary minion: it is out of the fight until something summons minions of this
+      /// pool; the pool's size is the most there can be at once.
+      Pool: string option
       Infusions: Infusions option
       Archons: Archon list
       Charms: Charm list
@@ -337,6 +346,7 @@ module Actor =
           Banners = []
           ActiveWhile = None
           Body = None
+          Pool = None
           Infusions = None
           Archons = []
           Charms = []
@@ -432,6 +442,8 @@ module Sim =
         | EnemyAttack of enemy: string
         /// Killed minions come back, if no other has died since this was set.
         | ReviveMinions of at: float
+        /// A temporary minion's time is up (unless it was summoned anew since).
+        | MinionLeaves of actor: string * at: float
         | PeriodicTick of actor: string * periodic: string
         /// A ward remnant's ward arrives.
         | WardArrives of amount: float
@@ -474,7 +486,9 @@ module Sim =
           Life: float
           Shield: float
           HitAt: float
-          Gone: bool }
+          Gone: bool
+          /// When a temporary minion's time is up.
+          Leaves: float }
 
     type private EnemyState =
         { Def: EnemyDef
@@ -681,6 +695,7 @@ module Sim =
         | AnySkill -> true
         | WithTag t -> Set.contains t skill.Tags
         | WithTagNot (t, n) -> Set.contains t skill.Tags && not (Set.contains n skill.Tags)
+        | WithTags (has, hasNot) -> has |> List.forall skill.Tags.Contains && not (hasNot |> List.exists skill.Tags.Contains)
         | Called n -> skill.Name = n
 
     // ---- time passing ----
@@ -1096,6 +1111,33 @@ module Sim =
         Map.tryFind skill.Name st.Cooldowns |> Option.forall (fun t -> t <= now)
 
     /// `target`: the enemy the triggering event concerns (hit enemy, or the one aimed at).
+    /// A minion goes out of the fight (killed, or its time is up): what it had begun is lost.
+    let private leave name (w: World) =
+        let its ev =
+            match ev with
+            | Ready n | Strike (n, _, _, _) | PassingStrike (n, _, _, _, _) | DirectHit (n, _, _, _) -> n = name
+            | _ -> false
+        { w with Queue = w.Queue |> Map.filter (fun _ ev -> not (its ev)) }
+        |> updateActor name (fun st -> { st with Gone = true; Life = 0.0; Shield = 0.0 })
+
+    /// Temporary minions of a pool appear: those that are out first; when all are in the
+    /// fight, the ones whose time would be up soonest are summoned anew.
+    let private summon (env: Env) (pool: string) (count: int) (duration: float) (w: World) =
+        env.Fight.Minions
+        |> List.filter (fun m -> m.Pool = Some pool)
+        |> List.sortBy (fun m -> let st = Map.find m.Name w.Actors in (if st.Gone then 0 else 1), st.Leaves)
+        |> List.truncate count
+        |> List.fold
+            (fun w m ->
+                let was = Map.find m.Name w.Actors
+                let leaves = w.Time + duration
+                let life, shield = match m.Body with Some b -> b.Life, b.EnergyShield | None -> 0.0, 0.0
+                let w = updateActor m.Name (fun st -> { st with Gone = false; Leaves = leaves; Life = life; Shield = shield; HitAt = w.Time }) w
+                let w = if was.Gone then schedule w.Time (Ready m.Name) w else w
+                let w = if leaves < infinity then schedule leaves (MinionLeaves(m.Name, leaves)) w else w
+                { w with Counts = bump ("summoned:" + pool) w.Counts })
+            w
+
     let rec private react env (rng: Rng) (actor: Actor) hook (skill: Skill) (target: string option) (w: World) =
         actor.Rules
         |> List.filter (fun r -> r.Hook = hook && matches r.Filter skill)
@@ -1152,6 +1194,7 @@ module Sim =
                                  let e = stackEffect w.Time (Map.tryFind name st.Buffs) name duration maxStacks mods
                                  { st with Buffs = Map.add name e st.Buffs }) w
                          schedule (w.Time + duration) Expire w
+                     | Summon (pool, count, duration) -> summon env pool count duration w
                      | RemoveBuff name ->
                          updateActor actor.Name (fun st -> { st with Buffs = Map.remove name st.Buffs }) w
                      | GrantMinionBuff (name, duration, mods) ->
@@ -2714,7 +2757,7 @@ module Sim =
     let private killMinion env (rng: Rng) (minion: Actor) (w: World) =
         let body = minion.Body.Value
         let player = env.Fight.Player
-        let w = updateActor minion.Name (fun st -> { st with Gone = true; Life = 0.0; Shield = 0.0 }) w
+        let w = leave minion.Name w
         let w = { w with Counts = bump "minion:died" w.Counts } |> markStatus player.Name "MinionDiedRecently"
         match body.Revive with
         | None -> w
@@ -2851,6 +2894,7 @@ module Sim =
                 setStacksWith env actorName true r (min maxR (stacksOf st r + 1)) w
                 |> markStatus actorName ("Gained" + r + "Recently")
                 |> fun w -> { w with Counts = bump ("gained:" + r) w.Counts }
+            | SummonMinions (pool, count, duration) -> summon env pool count duration w
             | HealLife amount ->
                 match env.Fight.Player.Vitals, w.Player with
                 | Some v, Some p when p.Died.IsNone && v.Life > 1.0 ->
@@ -3040,6 +3084,9 @@ module Sim =
             | DirectHit (name, skill, mult, enemy) -> onStrike env rng name skill mult enemy None true w
             | EnemyAttack name -> enemyAttack env rng name w
             | ReviveMinions at -> reviveMinions env at w
+            | MinionLeaves (name, at) ->
+                let st = Map.find name w.Actors
+                if st.Gone || st.Leaves <> at then w else { leave name w with Counts = bump "minion:left" w.Counts }
             | PeriodicTick (name, periodic) -> onPeriodic env rng name periodic w
             | ManaArrives amount ->
                 match env.Fight.Player.Vitals, env.Fight.Player.ManaRemnants, w.Player with
@@ -3177,7 +3224,8 @@ module Sim =
               Life = 0.0
               Shield = 0.0
               HitAt = -1e9
-              Gone = false }
+              Gone = false
+              Leaves = infinity }
         let w0 =
             { Player =
                 fight.Player.Vitals
@@ -3266,7 +3314,7 @@ module Sim =
                                     | _ -> res)
                                 res
                     let life, shield = match a.Body with Some b -> b.Life, b.EnergyShield | None -> 0.0, 0.0
-                    a.Name, { empty with Buffs = res; Energy = banked; Life = life; Shield = shield })
+                    a.Name, { empty with Buffs = res; Energy = banked; Life = life; Shield = shield; Gone = a.Pool.IsSome })
                 |> Map.ofList
               Queue = Map.empty
               Seq = 0
@@ -3280,7 +3328,8 @@ module Sim =
               Crystals = []
               Entropy = Map.empty
               Revival = None }
-            |> fun w -> actors |> List.fold (fun w a -> schedule 0.0 (Ready a.Name) w) w
+            // (a temporary minion starts acting when it is summoned)
+            |> fun w -> actors |> List.fold (fun w a -> if a.Pool.IsSome then w else schedule 0.0 (Ready a.Name) w) w
             |> fun w -> actors |> List.fold (fun w a -> a.Cycles |> List.fold (fun w c -> schedule 0.0 (CycleTick(a.Name, c.Name)) w) w) w
             |> fun w -> actors |> List.fold scheduleResourceTimers w
             |> fun w ->

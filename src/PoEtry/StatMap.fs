@@ -736,6 +736,7 @@ module StatMap =
         | "minion_elemental_resistance_%" -> Some(Mods(DamageType.elemental |> List.map (fun t -> Mod.base' (ForMinions(Resist t)) v)))
         | "minion_chaos_resistance_%" -> one (Mod.base' (ForMinions(Resist Chaos)) v)
         | "minion_maximum_all_elemental_resistances_%" -> Some(Mods(DamageType.elemental |> List.map (fun t -> Mod.base' (ForMinions(MaxResist t)) v)))
+        | "temporary_minion_limit_+" -> one (Mod.base' (ForMinions(Named "TemporaryMinionLimit")) v)
         | "minion_resummon_speed_+%" -> one (Mod.inc (ForMinions(Named "MinionReviveSpeed")) v)
         | "minion_maximum_life_%_to_gain_as_maximum_energy_shield" -> one (Mod.base' (ForMinions(Named "LifeAsExtraEnergyShield")) v)
         | "minion_attack_speed_+%" -> one (Mod.inc (ForMinions Speed) v |> Mod.whenever (SkillIs Attack))

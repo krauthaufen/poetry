@@ -457,6 +457,14 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         equal (box [ { Mod.inc MaxLife 20.0 with Stat = ForMinions MaxLife } ]) (box (mods "minion_maximum_life_+%" 20.0))
         equal 3 (mods "minion_elemental_resistance_%" 10.0).Length)
 
+    test "temporary minions: the gem's limit is the size of its pool" (fun () ->
+        let raw gem = Gems.rawStats db.Value ModDb.empty { Gem = gem; Level = 20; Quality = 0; StatSet = 1; Supports = [] }
+        equal (Some 10) (Behaviours.summonLimit (raw "Raging Spirits"))
+        equal (Some 3) (Behaviours.summonLimit (raw "Ravenous Swarm"))
+        equal (Some 8) (Behaviours.summonLimit (raw "Azmerian Swarms"))
+        equal (Some 10) (Behaviours.summonLimit (raw "Raise Zombie"))
+        equal None (Behaviours.summonLimit (raw "Skeletal Warrior")))
+
     test "Frost Wall: a row of Ice Crystals; the cast itself hits nothing" (fun () ->
         match Gems.skill db.Value ModDb.empty None { Gem = "Frost Wall"; Level = 20; Quality = 0; StatSet = 1; Supports = [] } with
         | Ok (s, _) ->

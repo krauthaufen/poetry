@@ -890,6 +890,24 @@ let main _ =
         equal 4 o.Counts.["minion:died"]
         equal 2 o.Counts.["trigger:Nova"])
 
+    test "minions: temporary ones are out until summoned, last their duration, and are summoned anew when all are out" (fun () ->
+        let call cd = { Skill.make "Call" [ Spell ] with Hits = []; Cooldown = Some cd }
+        let spirits n = [ for i in 1 .. n -> { Actor.make (sprintf "Spirit %d" i) [ noIgnite; sure ] [ strike "Bite" 100.0 ] with Pool = Some "Spirits" } ]
+        let run cd pool time =
+            let player =
+                { Actor.make "Player" [ noIgnite ] [ call cd ] with
+                    Rules = [ { Hook = OnUse; Filter = Called "Call"; Chance = 100.0; Reaction = Summon("Spirits", 2, 3.0) } ] }
+            Sim.run { Fight.single (boss 1e12) player time with MaxTime = time; Minions = spirits pool } 1u
+        // one call: two of the three appear, bite at 1 and 2 s and are gone at 3 s
+        let o = run 100.0 3 6.0
+        equal 2 o.Counts.["summoned:Spirits"]
+        equal 2 o.Counts.["minion:left"]
+        near 400.0 o.DamageBy.["Bite (hit)"]
+        // a pool of two, called every 2 s: the same two stay, their time starting anew
+        let o = run 2.0 2 6.5
+        equal false (o.Counts.ContainsKey "minion:left")
+        if o.DamageBy.["Bite (hit)"] < 1000.0 then failwithf "bites %g" o.DamageBy.["Bite (hit)"])
+
     test "hexblast: waits until a curse is half expired, detonates it, and then has nothing to detonate" (fun () ->
         let hex = { fireSpell 0.0 with Name = "Hex"; BaseDamage = Map.empty; Cooldown = Some 100.0 }
         let blast = { fireSpell 500.0 with Name = "Blast"; Mods = [ Mod.flag (Named "DetonatesCurse") ] }

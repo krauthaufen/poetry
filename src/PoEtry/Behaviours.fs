@@ -1279,6 +1279,21 @@ module Behaviours =
           Power = m.Life
           LifeRegen = life * Mods.sumBase Ctx.empty [ LifeRegenPercent ] db / 100.0 }
 
+    /// How many of a gem's temporary minions can be out at once (its limit stat).
+    let summonLimit (raw: (string * float) list) : int option =
+        raw
+        |> List.tryPick (fun (k, v) ->
+            if (k.StartsWith "base_number_of_" && k.EndsWith "_allowed") || k = "ravenous_swarm_maximum_swarm_count" || k = "max_azmerian_swarms" || k = "maximum_corpse_beetles_allowed"
+            then Some(int v) else None)
+
+    /// The stats that say what summons a gem's temporary minions, for the gems whose
+    /// summoning is simulated (see `summons`).
+    let private summonedBy (raw: (string * float) list) =
+        let has id = raw |> List.exists (fun (k, _) -> k = id)
+        has "skill_raging_spirits_max_per_action"
+        || has "base_cooldown_modifiable_repeat_interval_ms"
+        || has "skill_grants_%_chance_to_summon_azmerian_swarm_on_hitting_unique_or_rare_enemy_affected_by_elemental_ailment"
+
     /// Persistent minions of a build as actors. Each minion is the monster its gem names
     /// (skills' minion list; "Spectre: X" / "Companion: X" by monster name) at the gem's level:
     /// its attacks use "weapon" damage = monster damage of that level x the monster's damage
@@ -1291,6 +1306,7 @@ module Behaviours =
         let counts = minionCounts (spiritTotal sheet build) (spiritUses db sheet build)
         let minionMods = Mods.forMinions sheet.Mods
         let levelOf = minionLevel db charMods minionMods
+        let gemRaw (gem: PobGem) = Gems.rawStats db charMods { Gem = gem.Name; Level = gem.Level; Quality = gem.Quality; StatSet = 1; Supports = [] }
         build.Groups
         |> List.filter (fun g -> g.Enabled)
         |> List.map (fun g ->
@@ -1310,8 +1326,10 @@ module Behaviours =
                 match monsters with
                 | [] ->
                     [], (if byName.IsSome || (data |> Option.exists (fun d -> not d.MinionList.IsEmpty)) then [ sprintf "%s: no monster data" gem.Name ] else [])
-                | _ when not persistent -> [], [ sprintf "%s: temporary minions are not simulated" gem.Name ]
+                | _ when not persistent && (summonLimit (gemRaw gem)).IsNone -> [], [ sprintf "%s: temporary minions are not simulated" gem.Name ]
                 | m :: _ ->
+                    let raw = gemRaw gem
+                    let limit = summonLimit raw
                     let level = levelOf gem.Name gem.Level
                     let weapon, fixup = minionWeapon m level byName.IsSome
                     let minionMods = if fixup = 1.0 then minionMods else Mod.more (Damage AllDamage) ((fixup - 1.0) * 100.0) :: minionMods
@@ -1329,16 +1347,28 @@ module Behaviours =
                         @ (skills |> List.filter (fun s -> s.Cooldown.IsNone) |> List.sortByDescending estimate |> List.truncate 1)
                     // a pack counts as several ("skill_wolf_pack_size")
                     let count =
-                        Gems.rawStats db charMods { Gem = gem.Name; Level = gem.Level; Quality = gem.Quality; StatSet = 1; Supports = [] }
+                        raw
                         |> List.tryPick (fun (k, v) -> if k.EndsWith "_pack_size" then Some(int v) else None)
                         |> Option.defaultValue 1
                         |> fun pack -> pack * (Map.tryFind gem.Name counts |> Option.defaultValue 1)
                     // a minion without any damaging skill (a healer) simply doesn't fight
                     if ordered.IsEmpty then [], []
                     else
+                    match limit with
+                    | Some most ->
+                        // temporary minions: as many as the gem's limit, out of the fight until
+                        // something summons them. The ones enemies don't engage can't be hurt.
+                        let untouchable =
+                            data |> Option.exists (fun d ->
+                                d.Types.Contains "MinionsAreUndamagable" || d.Description.Contains "untargetable" || d.Description.Contains "not directly engage")
+                        let body = if untouchable then None else Some(minionBody m level minionMods None)
+                        let most = most + int (Mods.sumBase Ctx.empty [ Named "TemporaryMinionLimit" ] (ModDb.ofList minionMods))
+                        [ for i in 1 .. most -> { Actor.make (sprintf "%s %d" m.Name i) minionMods ordered with Body = body; Pool = Some gem.Name } ],
+                        (if summonedBy raw then [] else [ sprintf "%s: what summons its minions is not simulated" gem.Name ])
+                    | None ->
                         // killed, it is revived after the gem's revive time
                         let revive =
-                            Gems.rawStats db charMods { Gem = gem.Name; Level = gem.Level; Quality = gem.Quality; StatSet = 1; Supports = [] }
+                            raw
                             |> List.tryPick (fun (k, v) -> if k = "minion_base_resummon_time_ms" then Some(v / 1000.0) else None)
                             |> Option.defaultValue Constants.minionReviveSeconds
                         let body = minionBody m level minionMods (Some revive)
@@ -1349,6 +1379,58 @@ module Behaviours =
         |> List.concat
         |> List.unzip
         |> fun (actors, notes) -> List.concat actors, List.concat notes
+
+    /// What summons a build's temporary minions (the pools `minions` makes), as rules and
+    /// periodic actions of the player. A minion lasts the gem's duration.
+    /// - Raging Spirits: "Fire Spells you use yourself will also summon Raging Spirits": an
+    ///   area spell one per so much radius, a projectile spell one per projectile (it is
+    ///   summoned where the projectile hits), at most so many per cast.
+    /// - Ravenous Swarm: one swarm every repeat interval (cooldown recovery applies).
+    /// - Azmerian Swarms: by chance on hitting a rare or unique enemy that has an elemental
+    ///   ailment, and on killing any enemy that has one.
+    let summons (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) (pressed: Skill list) : Rule list * Periodic list =
+        let charMods = ModDb.ofList sheet.Mods
+        build.Groups
+        |> List.filter (fun g -> g.Enabled)
+        |> List.collect (fun g -> g.Gems |> List.filter (fun x -> x.Enabled && not x.IsSupport))
+        |> List.map (fun gem ->
+            let raw = Gems.rawStats db charMods { Gem = gem.Name; Level = gem.Level; Quality = gem.Quality; StatSet = 1; Supports = [] }
+            let stat id = raw |> List.filter (fun (k, _) -> k = id) |> List.sumBy snd
+            match summonLimit raw with
+            | None -> [], []
+            | Some _ ->
+                let ctx = Gems.ctxOf db gem.Name
+                let duration =
+                    match stat "base_skill_effect_duration" with
+                    | 0.0 -> infinity
+                    | ms -> ms / 1000.0 * Mods.mult ctx [ SkillDuration ] charMods
+                let perCast = int (stat "skill_raging_spirits_max_per_action")
+                let interval = stat "base_cooldown_modifiable_repeat_interval_ms"
+                let onHit = stat "skill_grants_%_chance_to_summon_azmerian_swarm_on_hitting_unique_or_rare_enemy_affected_by_elemental_ailment"
+                if perCast > 0 then
+                    let perRadius = stat "skill_raging_spirit_per_x_radius"
+                    pressed
+                    |> List.filter (fun s -> s.Tags.Contains Spell && s.Tags.Contains(Tag "Fire") && not (s.Tags.Contains Triggered))
+                    |> List.choose (fun s ->
+                        let n =
+                            match s.Delivery with
+                            | Projectiles p -> max 1 p.Count
+                            | AreaAtTarget r | AreaAroundSelf r when perRadius > 0.0 -> int (r / perRadius)
+                            | _ -> 0
+                        if n > 0 then Some { Hook = OnUse; Filter = Called s.Name; Chance = 100.0; Reaction = Summon(gem.Name, min perCast n, duration) } else None),
+                    []
+                elif interval > 0.0 then
+                    let every = interval / 1000.0 / Mods.inc ctx [ CooldownRecovery ] charMods
+                    [], [ { Name = "summon " + gem.Name; Every = every; Action = SummonMinions(gem.Name, 1, duration) } ]
+                elif onHit > 0.0 then
+                    let onKill = stat "skill_grants_%_chance_to_summon_azmerian_swarm_on_kill_affected_by_elemental_ailment"
+                    [ { Hook = OnHit; Filter = AnySkill; Chance = onHit
+                        Reaction = IfEnemyHas("RareOrUnique", IfEnemyHas("ElementalAilments", Summon(gem.Name, 1, duration))) }
+                      { Hook = OnKillOf "ElementalAilments"; Filter = AnySkill; Chance = onKill; Reaction = Summon(gem.Name, 1, duration) } ],
+                    []
+                else [], [])
+        |> List.unzip
+        |> fun (rules, periodics) -> List.concat rules, List.concat periodics
 
     /// Totems of a build as actors. A totem gem ("SummonsTotem") grants a second skill, the
     /// totem's own attack or spell (gems.json additionalGrantedEffectId); the totem uses it
