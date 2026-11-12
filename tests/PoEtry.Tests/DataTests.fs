@@ -421,6 +421,21 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
             near (0.75 / s.BaseTime) (fst s.Hits.[1] - fst s.Hits.[0])
         | Error e -> failwith e)
 
+    test "minions: level from the gem level, damage from the minion column; a spectre has monster damage made up for" (fun () ->
+        // MinionGemLevelScaling: a level 20 gem's minion is level 40; +3 to minion skills: 46
+        equal 40 (Behaviours.minionLevel db.Value ModDb.empty [] "Skeletal Warrior" 20)
+        equal 46 (Behaviours.minionLevel db.Value ModDb.empty [ Mod.base' (Named "GemLevel") 3.0 ] "Skeletal Warrior" 20)
+        // DefaultMonsterStats MinionDamage at 40 is 204.04; a Skeletal Warrior has 0.7 of it, +-30%
+        let warrior = db.Value.Minions.["RaisedSkeletonWarriors"]
+        let w, fixup = Behaviours.minionWeapon warrior 40 false
+        near (204.0 * 0.7 * 0.7) w.Damage.[Physical].Min
+        near (204.0 * 0.7 * 1.3) w.Damage.[Physical].Max
+        near 1.0 fixup
+        // as a spectre: monster damage (90.02 at 40), brought up to a minion's and 25% more
+        let s, fixup = Behaviours.minionWeapon warrior 40 true
+        near (90.019996643066 * 0.7 * 0.7) s.Damage.[Physical].Min
+        near (204.03999328613 / 90.019996643066 * 1.25) fixup)
+
     test "Frost Wall: a row of Ice Crystals; the cast itself hits nothing" (fun () ->
         match Gems.skill db.Value ModDb.empty None { Gem = "Frost Wall"; Level = 20; Quality = 0; StatSet = 1; Supports = [] } with
         | Ok (s, _) ->

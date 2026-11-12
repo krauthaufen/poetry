@@ -972,6 +972,14 @@ module Gems =
 
     /// The game stats of a socketed gem (own stat set, quality, alt quality, supports),
     /// for behaviours that need raw numbers.
+    /// Levels the character's mods add to a gem ("+ to Level of all Spell Skills").
+    let bonusLevels (db: GameDb) (characterMods: ModDb) (gem: string) =
+        let tags =
+            match skillOfGem db gem with
+            | Some data -> (data.Types |> Set.toList |> List.choose tagOfType) @ (data.Types |> Set.toList |> List.map (fun t -> Tag("Type:" + t))) @ [ Tag("Gem:" + data.Name) ]
+            | None -> []
+        int (Mods.sumBase { Ctx.empty with SkillName = gem; SkillTags = Set.ofList tags } [ Named "GemLevel" ] characterMods)
+
     let rawStats (db: GameDb) (characterMods: ModDb) (setup: GemSetup) =
         match skillOfGem db setup.Gem with
         | None -> []

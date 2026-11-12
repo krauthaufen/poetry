@@ -265,12 +265,13 @@ Checked against PoB's defensive numbers for 131 public characters (`tools/corpus
 | Mechanic | Rule | Source | Confidence |
 |---|---|---|---|
 | Which monster | the gem's first minion (skills' minion list); "Spectre: X" / "Companion: X" by monster name | game data (PoB Minions / Spectres export) | data |
-| Level | the gem level's level requirement (spectre / companion gems: a minion gem's curve) | PoB | pob |
-| Attack damage | monster damage of that level x the monster's damage multiplier, +- its spread, as physical "weapon" damage at its attack time, 5% crit | PoB minion weaponData | pob |
+| Level | MinionGemLevelScaling by gem level (twice the gem level: 40 at gem level 20), the gem level raised by "+ to Level of all Minion Skills" and anything else that raises the gem; spectre and companion gems the same | game data (DefaultMonsterStats / MinionGemLevelScaling via PoB Misc.lua); checked against PoB on corpus 047 (gem 19 + 12 → level 62) | data |
+| Attack damage | DefaultMonsterStats MinionDamage of that level (floored) x the monster's damage multiplier, +- its spread, as physical "weapon" damage at its attack time, its own crit chance. A spectre or companion is a real monster: monster Damage of that level, and everything it deals x (MinionDamage / Damage x 1.25) | game data; the 1.25 is PoB's SpectreBeastDamageFixup ("server side mod added in 0.3") | data; 1.25 pob |
 | Skills | the monster's skills that deal damage, scaled to its level; cooldown skills when ready, else the strongest; the gem's supports apply | game data | data; choice of skill is a guess |
-| Owner's mods | "Minions deal / have ..." mods apply; minion gem levels from "+ to level of minion skills" are NOT applied | | partial |
+| Owner's mods | "Minions deal / have ..." mods apply | | partial |
 | Count | 1 per gem, or the gem's pack size; how many a build reserves spirit for is unknown from the API | | guess, usually too low |
-| Not modelled | temporary minions (zombies, raging spirits), minion life and death, command skills, minion accuracy (always hit), auras from minions | | todo |
+| Accuracy | minions that attack always hit | wiki Minion; PoB "Minions no longer need Accuracy as of patch 0.3.0" | data |
+| Not modelled | temporary minions (zombies, raging spirits), minion life and death, auras from minions | | todo |
 
 ### Totems, curses, buffs, damage over time
 

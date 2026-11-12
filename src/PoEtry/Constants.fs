@@ -105,6 +105,15 @@ module Constants =
     let monsterAccuracy level = byLevel Tables.monsterAccuracy level
     /// DefaultMonsterStats damage column.
     let monsterDamage level = byLevel Tables.monsterDamage level
+    /// DefaultMonsterStats MinionLife / MinionDamage: what a player's minion of that level has.
+    let allyLife level = byLevel Tables.allyLife level
+    let allyDamage level = byLevel Tables.allyDamage level
+    /// MinionGemLevelScaling.dat: the level of a minion from a gem of that level.
+    let minionLevel gemLevel = int (byLevel Tables.minionLevel gemLevel)
+    /// Spectres and companions are real monsters: their damage comes from the monster column,
+    /// brought up to a minion's and then 25% more ("server side mod added in 0.3", PoB
+    /// SpectreBeastDamageFixup; not in the data).
+    let spectreDamageFixup = 1.25
 
     // ---- charges and rage ----
     /// GameConstants BaseMaximumRage; Character.ot max_*_charges.

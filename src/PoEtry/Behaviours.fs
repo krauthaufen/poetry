@@ -1227,6 +1227,30 @@ module Behaviours =
         |> List.map (fun u -> u.Gem, max 1 (u.FreeMinions + int (floor (share / u.PerMinion))))
         |> Map.ofList
 
+    /// A minion's level comes from its gem's (MinionGemLevelScaling: twice the gem level), with
+    /// "+ to Level of all Minion Skills" and whatever else raises the gem.
+    let minionLevel (db: GameDb) (charMods: ModDb) (minionMods: Mod list) (gemName: string) (gemLevel: int) =
+        let own = Gems.bonusLevels db charMods gemName
+        let forMinions = int (Mods.sumBase Ctx.empty [ Named "GemLevel" ] (ModDb.ofList minionMods))
+        Constants.minionLevel (gemLevel + own + forMinions)
+
+    /// What a minion attacks with: physical damage of its level (DefaultMonsterStats
+    /// MinionDamage) x the monster's damage multiplier, +- its spread, at its attack time.
+    /// A spectre or companion is a real monster: it has monster damage of its level, and a
+    /// multiplier on all it deals that makes up for it (returned beside the weapon).
+    let minionWeapon (m: MinionData) (level: int) (monster: bool) : Weapon * float =
+        let avg, fixup =
+            if monster then
+                let d = Constants.monsterDamage level
+                m.Damage * d, Constants.allyDamage level / d * Constants.spectreDamageFixup
+            else m.Damage * floor (Constants.allyDamage level), 1.0
+        { Damage = Map.ofList [ Physical, { Min = avg * (1.0 - m.DamageSpread); Max = avg * (1.0 + m.DamageSpread) } ]
+          CritChance = m.CritChance
+          AttacksPerSecond = 1.0 / max 0.05 m.AttackTime
+          ReloadTime = 0.0
+          Tags = [] },
+        fixup
+
     /// Persistent minions of a build as actors. Each minion is the monster its gem names
     /// (skills' minion list; "Spectre: X" / "Companion: X" by monster name) at the gem's level:
     /// its attacks use "weapon" damage = monster damage of that level x the monster's damage
@@ -1238,10 +1262,7 @@ module Behaviours =
         // as many of each as the character's Spirit pays for
         let counts = minionCounts (spiritTotal sheet build) (spiritUses db sheet build)
         let minionMods = Mods.forMinions sheet.Mods
-        let levelOf (gemName: string) (gemLevel: int) =
-            let req name = Gems.data db name |> Option.bind (fun d -> Map.tryFind gemLevel d.Levels) |> Option.map (fun l -> int l.LevelRequirement)
-            // spectre / companion gems aren't in the gem data: take a minion gem's level curve
-            req gemName |> Option.filter (fun l -> l > 0) |> Option.orElse (req "Skeletal Warrior") |> Option.defaultValue sheet.Level |> max 1
+        let levelOf = minionLevel db charMods minionMods
         build.Groups
         |> List.filter (fun g -> g.Enabled)
         |> List.map (fun g ->
@@ -1264,13 +1285,8 @@ module Behaviours =
                 | _ when not persistent -> [], [ sprintf "%s: temporary minions are not simulated" gem.Name ]
                 | m :: _ ->
                     let level = levelOf gem.Name gem.Level
-                    let avg = m.Damage * Constants.monsterDamage level
-                    let weapon =
-                        { Damage = Map.ofList [ Physical, { Min = avg * (1.0 - m.DamageSpread); Max = avg * (1.0 + m.DamageSpread) } ]
-                          CritChance = m.CritChance
-                          AttacksPerSecond = 1.0 / max 0.05 m.AttackTime
-                          ReloadTime = 0.0
-                          Tags = [] }
+                    let weapon, fixup = minionWeapon m level byName.IsSome
+                    let minionMods = if fixup = 1.0 then minionMods else Mod.more (Damage AllDamage) ((fixup - 1.0) * 100.0) :: minionMods
                     let skills =
                         m.SkillList
                         |> List.choose (fun sid ->
