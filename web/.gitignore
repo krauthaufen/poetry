@@ -1,0 +1,13 @@
+build/
+dist/
+node_modules
+bin/
+obj/
+View.g*
+.watch.log
+.fable.log
+.emit.log
+.vite.log
+public/sim/
+public/data
+public/builds

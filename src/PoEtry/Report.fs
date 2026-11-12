@@ -135,3 +135,9 @@ type Session(read: string -> string) =
             | other -> Report.write (JObj(Map.ofList [ "error", JStr(sprintf "unknown op %A" other) ]))
         with e ->
             Report.write (JObj(Map.ofList [ "error", JStr e.Message ]))
+
+/// The session for JavaScript callers (a browser worker): plain functions, whose names stay
+/// as written when compiled with Fable.
+module Front =
+    let create (read: string -> string) : Session = Session read
+    let handle (session: Session) (request: string) : string = session.Handle request

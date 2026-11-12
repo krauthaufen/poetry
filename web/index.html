@@ -1,0 +1,92 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PoEtry</title>
+  <link rel="icon" href="data:," />
+  <script>window.global = globalThis;</script>
+  <script>
+    // The simulator behind urls: a fetch of "__sim?op=...&build=<url>&..." is answered by
+    // the worker. The character is read from its url here (once per url) and sent along.
+    (() => {
+      const worker = new Worker(new URL("./sim-worker.js", document.baseURI), { type: "module" });
+      const waiting = new Map();
+      const builds = new Map();
+      let next = 1;
+      worker.onmessage = (e) => { const done = waiting.get(e.data.id); waiting.delete(e.data.id); if (done) done(e.data.answer); };
+      const plain = window.fetch.bind(window);
+      const answer = (text, status = 200) => new Response(text, { status, headers: { "content-type": "application/json" } });
+      window.fetch = async (input, init) => {
+        const url = typeof input === "string" ? input : input.url;
+        const at = url.indexOf("__sim?");
+        if (at < 0) return plain(input, init);
+        // everything after "build=" is the character's url, whatever it contains
+        const query = url.slice(at + 6);
+        const cut = query.indexOf("build=");
+        const params = new URLSearchParams(cut < 0 ? query : query.slice(0, cut));
+        const buildUrl = cut < 0 ? "" : query.slice(cut + 6);
+        const request = {};
+        for (const [k, v] of params) request[k] = v !== "" && !isNaN(Number(v)) ? Number(v) : v;
+        try {
+          if (!builds.has(buildUrl)) builds.set(buildUrl, plain(buildUrl).then((r) => { if (!r.ok) throw new Error(`${buildUrl}: status ${r.status}`); return r.text(); }));
+          request.build = await builds.get(buildUrl);
+        } catch (err) {
+          builds.delete(buildUrl);
+          return answer(JSON.stringify({ error: String(err && err.message || err) }));
+        }
+        const id = next++;
+        return new Promise((resolve) => { waiting.set(id, (text) => resolve(answer(text))); worker.postMessage({ id, request: JSON.stringify(request) }); });
+      };
+    })();
+  </script>
+  <style>
+    /* (the framework brings Bootstrap along: everything here is under #app to win over it) */
+    /* the game's own colours: text grey #7f7f7f, values white #c8c8c8 (normal items), magic blue #8888ff, rare yellow #ffff77,
+       unique orange #af6025, gem teal #1ba29b, currency #aa9e82; fire #960000, cold #366492, lightning #ffd700, chaos #d02090 */
+    :root { --ink: #c8c8c8; --gold: #aa9e82; --dim: #7f7f7f; --stone: #0c0b0a; --slab: #151311; --edge: #3b3024; --fire: #960000;
+            --magic: #8888ff; --rare: #ffff77; --unique: #af6025; --gem: #1ba29b; --cold: #366492; --lightning: #ffd700; --chaos: #d02090; }
+    html, body, #app { margin: 0; min-height: 100%; }
+    body { background: radial-gradient(ellipse at top, #1c1814 0%, var(--stone) 60%) fixed !important; color: var(--ink) !important;
+           font: 15px/1.45 "Fontin", "Palatino Linotype", "Book Antiqua", Georgia, serif !important; }
+    #app header { padding: 18px 28px 10px; border-bottom: 1px solid var(--edge); display: flex; align-items: baseline; gap: 24px; flex-wrap: wrap; }
+    #app h1 { margin: 0; font-size: 28px; letter-spacing: 3px; color: var(--unique); font-variant: small-caps; text-shadow: 0 0 12px rgba(175,96,37,.35); }
+    #app .title { font-size: 18px; color: var(--rare); }
+    #app .status { color: var(--dim); font-style: italic; }
+    #app .main { display: flex; gap: 22px; padding: 22px 28px; flex-wrap: wrap; align-items: flex-start; }
+    #app .column { flex: 1 1 260px; max-width: 340px; display: flex; flex-direction: column; gap: 16px; }
+    #app .column.wide { flex: 2 1 420px; max-width: 760px; }
+    #app .panel { background: linear-gradient(180deg, #221c18, var(--slab)); border: 1px solid var(--edge); border-radius: 3px;
+             box-shadow: inset 0 0 0 1px #0c0a09, 0 6px 18px rgba(0,0,0,.45); padding: 10px 16px 14px; }
+    #app h3 { margin: 2px 0 8px; font-size: 13px; letter-spacing: 2px; text-transform: uppercase; color: var(--gold); font-weight: normal;
+         border-bottom: 1px solid var(--edge); padding-bottom: 6px; }
+    #app .line { display: flex; justify-content: space-between; padding: 2px 0; }
+    #app .what { color: var(--dim); }
+    #app .amount { color: var(--ink); font-variant-numeric: tabular-nums; }
+    #app .line.fire .amount { color: #e0503c; }   /* the game's fire red, lightened to read on black as its tooltips do */
+    #app .line.cold .amount { color: #5c9bd6; }
+    #app .line.lightning .amount { color: var(--lightning); }
+    #app .line.chaos .amount { color: var(--chaos); }
+    #app .line.life .amount { color: #c8323c; }
+    #app .line.mana .amount { color: var(--magic); }
+    #app .line.energy-shield .amount { color: #b4e6ff; }
+    #app .line.spirit .amount { color: var(--gem); }
+    #app .line.dps .amount { color: var(--rare); font-size: 20px; }
+    #app .note { color: var(--fire); font-size: 13px; padding: 0 4px; }
+    #app nav { display: flex; gap: 6px; }
+    #app button.tab { background: #1a1512; color: var(--dim); border: 1px solid var(--edge); padding: 7px 16px; font: inherit; letter-spacing: 1px;
+                 cursor: pointer; border-radius: 2px; }
+    #app button.tab:hover { color: var(--ink); border-color: #5a4836; }
+    #app button.tab.active { color: #0c0b0a; background: linear-gradient(180deg, #c9b890, #8f8263); border-color: var(--gold); }
+    #app .pressing { color: var(--gem); font-size: 16px; }
+    #app .share { position: relative; display: flex; justify-content: space-between; padding: 4px 8px; margin: 3px 0; border: 1px solid #2a221c; background: #171310; }
+    #app .share .bar { position: absolute; left: 0; top: 0; bottom: 0; background: linear-gradient(90deg, rgba(175,96,37,.75), rgba(175,96,37,.35)); }
+    #app .share .name, #app .share .pct { position: relative; color: var(--ink); }
+    #app .share .pct { color: var(--ink); font-variant-numeric: tabular-nums; }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <script type="module" src="./build/entry.js"></script>
+</body>
+</html>

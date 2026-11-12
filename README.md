@@ -77,6 +77,15 @@ python3 tools/corpus/fetch.py && dotnet fsi --optimize+ tools/corpus/run.fsx   #
 
 Corpus characters and your own builds stay out of the repository (`corpus/`, `builds-private/`).
 
+## Web front end (`web/`)
+
+A pure FableCube application (HTML through the FableCube toy's framework, `../fablecube-toy/lib`). The simulator is not part of the page: compiled with Fable it runs in a worker (`web/public/sim-worker.js`) behind `Report.fs`'s JSON interface, and the page asks it through urls (`__sim?op=fight&...`, answered by the bridge in `web/index.html`), so a question is a `Dom.Fetch` and an answer a message.
+
+```bash
+web/play.sh          # live on :5173; web/build.sh for static files in web/dist
+# open /?build=<url of a character JSON or PoB XML>
+```
+
 ## Status
 
 Version 1.0 release candidate. Modelled: hit damage, conversion, crits, accuracy, penetration and mitigation; all ailments and buildup; cooldowns with stored uses, charges, rage, infusions and remnants; meta gems and invocations; curses, marks and curse auras; skill damage over time, lingering and staged skills; crossbow ammunition; shield attacks; Glory, Combo and banners built up in the fight; persistent and temporary minions (with life, death and revival) and totems; the player's pools, defences, recovery, flasks, ailments and stuns; keystones; weapon sets; radius jewels.

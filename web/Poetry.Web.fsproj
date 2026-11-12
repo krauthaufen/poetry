@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The FableCube toy's framework (TOYLIB, default ../../fablecube-toy/lib) with this
+       application's sources. The simulator is not part of it: it runs in a worker
+       (sim/, built by build-sim.sh) and is asked through urls. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <LangVersion>latest</LangVersion>
+    <DefineConstants>$(DefineConstants);WOMBAT_SHIM</DefineConstants>
+    <ToyWork>$(MSBuildThisFileDirectory)</ToyWork>
+    <ToyLib Condition="'$(TOYLIB)' != ''">$(TOYLIB)/</ToyLib>
+    <ToyLib Condition="'$(ToyLib)' == ''">$(MSBuildThisFileDirectory)../../fablecube-toy/lib/</ToyLib>
+  </PropertyGroup>
+  <ItemGroup>
+    <AppCompile Include="App.fs" />
+  </ItemGroup>
+  <Import Project="$(ToyLib)Toy.props" />
+  <ItemGroup>
+    <PackageReference Include="Aardvark.Portable.Shell.Web" Version="$(Portable)" />
+    <PackageReference Include="Aardvark.Portable.Shader" Version="$(Portable)" />
+    <PackageReference Include="Aardvark.Portable.Shader.Plugin" Version="$(Portable)" />
+    <PackageReference Include="FSharp.Data.Adaptive" Version="1.2.26" ExcludeAssets="all" />
+  </ItemGroup>
+</Project>
