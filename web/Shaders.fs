@@ -42,6 +42,12 @@ let spriteFragment (f : Textured) =
         if c.W < t.W then discard ()
         // (towards the ground's own colour: there is no blending to do it properly)
         let fade = if t.W < 0.1f then c.W else 1.0f
+        // the lowest cut is the ascendancy's portrait: it fades out towards the ring around it
+        let r : V4f = uniform?Rect
+        let dx = (f.Uv.X - r.X) / r.Z - 0.5f
+        let dy = (f.Uv.Y - r.Y) / r.W - 0.5f
+        let d = 2.0f * sqrt (dx * dx + dy * dy)
+        let fade = if t.W < 0.015f then fade * max 0.0f (min 1.0f ((0.66f - d) / 0.15f)) else fade
         return { Color = V4f (0.047f + (c.X * t.X - 0.047f) * fade, 0.047f + (c.Y * t.Y - 0.047f) * fade, 0.055f + (c.Z * t.Z - 0.055f) * fade, 1.0f) }
     }
 

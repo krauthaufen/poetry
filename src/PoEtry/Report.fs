@@ -46,6 +46,11 @@ module Report =
               "level", num (float c.Sheet.Level)
               // the passives allocated (those bound to a weapon set apart)
               "passives", JArr(c.Build.TreeNodes |> List.map (fun i -> num (float i)))
+              // what an attribute passive was chosen to be
+              "choices", JArr(c.Build.TreeOverrides |> Map.toList |> List.choose (fun (i, stats) ->
+                  [ "Strength"; "Dexterity"; "Intelligence" ]
+                  |> List.tryFind (fun a -> stats |> List.exists (fun (s: string) -> s.EndsWith("to " + a)))
+                  |> Option.map (fun a -> obj [ "id", num (float i); "name", JStr a ])))
               "passivesSet1", JArr(c.Build.TreeNodesSet1 |> List.map (fun i -> num (float i)))
               "passivesSet2", JArr(c.Build.TreeNodesSet2 |> List.map (fun i -> num (float i)))
               "attributes", obj [ "str", num v.Str; "dex", num v.Dex; "int", num v.Int ]
@@ -124,8 +129,8 @@ type Session(read: string -> string) =
 
     /// The character of a build text; `passives` ("" or ids separated by commas) replaces
     /// the passives allocated in it.
-    member _.Load(build: string, passives: string) : Loaded =
-        let key = passives + "|" + build
+    member _.Load(build: string, passives: string, choices: string) : Loaded =
+        let key = passives + "|" + choices + "|" + build
         match last with
         | Some (k, c) when k = key -> c
         | _ ->
@@ -140,7 +145,13 @@ type Session(read: string -> string) =
                 if passives = "" then b
                 else
                     let ids = passives.Split(',') |> Array.choose (fun s -> match System.Int32.TryParse(s.Trim()) with | true, v -> Some v | _ -> None) |> List.ofArray
-                    { b with TreeNodes = ids }
+                    // "id:Strength,...": what the attribute passives are chosen to be
+                    let chosen =
+                        choices.Split(',') |> Array.choose (fun s ->
+                            match s.Split(':') with
+                            | [| i; a |] -> (match System.Int32.TryParse(i.Trim()) with | true, v -> Some(v, [ "+5 to " + a.Trim() ]) | _ -> None)
+                            | _ -> None)
+                    { b with TreeNodes = ids; TreeOverrides = chosen |> Array.fold (fun m (i, s) -> Map.add i s m) b.TreeOverrides }
             let c = Setup.loadWith db.Value tree.Value b Options.defaults
             last <- Some(key, c)
             c
@@ -155,9 +166,10 @@ type Session(read: string -> string) =
                 | Some (JStr s) -> s
                 | Some (JNum n) -> sprintf "%.0f" n
                 | _ -> ""
+            let choices = Json.strField "choices" j |> Option.defaultValue ""
             match Json.strField "op" j with
-            | Some "character" -> Report.write (Report.character (this.Load(build, passives)))
-            | Some "fight" -> Report.write (Report.fight (this.Load(build, passives)) j)
+            | Some "character" -> Report.write (Report.character (this.Load(build, passives, choices)))
+            | Some "fight" -> Report.write (Report.fight (this.Load(build, passives, choices)) j)
             | other -> Report.write (JObj(Map.ofList [ "error", JStr(sprintf "unknown op %A" other) ]))
         with e ->
             Report.write (JObj(Map.ofList [ "error", JStr e.Message ]))

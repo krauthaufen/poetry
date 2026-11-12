@@ -84,6 +84,19 @@
     #app .pressing { color: var(--gem); font-size: 16px; }
     #app .treeview { position: absolute; left: 0; right: 0; top: 64px; bottom: 0; }
     #app .points { color: var(--gold); }
+    #app .passive-tip { position: fixed; box-sizing: border-box; padding: 0 0 10px 0; background: rgba(4, 4, 6, 0.9); border: 1px solid #3a3226; color: #8888ff; font-size: 14px; line-height: 1.45; z-index: 5; pointer-events: auto; }
+    #app .passive-tip .stats, #app .passive-tip .actions, #app .passive-tip .state { padding: 0 12px; }
+    #app .passive-tip .state { color: #6a6458; margin-top: 8px; }
+    #app .passive-tip.none { display: none; }
+    #app .passive-tip .name { color: #e8dcc0; font-size: 18px; margin-bottom: 8px; padding: 6px 12px; text-align: center; font-variant: small-caps; letter-spacing: 0.5px; background: linear-gradient(#2a251d, #14110d); border-bottom: 1px solid #5a4a2e; }
+    #app .passive-tip.notable .name, #app .passive-tip.keystone .name { color: var(--gold); }
+    #app .passive-tip .actions { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; }
+    #app .passive-tip button { cursor: pointer; }
+    #app .passive-tip .choice { padding: 5px 10px; background: #15120e; border: 1px solid #5a4a2e; color: #ccc; font: inherit; }
+    #app .passive-tip .choice.Strength { color: #ff6650; }
+    #app .passive-tip .choice.Dexterity { color: #6be36b; }
+    #app .passive-tip .choice.Intelligence { color: #6b9bff; }
+    #app .passive-tip .choice.active { border-color: currentColor; background: #2a241a; }
     #app .headline { color: var(--rare); font-size: 18px; }
     #app .share { position: relative; display: flex; justify-content: space-between; padding: 4px 8px; margin: 3px 0; border: 1px solid #2a221c; background: #171310; }
     #app .share .bar { position: absolute; left: 0; top: 0; bottom: 0; background: linear-gradient(90deg, rgba(175,96,37,.75), rgba(175,96,37,.35)); }

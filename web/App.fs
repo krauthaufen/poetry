@@ -22,6 +22,9 @@ type Passive =
       /// Not shown until it is allocated (a Sinister Jewel Socket).
       Hidden : bool
       Name : string
+      /// What it grants, and for one with a choice (an attribute) what can be chosen.
+      Stats : string list
+      Options : string list
       Ascendancy : string
       Icon : string
       IconRect : V4d
@@ -47,6 +50,10 @@ type Msg =
     | Toggle of int
     /// A click on the tree, at this place of it.
     | Click of V3d
+    /// From the tooltip: allocate a passive (as this choice, "" for none), give it back, close.
+    | Allocate of int * string
+    | Deallocate of int
+    | Close
     /// The place of the tree under a pointer that came down, with where the camera was when
     /// it was worked out.
     /// The page's size, as the bridge in index.html answers `__window`.
@@ -129,8 +136,12 @@ type Model =
       Asked : int
       /// A click that could not be placed yet (the page's size was not known).
       Pending : V2d option
-      /// (for checks) what the last click did.
-      Note : string }
+      /// What an allocated passive with a choice was chosen to be ("Strength", ...).
+      Choices : Map<int, string>
+      /// The passive whose tooltip is pinned (clicked), and the one under the mouse.
+      Selected : int option
+      Hovered : int option
+      Level : int }
 
 let init : Model =
     { Build = ""; Scenario = "boss"; Status = "locating"; Title = ""; Class = ""; Ascendancy = ""; Tab = "character"
@@ -142,7 +153,7 @@ let init : Model =
       Centre = V2d (0.0, 0.0); Height = 9000.0
       Camera = { Sky = V3d (0.0, 1.0, 0.0); Location = V3d (0.0, 0.0, 7794.2); Forward = V3d (0.0, 0.0, -1.0); Up = V3d (0.0, 1.0, 0.0); Right = V3d (1.0, 0.0, 0.0) }
       Near = 7000.0; Far = 8600.0
-      Touches = []; Travel = 0.0; Page = V2d (0.0, 0.0); Asked = 0; Pending = None; Note = "" }
+      Touches = []; Travel = 0.0; Page = V2d (0.0, 0.0); Asked = 0; Pending = None; Choices = Map.empty; Selected = None; Hovered = None; Level = 0 }
 
 /// The camera straight above the centre, so far up that `Height` of the tree is seen through
 /// its 60 degree lens; the depth range close around the tree's plane (its layers are a unit
@@ -156,10 +167,13 @@ let private look (m : Model) : Model =
 
 /// The passives as the simulator is told them (only once they were changed here).
 let private passives (m : Model) =
-    if m.Edited then "&passives=" + (m.Allocated |> Set.toList |> List.map string |> String.concat ",") else ""
+    if m.Edited then
+        "&passives=" + (m.Allocated |> Set.toList |> List.map string |> String.concat ",")
+        + "&choices=" + (m.Choices |> Map.toList |> List.filter (fun (i, _) -> m.Allocated.Contains i) |> List.map (fun (i, c) -> string i + ":" + c) |> String.concat ",")
+    else ""
 
 let private sheetUrl (m : Model) = "__sim?op=character" + passives m + "&build=" + m.Build
-let private fightUrl (m : Model) = "__sim?op=fight&runs=20&time=30&scenario=" + m.Scenario + passives m + "&build=" + m.Build
+let private fightUrl (m : Model) = "__sim?op=fight&runs=5&time=20&life=1e12&scenario=" + m.Scenario + passives m + "&build=" + m.Build
 
 // ---- the passive tree ----
 
@@ -197,7 +211,7 @@ let private ribbon (width : float) (at : Map<int, V2d>) (edge : float list) : V3
 /// How much smaller an ascendancy is drawn than it is laid out, and how big its class art
 /// and the ring around it are, in widths of its background (pob-web's PassiveTree).
 let private ascendancyScale = 0.8025
-let private artSize = 1500.0 * 2.36
+let private artSize = 1500.0 * 3.1
 let private ringSize = 1500.0 * 2.675
 
 /// As many zero texture coordinates as a mesh has vertices.
@@ -231,6 +245,8 @@ let private readTree (j : Json) (m : Model) : Model =
               Kind = kind
               Hidden = Json.bool (Json.field "hidden" n)
               Name = Json.string (Json.field "name" n)
+              Stats = Json.field "stats" n |> Json.list |> List.map Json.string
+              Options = (if kind = "attribute" then Json.field "options" n |> Json.list |> List.map (fun o -> Json.string (Json.field "name" o)) else [])
               Ascendancy = Json.string (Json.field "ascendancy" n)
               Icon = icon
               IconRect = rect
@@ -317,6 +333,22 @@ let private open' (m : Model) (asc : Map<int, string>) (id : int) =
     | Some a -> a = "" || a = m.Ascendancy
     | None -> false
 
+/// Of these passives, those that hang on a start (the class' own start is whichever touches
+/// them) or on the ascendancy's.
+let private hanging (m : Model) (all : Set<int>) : Set<int> =
+    let asc = List.ofArray m.Passives |> List.map (fun p -> p.Id, p.Ascendancy) |> Map.ofList
+    let starts = List.ofArray m.Passives |> List.filter (fun p -> p.Kind = "start") |> List.map (fun p -> p.Id) |> Set.ofList
+    let ascStarts = List.ofArray m.Passives |> List.filter (fun p -> p.Kind = "ascstart" && p.Ascendancy = m.Ascendancy) |> List.map (fun p -> p.Id) |> Set.ofList
+    let next (i : int) = Map.tryFind i m.Neighbours |> Option.defaultValue [] |> List.filter (fun n -> open' m asc n && not (starts.Contains n))
+    let seeds = all |> Set.filter (fun i -> ascStarts.Contains i || (Map.tryFind i m.Neighbours |> Option.defaultValue [] |> List.exists (fun n -> starts.Contains n || ascStarts.Contains n)))
+    let rec grow (seen : Set<int>) (front : int list) =
+        match front with
+        | [] -> seen
+        | i :: rest ->
+            let more = next i |> List.filter (fun n -> all.Contains n && not (seen.Contains n))
+            grow (more |> List.fold (fun s n -> Set.add n s) seen) (rest @ more)
+    grow seeds (Set.toList seeds)
+
 /// Allocating a passive takes the shortest way to it from what is allocated; deallocating
 /// one drops it and all that then comes loose from the start.
 let private toggle (id : int) (m : Model) : Model =
@@ -325,16 +357,7 @@ let private toggle (id : int) (m : Model) : Model =
     let ascStarts = List.ofArray m.Passives |> List.filter (fun p -> p.Kind = "ascstart" && p.Ascendancy = m.Ascendancy) |> List.map (fun p -> p.Id) |> Set.ofList
     let next (i : int) = Map.tryFind i m.Neighbours |> Option.defaultValue [] |> List.filter (fun n -> open' m asc n && not (starts.Contains n))
     if m.Allocated.Contains id then
-        // what hangs on a start (the class' own start is whichever touches the allocated)
-        let hanging (all : Set<int>) =
-            let seeds = all |> Set.filter (fun i -> ascStarts.Contains i || (Map.tryFind i m.Neighbours |> Option.defaultValue [] |> List.exists (fun n -> starts.Contains n || ascStarts.Contains n)))
-            let rec grow (seen : Set<int>) (front : int list) =
-                match front with
-                | [] -> seen
-                | i :: rest ->
-                    let more = next i |> List.filter (fun n -> all.Contains n && not (seen.Contains n))
-                    grow (more |> List.fold (fun s n -> Set.add n s) seen) (rest @ more)
-            grow seeds (Set.toList seeds)
+        let hanging = hanging m
         // what was loose before stays (passives a jewel or an item allocates without a way to them)
         let loose = Set.difference m.Allocated (hanging m.Allocated) |> Set.remove id
         { m with Allocated = Set.union (hanging (m.Allocated.Remove id)) loose; Edited = true }
@@ -402,6 +425,16 @@ let private gesture (id : int) (before : V2d) (now : V2d) (m : Model) : Model =
             let at = placeAt m (V2d (0.0, 0.0)) height (between now other)
             look { m with Height = height; Centre = V2d (held.X - at.X, held.Y - at.Y) }
 
+/// The passive drawn at a place of the tree (y up), if any.
+let private passiveAt (m : Model) (x : float) (y : float) : Passive option =
+    let near (ps : Passive list) =
+        ps
+        |> List.filter (fun q -> (q.X - x) * (q.X - x) + (q.Y + y) * (q.Y + y) <= q.Size * q.Size / 4.0)
+        |> List.sortBy (fun q -> (q.X - x) * (q.X - x) + (q.Y + y) * (q.Y + y))
+        |> List.tryHead
+    // (the ascendancy's lie over the tree's own there: they come first)
+    near (m.Shown |> List.filter (fun q -> q.Ascendancy <> "" && visible m q)) |> Option.orElse (near (m.Shown |> List.filter (visible m)))
+
 let rec update (msg : Msg) (m : Model) : Model =
     match msg with
     | Located href ->
@@ -417,18 +450,14 @@ let rec update (msg : Msg) (m : Model) : Model =
     // the passive under the click: the nearest one whose frame covers the place (the
     // character's own ascendancy is drawn in the middle, over the tree's passives there)
     | Click p ->
-        let near (ps : Passive list) =
-            ps
-            |> List.filter (fun q -> (q.X - p.X) * (q.X - p.X) + (q.Y + p.Y) * (q.Y + p.Y) <= q.Size * q.Size / 4.0)
-            |> List.sortBy (fun q -> (q.X - p.X) * (q.X - p.X) + (q.Y + p.Y) * (q.Y + p.Y))
-            |> List.tryHead
-        // (the ascendancy's lie over the tree's own there: they come first)
-        match near (m.Shown |> List.filter (fun q -> q.Ascendancy <> "" && visible m q)) |> Option.orElse (near (m.Shown |> List.filter (visible m))) with
-        | Some q ->
-            let had = m.Allocated.Contains q.Id
-            let m' = toggle q.Id m
-            paths { m' with Fighting = true; Note = sprintf "%s %d %s was %b: %d to %d" m.Note q.Id q.Name had m.Allocated.Count m'.Allocated.Count + " lost " + (Set.difference m.Allocated m'.Allocated |> Set.toList |> List.map (fun i -> m.Passives |> Array.tryFind (fun p -> p.Id = i) |> Option.map (fun p -> sprintf "%d %s %s [%s]" i p.Kind p.Name p.Ascendancy) |> Option.defaultValue (string i + " unknown")) |> String.concat "; ") + " asc=" + m.Ascendancy }
-        | None -> { m with Note = m.Note + " nothing there" }
+        match passiveAt m p.X p.Y with
+        | Some q -> { m with Selected = Some q.Id }
+        | None -> { m with Selected = None }
+    | Allocate (id, choice) ->
+        let m = if m.Allocated.Contains id then m else toggle id m
+        paths { m with Choices = (if choice = "" then m.Choices else Map.add id choice m.Choices); Edited = true; Fighting = true }
+    | Deallocate id -> if m.Allocated.Contains id then paths { toggle id m with Fighting = true } else m
+    | Close -> { m with Selected = None }
     | Toggle id -> paths { toggle id m with Fighting = true }
     // A place on the tree comes from the last frame drawn; under an older camera than the
     // model's it is no use.
@@ -451,6 +480,11 @@ let rec update (msg : Msg) (m : Model) : Model =
     | PointerMove e ->
         match m.Touches |> List.tryFind (fun (i, _) -> i = e.PointerId) with
         | Some (_, before) -> gesture e.PointerId before e.Position m
+        // no pointer down: the mouse, over a passive or not
+        | None when m.Page.X > 0.0 ->
+            let p = placeAt m m.Centre m.Height e.Position
+            let over = passiveAt m p.X p.Y |> Option.map (fun q -> q.Id)
+            if over = m.Hovered then m else { m with Hovered = over }
         | None -> m
     | PointerUp e ->
         let left = m.Touches |> List.filter (fun (i, _) -> i <> e.PointerId)
@@ -485,6 +519,8 @@ let rec update (msg : Msg) (m : Model) : Model =
                     Ascendancy = Json.string (Json.field "ascendancy" j)
                     // what the character has allocated, until it is changed here
                     Allocated = (if m.Edited then m.Allocated else Json.field "passives" j |> Json.list |> List.map Json.int |> Set.ofList)
+                    Choices = (if m.Edited then m.Choices else Json.field "choices" j |> Json.list |> List.map (fun c -> Json.int (Json.field "id" c), Json.string (Json.field "name" c)) |> Map.ofList)
+                    Level = int (n [ "level" ])
                     Pools = [ row "Life" (n [ "pools"; "life" ]); row "Mana" (n [ "pools"; "mana" ]); row "Energy Shield" (n [ "pools"; "energyShield" ]); row "Spirit" (n [ "pools"; "spirit" ]) ]
                     Defences = [ row "Armour" (n [ "defences"; "armour" ]); row "Evasion" (n [ "defences"; "evasion" ]); row "Deflection" (n [ "defences"; "deflection" ]); row "Block" (n [ "defences"; "block" ]) ]
                     Resistances = named "resistances"
@@ -544,6 +580,14 @@ let white = V4d (1.0, 1.0, 1.0, 0.35)
 
 let dim = V4d (0.42, 0.42, 0.45, 0.35)
 
+/// An allocated passive's tint: an attribute's by what was chosen, as in the game.
+let private chosen (m : Model) (p : Passive) : V4d =
+    match Map.tryFind p.Id m.Choices with
+    | Some "Strength" -> V4d (1.0, 0.38, 0.3, 0.35)
+    | Some "Dexterity" -> V4d (0.4, 1.0, 0.4, 0.35)
+    | Some "Intelligence" -> V4d (0.4, 0.6, 1.0, 0.35)
+    | _ -> white
+
 /// A passive's icon: out of the sheet bound above, dim until it is allocated.
 let icon (m : Model) (p : Passive) : Scene<Msg> =
     sg {
@@ -551,7 +595,7 @@ let icon (m : Model) (p : Passive) : Scene<Msg> =
         Sg.Scale (p.IconSize)
         Sg.Texture ("Atlas", p.Icon)
         Sg.Uniform ("Rect", p.IconRect)
-        Sg.Uniform ("Tint", (if m.Allocated.Contains p.Id then white else dim))
+        Sg.Uniform ("Tint", (if m.Allocated.Contains p.Id then chosen m p else dim))
         quad
     }
 
@@ -600,7 +644,7 @@ let tree (m : Model) : Node<Msg> =
                         mesh Topology.Triangles { Mesh.Attribute ("Positions", m.Web); Mesh.Attribute ("DiffuseColorCoordinates", m.WebUv) }
                     }
                     sg {
-                        Sg.Uniform ("Color", V4d (0.686, 0.376, 0.145, 1.0))
+                        Sg.Uniform ("Color", V4d (0.82, 0.74, 0.47, 1.0))
                         Sg.Translate (0.0, 0.0, 0.7)
                         mesh Topology.Triangles { Mesh.Attribute ("Positions", m.Path); Mesh.Attribute ("DiffuseColorCoordinates", m.PathUv) }
                     }
@@ -620,7 +664,7 @@ let tree (m : Model) : Node<Msg> =
                     Sg.Scale (artSize)
                     Sg.Texture ("Atlas", (if m.Art = "" then "art/ring.png" else m.Art))
                     Sg.Uniform ("Rect", V4d (0.0, 0.0, 1.0, 1.0))
-                    Sg.Uniform ("Tint", (if m.Art = "" then V4d (0.0, 0.0, 0.0, 2.0) else V4d (0.6, 0.6, 0.6, 0.02)))
+                    Sg.Uniform ("Tint", (if m.Art = "" then V4d (0.0, 0.0, 0.0, 2.0) else V4d (0.75, 0.75, 0.75, 0.01)))
                     quad
                 }
                 sg {
@@ -628,7 +672,7 @@ let tree (m : Model) : Node<Msg> =
                     Sg.Scale (ringSize)
                     Sg.Texture ("Atlas", "art/ring.png")
                     Sg.Uniform ("Rect", V4d (0.0, 0.0, 1.0, 1.0))
-                    Sg.Uniform ("Tint", (if m.Art = "" then V4d (0.0, 0.0, 0.0, 2.0) else V4d (0.8, 0.8, 0.8, 0.02)))
+                    Sg.Uniform ("Tint", (if m.Art = "" then V4d (0.0, 0.0, 0.0, 2.0) else V4d (0.8, 0.8, 0.8, 0.45)))
                     quad
                 }
             }
@@ -651,6 +695,60 @@ let private tab (m : Model) (key : string) (name : string) : Node<Msg> =
         name
     }
 
+/// Passive points spent of those a character of this level has (one a level after the
+/// first, 24 from quests), the ascendancy's apart; what a jewel or an item allocates
+/// without a way to it costs none.
+let private points (m : Model) : string =
+    let spent = hanging m m.Allocated
+    let asc = m.Passives |> Array.filter (fun p -> p.Ascendancy <> "" && p.Kind <> "ascstart" && spent.Contains p.Id) |> Array.length
+    let starts = m.Passives |> Array.filter (fun p -> p.Kind = "ascstart" && spent.Contains p.Id) |> Array.length
+    let free = m.Allocated.Count - spent.Count
+    sprintf "%d of %d points, %d ascendancy%s" (spent.Count - asc - starts) (m.Level - 1 + 24) asc (if free > 0 then sprintf ", %d granted" free else "")
+
+/// The tooltip of the pinned passive (with what can be done to it) or the one under the mouse.
+let private tooltip (m : Model) : Node<Msg> =
+    let pinned = m.Selected.IsSome
+    match (if pinned then m.Selected else m.Hovered) |> Option.bind (fun i -> m.Passives |> Array.tryFind (fun p -> p.Id = i)) with
+    | None -> div { Dom.Class "passive-tip none" }
+    | Some p ->
+        let has = m.Allocated.Contains p.Id
+        let title = match Map.tryFind p.Id m.Choices with Some c when has -> c | _ -> p.Name
+        // beside the passive where it is drawn (an ascendancy's: around the middle), kept on the page
+        let q = m.Shown |> List.tryFind (fun s -> s.Id = p.Id) |> Option.defaultValue p
+        let s = size m
+        let u = m.Height / max 1.0 s.X
+        let x = (q.X - m.Centre.X) / u + s.X / 2.0 + q.Size / u / 2.0 + 10.0
+        let y = top + s.Y / 2.0 + (q.Y + m.Centre.Y) / u + q.Size / u / 2.0 + 6.0
+        let wide = min 380.0 (m.Page.X - 24.0)
+        let state = if has then "Allocated" else "Unallocated"
+        // (a chosen attribute grants that one)
+        let stats = match Map.tryFind p.Id m.Choices with Some c when has -> p.Stats |> List.map (fun s -> s.Replace ("any Attribute", c)) | _ -> p.Stats
+        div {
+            Dom.Style [ Css.Left (sprintf "%.0fpx" (max 12.0 (min x (m.Page.X - wide - 12.0)))); Css.Top (sprintf "%.0fpx" (max (top + 8.0) (min y (m.Page.Y - 190.0)))); Css.Width (sprintf "%.0fpx" wide) ]
+            Dom.Class ("passive-tip " + p.Kind)
+            Dom.Attr ("data-check", "tooltip")
+            div { Dom.Class "name"; title }
+            div {
+                Dom.Class "stats"
+                for s in stats do
+                    div { s }
+            }
+            if pinned then
+                div {
+                    Dom.Class "actions"
+                    if not p.Options.IsEmpty then
+                        for o in p.Options do
+                            button { Dom.Class ("choice " + o + (if has && Map.tryFind p.Id m.Choices = Some o then " active" else "")); Dom.OnClick (fun _ -> Allocate (p.Id, o)); o }
+                    if p.Options.IsEmpty && not has then
+                        button { Dom.Class "tab"; Dom.OnClick (fun _ -> Allocate (p.Id, "")); "Allocate" }
+                    if has then
+                        button { Dom.Class "tab"; Dom.OnClick (fun _ -> Deallocate p.Id); "Refund" }
+                    button { Dom.Class "tab"; Dom.OnClick (fun _ -> Close); "Close" }
+                }
+            if not pinned then
+                div { Dom.Class "state"; state }
+        }
+
 let private status (m : Model) = if m.Fighting then "fighting ..." else m.Status
 
 let view (m : Model) : Node<Msg> =
@@ -668,6 +766,10 @@ let view (m : Model) : Node<Msg> =
         }
         span { Dom.Fetch ("tree.json", TreeData) }
         span { Dom.Fetch ("__window?" + string m.Asked, Sized) }
+        div {
+            if m.Tab = "tree" then
+                tooltip m
+        }
         header {
             h1 { "PoEtry" }
             div { Dom.Class "title"; Dom.Attr ("data-check", "title"); m.Title }
@@ -676,9 +778,8 @@ let view (m : Model) : Node<Msg> =
                 tab m "tree" "Passive tree"
             }
             if m.Tab = "tree" then
-                div { Dom.Class "points"; Dom.Attr ("data-check", "points"); sprintf "%d passives" m.Allocated.Count }
-            // (for checks: what is known of the control's size, and the pointers down)
-            div { Dom.Attr ("data-check", "pointer"); Dom.Style [ Css.Display "none" ]; sprintf "%.0fx%.0f touches %d travel %.0f" m.Page.X m.Page.Y m.Touches.Length m.Travel + " | " + m.Note }
+                div { Dom.Class "points"; Dom.Attr ("data-check", "points"); points m }
+            div { Dom.Attr ("data-check", "pointer"); Dom.Style [ Css.Display "none" ]; sprintf "%.0fx%.0f touches %d" m.Page.X m.Page.Y m.Touches.Length }
             if not m.Dps.IsEmpty then
                 div { Dom.Class "headline"; Dom.Attr ("data-check", "dps"); m.Dps.Head.Value + " DPS" }
             div { Dom.Class "status"; Dom.Attr ("data-check", "status"); status m }
