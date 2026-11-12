@@ -160,6 +160,9 @@ type Model =
       /// The radii of the jewels in allocated sockets, as a mesh.
       Rings : Buffer<V3f>
       RingsUv : Buffer<V2f>
+      /// The gem the fights after a change of passives press: the one the first fight found
+      /// strongest ("" before; finding it costs as much as the fight itself).
+      Pressing : string
       Selected : int option
       Hovered : int option
       Level : int }
@@ -174,7 +177,7 @@ let init : Model =
       Centre = V2d (0.0, 0.0); Height = 9000.0
       Camera = { Sky = V3d (0.0, 1.0, 0.0); Location = V3d (0.0, 0.0, 7794.2); Forward = V3d (0.0, 0.0, -1.0); Up = V3d (0.0, 1.0, 0.0); Right = V3d (1.0, 0.0, 0.0) }
       Near = 7000.0; Far = 8600.0
-      Touches = []; Travel = 0.0; Page = V2d (0.0, 0.0); Pending = None; Choices = Map.empty; JewelSprites = Map.empty; Jewels = Map.empty; Unlocks = Map.empty; Opened = Data.pack (Data.ofList ([] : V3f list)); OpenedUv = Data.pack (Data.ofList ([] : V2f list)); Rings = Data.pack (Data.ofList ([] : V3f list)); RingsUv = Data.pack (Data.ofList ([] : V2f list)); Selected = None; Hovered = None; Level = 0 }
+      Touches = []; Travel = 0.0; Page = V2d (0.0, 0.0); Pending = None; Choices = Map.empty; JewelSprites = Map.empty; Jewels = Map.empty; Unlocks = Map.empty; Opened = Data.pack (Data.ofList ([] : V3f list)); OpenedUv = Data.pack (Data.ofList ([] : V2f list)); Rings = Data.pack (Data.ofList ([] : V3f list)); RingsUv = Data.pack (Data.ofList ([] : V2f list)); Pressing = ""; Selected = None; Hovered = None; Level = 0 }
 
 /// The camera straight above the centre, so far up that `Height` of the tree is seen through
 /// its 60 degree lens; the depth range close around the tree's plane (its layers are a unit
@@ -194,7 +197,7 @@ let private passives (m : Model) =
     else ""
 
 let private sheetUrl (m : Model) = "__sim?op=character" + passives m + "&build=" + m.Build
-let private fightUrl (m : Model) = "__sim?op=fight&runs=5&time=20&life=1e12&scenario=" + m.Scenario + passives m + "&build=" + m.Build
+let private fightUrl (m : Model) = "__sim?op=fight&runs=5&time=20&life=1e12&scenario=" + m.Scenario + (if m.Pressing <> "" then "&gem=" + m.Pressing.Replace (" ", "%20") else "") + passives m + "&build=" + m.Build
 
 // ---- the passive tree ----
 
@@ -526,8 +529,8 @@ let rec update (msg : Msg) (m : Model) : Model =
         | None -> { m with Selected = None }
     | Allocate (id, choice) ->
         let m = if m.Allocated.Contains id then m else toggle id m
-        paths { m with Choices = (if choice = "" then m.Choices else Map.add id choice m.Choices); Edited = true; Fighting = true }
-    | Deallocate id -> if m.Allocated.Contains id then paths { toggle id m with Fighting = true } else m
+        paths { m with Choices = (if choice = "" then m.Choices else Map.add id choice m.Choices); Edited = true; Fighting = true; Pressing = (if m.Pressing = "" then m.Gem else m.Pressing) }
+    | Deallocate id -> if m.Allocated.Contains id then paths { toggle id m with Fighting = true; Pressing = (if m.Pressing = "" then m.Gem else m.Pressing) } else m
     | Close -> { m with Selected = None }
     | Toggle id -> paths { toggle id m with Fighting = true }
     // A place on the tree comes from the last frame drawn; under an older camera than the
