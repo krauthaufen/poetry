@@ -1,0 +1,48 @@
+diff --git a/web/App.fs b/web/App.fs
+index 0a7f0f0..e36449d 100644
+--- a/web/App.fs
++++ b/web/App.fs
+@@ -464,8 +464,10 @@ let frame (m : Model) (p : Passive) : Scene<Msg> =
+ 
+ let tree (m : Model) : Node<Msg> =
+     renderControl {
+-        Dom.Style [ Css.Position "absolute"; Css.Left "0"; Css.Top "64px"; Css.Width "100%"; Css.Height "calc(100% - 64px)"; Css.TouchAction "none"; Css.UserSelect "none"
+-                    Css.Prop ("visibility", (if m.Tab = "tree" then "visible" else "hidden")) ]
++        Dom.Style [ Css.Position "absolute"; Css.Left "0"; Css.Top "64px"; Css.Width "100%"; Css.Height "calc(100% - 64px)"; Css.TouchAction "none"; Css.UserSelect "none" ]
++        // (hidden under the other tab; a style of its own, as the constant ones above are
++        // lost when a computed one stands in the same list)
++        Dom.Style [ Css.Prop ("visibility", (if m.Tab = "tree" then "visible" else "hidden")) ]
+         RenderControl.Perspective (60.0, m.Near, m.Far)
+         RenderControl.Camera m.Camera
+         sg {
+@@ -551,8 +553,16 @@ let private status (m : Model) = if m.Fighting then "fighting ..." else m.Status
+ let view (m : Model) : Node<Msg> =
+     body {
+         Dom.OnLocation Located
+-        if m.Build <> "" then span { Dom.Fetch (sheetUrl m, Sheet) }
+-        if m.Title <> "" then span { Dom.Fetch (fightUrl m, Fought) }
++        // The tree comes first among the page's children, and the conditional ones after it
++        // sit in an element of their own: a conditional child makes the list dynamic from
++        // there on, and FableCube then builds everything after it as one plain value, made
++        // anew on every change (for a render control: a new canvas and every draw again).
++        // Being fixed in FableCube; see its dogfood/poetry.md.
++        tree m
++        div {
++            if m.Build <> "" then span { Dom.Fetch (sheetUrl m, Sheet) }
++            if m.Title <> "" then span { Dom.Fetch (fightUrl m, Fought) }
++        }
+         span { Dom.Fetch ("tree.json", TreeData) }
+         header {
+             h1 { "PoEtry" }
+@@ -567,11 +577,6 @@ let view (m : Model) : Node<Msg> =
+                 div { Dom.Class "headline"; Dom.Attr ("data-check", "dps"); m.Dps.Head.Value + " DPS" }
+             div { Dom.Class "status"; Dom.Attr ("data-check", "status"); status m }
+         }
+-        // The tree is always there and only hidden under the other tab, and it is a child of
+-        // the page itself: under an `if`, or inside another element, the render control is
+-        // one value to FableCube and made anew, canvas and every draw, whenever anything in
+-        // it changes (its dogfood/poetry.md).
+-        tree m
+         if m.Tab = "character" then
+             div {
+                 Dom.Class "main"
