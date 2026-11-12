@@ -262,14 +262,19 @@ module StatKey =
 /// A mod with its stat's key (in the part of a db that is not indexed yet).
 type KeyedMod = { Code: int; Name: string; Mod: Mod }
 
-/// Mods indexed by stat, so a query only looks at the mods that can matter. The index is
-/// built once and never changed; mods added later lie in a short list before it (`Recent`,
-/// newest first), which is folded into a new index once it grows. `Order` is every mod,
-/// newest first. Two dbs are equal when they hold the same mods in the same order.
+/// Mods by their stats' keys, newest first per stat.
+type ModIndex =
+    { Coded: System.Collections.Generic.Dictionary<int, Mod list>
+      Names: System.Collections.Generic.Dictionary<string, Mod list> }
+
+/// Mods indexed by stat, so a query only looks at the mods that can matter. An index is
+/// built once and never changed; mods added later lie in a short list before the indexes
+/// (`Recent`, newest first), which becomes an index of its own once it grows (`Layers`,
+/// newest first; folded into one when there are many). `Order` is every mod, newest first.
+/// Two dbs are equal when they hold the same mods in the same order.
 [<CustomEquality; NoComparison>]
 type ModDb =
-    { Coded: System.Collections.Generic.Dictionary<int, Mod list>
-      Names: System.Collections.Generic.Dictionary<string, Mod list>
+    { Layers: ModIndex list
       Recent: KeyedMod list
       RecentCount: int
       Order: Mod list }
@@ -281,7 +286,7 @@ type ModDb =
 
 module ModDb =
     /// The index of these mods (newest first).
-    let private index (order: Mod list) : ModDb =
+    let private index (order: Mod list) : ModIndex =
         let coded = System.Collections.Generic.Dictionary<int, Mod list>()
         let names = System.Collections.Generic.Dictionary<string, Mod list>()
         // oldest first, each put before the ones of its stat: newest first per stat
@@ -296,23 +301,33 @@ module ModDb =
                 match names.TryGetValue n with
                 | true, ms -> names.[n] <- m :: ms
                 | _ -> names.[n] <- [ m ]
-        { Coded = coded; Names = names; Recent = []; RecentCount = 0; Order = order }
+        { Coded = coded; Names = names }
 
-    let empty: ModDb = index []
+    let empty: ModDb = { Layers = []; Recent = []; RecentCount = 0; Order = [] }
+
+    /// With the recent mods as an index of their own (all in one index once there are many).
+    let private settle (db: ModDb) : ModDb =
+        if db.RecentCount = 0 then db
+        elif db.Layers.Length >= 3 then { db with Layers = [ index db.Order ]; Recent = []; RecentCount = 0 }
+        else { db with Layers = index (db.Recent |> List.map (fun k -> k.Mod)) :: db.Layers; Recent = []; RecentCount = 0 }
 
     let add (db: ModDb) (m: Mod) : ModDb =
-        if db.RecentCount >= 16 then index (m :: db.Order)
-        else
-            let c = StatKey.code m.Stat
-            { db with
-                Recent = { Code = c; Name = (if c < 0 then StatKey.name m.Stat else ""); Mod = m } :: db.Recent
-                RecentCount = db.RecentCount + 1
-                Order = m :: db.Order }
+        let db = if db.RecentCount >= 12 then settle db else db
+        let c = StatKey.code m.Stat
+        { db with
+            Recent = { Code = c; Name = (if c < 0 then StatKey.name m.Stat else ""); Mod = m } :: db.Recent
+            RecentCount = db.RecentCount + 1
+            Order = m :: db.Order }
 
     let addList (mods: Mod list) (db: ModDb) =
         match mods with
         | [] -> db
-        | _ when db.RecentCount + List.length mods > 16 -> index (List.fold (fun order m -> m :: order) db.Order mods)
+        | _ when List.length mods > 12 ->
+            // many at once: an index of their own, over what was there
+            let db = settle db
+            let order = List.fold (fun order m -> m :: order) db.Order mods
+            if db.Layers.Length >= 3 then { db with Layers = [ index order ]; Order = order }
+            else { db with Layers = index (List.rev mods) :: db.Layers; Order = order }
         | _ -> List.fold add db mods
 
     let ofList (mods: Mod list) = addList mods empty
@@ -329,16 +344,18 @@ module ModDb =
         if c >= 0 then
             for k in db.Recent do
                 if k.Code = c then f k.Mod
-            match db.Coded.TryGetValue c with
-            | true, ms -> for m in ms do f m
-            | _ -> ()
+            for layer in db.Layers do
+                match layer.Coded.TryGetValue c with
+                | true, ms -> for m in ms do f m
+                | _ -> ()
         else
             let n = StatKey.name stat
             for k in db.Recent do
                 if k.Code < 0 && k.Name = n then f k.Mod
-            match db.Names.TryGetValue n with
-            | true, ms -> for m in ms do f m
-            | _ -> ()
+            for layer in db.Layers do
+                match layer.Names.TryGetValue n with
+                | true, ms -> for m in ms do f m
+                | _ -> ()
 
 /// Queries over a mod db, PoE style:
 ///   total = base * (1 + sum increased / 100) * product (1 + more / 100)

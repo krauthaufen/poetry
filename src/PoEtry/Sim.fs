@@ -607,6 +607,10 @@ module Sim =
     type private Env =
         { Fight: Fight
           SkillDbs: Map<string * string, ModDb>
+          /// An actor's mods while using a skill (`skillDb`), by actor and skill, for the buffs
+          /// it was last asked with: the same buffs (the very same map) give the same mods, and
+          /// a use asks many times.
+          WithBuffs: System.Collections.Generic.Dictionary<string, System.Collections.Generic.Dictionary<string, Map<string, Effect> * ModDb>>
           /// Percent of maximum life lost per minute per Rage (Berserk).
           BerserkLoss: float
           /// The player's rage upkeep: regeneration per second, loss per second, seconds without
@@ -700,15 +704,29 @@ module Sim =
 
     /// The actor's mods while using a skill: sheet + skill mods + active buffs.
     let private skillDb env (actor: Actor) (skill: Skill) (st: ActorState) =
-        let buffMods = st.Buffs |> Map.toList |> List.collect (fun (_, e) -> e.Mods |> List.map (Mod.scaled (float e.Stacks)))
-        let db = ModDb.addList buffMods (Map.find (actor.Name, skill.Name) env.SkillDbs)
-        // Rage: 1% more attack damage per Rage, times rage effect, rounded down.
-        match Map.tryFind "Rage" st.Buffs with
-        | Some r when r.Stacks > 0 ->
-            let effect = Mods.mult Ctx.empty [ Named "RageEffect" ] db
-            let more = floor (float r.Stacks * effect) * Constants.moreAttackDamagePerRage
-            ModDb.add db (Mod.more (Damage AllDamage) more |> Mod.whenever (SkillIs Attack) |> Mod.from "Rage")
-        | _ -> db
+        let build () =
+            let buffMods = st.Buffs |> Map.toList |> List.collect (fun (_, e) -> e.Mods |> List.map (Mod.scaled (float e.Stacks)))
+            let db = ModDb.addList buffMods (Map.find (actor.Name, skill.Name) env.SkillDbs)
+            // Rage: 1% more attack damage per Rage, times rage effect, rounded down.
+            match Map.tryFind "Rage" st.Buffs with
+            | Some r when r.Stacks > 0 ->
+                let effect = Mods.mult Ctx.empty [ Named "RageEffect" ] db
+                let more = floor (float r.Stacks * effect) * Constants.moreAttackDamagePerRage
+                ModDb.add db (Mod.more (Damage AllDamage) more |> Mod.whenever (SkillIs Attack) |> Mod.from "Rage")
+            | _ -> db
+        let ofActor =
+            match env.WithBuffs.TryGetValue actor.Name with
+            | true, d -> d
+            | _ ->
+                let d = System.Collections.Generic.Dictionary<string, Map<string, Effect> * ModDb>()
+                env.WithBuffs.[actor.Name] <- d
+                d
+        match ofActor.TryGetValue skill.Name with
+        | true, (buffs, db) when obj.ReferenceEquals(buffs, st.Buffs) -> db
+        | _ ->
+            let db = build ()
+            ofActor.[skill.Name] <- (st.Buffs, db)
+            db
 
     let private aimed (env: Env) (w: World) =
         Geometry.aim env.Fight.Targeting (alive w |> List.map (fun e -> e.Def))
@@ -934,14 +952,25 @@ module Sim =
 
     let private prune (w: World) =
         let live (x: Effect) = x.Expires > w.Time
+        // (what has nothing to lose stays the very value it was: nothing is built anew, and
+        // what is remembered for an actor's buffs stays good)
+        let enemyStale (e: EnemyState) = (e.Debuffs |> Map.exists (fun _ x -> not (live x))) || (e.Dots |> List.exists (fun d -> not (d.Expires > w.Time)))
+        let actorStale (st: ActorState) = st.Buffs |> Map.exists (fun _ x -> not (live x))
         { w with
             Enemies =
-                w.Enemies
-                |> Map.map (fun _ e ->
-                    { e with
-                        Debuffs = e.Debuffs |> Map.filter (fun _ x -> live x)
-                        Dots = e.Dots |> List.filter (fun d -> d.Expires > w.Time) })
-            Actors = w.Actors |> Map.map (fun _ st -> { st with Buffs = st.Buffs |> Map.filter (fun _ x -> live x) })
+                (if w.Enemies |> Map.exists (fun _ e -> enemyStale e) then
+                    w.Enemies
+                    |> Map.map (fun _ e ->
+                        if enemyStale e then
+                            { e with
+                                Debuffs = e.Debuffs |> Map.filter (fun _ x -> live x)
+                                Dots = e.Dots |> List.filter (fun d -> d.Expires > w.Time) }
+                        else e)
+                 else w.Enemies)
+            Actors =
+                (if w.Actors |> Map.exists (fun _ st -> actorStale st) then
+                    w.Actors |> Map.map (fun _ st -> if actorStale st then { st with Buffs = st.Buffs |> Map.filter (fun _ x -> live x) } else st)
+                 else w.Actors)
             Counts =
                 w.Actors
                 |> Map.fold (fun c _ st -> st.Buffs |> Map.fold (fun c k x -> if not (live x) && x.Expires < infinity && k.EndsWith "Charge" then bump ("expired:" + k) c else c) c) w.Counts }
@@ -3384,6 +3413,7 @@ module Sim =
              Mods.sumBase c [ Named "RageWhenHit" ] db,
              Mods.sumBase c [ Named "RageOnKill" ] db)
           BerserkLoss = Mods.sumBase Ctx.empty [ Named "LifeLossPercentPerMinutePerRage" ] (ModDb.ofList fight.Player.Mods)
+          WithBuffs = System.Collections.Generic.Dictionary()
           SkillDbs =
             Map.ofList
                 [ for a in fight.Player :: fight.Minions do
