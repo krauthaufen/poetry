@@ -49,7 +49,6 @@
   level 20: cost None (per minute None), cooldown None xNone, multiplier None, crit None
   set Ancestral Spirits minion_1%_damage_+%_per_X_player_strength=1 active_skill_minion_1%_attack_speed_+%_per_X_player_dexterity=3  | triggerable_in_any_set base_deal_no_damage skill_triggered_when_summoning_totem
   play: (cannot be pressed)
-  note: Ancestral Spirits: temporary minions are not simulated
   fight: 0 dps; 
          
 
@@ -1914,7 +1913,6 @@
   minion Corpse Beetle 6: Corpse Beetle: Sandblast
   minion Corpse Beetle 7: Corpse Beetle: Sandblast
   minion Corpse Beetle 8: Corpse Beetle: Sandblast
-  note: Kelari's Malediction: what summons its minions is not simulated
   fight: 0 dps; 
          
   types without a model: TargetsDestructibleRareCorpses
@@ -2270,7 +2268,8 @@ Purple Flames of Chayula for a duration.
   set Empowered        active_skill_base_area_of_effect_radius=21 electric_spit_maximum_secondary_explosions=10 projectile_maximum_downwards_angle_degrees=10 base_number_of_projectiles=3 barrage_base_spread_arc_override=25 channel_start_duration_as_%_of_attack_time=350 channel_end_duration_as_%_of_attack_time=1000 display_attack_time_+%=350 electric_spit_empowered_channel_consume_power_charge_per_X_ms=1500 minimum_projectile_target_distance_+=40 active_skill_override_turn_duration_ms=200 ground_oil_art_variation=2000 skill_base_oil_movement_speed_+%_final_to_apply=-20 skill_base_oil_exposure_-_to_total_elemental_resistance=20 base_skill_effect_duration=6000 active_skill_base_physical_damage_%_to_convert_to_lightning=40  | base_is_projectile projectile_ballistic_angle_from_target_distance is_area_damage maintain_projectile_direction_when_using_contact_position projectiles_barrage projectiles_fire_at_ground skill_do_not_elapse_channel_time_while_barraging
   play: spam Oil Barrage
   built Oil Barrage                        x2.81, 0.26s, cd None x1, cost 41 +40/s, hits [(1.0, 1.0)], 3 projectiles, pierce 0, chain 0
-  fight: 573 dps; Oil Barrage (hit) 100%
+        part Oil Barrage: Empowered       x3.12, hits [(1.0, 1.0)]
+  fight: 586 dps; Oil Barrage (hit) 100%
          crits:Oil Barrage 11, hits:Oil Barrage 168, uses:Oil Barrage 57
   types without a model: CreatesGroundEffect
 
@@ -3618,7 +3617,8 @@ Purple Flames of Chayula for a duration.
   set Pustule Explosion toxic_domain_healing_per_minute_+=100 toxic_domain_mana_cost_+%=25 toxic_domain_pustule_chance_%=100 base_skill_effect_duration=8000 skill_specific_stat_description_mode=1 active_skill_base_area_of_effect_radius=16 base_skill_detonation_time=15000 base_chance_to_poison_on_hit_%=100 toxic_pustule_max_burst_damage_+%_final_from_stored_poison=300 skill_specific_stat_description_mode=1 toxic_pustule_max_additional_burst_base_radius_+=15  | toxic_domain_healing_per_minute_+ toxic_pustule_burst_1%_more_damage_per_x_stored_poison toxic_pustule_duration_expires_1%_faster_per_x_stored_poison_damage_multiplied_by_sixty toxic_pustule_burst_base_radius_+1_per_x_stored_poison pustules_grow_as_though_dealing_X_poison_damage_per_minute_when_wet can_perform_skill_while_moving is_area_damage skill_no_cost_or_reservation
   play: cd Toxic Domain; spam Toxic Domain
   built Toxic Domain                       x3.12, 0.59s, cd Some 11.0 x1, cost 106 +0/s, hits [(1.0, 1.0)], area 30
-  fight: 2 dps; Toxic Domain (hit) 100%
+        part Toxic Domain: Pustule Explosion x1.19, hits [(1.0, 1.0)]
+  fight: 0 dps; Toxic Domain (hit) 0%
          hits:Toxic Domain 2, uses:Toxic Domain 2
   types without a model: DetonatesAfterTime
 
