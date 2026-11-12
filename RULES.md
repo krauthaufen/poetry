@@ -280,7 +280,11 @@ Checked against PoB's defensive numbers for 131 public characters (`tools/corpus
 | Raging Spirits | a fire spell the player uses (not a triggered one) summons spirits: an area spell one per 1.5 m of its base radius (skill_raging_spirit_per_x_radius), a projectile spell one per projectile, at most 2 per cast; 5 s, limit 10 | game data, wiki. They appear with the use, not when the projectile hits; area modifiers are not counted in the radius | data; partial |
 | Ravenous Swarm | one swarm every 6 s (base_cooldown_modifiable_repeat_interval_ms, cooldown recovery applies), limit 3, for the gem's duration | game data | data |
 | Azmerian Swarms | a hit on a rare or unique enemy with an elemental ailment summons one by the gem's chance (10%), a kill of an enemy with one always; 10 s, limit 8 | game data | data |
-| Not modelled | zombies, Unearth, Wardbound and Ancestral Spirit minions, corpse beetles; auras from minions, minions taking damage for the player, what a minion's death does besides energy | | todo |
+| Raise Zombie | a use takes a corpse and raises one zombie; without a corpse it takes a power charge and raises three, the first with the gem's more hit damage (power_charged_zombie_hit_damage_+%_final). It can't be used with neither. 20 s, limit 10 | game data, gem description. The empowered zombie's less damage taken and the decay are not modelled | data; partial |
+| Unearth | a use raises a Bone Construct from every corpse and from every dead reviving minion (once per death), up to the limit, for 15 s; its own hit needs no corpse | gem description ("The bones of Corpses and dead Reviving Minions"). "Larger Corpses create more than one" is not modelled | data; partial |
+| Wardbound Minions | a use spends all Runic Ward: one caster per wardbound_minions_summon_minion_for_every_X_runic_ward_spent, for the gem's duration, but no longer than its 6 casts take (casts x the caster's cast time, speed not counted) | game data | data; the cast limit as a duration is an approximation |
+| Playing summoning skills | beside the main skill, a skill that raises temporary minions is used while fewer than its limit are out (Unearth: and there is a corpse or dead minion) | | guess |
+| Not modelled | Ancestral Spirit minions, corpse beetles; auras from minions, minions taking damage for the player, what a minion's death does besides energy | | todo |
 
 ### Totems, curses, buffs, damage over time
 

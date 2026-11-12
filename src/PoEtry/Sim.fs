@@ -62,6 +62,17 @@ type Reaction =
     | GrantMinionBuff of name: string * duration: float * mods: Mod list
     /// Temporary minions of a pool appear for `duration` seconds (infinity: until killed).
     | Summon of pool: string * count: int * duration: float
+    /// Like Summon; the first of them has these mods for its time (an empowered zombie).
+    | SummonEmpowered of pool: string * count: int * duration: float * first: Mod list
+    /// Takes a corpse if there is one (every kill leaves one) and goes on with `then'`;
+    /// with `otherwise` if there is none.
+    | WithCorpse of then': Reaction * otherwise: Reaction
+    /// One minion of the pool for every corpse there is, and (`deadMinions`) for every killed
+    /// minion waiting to be revived, each once per death (Unearth).
+    | SummonPerCorpse of pool: string * duration: float * deadMinions: bool
+    /// Spends all of the player's Runic Ward: one minion of the pool per `wardEach` spent.
+    | SummonPerWard of pool: string * wardEach: float * duration: float
+    | NoReaction
     /// Take a debuff off the enemy concerned (a mark that has been activated).
     | RemoveDebuff of name: string
     /// Stacks of a resource (infusions from Powered by Verisium), capped at its maximum.
@@ -566,7 +577,9 @@ module Sim =
           /// Evasion entropy of each defender: (value 0..99, time of the last attempted hit).
           Entropy: Map<string, float * float>
           /// Killed minions are revived at this time; how many have died since the last revival.
-          Revival: (float * int) option }
+          Revival: (float * int) option
+          /// Killed minions whose bones have been used (Unearth) since they died.
+          Boned: Set<string> }
 
     /// Fixed for the whole fight: mod dbs built once, buffs layered on per event.
     type private Env =
@@ -681,8 +694,23 @@ module Sim =
 
     let private view env (w: World) (st: ActorState) =
         let target = aimed env w
+        // what the player sees of the minions: how many of each pool of temporary ones are out
+        // ("Out:<pool>"), and how many corpses and dead minions lie about ("Corpses")
+        let seen =
+            if env.Fight.Minions |> List.forall (fun m -> m.Pool.IsNone) then buffStacks st
+            else
+                let out =
+                    env.Fight.Minions
+                    |> List.filter (fun m -> m.Pool.IsSome && not (Map.find m.Name w.Actors).Gone)
+                    |> List.countBy (fun m -> "Out:" + m.Pool.Value)
+                let bones =
+                    env.Fight.Minions
+                    |> List.filter (fun m -> (m.Body |> Option.exists (fun b -> b.Revive.IsSome)) && (Map.find m.Name w.Actors).Gone && not (w.Boned.Contains m.Name))
+                    |> List.length
+                ("Corpses", w.Kills.Length - w.CorpsesUsed + bones) :: out
+                |> List.fold (fun m (k, n) -> if n > 0 then Map.add k n m else m) (buffStacks st)
         { Time = w.Time
-          Buffs = buffStacks st
+          Buffs = seen
           EnemyStatus = target |> Option.map status |> Option.defaultValue Map.empty
           EnemyLifeFraction = target |> Option.map (fun e -> e.Life / e.Def.Life) |> Option.defaultValue 0.0
           EnemyRarity = target |> Option.map (fun e -> e.Def.Rarity) |> Option.defaultValue Normal
@@ -1110,7 +1138,6 @@ module Sim =
     let private ready (st: ActorState) now (skill: Skill) =
         Map.tryFind skill.Name st.Cooldowns |> Option.forall (fun t -> t <= now)
 
-    /// `target`: the enemy the triggering event concerns (hit enemy, or the one aimed at).
     /// A minion goes out of the fight (killed, or its time is up): what it had begun is lost.
     let private leave name (w: World) =
         let its ev =
@@ -1122,22 +1149,37 @@ module Sim =
 
     /// Temporary minions of a pool appear: those that are out first; when all are in the
     /// fight, the ones whose time would be up soonest are summoned anew.
-    let private summon (env: Env) (pool: string) (count: int) (duration: float) (w: World) =
+    let private summonWith (env: Env) (pool: string) (count: int) (duration: float) (first: Mod list) (w: World) =
         env.Fight.Minions
         |> List.filter (fun m -> m.Pool = Some pool)
         |> List.sortBy (fun m -> let st = Map.find m.Name w.Actors in (if st.Gone then 0 else 1), st.Leaves)
         |> List.truncate count
+        |> List.indexed
         |> List.fold
-            (fun w m ->
+            (fun w (i, m) ->
                 let was = Map.find m.Name w.Actors
                 let leaves = w.Time + duration
                 let life, shield = match m.Body with Some b -> b.Life, b.EnergyShield | None -> 0.0, 0.0
-                let w = updateActor m.Name (fun st -> { st with Gone = false; Leaves = leaves; Life = life; Shield = shield; HitAt = w.Time }) w
+                let buffs (b: Map<string, Effect>) =
+                    if i = 0 && not first.IsEmpty then Map.add "Empowered" { Name = "Empowered"; Mods = first; Stacks = 1; Expires = leaves } b
+                    else Map.remove "Empowered" b
+                let w = updateActor m.Name (fun st -> { st with Gone = false; Leaves = leaves; Life = life; Shield = shield; HitAt = w.Time; Buffs = buffs st.Buffs }) w
                 let w = if was.Gone then schedule w.Time (Ready m.Name) w else w
                 let w = if leaves < infinity then schedule leaves (MinionLeaves(m.Name, leaves)) w else w
                 { w with Counts = bump ("summoned:" + pool) w.Counts })
             w
 
+    let private summon env pool count duration w = summonWith env pool count duration [] w
+
+    /// What a skill does with corpses, if a rule of the actor says so.
+    let private corpseRule (actor: Actor) (skill: Skill) =
+        actor.Rules
+        |> List.tryPick (fun r ->
+            match r.Reaction with
+            | WithCorpse _ | SummonPerCorpse _ when r.Hook = OnUse && matches r.Filter skill -> Some r.Reaction
+            | _ -> None)
+
+    /// `target`: the enemy the triggering event concerns (hit enemy, or the one aimed at).
     let rec private react env (rng: Rng) (actor: Actor) hook (skill: Skill) (target: string option) (w: World) =
         actor.Rules
         |> List.filter (fun r -> r.Hook = hook && matches r.Filter skill)
@@ -1167,6 +1209,9 @@ module Sim =
                           | _ -> w
                       | SetStacks (buff, n) ->
                           updateActor actor.Name (fun st -> { st with Buffs = Map.add buff { Name = buff; Mods = []; Stacks = n; Expires = infinity } st.Buffs }) w
+                      | WithCorpse (next, otherwise) ->
+                          if w.Kills.Length > w.CorpsesUsed then perform next { w with CorpsesUsed = w.CorpsesUsed + 1 } else perform otherwise w
+                      | NoReaction -> w
                       | IfBuff (buff, next) ->
                           match Map.tryFind buff (Map.find actor.Name w.Actors).Buffs with
                           | Some e when e.Stacks > 0 && e.Expires > w.Time -> perform next w
@@ -1187,7 +1232,28 @@ module Sim =
                         | Some t when w.Enemies.[t].Life > 0.0 -> f t
                         | _ -> w
                      match reaction with
-                     | SpendStack _ | SetStacks _ | Empower _ | IfEnemyHas _ | IfBuff _ -> w
+                     | SpendStack _ | SetStacks _ | Empower _ | IfEnemyHas _ | IfBuff _ | WithCorpse _ | NoReaction -> w
+                     | SummonEmpowered (pool, count, duration, first) -> summonWith env pool count duration first w
+                     | SummonPerCorpse (pool, duration, deadMinions) ->
+                         let size = env.Fight.Minions |> List.filter (fun m -> m.Pool = Some pool) |> List.length
+                         let corpses = min size (w.Kills.Length - w.CorpsesUsed)
+                         let bones =
+                             if not deadMinions then []
+                             else
+                                 env.Fight.Minions
+                                 |> List.filter (fun m ->
+                                     (m.Body |> Option.exists (fun b -> b.Revive.IsSome)) && (Map.find m.Name w.Actors).Gone && not (w.Boned.Contains m.Name))
+                                 |> List.map (fun m -> m.Name)
+                                 |> List.truncate (size - corpses)
+                         if corpses + bones.Length = 0 then w
+                         else
+                             summon env pool (corpses + bones.Length) duration
+                                 { w with CorpsesUsed = w.CorpsesUsed + corpses; Boned = bones |> List.fold (fun s n -> Set.add n s) w.Boned }
+                     | SummonPerWard (pool, wardEach, duration) ->
+                         match w.Player with
+                         | Some p when wardEach > 0.0 && p.Ward >= wardEach ->
+                             summon env pool (int (p.Ward / wardEach)) duration { w with Player = Some { p with Ward = 0.0 } }
+                         | _ -> w
                      | GrantBuff (name, duration, maxStacks, mods) ->
                          let w =
                              updateActor actor.Name (fun st ->
@@ -1411,7 +1477,10 @@ module Sim =
                 match requirements skill with
                 | [] -> w
                 | reqs -> updateActor actor.Name (fun st -> { st with Energy = reqs |> List.fold (fun e (key, _) -> Map.remove key e) st.Energy }) w
-            let w = if skill.Tags.Contains(Tag "Type:TargetsDestructibleCorpses") && w.Kills.Length > w.CorpsesUsed then { w with CorpsesUsed = w.CorpsesUsed + 1 } else w
+            // (a skill whose rule says what it does with corpses takes them there)
+            let w =
+                if skill.Tags.Contains(Tag "Type:TargetsDestructibleCorpses") && w.Kills.Length > w.CorpsesUsed && (corpseRule actor skill).IsNone
+                then { w with CorpsesUsed = w.CorpsesUsed + 1 } else w
             // a warp into one's own projectile: the projectile is gone (what it had still to do
             // with it), and the warp's explosion happens whatever state the enemy is in
             let w =
@@ -1680,7 +1749,14 @@ module Sim =
         let choice =
             // a skill that works on a corpse needs one: every kill leaves a corpse, each use takes one
             let corpses = w.Kills.Length - w.CorpsesUsed
-            let needsCorpse (s: Skill) = s.Tags.Contains(Tag "Type:TargetsDestructibleCorpses") && not (s.Tags.Contains(Tag "Type:SkillConsumesPowerChargesOnUse"))
+            // (unless it does without: something else in its place, or corpses only add to it)
+            let needsCorpse (s: Skill) =
+                s.Tags.Contains(Tag "Type:TargetsDestructibleCorpses")
+                && (match corpseRule actor s with
+                    | Some (SummonPerCorpse _) -> false
+                    | Some (WithCorpse (_, SpendStack (buff, _))) -> not (Map.tryFind buff st.Buffs |> Option.exists (fun e -> e.Stacks > 0 && e.Expires > w.Time))
+                    | Some _ -> true
+                    | None -> not (s.Tags.Contains(Tag "Type:SkillConsumesPowerChargesOnUse")))
             let usable =
                 actor.Rotation |> List.filter (fun step ->
                     let s = skillOf actor step.Use
@@ -2785,7 +2861,7 @@ module Sim =
                         |> schedule w.Time (Ready m.Name)
                         |> fun w -> { w with Counts = bump "minion:revived" w.Counts }
                     | _ -> w)
-                { w with Revival = None }
+                { w with Revival = None; Boned = Set.empty }
         | _ -> w
 
     /// Mitigated damage onto a minion: energy shield first (chaos removes twice as much),
@@ -3327,7 +3403,8 @@ module Sim =
               Agonies = []
               Crystals = []
               Entropy = Map.empty
-              Revival = None }
+              Revival = None
+              Boned = Set.empty }
             // (a temporary minion starts acting when it is summoned)
             |> fun w -> actors |> List.fold (fun w a -> if a.Pool.IsSome then w else schedule 0.0 (Ready a.Name) w) w
             |> fun w -> actors |> List.fold (fun w a -> a.Cycles |> List.fold (fun w c -> schedule 0.0 (CycleTick(a.Name, c.Name)) w) w) w

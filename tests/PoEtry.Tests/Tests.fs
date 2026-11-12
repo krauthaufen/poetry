@@ -908,6 +908,46 @@ let main _ =
         equal false (o.Counts.ContainsKey "minion:left")
         if o.DamageBy.["Bite (hit)"] < 1000.0 then failwithf "bites %g" o.DamageBy.["Bite (hit)"])
 
+    test "minions: a zombie from a corpse, or three for a power charge, the first of them empowered" (fun () ->
+        let raise = { Skill.make "Raise" [ Spell; Tag "Type:TargetsDestructibleCorpses" ] with Hits = [] }
+        let zombies = [ for i in 1 .. 10 -> { Actor.make (sprintf "Zombie %d" i) [ noIgnite; sure ] [ strike "Bite" 100.0 ] with Pool = Some "Zombies" } ]
+        let rule = WithCorpse(Summon("Zombies", 1, 100.0), SpendStack("PowerCharge", SummonEmpowered("Zombies", 3, 100.0, [ Mod.more (Damage AllDamage) 100.0 ])))
+        let player =
+            { Actor.make "Player" [ noIgnite ] [ raise ] with
+                Resources = [ "PowerCharge", 2 ]
+                Rules = [ { Hook = OnUse; Filter = Called "Raise"; Chance = 100.0; Reaction = rule } ] }
+        let o = Sim.run { Fight.single (boss 1e12) player 5.5 with MaxTime = 5.5; Minions = zombies } 1u
+        // no corpse on a lone boss: two charges, two uses, six zombies; then it can't be used
+        equal 2 o.Counts.["uses:Raise"]
+        equal 6 o.Counts.["summoned:Zombies"]
+        // from 0 s: three bite at 1 .. 5 s, one of them for double; from 1 s: three at 2 .. 5 s
+        near (5.0 * 400.0 + 4.0 * 400.0) o.DamageBy.["Bite (hit)"])
+
+    test "minions: Unearth raises a construct from a dead reviving minion, once per death" (fun () ->
+        let dig = { Skill.make "Dig" [ Spell; Tag "Type:TargetsDestructibleCorpses" ] with Hits = [] }
+        let skeleton = { Actor.make "Skeleton" [ noIgnite; sure ] [ strike "Bite" 100.0 ] with Body = Some(body 100.0 (Some 5.0)) }
+        let constructs = [ for i in 1 .. 4 -> { Actor.make (sprintf "Construct %d" i) [ noIgnite; sure ] [ strike "Claw" 10.0 ] with Pool = Some "Constructs" } ]
+        let player =
+            { Actor.make "Player" [ noIgnite ] [ dig ] with
+                Rules = [ { Hook = OnUse; Filter = Called "Dig"; Chance = 100.0; Reaction = SummonPerCorpse("Constructs", 2.5, true) } ] }
+        let o = Sim.run { Fight.single (attacker Physical 60.0 1.0) player 20.0 with MaxTime = 20.0; Minions = skeleton :: constructs } 1u
+        // the skeleton dies four times (see above); the last time too late for another use
+        equal 4 o.Counts.["minion:died"]
+        let raised = o.Counts.["summoned:Constructs"]
+        if raised < 3 || raised > 4 then failwithf "raised %d" raised)
+
+    test "minions: Wardbound casters, one per so much Runic Ward, all of it spent" (fun () ->
+        let bind = { Skill.make "Bind" [ Spell ] with Hits = []; Cooldown = Some 100.0 }
+        let casters = [ for i in 1 .. 5 -> { Actor.make (sprintf "Caster %d" i) [ noIgnite; sure ] [ strike "Blast" 100.0 ] with Pool = Some "Casters" } ]
+        let player =
+            { Actor.make "Player" [ noIgnite ] [ bind ] with
+                Vitals = Some { PlayerStats.basic 100.0 100.0 with Ward = 100.0 }
+                Rules = [ { Hook = OnUse; Filter = Called "Bind"; Chance = 100.0; Reaction = SummonPerWard("Casters", 30.0, 2.5) } ] }
+        let o = Sim.run { Fight.single (boss 1e12) player 5.5 with MaxTime = 5.5; Minions = casters } 1u
+        // 100 ward: three casters for 2.5 s, two blasts each
+        equal 3 o.Counts.["summoned:Casters"]
+        near 600.0 o.DamageBy.["Blast (hit)"])
+
     test "hexblast: waits until a curse is half expired, detonates it, and then has nothing to detonate" (fun () ->
         let hex = { fireSpell 0.0 with Name = "Hex"; BaseDamage = Map.empty; Cooldown = Some 100.0 }
         let blast = { fireSpell 500.0 with Name = "Blast"; Mods = [ Mod.flag (Named "DetonatesCurse") ] }

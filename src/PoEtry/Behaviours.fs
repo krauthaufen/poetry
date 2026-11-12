@@ -1293,6 +1293,44 @@ module Behaviours =
         has "skill_raging_spirits_max_per_action"
         || has "base_cooldown_modifiable_repeat_interval_ms"
         || has "skill_grants_%_chance_to_summon_azmerian_swarm_on_hitting_unique_or_rare_enemy_affected_by_elemental_ailment"
+        || has "base_number_of_zombies_allowed"
+        || has "base_number_of_skeletal_constructs_allowed"
+        || has "wardbound_minions_summon_minion_for_every_X_runic_ward_spent"
+
+    /// A skill the player uses to summon temporary minions (the pool `minions` makes for its gem):
+    /// - Raise Zombie: "Consume a Corpse or Power Charge to create a short-lived Zombie. Zombies
+    ///   created from Power Charges are Empowered and also create two additional
+    ///   non-empowered Zombies": one from a corpse; without one, three for a power charge,
+    ///   the first with the gem's more hit damage.
+    /// - Unearth: a Bone Construct from every corpse and every dead reviving minion.
+    /// - Wardbound Minions: spends all Runic Ward, a caster per so much of it; a caster casts
+    ///   at most so many times, so it lasts no longer than that takes.
+    let summoner (db: GameDb) (charMods: ModDb) (setup: GemSetup) (skill: Skill) : Rule list =
+        let raw = Gems.rawStats db charMods { setup with Supports = [] }
+        let stat id = raw |> List.filter (fun (k, _) -> k = id) |> List.sumBy snd
+        let has id = raw |> List.exists (fun (k, _) -> k = id)
+        let ctx = { Ctx.empty with SkillTags = skill.Tags; SkillName = skill.Name }
+        let duration =
+            match stat "base_skill_effect_duration" with
+            | 0.0 -> infinity
+            | ms -> ms / 1000.0 * Mods.mult ctx [ SkillDuration ] (ModDb.ofList (ModDb.toList charMods @ skill.Mods))
+        let rule reaction = [ { Hook = OnUse; Filter = Called skill.Name; Chance = 100.0; Reaction = reaction } ]
+        if has "base_number_of_zombies_allowed" then
+            let empowered = [ Mod.more (Damage AllDamage) (stat "power_charged_zombie_hit_damage_+%_final") |> Mod.from "Empowered" ]
+            rule (WithCorpse(Summon(setup.Gem, 1, duration), SpendStack("PowerCharge", SummonEmpowered(setup.Gem, 3, duration, empowered))))
+        elif has "base_number_of_skeletal_constructs_allowed" then rule (SummonPerCorpse(setup.Gem, duration, true))
+        elif has "wardbound_minions_summon_minion_for_every_X_runic_ward_spent" then
+            let casts = stat "wardbound_minion_maximum_number_of_casts"
+            let castTime =
+                Gems.data db setup.Gem
+                |> Option.bind (fun d -> d.MinionList |> List.tryHead)
+                |> Option.bind (fun id -> Map.tryFind id db.Minions)
+                |> Option.bind (fun m -> m.SkillList |> List.tryPick (fun sid -> Map.tryFind sid db.Skills))
+                |> Option.map (fun s -> s.CastTime)
+                |> Option.defaultValue 1.0
+            let lasts = if casts > 0.0 then min duration (casts * castTime) else duration
+            rule (SummonPerWard(setup.Gem, stat "wardbound_minions_summon_minion_for_every_X_runic_ward_spent", lasts))
+        else []
 
     /// Persistent minions of a build as actors. Each minion is the monster its gem names
     /// (skills' minion list; "Spectre: X" / "Companion: X" by monster name) at the gem's level:

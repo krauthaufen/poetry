@@ -363,7 +363,7 @@ module Setup =
                         match Behaviours.demonForm db charMods setup s with
                         | Some (s', rs, ms) -> s', cryRules @ rs, cryGrants @ ms
                         | None -> s, cryRules, cryGrants
-                    let cryRules = cryRules @ Behaviours.sigilOfPower db charMods setup s @ Behaviours.markBuff db charMods setup s @ Behaviours.offering db charMods setup s
+                    let cryRules = cryRules @ Behaviours.sigilOfPower db charMods setup s @ Behaviours.markBuff db charMods setup s @ Behaviours.offering db charMods setup s @ Behaviours.summoner db charMods setup s
                     // parts that happen when the skill kills (Crushing Fear's shockwave)
                     let cryRules =
                         cryRules
@@ -435,7 +435,20 @@ module Setup =
                     let tipped = p.Rules |> List.exists (fun r -> match r.Reaction with SetStacks (b, _) -> b.StartsWith "EmpoweredRepeatable:" | _ -> false)
                     // a warp is used into the main skill's projectile whenever there is one
                     let warps = p.Skill.Mods |> List.exists (fun m -> m.Stat = Named("WarpsInto:" + mainGem))
-                    if warps then Some(OnCooldown x.Name)
+                    // a skill that summons temporary minions is used while fewer than can be are out
+                    // (Unearth: and there is something to raise them from)
+                    let summons =
+                        p.Rules |> List.tryPick (fun r ->
+                            match r.Reaction with
+                            | WithCorpse _ -> Some false
+                            | SummonPerCorpse _ -> Some true
+                            | _ -> None)
+                    let most = c.Minions |> List.filter (fun m -> m.Pool = Some x.Name) |> List.length
+                    let count key (v: View) = Map.tryFind key v.Buffs |> Option.defaultValue 0
+                    if summons.IsSome && most > 0 then
+                        let needsCorpses = summons.Value
+                        Some(When((fun v -> count ("Out:" + x.Name) v < most && (not needsCorpses || count "Corpses" v > 0)), x.Name))
+                    elif warps then Some(OnCooldown x.Name)
                     elif barrage || tipped then (if mainRepeats then Some(OnCooldown x.Name) else None)
                     elif skip then None
                     // a skill that needs Glory or Combo is used whenever it has enough
