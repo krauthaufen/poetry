@@ -65,6 +65,8 @@ for key, n in src["nodes"].items():
     if n.get("ascendancyName"): node["ascendancy"] = n["ascendancyName"]
     # a Sinister Jewel Socket (the Voices jewel's): only there once something is in it
     if n.get("sinister"): node["hidden"] = True
+    # only there once these passives are allocated (the Oracle's "The Unseen Path" opens 197)
+    if n.get("unlockConstraint"): node["unlock"] = [int(i) for i in n["unlockConstraint"].get("nodes", []) if i]
     if n.get("classesStart"): node["classes"] = n["classesStart"]
     if n.get("options"):
         # an attribute node: what it can be made

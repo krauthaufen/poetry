@@ -21,6 +21,8 @@ type Passive =
       Kind : string
       /// Not shown until it is allocated (a Sinister Jewel Socket).
       Hidden : bool
+      /// Only there once these passives are allocated (the Oracle's "The Unseen Path").
+      Unlock : int list
       Name : string
       /// What it grants, and for one with a choice (an attribute) what can be chosen.
       Stats : string list
@@ -37,7 +39,9 @@ type Jewel = { Called : string; Base : string; Rarity : string; Mods : string li
 
 /// A connection: its two passives and its ribbon (triangles); an ascendancy's own are laid
 /// out for the middle of the tree.
-type Link = { A : int; B : int; Of : string; Ribbon : V3f list }
+/// (`Needs`: the passives that must be allocated for it to be there at all, with its thin
+/// ribbon for the web of all connections; the web itself holds the others'.)
+type Link = { A : int; B : int; Of : string; Ribbon : V3f list; Needs : int list; Thin : V3f list }
 
 /// An ascendancy: where its part of the tree is laid out (the middle of its background), and
 /// its class art in the small background sheet.
@@ -142,6 +146,11 @@ type Model =
       /// The pictures of jewels in sockets, by unique name or base type; the character's jewels by socket.
       JewelSprites : Map<string, string * V4d>
       Jewels : Map<int, Jewel>
+      /// The passives that are only there once others are allocated, with those others; and
+      /// the connections of the ones that are there now, as a mesh.
+      Unlocks : Map<int, int list>
+      Opened : Buffer<V3f>
+      OpenedUv : Buffer<V2f>
       Selected : int option
       Hovered : int option
       Level : int }
@@ -156,7 +165,7 @@ let init : Model =
       Centre = V2d (0.0, 0.0); Height = 9000.0
       Camera = { Sky = V3d (0.0, 1.0, 0.0); Location = V3d (0.0, 0.0, 7794.2); Forward = V3d (0.0, 0.0, -1.0); Up = V3d (0.0, 1.0, 0.0); Right = V3d (1.0, 0.0, 0.0) }
       Near = 7000.0; Far = 8600.0
-      Touches = []; Travel = 0.0; Page = V2d (0.0, 0.0); Pending = None; Choices = Map.empty; JewelSprites = Map.empty; Jewels = Map.empty; Selected = None; Hovered = None; Level = 0 }
+      Touches = []; Travel = 0.0; Page = V2d (0.0, 0.0); Pending = None; Choices = Map.empty; JewelSprites = Map.empty; Jewels = Map.empty; Unlocks = Map.empty; Opened = Data.pack (Data.ofList ([] : V3f list)); OpenedUv = Data.pack (Data.ofList ([] : V2f list)); Selected = None; Hovered = None; Level = 0 }
 
 /// The camera straight above the centre, so far up that `Height` of the tree is seen through
 /// its 60 degree lens; the depth range close around the tree's plane (its layers are a unit
@@ -247,6 +256,7 @@ let private readTree (j : Json) (m : Model) : Model =
               IconSize = (match kind with "keystone" -> 164.0 | "notable" -> 108.0 | "jewel" -> 152.0 | "ascstart" -> 32.0 | _ -> 74.0)
               Kind = kind
               Hidden = Json.bool (Json.field "hidden" n)
+              Unlock = Json.field "unlock" n |> Json.list |> List.map Json.int
               Name = Json.string (Json.field "name" n)
               Stats = Json.field "stats" n |> Json.list |> List.map Json.string
               Options = (if kind = "attribute" then Json.field "options" n |> Json.list |> List.map (fun o -> Json.string (Json.field "name" o)) else [])
@@ -265,21 +275,28 @@ let private readTree (j : Json) (m : Model) : Model =
     let ascendancyOf = passives |> List.map (fun p -> p.Id, p.Ascendancy) |> Map.ofList
     let edges = Json.field "edges" j |> Json.list |> List.map (fun e -> Json.list e |> List.map Json.number)
     let own (e : float list) = ascendancyOf.[int e.[0]]
-    let links = edges |> List.filter (fun e -> own e = "") |> List.map (fun e -> { A = int e.[0]; B = int e.[1]; Of = ""; Ribbon = ribbon 26.0 at e })
+    let unlocks = passives |> List.filter (fun p -> not p.Unlock.IsEmpty) |> List.map (fun p -> p.Id, p.Unlock) |> Map.ofList
+    let needs (e : float list) = (Map.tryFind (int e.[0]) unlocks |> Option.defaultValue []) @ (Map.tryFind (int e.[1]) unlocks |> Option.defaultValue []) |> List.distinct
+    let links =
+        edges |> List.filter (fun e -> own e = "")
+        |> List.map (fun e ->
+            let n = needs e
+            { A = int e.[0]; B = int e.[1]; Of = ""; Ribbon = ribbon 26.0 at e; Needs = n; Thin = (if n.IsEmpty then [] else ribbon 14.0 at e) })
     let ascendedLinks =
         edges |> List.filter (fun e -> own e <> "" && middleOf.ContainsKey (own e))
-        |> List.map (fun e -> { A = int e.[0]; B = int e.[1]; Of = own e; Ribbon = ribbonAt 22.0 at middleOf.[own e] ascendancyScale e })
+        |> List.map (fun e -> { A = int e.[0]; B = int e.[1]; Of = own e; Ribbon = ribbonAt 22.0 at middleOf.[own e] ascendancyScale e; Needs = []; Thin = [] })
     // an ascendancy's passives, where they are drawn: around the middle of the tree
     let ascended =
         passives |> List.filter (fun p -> p.Ascendancy <> "" && middleOf.ContainsKey p.Ascendancy)
         |> List.map (fun p ->
             let q = (V2d (p.X, p.Y) - middleOf.[p.Ascendancy]) * ascendancyScale
             { p with X = q.X; Y = q.Y })
-    let web = edges |> List.filter (fun e -> own e = "") |> List.collect (ribbon 14.0 at)
+    let web = edges |> List.filter (fun e -> own e = "" && (needs e).IsEmpty) |> List.collect (ribbon 14.0 at)
     let shown = (passives |> List.filter (fun p -> p.Kind <> "start" && p.Ascendancy = "")) @ ascended
     { m with
         JewelSprites = Json.field "jewels" j |> Json.members |> List.map (fun (k, v) -> k, sprite v) |> Map.ofList
         Passives = Array.ofList passives
+        Unlocks = unlocks
         Ascendancies = ascendancies
         Shown = shown
         Links = Array.ofList (links @ ascendedLinks)
@@ -295,9 +312,10 @@ let private readTree (j : Json) (m : Model) : Model =
 let private paths (m : Model) : Model =
     let ribbons =
         List.ofArray m.Links
-        |> List.filter (fun l -> (l.Of = "" || l.Of = m.Ascendancy) && m.Allocated.Contains l.A && m.Allocated.Contains l.B)
+        |> List.filter (fun l -> (l.Of = "" || l.Of = m.Ascendancy) && m.Allocated.Contains l.A && m.Allocated.Contains l.B && l.Needs |> List.forall m.Allocated.Contains)
         |> List.collect (fun l -> l.Ribbon)
-    { m with Path = Data.pack (Data.ofList ribbons); PathUv = noUv ribbons }
+    let opened = List.ofArray m.Links |> List.filter (fun l -> not l.Needs.IsEmpty && l.Needs |> List.forall m.Allocated.Contains) |> List.collect (fun l -> l.Thin)
+    { m with Path = Data.pack (Data.ofList ribbons); PathUv = noUv ribbons; Opened = Data.pack (Data.ofList opened); OpenedUv = noUv opened }
 
 /// The character's ascendancy, once the tree and the character are both there: the game's
 /// character data names it as the class ("Spirit Walker"); else the one its allocated
@@ -319,7 +337,7 @@ let private settle (m : Model) : Model =
 /// Whether a passive is drawn: the tree's own, the character's ascendancy's, and a hidden
 /// socket only once it is allocated.
 let private visible (m : Model) (p : Passive) =
-    (p.Ascendancy = "" || p.Ascendancy = m.Ascendancy) && (not p.Hidden || m.Allocated.Contains p.Id)
+    (p.Ascendancy = "" || p.Ascendancy = m.Ascendancy) && (not p.Hidden || m.Allocated.Contains p.Id) && p.Unlock |> List.forall m.Allocated.Contains
 
 /// Where a character's passives start: its class' start and its ascendancy's.
 let private roots (m : Model) : Set<int> =
@@ -331,7 +349,7 @@ let private roots (m : Model) : Set<int> =
 /// Whether a passive can be taken by this character at all (another ascendancy's can't).
 let private open' (m : Model) (asc : Map<int, string>) (id : int) =
     match Map.tryFind id asc with
-    | Some a -> a = "" || a = m.Ascendancy
+    | Some a -> (a = "" || a = m.Ascendancy) && (Map.tryFind id m.Unlocks |> Option.defaultValue [] |> List.forall m.Allocated.Contains)
     | None -> false
 
 /// Of these passives, those that hang on a start (the class' own start is whichever touches
@@ -654,6 +672,11 @@ let tree (m : Model) : Node<Msg> =
                 sg {
                     Sg.Uniform ("Color", V4d (0.227, 0.227, 0.306, 1.0))
                     mesh Topology.Triangles { Mesh.Attribute ("Positions", m.Web); Mesh.Attribute ("DiffuseColorCoordinates", m.WebUv) }
+                }
+                // (the connections of passives that are only there for some: the Oracle's)
+                sg {
+                    Sg.Uniform ("Color", V4d (0.227, 0.227, 0.306, 1.0))
+                    mesh Topology.Triangles { Mesh.Attribute ("Positions", m.Opened); Mesh.Attribute ("DiffuseColorCoordinates", m.OpenedUv) }
                 }
                 sg {
                     Sg.Uniform ("Color", V4d (0.82, 0.74, 0.47, 1.0))
