@@ -345,6 +345,8 @@ module StatMap =
         | "spear_skills_inflict_bloodstone_lance_on_hit" -> one (Mod.base' (Named "Rule:OnHit:BloodstoneLance:1000000") 100.0 |> Mod.whenever (SkillIs Spear))
         | "damage_per_bloodstone_lance_+%_final" -> one (Mod.more (Damage AllDamage) v |> Mod.whenever (PerEnemyStack("BloodstoneLance", 1.0)))
         | "cannot_inflict_bloodstone_lance" -> one (Mod.flag (Named "CannotInflict:BloodstoneLance"))
+        // "Create a Fragment of Divinity in your Presence every 4 seconds"
+        | "manifest_a_fragment_of_divinity_in_your_presence_every_4_seconds" -> one (Mod.base' (Named "DivineFragmentEvery") 4.0)
         // Ice Crystals: what one withstands, how many a use makes, how many there can be
         | "frost_wall_maximum_life" -> one (Mod.base' (Named "CrystalLife") v)
         | "grim_pillars_number_of_pillars_to_create" -> one (Mod.base' (Named "CrystalsCreated") v)

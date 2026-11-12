@@ -241,6 +241,10 @@ module Setup =
                     // "Gain Accuracy Rating equal to your Intelligence"
                     @ (if Mods.flag Ctx.empty (Named "AccuracyFromIntelligence") (ModDb.ofList sheet.Mods) then [ Mod.base' (Named "Accuracy") vitals.Int |> Mod.from "Intelligence" ] else []) }
         let periodics = Behaviours.periodics db sheet build o.ChargeGen
+        // a Fragment of Divinity lies ready (one at a time: how many can lie about is not in the data)
+        let maxResources, startResources =
+            if Mods.sumBase Ctx.empty [ Named "DivineFragmentEvery" ] (ModDb.ofList sheet.Mods) > 0.0 then Map.add "DivineFragment" 1 maxResources, Map.add "DivineFragment" 1 startResources
+            else maxResources, startResources
         // Ghost Dance: shrouds as stacks (full at the start), spent when hit
         let ghost = Behaviours.ghostDance db sheet build
         let maxResources, startResources =

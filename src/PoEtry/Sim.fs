@@ -1164,8 +1164,13 @@ module Sim =
             let st = Map.find actor.Name w.Actors
             let ctx = Skill.ctx skill false (skillStacks actor skill st) (status target)
             let mods = skillDb env actor skill st
+            // "does not use up its Cooldown when empowered" (by what it consumes)
+            let free =
+                partFlag skill "NoCooldownWithCharge"
+                && (match skill.Consumes with Some charge -> (Map.tryFind charge st.Buffs |> Option.exists (fun e -> e.Stacks > 0 && e.Expires > w.Time)) | None -> false)
             let w =
                 match skill.Cooldown with
+                | Some _ when free -> w
                 | Some cd ->
                     let recovery = Mods.mult ctx [ CooldownRecovery ] mods
                     let uses = skill.StoredUses * (if Mods.sumBase ctx [ Named "DoubleCooldownUses" ] mods > 0.0 then 2 else 1)
@@ -1431,7 +1436,9 @@ module Sim =
                 match skill.Consumes with
                 | Some charge ->
                     let last = times |> List.map fst |> List.fold max w.Time
-                    schedule (last + 1e-9) (ConsumeCharges(actor.Name, charge, skill.Name)) w
+                    // "Consume it when you leap": at the start, where that is what empowers the use
+                    let at = if partFlag skill "NoCooldownWithCharge" then w.Time else last
+                    schedule (at + 1e-9) (ConsumeCharges(actor.Name, charge, skill.Name)) w
                 | None -> w
             // Cast on Dodge: energy per unit travelled by a dodge roll
             let w =
@@ -1521,6 +1528,11 @@ module Sim =
                     && (match warpsInto s with
                         | Some gem -> ballInFlight actor.Name gem w || (aimed env w |> Option.exists (fun e -> (status e).ContainsKey "Cullable"))
                         | None -> true)
+                    // a skill that is empowered by something lying about waits for it, where the character makes it
+                    && (not (partFlag s "NoCooldownWithCharge")
+                        || (match s.Consumes with
+                            | Some charge -> (Map.tryFind charge actor.MaxResources |> Option.defaultValue 0) = 0 || (Map.tryFind charge st.Buffs |> Option.exists (fun e -> e.Stacks > 0 && e.Expires > w.Time))
+                            | None -> true))
                     // a skill that spends what has piled up on the enemy waits for the pile to be full
                     && (s.Mods |> List.forall (fun m ->
                             match m.Stat with

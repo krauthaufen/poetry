@@ -815,6 +815,28 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
             let perStab = out.DamageBy.["Spear Stab (hit)"] / float stabs
             if perSpite < perStab * 4.53 * 7.0 * 0.5 then failwithf "Spite %.0f, stab %.0f" perSpite perStab
         | Error e -> failwith e)
+
+    test "Righteous Descent: a Fragment of Divinity empowers it and saves its cooldown" (fun () ->
+        let gem name = { Name = name; Level = 20; Quality = 0; Enabled = true; IsSupport = false; StatSet = 1 }
+        let run lines =
+            let b = { blank with
+                        Items = [ "Weapon 1", "Rarity: Normal\nHardwood Spear\n--------\n" ]
+                        Groups = [ { Label = ""; Slot = ""; Enabled = true; Gems = [ gem "Righteous Descent" ] } ]
+                        ExtraLines = [ "+5000 to Accuracy Rating" ] @ lines }
+            let o = { Options.defaults with MaxTime = 21.0; Immortal = true }
+            let c = Setup.loadWith db.Value treeJson b o
+            Sim.run (Setup.fight c o (Setup.player c o [ OnCooldown "Righteous Descent" ] None) (Encounter.boss 83 Rarity.defaults 30.0 |> List.map (fun e -> { e with Life = 1e13 }))) 1u
+        let count (out: Outcome) k = Map.tryFind k out.Counts |> Option.defaultValue 0
+        // without fragments: the plain leap on its 10 s cooldown (at 0, 10 and 20 s)
+        let plain = run []
+        equal (box 3) (box (count plain "uses:Righteous Descent"))
+        equal (box 0) (box (count plain "hits:Righteous Descent: Empowered"))
+        // a fragment every 4 s (one lying ready): only the empowered leap, never the plain one
+        let out = run [ "Create a Fragment of Divinity in your Presence every 4 seconds" ]
+        let uses = count out "uses:Righteous Descent"
+        if uses < 5 || uses > 7 then failwithf "%d uses %A" uses out.Counts
+        equal (box uses) (box (count out "hits:Righteous Descent: Empowered" + (if count out "hits:Righteous Descent: Empowered" < uses then 1 else 0)))
+        equal (box 0) (box (count out "hits:Righteous Descent")))
 #else
 let run (_: string -> (unit -> unit) -> unit) (_: float -> float -> unit) (_: obj -> obj -> unit) = ()
 #endif

@@ -93,6 +93,9 @@ module Behaviours =
         [ let consume = sum "ConsumeEachChargeEveryMs"
           if consume > 0.0 then
               yield { Name = "consume charges"; Every = consume / 1000.0; Action = ConsumeEach charges }
+          let fragment = sum "DivineFragmentEvery"
+          if fragment > 0.0 then
+              yield { Name = "fragment of divinity"; Every = fragment; Action = GainRandom [ "DivineFragment" ] }
           // Into the Breach: a Flame of Chayula appears every so often; a purple one, picked up,
           // gives "N% of damage as extra Chaos" for 8 seconds, each on its own, ten at most
           for g in build.Groups |> List.filter (fun g -> g.Enabled) do

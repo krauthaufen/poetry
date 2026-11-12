@@ -391,6 +391,10 @@ module Gems =
               ("Earthshatter", "Explosion"), [ "Part"; "DetonatedBy:Warcry" ]
               // "destroying all Bloodstone Lances on each enemy ... to cause a damaging explosion"
               ("Shattering Spite", ""), [ "Vs:BloodstoneLance!"; "NeedsStacks:BloodstoneLance:30" ]
+              // "will Consume [a Fragment of Divinity] when you leap to become Empowered ... does not
+              // use up its Cooldown when empowered"
+              ("Righteous Descent", ""), [ "Consumes:DivineFragment"; "NotWithCharge" ]
+              ("Righteous Descent", "Empowered"), [ "Part"; "Charge" ]
               // the pillars stay as Ice Crystals and explode when destroyed
               ("Grim Pillars", "Explosion"), [ "Part"; "Crystals" ]
               ("Frozen Locus", "Explosion"), [ "Crystals" ]
@@ -480,6 +484,7 @@ module Gems =
             elif c.StartsWith "NeedsStacks:" then
                 let parts = c.Split ':'
                 [ Mod.base' (Named("NeedsEnemyStacks:" + parts.[1])) (float parts.[2]) ]
+            elif c.StartsWith "Consumes:" then [ Mod.flag (Named c); Mod.base' (Named "ConsumeChargeCount") 1.0; Mod.flag (Named "NoCooldownWithCharge") ]
             elif c = "Crystals" then [ Mod.flag (Named "DetonatedBy:CrystalBreak"); Mod.flag (Named "Crystals") ]
             elif c = "NoHit" then [ Mod.flag (Named "NoHitDamage") ]
             elif c = "Ignites" then [ Mod.base' (AilmentChance Ignite) 100.0 ]
@@ -732,6 +737,8 @@ module Gems =
             [ "Power"; "Frenzy"; "Endurance" ]
             |> List.tryFind (fun kind -> data.Types.Contains(sprintf "SkillConsumes%sChargesOnUse" kind))
             |> Option.map (fun kind -> kind + "Charge")
+            // or something else the description names (a Fragment of Divinity)
+            |> Option.orElse (Map.tryFind (data.Name, "") partConditions |> Option.bind (List.tryPick (fun (c: string) -> if c.StartsWith "Consumes:" then Some(c.Substring 9) else None)))
           Cost = gemLevel |> Option.bind (fun l -> l.ManaCost) |> Option.defaultValue 0.0
           // "comet_fall_time_ms": hits land this long after the cast
           HitDelay = (ownStats |> List.filter (fun (id, _) -> id.EndsWith "_fall_time_ms") |> List.sumBy snd) / 1000.0
