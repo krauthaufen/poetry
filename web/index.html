@@ -53,6 +53,7 @@
         const clears = rs.map((r) => r.clear && r.clear.mean).filter((x) => x != null);
         return {
           gem: f.gem, scenario: rs[0].scenario, runs: rs.length, more: rs.length < f.total && !f.failed,
+          replay: (rs.find((r) => r.replay) || {}).replay || null,
           killRate: mean(rs.map((r) => r.killRate)),
           clear: clears.length === rs.length ? stats(clears) : null,
           dps: stats(rs.map((r) => r.dps.mean)),
@@ -71,32 +72,42 @@
       const settle = (f) => {
         // whoever waits is answered once there is more than was last told (or nothing more comes)
         if (!f.waiters.length) return;
-        if (f.error) { f.waiters.splice(0).forEach((w) => w(JSON.stringify({ error: f.error }))); return; }
-        if (f.results.length > f.told || (f.results.length >= f.total && f.results.length > 0)) {
-          f.told = f.results.length;
-          const text = JSON.stringify(merged(f));
-          f.waiters.splice(0).forEach((w) => w(text));
-        }
+        if (f.error) { f.waiters.splice(0).forEach((w) => w.done(JSON.stringify({ error: f.error }))); return; }
+        const done = (f.results.length >= f.total || f.failed) && f.results.length > 0;
+        // (who asked ahead waits for all of it and is not counted as told)
+        const ready = f.waiters.filter((w) => done || (!w.all && f.results.length > f.told));
+        if (!ready.length) return;
+        const text = JSON.stringify(merged(f));
+        if (ready.some((w) => !w.all)) f.told = f.results.length;
+        f.waiters = f.waiters.filter((w) => !ready.includes(w));
+        ready.forEach((w) => w.done(text));
       };
-      const fight = (key, request) => {
+      const fight = (key, request, all) => {
         let f = fights.get(key);
         if (!f) {
           f = { results: [], total: Math.max(1, request.runs || 12), told: 0, waiters: [], gem: "", error: "", failed: false };
           fights.set(key, f);
-          if (fights.size > 8) fights.delete(fights.keys().next().value);
-          // runs of the question before that no worker has begun are not wanted any more
-          for (let i = jobs.length - 1; i >= 0; i--) if (jobs[i].fight && jobs[i].fight !== key) jobs.splice(i, 1);
+          if (fights.size > 24) fights.delete(fights.keys().next().value);
+          // runs of the question before that no worker has begun are not wanted any more,
+          // and that question is forgotten (asked again, it starts anew)
+          for (let i = jobs.length - 1; i >= 0; i--) {
+            const other = jobs[i].fight;
+            if (!other || other === key) continue;
+            jobs.splice(i, 1);
+            const dropped = fights.get(other);
+            if (dropped) { fights.delete(other); dropped.error = dropped.results.length ? "" : "dropped"; dropped.failed = true; settle(dropped); }
+          }
           current = key;
-          const one = (seed, gem) => ask({ ...request, runs: 1, seed, ...(gem ? { gem } : {}) }, key).then((text) => {
+          const one = (seed, gem) => ask({ ...request, runs: 1, seed, ...(seed === 1 ? { trace: 1 } : {}), ...(gem ? { gem } : {}) }, key).then((text) => {
             let r; try { r = JSON.parse(text); } catch { r = { error: "no answer" }; }
             if (r.error) { if (!f.results.length) f.error = r.error; f.failed = true; } else { f.results.push(r); f.gem = r.gem; }
             settle(f);
             return r;
           });
           // the first run finds the gem to press (if none was named); the others press it
-          one(1, request.gem).then((r) => { if (!r.error) for (let s = 2; s <= f.total; s++) one(s, r.gem); });
+          one(1, request.gem).then((r) => { if (!r.error && fights.get(key) === f) for (let s = 2; s <= f.total; s++) one(s, r.gem); });
         }
-        return new Promise((done) => { f.waiters.push(done); settle(f); });
+        return new Promise((done) => { f.waiters.push({ done, all }); settle(f); });
       };
 
       const builds = new Map();
@@ -114,6 +125,8 @@
         const request = {};
         for (const [k, v] of params) request[k] = v !== "" && !isNaN(Number(v)) ? Number(v) : v;
         delete request.round;
+        const all = !!request.wait;
+        delete request.wait;
         const key = JSON.stringify(request) + "|" + buildUrl;
         try {
           if (!builds.has(buildUrl)) builds.set(buildUrl, plain(buildUrl).then((r) => { if (!r.ok) throw new Error(`${buildUrl}: status ${r.status}`); return r.text(); }));
@@ -122,7 +135,7 @@
           builds.delete(buildUrl);
           return answer(JSON.stringify({ error: String(err && err.message || err) }));
         }
-        return answer(await (request.op === "fight" ? fight(key, request) : ask(request, "")));
+        return answer(await (request.op === "fight" ? fight(key, request, all) : ask(request, "")));
       };
     })();
   </script>

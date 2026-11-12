@@ -53,8 +53,22 @@ type Link = { A : int; B : int; Of : string; Ribbon : V3f list; Needs : int list
 /// its class art in the small background sheet.
 type Ascendancy = { Called : string; Middle : V2d; Art : string }
 
+/// A fight as it is shown: a mark of a skill use ("r": an area at x, y with a radius, so
+/// long after the use; "f": a projectile's way, x and y in turn; "l": a line), something
+/// that happened ("u": a use, "s": an enemy is hit, "m": an enemy is at X, Y now, "h": an
+/// enemy hits the player, "k": an enemy dies), an enemy as the fight begins, and one colour's
+/// triangles of the picture.
+type Shape = { Sort : string; Nums : float list }
+type Happening = { Kind : string; T : float; Who : string; Shapes : Shape list; X : float; Y : float }
+type Foe = { Called : string; Start : V2d; Radius : float; Rank : string }
+type Layer = { Color : V4d; Points : Buffer<V3f>; Uvs : Buffer<V2f> }
+
 type Msg =
     | Located of string
+    /// A frame of the fight's picture was drawn, at this time in seconds.
+    | Tick of float
+    /// Another scenario's fights are done (asked ahead, so that choosing it shows them at once).
+    | Warmed of Fetched
     | Sheet of Fetched
     | Fought of Fetched
     | Scenario of string
@@ -163,6 +177,18 @@ type Model =
       /// The gem the fights after a change of passives press: the one the first fight found
       /// strongest ("" before; finding it costs as much as the fight itself).
       Pressing : string
+      /// The fight shown: its enemies, who fights them (name, whether a minion), what
+      /// happened, how long it took (seconds of the fight), how wide the field is; when its
+      /// showing began (-1: with the next frame), the picture now; and the scenarios whose
+      /// fights were asked ahead.
+      Foes : Foe list
+      Allies : (string * bool) list
+      Happened : Happening list
+      Lasts : float
+      Field : float
+      Began : float
+      Stage : Layer list
+      Warm : string list
       /// The fight is asked again while runs are still out: which asking this is, how many
       /// runs the numbers shown are of, and whether more are coming.
       Round : int
@@ -182,7 +208,7 @@ let init : Model =
       Centre = V2d (0.0, 0.0); Height = 9000.0
       Camera = { Sky = V3d (0.0, 1.0, 0.0); Location = V3d (0.0, 0.0, 7794.2); Forward = V3d (0.0, 0.0, -1.0); Up = V3d (0.0, 1.0, 0.0); Right = V3d (1.0, 0.0, 0.0) }
       Near = 7000.0; Far = 8600.0
-      Touches = []; Travel = 0.0; Page = V2d (0.0, 0.0); Pending = None; Choices = Map.empty; JewelSprites = Map.empty; Jewels = Map.empty; Unlocks = Map.empty; Opened = Data.pack (Data.ofList ([] : V3f list)); OpenedUv = Data.pack (Data.ofList ([] : V2f list)); Rings = Data.pack (Data.ofList ([] : V3f list)); RingsUv = Data.pack (Data.ofList ([] : V2f list)); Pressing = ""; Round = 0; Runs = 0; More = false; Selected = None; Hovered = None; Level = 0 }
+      Touches = []; Travel = 0.0; Page = V2d (0.0, 0.0); Pending = None; Choices = Map.empty; JewelSprites = Map.empty; Jewels = Map.empty; Unlocks = Map.empty; Opened = Data.pack (Data.ofList ([] : V3f list)); OpenedUv = Data.pack (Data.ofList ([] : V2f list)); Rings = Data.pack (Data.ofList ([] : V3f list)); RingsUv = Data.pack (Data.ofList ([] : V2f list)); Pressing = ""; Foes = []; Allies = []; Happened = []; Lasts = 0.0; Field = 100.0; Began = -1.0; Stage = []; Warm = []; Round = 0; Runs = 0; More = false; Selected = None; Hovered = None; Level = 0 }
 
 /// The camera straight above the centre, so far up that `Height` of the tree is seen through
 /// its 60 degree lens; the depth range close around the tree's plane (its layers are a unit
@@ -202,7 +228,155 @@ let private passives (m : Model) =
     else ""
 
 let private sheetUrl (m : Model) = "__sim?op=character" + passives m + "&build=" + m.Build
-let private fightUrl (m : Model) = "__sim?op=fight&runs=16&time=20&life=1e12&round=" + string m.Round + "&scenario=" + m.Scenario + (if m.Pressing <> "" then "&gem=" + m.Pressing.Replace (" ", "%20") else "") + passives m + "&build=" + m.Build
+let private fightOf (m : Model) (scenario : string) (ask : string) = "__sim?op=fight&runs=32&time=20&life=1e12" + ask + "&scenario=" + scenario + (if m.Pressing <> "" then "&gem=" + m.Pressing.Replace (" ", "%20") else "") + passives m + "&build=" + m.Build
+let private fightUrl (m : Model) = fightOf m m.Scenario ("&round=" + string m.Round)
+
+let private scenarios = [ "boss"; "pinnacle"; "pack"; "surrounded" ]
+
+/// The scenario whose fights are asked ahead now: the first not shown and not asked yet,
+/// once the shown one's fights are all in.
+let private warming (m : Model) : string =
+    if m.Fighting || m.More || m.Runs = 0 then ""
+    else scenarios |> List.tryFind (fun s -> s <> m.Scenario && not (List.contains s m.Warm)) |> Option.defaultValue ""
+
+// ---- the fight's picture ----
+
+/// How much of the fight a second of showing covers: a short fight is shown slowly.
+let private pace (m : Model) = max 0.1 (min 1.0 (m.Lasts / 8.0))
+
+let private disc (c : V2d) (r : float) (z : float) : V3f list =
+    let n = 20
+    let pt (i : int) = let a = 6.283185307 * float i / float n in V3f (float32 (c.X + r * cos a), float32 (c.Y + r * sin a), float32 z)
+    let mid = V3f (float32 c.X, float32 c.Y, float32 z)
+    [ for i in 0 .. n - 1 do
+        yield! [ mid; pt i; pt (i + 1) ] ]
+
+let private band (c : V2d) (r : float) (width : float) (z : float) : V3f list =
+    let n = 48
+    let pt (i : int) (rad : float) = let a = 6.283185307 * float i / float n in V3f (float32 (c.X + rad * cos a), float32 (c.Y + rad * sin a), float32 z)
+    [ for i in 0 .. n - 1 do
+        let a0, a1, b0, b1 = pt i (r - width / 2.0), pt (i + 1) (r - width / 2.0), pt i (r + width / 2.0), pt (i + 1) (r + width / 2.0)
+        yield! [ a0; b0; a1; a1; b0; b1 ] ]
+
+let private stroke (a : V2d) (b : V2d) (width : float) (z : float) : V3f list =
+    let dx, dy = b.X - a.X, b.Y - a.Y
+    let l = sqrt (dx * dx + dy * dy)
+    if l < 1e-6 then []
+    else
+        let nx, ny = -dy / l * width / 2.0, dx / l * width / 2.0
+        let p (x : float) (y : float) = V3f (float32 x, float32 y, float32 z)
+        [ p (a.X + nx) (a.Y + ny); p (a.X - nx) (a.Y - ny); p (b.X + nx) (b.Y + ny); p (b.X + nx) (b.Y + ny); p (a.X - nx) (a.Y - ny); p (b.X - nx) (b.Y - ny) ]
+
+/// A way of points up to a share of its length, and where that is.
+let rec private along (points : V2d list) (left : float) (width : float) (z : float) : V3f list * V2d =
+    match points with
+    | a :: b :: rest ->
+        let l = sqrt ((b.X - a.X) * (b.X - a.X) + (b.Y - a.Y) * (b.Y - a.Y))
+        if l >= left then
+            let k = if l < 1e-6 then 0.0 else left / l
+            let at = V2d (a.X + (b.X - a.X) * k, a.Y + (b.Y - a.Y) * k)
+            stroke a at width z, at
+        else
+            let more, at = along (b :: rest) (left - l) width z
+            stroke a b width z @ more, at
+    | [ a ] -> [], a
+    | [] -> [], V2d (0.0, 0.0)
+
+let rec private pairs (xs : float list) : V2d list =
+    match xs with
+    | x :: y :: rest -> V2d (x, y) :: pairs rest
+    | _ -> []
+
+let private lengthOf (points : V2d list) : float =
+    List.pairwise points |> List.sumBy (fun (a, b) -> sqrt ((b.X - a.X) * (b.X - a.X) + (b.Y - a.Y) * (b.Y - a.Y)))
+
+/// The picture of the fight at a time of it: the enemies where they are (by rarity), the
+/// player in the middle with the minions around (they have no place of their own in the
+/// simulation), the marks of the uses just made (the player's, the minions'), the enemies'
+/// hits on the player, and a flash on whoever was just hit.
+let private stage (m : Model) (c : float) : Layer list =
+    let speed = pace m
+    let w = 0.45 * speed
+    let u = m.Field / 110.0
+    let gone = m.Happened |> List.filter (fun h -> h.Kind = "k" && h.T <= c - w * 0.3) |> List.map (fun h -> h.Who) |> Set.ofList
+    let at =
+        m.Happened |> List.fold (fun (p : Map<string, V2d>) h -> if h.Kind = "m" && h.T <= c then Map.add h.Who (V2d (h.X, h.Y)) p else p)
+            (m.Foes |> List.map (fun f -> f.Called, f.Start) |> Map.ofList)
+    let place (name : string) = Map.tryFind name at |> Option.defaultValue (V2d (0.0, 0.0))
+    let struck = m.Happened |> List.filter (fun h -> h.Kind = "s" && h.T <= c && h.T > c - w * 0.3) |> List.map (fun h -> h.Who) |> Set.ofList
+    let foes (rank : string) = m.Foes |> List.filter (fun f -> f.Rank = rank && not (gone.Contains f.Called)) |> List.collect (fun f -> disc (place f.Called) f.Radius 1.0)
+    let flashes = m.Foes |> List.filter (fun f -> struck.Contains f.Called) |> List.collect (fun f -> disc (place f.Called) (f.Radius * 0.55) 9.0)
+    let minions = m.Allies |> List.filter snd
+    let allies =
+        disc (V2d (0.0, 0.0)) (u * 2.2) 2.0
+        @ (minions |> List.indexed |> List.collect (fun (i, _) ->
+            let a = 6.283185307 * float i / float (max 1 minions.Length)
+            disc (V2d (u * 9.0 * cos a, u * 9.0 * sin a)) (u * 1.1) 2.0))
+    let player = m.Allies |> List.tryFind (fun (_, minion) -> not minion) |> Option.map fst |> Option.defaultValue ""
+    let marks (own : bool) =
+        m.Happened
+        |> List.filter (fun h -> h.Kind = "u" && h.T <= c && h.T > c - w - 2.0 && (h.Who = player) = own)
+        |> List.collect (fun h ->
+            h.Shapes |> List.collect (fun s ->
+                match s.Sort, s.Nums with
+                | "r", [ x; y; r; delay ] ->
+                    let p = (c - h.T - delay) / w
+                    // the area's true size as a thin line, and a wave running out to it
+                    if p < 0.0 || p > 1.0 then [] else band (V2d (x, y)) r (u * 0.3) 5.0 @ band (V2d (x, y)) (r * (0.3 + 0.7 * p)) (u * 0.9) 5.0
+                | "f", nums ->
+                    let p = (c - h.T) / w
+                    if p < 0.0 || p > 1.0 then []
+                    else
+                        let way = pairs nums
+                        let trail, head = along way (lengthOf way * p) (u * 0.35) 5.0
+                        trail @ disc head (u * 0.9) 5.0
+                | "l", [ x1; y1; x2; y2 ] ->
+                    let p = (c - h.T) / (w * 0.5)
+                    if p < 0.0 || p > 1.0 then [] else stroke (V2d (x1, y1)) (V2d (x2, y2)) (u * 0.5) 5.0
+                | _ -> []))
+    let hurts =
+        m.Happened |> List.filter (fun h -> h.Kind = "h" && h.T <= c && h.T > c - w * 0.5)
+        |> List.collect (fun h -> stroke (place h.Who) (V2d (0.0, 0.0)) (u * 0.6) 6.0)
+    let layer (r : float) (g : float) (b : float) (points : V3f list) = { Color = V4d (r, g, b, 1.0); Points = Data.pack (Data.ofList points); Uvs = Data.pack (Data.ofList (points |> List.map (fun _ -> V2f (0.0f, 0.0f)))) }
+    [ layer 0.55 0.2 0.18 (foes "normal")
+      layer 0.4 0.45 0.95 (foes "magic")
+      layer 0.95 0.95 0.4 (foes "rare")
+      layer 0.8 0.42 0.14 (foes "unique")
+      layer 0.9 0.86 0.62 allies
+      layer 0.4 0.78 1.0 (marks true)
+      layer 0.45 0.85 0.5 (marks false)
+      layer 1.0 0.22 0.18 hurts
+      layer 1.0 1.0 1.0 flashes ]
+
+/// The fight to show, out of a fight's answer (none: what is shown stays).
+let private readReplay (j : Json) (m : Model) : Model =
+    let r = Json.field "replay" j
+    let events = Json.field "events" r |> Json.list
+    if events.IsEmpty then m
+    else
+        let foes =
+            Json.field "enemies" r |> Json.list
+            |> List.map (fun e -> { Called = Json.string (Json.field "name" e); Start = V2d (Json.number (Json.field "x" e), Json.number (Json.field "y" e)); Radius = max 2.0 (Json.number (Json.field "size" e)); Rank = Json.string (Json.field "rarity" e) })
+        let happened =
+            events |> List.map (fun e ->
+                match Json.list e with
+                | k :: t :: who :: rest ->
+                    let kind = Json.string k
+                    let shapes =
+                        match kind, rest with
+                        | "u", [ _; marks ] -> Json.list marks |> List.map (fun s -> match Json.list s with | sort :: nums -> { Sort = Json.string sort; Nums = nums |> List.map Json.number } | [] -> { Sort = ""; Nums = [] })
+                        | _ -> []
+                    let x, y = (match kind, rest with | "m", [ x; y ] -> Json.number x, Json.number y | _ -> 0.0, 0.0)
+                    { Kind = kind; T = Json.number t; Who = Json.string who; Shapes = shapes; X = x; Y = y }
+                | _ -> { Kind = ""; T = 0.0; Who = ""; Shapes = []; X = 0.0; Y = 0.0 })
+        let far = foes |> List.fold (fun d f -> max d (sqrt (f.Start.X * f.Start.X + f.Start.Y * f.Start.Y) + f.Radius)) 30.0
+        { m with
+            Foes = foes
+            Allies = Json.field "actors" r |> Json.list |> List.map (fun a -> Json.string (Json.field "name" a), Json.bool (Json.field "minion" a))
+            Happened = happened
+            Lasts = max 0.5 (Json.number (Json.field "duration" r))
+            Field = far * 2.3
+            Began = -1.0 }
 
 // ---- the passive tree ----
 
@@ -520,7 +694,7 @@ let rec update (msg : Msg) (m : Model) : Model =
         match Native.queryParam "build" href with
         | Some b -> { m with Build = b; Status = "reading the character" }
         | None -> { m with Status = "no character: add ?build=<url of a character or a PoB build> to the address" }
-    | Scenario s -> { m with Scenario = s; Fighting = true; Dps = []; Shares = [] }
+    | Scenario s -> { m with Scenario = s; Fighting = true; Dps = []; Shares = []; Runs = 0; Round = 0; Happened = [] }
     | Tab t -> { m with Tab = t }
     | TreeData r ->
         match r.Status, Native.parseJson r.Text with
@@ -534,8 +708,8 @@ let rec update (msg : Msg) (m : Model) : Model =
         | None -> { m with Selected = None }
     | Allocate (id, choice) ->
         let m = if m.Allocated.Contains id then m else toggle id m
-        paths { m with Choices = (if choice = "" then m.Choices else Map.add id choice m.Choices); Edited = true; Fighting = true; Pressing = (if m.Pressing = "" then m.Gem else m.Pressing) }
-    | Deallocate id -> if m.Allocated.Contains id then paths { toggle id m with Fighting = true; Pressing = (if m.Pressing = "" then m.Gem else m.Pressing) } else m
+        paths { m with Choices = (if choice = "" then m.Choices else Map.add id choice m.Choices); Edited = true; Fighting = true; Warm = []; Runs = 0; Round = 0; Happened = []; Pressing = (if m.Pressing = "" then m.Gem else m.Pressing) }
+    | Deallocate id -> if m.Allocated.Contains id then paths { toggle id m with Fighting = true; Warm = []; Runs = 0; Round = 0; Happened = []; Pressing = (if m.Pressing = "" then m.Gem else m.Pressing) } else m
     | Close -> { m with Selected = None }
     | Toggle id -> paths { toggle id m with Fighting = true }
     // A place on the tree comes from the last frame drawn; under an older camera than the
@@ -614,6 +788,16 @@ let rec update (msg : Msg) (m : Model) : Model =
                     NotUnderstood = missing
                     Fighting = true }
         | s, _ -> { m with Status = "the simulator did not answer (status " + string s + ")" }
+    | Tick t ->
+        if m.Happened.IsEmpty then m
+        else
+            let began = if m.Began < 0.0 then t else m.Began
+            // the fight, a breath, and again
+            let whole = m.Lasts / pace m + 1.2
+            let shown = t - began
+            let c = (shown - whole * floor (shown / whole)) * pace m
+            { m with Began = began; Stage = stage m c }
+    | Warmed r -> { m with Warm = (warming m) :: m.Warm }
     | Fought r when r.Url <> fightUrl m -> m
     | Fought r ->
         match r.Status, Native.parseJson r.Text with
@@ -622,6 +806,7 @@ let rec update (msg : Msg) (m : Model) : Model =
             let dps k = Json.field "dps" j |> Json.field k |> Json.number
             // (while runs are still out the fight is asked again: the next answer is of more of them)
             let more = Json.bool (Json.field "more" j)
+            let m = if m.Round = 0 || m.Happened.IsEmpty then readReplay j m else m
             { m with
                 Fighting = false
                 Runs = Json.int (Json.field "runs" j)
@@ -705,6 +890,33 @@ let frame (m : Model) (p : Passive) : Scene<Msg> =
         Sg.Uniform ("Rect", (if m.Allocated.Contains p.Id then p.FrameOn else p.FrameOff))
         Sg.Uniform ("Tint", white)
         quad
+    }
+
+/// The fight's picture: a small field seen from above, the player in the middle.
+let arena (m : Model) : Node<Msg> =
+    renderControl {
+        Dom.Style [ Css.Position "fixed"; Css.Prop ("right", "12px"); Css.Prop ("bottom", "12px"); Css.Width "260px"; Css.Height "260px"
+                    Css.Prop ("border", "1px solid #3b3024"); Css.Prop ("z-index", "4"); Css.Prop ("pointer-events", "none")
+                    Css.Prop ("visibility", (if m.Happened.IsEmpty then "hidden" else "visible")) ]
+        RenderControl.Orthographic (m.Field, 1.0, 400.0)
+        RenderControl.Camera { Sky = V3d (0.0, 1.0, 0.0); Location = V3d (0.0, 0.0, 200.0); Forward = V3d (0.0, 0.0, -1.0); Up = V3d (0.0, 1.0, 0.0); Right = V3d (1.0, 0.0, 0.0) }
+        RenderControl.OnRendered Tick
+        RenderControl.Animating (not m.Happened.IsEmpty)
+        sg {
+            Sg.Shader { Shaders.flat }
+            Sg.NoEvents true
+            sg {
+                Sg.Uniform ("Color", V4d (0.035, 0.033, 0.03, 1.0))
+                Sg.Translate (0.0, 0.0, -1.0)
+                Sg.Scale (100000.0)
+                quad
+            }
+            for l in m.Stage do
+                sg {
+                    Sg.Uniform ("Color", l.Color)
+                    mesh Topology.Triangles { Mesh.Attribute ("Positions", l.Points); Mesh.Attribute ("DiffuseColorCoordinates", l.Uvs) }
+                }
+        }
     }
 
 let tree (m : Model) : Node<Msg> =
@@ -893,9 +1105,11 @@ let view (m : Model) : Node<Msg> =
         // anew on every change (for a render control: a new canvas and every draw again).
         // Being fixed in FableCube; see its dogfood/poetry.md.
         tree m
+        arena m
         div {
             if m.Build <> "" then span { Dom.Fetch (sheetUrl m, Sheet) }
             if m.Title <> "" then span { Dom.Fetch (fightUrl m, Fought) }
+            if warming m <> "" then span { Dom.Fetch (fightOf m (warming m) "&wait=1", Warmed) }
         }
         span { Dom.Fetch ("tree.json", TreeData) }
         div {
