@@ -122,6 +122,11 @@
    7  companions_you_control_gain_damage_+%_against_enemies_marked_by_you
    7  can_have_unlimited_companions
    7  combo_falloff_speed_+%
+   6  skill: twister_consumes_wind_storm
+   6  skill: twister_damage_+%_final_per_whirling_slash_stage
+   6  skill: twister_hit_interval_ms
+   6  skill: twister_gain_%_elemental_damage_of_corresponding_type
+   6  skill: twister_bounce_check_angle
    6  Herald of Plague: herald_of_agony_poison_spread_on_kill_radius_base_magnitude_to_grant
    6  Herald of Plague: hinder_chance_%_on_spreading_poioson
    6  each_arrow_fired_gains_random_perdandus_prefix
@@ -132,11 +137,6 @@
    5  Into the Breach: breach_flame_chaos_addition_%
    5  Into the Breach: breach_flame_spawn_radius
    5  Into the Breach: breach_walk_base_visibility_range
-   5  skill: twister_consumes_wind_storm
-   5  skill: twister_damage_+%_final_per_whirling_slash_stage
-   5  skill: twister_hit_interval_ms
-   5  skill: twister_gain_%_elemental_damage_of_corresponding_type
-   5  skill: twister_bounce_check_angle
    5  skill: twister_%_chance_for_additional_twister
    5  cannot_have_more_than_1_damaging_ailment
    5  Herald of Blood: skill_herald_bleeding_enemies_explode_for_%_blood_loss_as_unscalable_physical_damage
@@ -165,7 +165,6 @@
    5  tamed_beasts_randomly_possessed_every_x_ms
    5  resist_all_elements_%_per_socketed_non_idol_augment
    5  remnants_you_create_reappear_X_ms_after_being_collected
-   5  skill: base_skill_detonation_time
    5  titan_additional_inventory
    5  skill: deal_no_elemental_damage
    5  skill: base_deal_no_chaos_damage
@@ -200,6 +199,7 @@
    4  skill: cannot_inflict_blind
    4  trigger_elemental_storm_on_crit
    4  skill: melee_strike_bonus_attack_distance
+   4  skill: base_skill_detonation_time
    4  skill: off_hand_weapon_minimum_physical_damage
    4  skill: off_hand_weapon_maximum_physical_damage
    4  skill: wall_maximum_length
@@ -288,8 +288,6 @@
    2  elemental_skill_limit_+
    2  ascendancy_tactician_suppressing_fire_hit_damage_immobilisation_multiplier_+%_final
    2  pin_stops_enemies
-   2  skill: base_number_of_remote_spear_mines_allowed
-   2  skill: remote_spear_mine_minimum_target_distance
    2  has_unique_fire_shrine_effect
    2  skill: attack_speed_modifiers_apply_to_over_time_cost
    2  melee_damage_+%_at_close_range
@@ -308,6 +306,8 @@
    2  marked_enemies_cannot_deal_critical_strikes
    2  skill: projectiles_return
    2  skill: ground_effects_cannot_trigger
+   2  spell_impale_magnitude_+%
+   2  skill: awakened_forest_spawn_vines_per_X%_cast_time
 
 == unsimulated stats (builds affected)
  128  base_movement_velocity_+% [movement]
@@ -322,7 +322,7 @@
   27  movement_speed_+%_if_10_green_supports_socketed [movement]
   26  unique_double_presence_radius [presence / allies]
   24  minion_maximum_life_+% [minion stats beyond damage and speed]
-  23  skill: active_skill_base_secondary_area_of_effect_radius [area of effect]
+  22  skill: active_skill_base_secondary_area_of_effect_radius [area of effect]
   16  minion_chaos_resistance_% [minion stats beyond damage and speed]
   15  skill_time_of_need_gain_x_life [life / recovery]
   15  base_stun_recovery_+% [stun / ailment threshold]
@@ -354,6 +354,7 @@
    8  maximum_number_of_arctic_armour_stationary_stacks [defences]
    8  defend_with_%_of_armour_while_not_on_low_energy_shield [energy shield / recovery]
    8  arcane_surge_mana_regen_modifier_on_you_applies_to_life_regen_instead [life / recovery]
+   8  skill: skill_can_add_multiple_charges_per_action [charges]
    8  stun_threshold_+%_for_each_time_hit_recently_up_to_100% [stun / ailment threshold]
    8  area_of_effect_+%_if_have_stunned_an_enemy_recently [area of effect]
    8  movement_speed_+%_if_enemy_killed_recently [movement]
@@ -373,7 +374,7 @@
    7  skill: companion_takes_%_damage_before_you_from_support [companions]
    7  regenerate_%_life_over_1_second_when_stunned [life / recovery]
    7  companion_attack_speed_+% [companions]
-   7  skill: skill_can_add_multiple_charges_per_action [charges]
+   7  skill: minimum_per_projectile_spread_angle_degrees [projectile count / speed / chaining]
    7  inflict_withered_for_x_seconds_on_unwithered_enemies_when_they_enter_your_presence [presence / allies]
    7  surrounded_area_of_effect_+% [area of effect]
    7  totem_placement_range_+% [totems]
@@ -395,7 +396,7 @@
    6  wind_skills_count_as_empowered_by_ignited_ground [empowered attacks]
    6  wind_skills_count_as_empowered_by_shocked_ground [empowered attacks]
    6  companion_onslaught_on_kill_% [companions]
-   6  skill: minimum_per_projectile_spread_angle_degrees [projectile count / speed / chaining]
+   6  skill: twister_base_movement_speed [movement]
    6  missing_life_%_gained_as_life_before_hit [life / recovery]
    6  damaging_ailments_deal_damage_+%_faster [faster ailments]
    6  attack_area_of_effect_+%_per_enemy_ignited_last_8_seconds [area of effect]
@@ -419,7 +420,6 @@
    6  lose_%_of_life_and_energy_shield_when_you_use_a_chaos_skill [life / recovery]
    6  companion_%_damage_as_chaos [companions]
    6  skill: active_skill_hit_damage_stun_multiplier_+%_final [stun / ailment threshold]
-   6  skill: base_projectiles_cannot_chain [projectile count / speed / chaining]
    6  scavenged_plating_thorns_minimum_physical_damage [thorns]
    6  scavenged_plating_thorns_maximum_physical_damage [thorns]
    6  scavenged_plating_armour_+%_final_per_stack [defences]
@@ -432,7 +432,6 @@
    5  breach_flame_mana_leech_% [mana / recovery]
    5  breach_flame_life_leech_% [life / recovery]
    5  wind_skills_can_be_empowered_by_multiple_elements [empowered attacks]
-   5  skill: twister_base_movement_speed [movement]
    5  skill_cost_base_life_equal_to_base_mana [life / recovery]
    5  lose_%_of_life_loss_over_4_seconds_instead [life / recovery]
    5  life_remnants_gain_per_globe [life / recovery]
@@ -466,6 +465,7 @@
    5  skill: active_skill_does_not_decay_heavy_stun_during_action [stun / ailment threshold]
    5  skill: active_skill_heavy_stun_decay_after_action_delay_ms [stun / ailment threshold]
    5  global_armour_evasion_energy_shield_while_in_presence_of_companion_+% [companions]
+   5  skill: base_projectiles_cannot_chain [projectile count / speed / chaining]
    5  skill: base_skill_cost_life_instead_of_mana_% [life / recovery]
    5  skill: gain_%_of_damage_as_physical_per_20_life_cost_up_to_40_% [life / recovery]
    5  thorns_minimum_base_physical_damage [thorns]
@@ -530,28 +530,28 @@
 == DPS against poe.ninja's (a lead, not the truth): ours / theirs
    6  under 1%
    8  1% to 10%
-  19  10% to 50%
-  45  50% to 200%
-  33  2x to 10x
-  11  over 10x
+  20  10% to 50%
+  46  50% to 200%
+  32  2x to 10x
+  10  over 10x
 
 == per build
 001-abyssal-lich-comet                               Comet (pressed Entangle)                     19877779 dps (theirs    7132055)  0 unknown, 6 unmapped, 18 unsimulated  energy shield 11001/11515
 002-acolyte-of-chayula-wolf-pack                     Wolf Pack                                        6584 dps (theirs        164)  0 unknown, 8 unmapped, 28 unsimulated
-003-amazon-twister                                   Twister                                        663991 dps (theirs     246803)  0 unknown, 10 unmapped, 23 unsimulated
+003-amazon-twister                                   Twister                                        452346 dps (theirs     246803)  0 unknown, 10 unmapped, 23 unsimulated
 004-blood-mage-shattering-spite                      Shattering Spite                               317142 dps (theirs    1907108)  0 unknown, 17 unmapped, 38 unsimulated  spirit 374/241
 005-chronomancer-living-bomb                         Living Bomb (pressed Spark)                    130945 dps (theirs     233180)  0 unknown, 4 unmapped, 17 unsimulated  spirit 398/365  fire res 38/36  lightning res 18/15
 006-deadeye-ice-shot                                 Ice Shot (pressed Tornado Shot)                210941 dps (theirs     338664)  0 unknown, 10 unmapped, 15 unsimulated  evasion 12552/13693  deflection 5774/6298  chaos res 79/75
 007-disciple-of-varashta-navira-s-fracturing         Kelari, the Tainted Sands                     2043989 dps (theirs          0)  0 unknown, 10 unmapped, 18 unsimulated
-008-druid-twister                                    Twister                                         93773 dps (theirs       8096)  0 unknown, 9 unmapped, 24 unsimulated  fire res 136/125
+008-druid-twister                                    Twister                                         22763 dps (theirs       8096)  0 unknown, 9 unmapped, 24 unsimulated  fire res 136/125
 009-gemling-legionnaire-ember-fusillade              Ember Fusillade (pressed Dodge Roll)          4615382 dps (theirs    2978320)  0 unknown, 4 unmapped, 17 unsimulated
 010-huntress-stormblast-bolts                        Stormblast Bolts                               209187 dps (theirs      42228)  0 unknown, 7 unmapped, 16 unsimulated
 011-infernalist-comet                                Comet (pressed Frostflame Nova)               3211444 dps (theirs     967158)  0 unknown, 4 unmapped, 14 unsimulated
 012-invoker-grim-pillars                             Grim Pillars (pressed Entangle)              17038539 dps (theirs    2741489)  0 unknown, 12 unmapped, 22 unsimulated  energy shield 17627/18090
 013-lich-profane-ritual                              Profane Ritual                                      0 dps (theirs         77)  0 unknown, 6 unmapped, 26 unsimulated
 014-martial-artist-flicker-strike                    Flicker Strike                                 228883 dps (theirs    1031479)  0 unknown, 10 unmapped, 14 unsimulated  evasion 17353/16148  deflection 3124/2906
-015-mercenary-twister                                Twister                                       1325314 dps (theirs     306275)  0 unknown, 8 unmapped, 22 unsimulated
-016-monk-twister                                     Twister                                        246072 dps (theirs      31164)  0 unknown, 8 unmapped, 19 unsimulated
+015-mercenary-twister                                Twister                                        288796 dps (theirs     306275)  0 unknown, 8 unmapped, 22 unsimulated
+016-monk-twister                                     Twister                                         69575 dps (theirs      31164)  0 unknown, 8 unmapped, 19 unsimulated
 017-oracle-lightning-bolt                            Lightning Bolt                                1896660 dps (theirs     776559)  5 unknown, 12 unmapped, 31 unsimulated
 018-pathfinder-entangle                              Entangle                                        32403 dps (theirs      74057)  0 unknown, 12 unmapped, 25 unsimulated  energy shield 3169/3338  evasion 21728/23272  deflection 9343/10006
 019-ranger-ice-shot                                  Ice Shot                                       170652 dps (theirs     289128)  0 unknown, 8 unmapped, 11 unsimulated  deflection 9460/12526
@@ -631,7 +631,7 @@
 093-gemling-legionnaire-falling-thunder              Falling Thunder                             270631646 dps (theirs    1365072)  5 unknown, 7 unmapped, 15 unsimulated  dexterity 115/119
 094-infernalist-grim-pillars                         Grim Pillars (pressed Bonestorm)                 2464 dps (theirs        336)  0 unknown, 9 unmapped, 12 unsimulated
 095-invoker-tempest-bell                             Tempest Bell                                   235727 dps (theirs      95212)  0 unknown, 14 unmapped, 9 unsimulated  energy shield 6175/5985  dexterity 194/198  deflection 10163/10411
-096-lich-companion-diretusk-boar                     Companion: Diretusk Boar (pressed Explosive Spear)         2480 dps (theirs       7818)  0 unknown, 4 unmapped, 24 unsimulated
+096-lich-companion-diretusk-boar                     Companion: Diretusk Boar (pressed Twister)         2598 dps (theirs       7818)  0 unknown, 6 unmapped, 23 unsimulated
 097-martial-artist-rend                              Rend                                             2730 dps (theirs       1671)  0 unknown, 9 unmapped, 16 unsimulated  energy shield 4472/3726  evasion 34288/27279  deflection 26059/21004
 098-oracle-lightning-warp                            Lightning Warp (pressed Ball Lightning)       1371318 dps (theirs  104281784)  8 unknown, 17 unmapped, 37 unsimulated
 099-pathfinder-decompose                             Decompose                                        1038 dps (theirs     104539)  0 unknown, 16 unmapped, 39 unsimulated
@@ -649,7 +649,7 @@
 111-amazon-fragmentation-rounds                      Fragmentation Rounds                           247691 dps (theirs      26215)  0 unknown, 10 unmapped, 16 unsimulated
 112-blood-mage-doom-blast                            Elemental Weakness                               8182 dps (theirs          0)  0 unknown, 3 unmapped, 25 unsimulated
 113-chronomancer-reap                                Reap                                          1712210 dps (theirs    1322925)  0 unknown, 5 unmapped, 13 unsimulated
-114-deadeye-twister                                  Twister                                        368919 dps (theirs     471809)  0 unknown, 13 unmapped, 22 unsimulated  evasion 1597/1228
+114-deadeye-twister                                  Twister                                         94698 dps (theirs     471809)  0 unknown, 13 unmapped, 22 unsimulated  evasion 1597/1228
 115-disciple-of-varashta-flame-wall                  Flame Wall (pressed Frost Wall)                  1329 dps (theirs       2712)  0 unknown, 10 unmapped, 15 unsimulated  fire res 98/82
 116-gemling-legionnaire-boneshatter                  Boneshatter                                      2829 dps (theirs       2798)  4 unknown, 6 unmapped, 15 unsimulated  strength 186/195  dexterity 151/160  intelligence 77/86  chaos res 48/44
 117-infernalist-comet                                Comet (pressed Spark)                          958808 dps (theirs    1682056)  0 unknown, 3 unmapped, 11 unsimulated  strength 88/91  lightning res 83/87

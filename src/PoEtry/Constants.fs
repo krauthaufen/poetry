@@ -192,6 +192,10 @@ module Constants =
     /// "by approximately 50%" started from "a 90 Degree Cone", so 200 was 90 degrees.
     let spreadOverrideDegrees = 0.45
 
+    /// How far (units) a twister strays to either side of its line ("moves forward
+    /// erratically"): not in the data. A guess: twice its own radius.
+    let twisterWander = 10.0
+
     /// Spearfield: "Spears emerge within a 6.9 metre length cone" in front of the player. The
     /// length is the skill's radius; the angle is in neither the data nor the wiki. A guess.
     let spearfieldCone = 90.0

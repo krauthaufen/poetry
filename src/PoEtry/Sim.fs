@@ -398,6 +398,8 @@ module Sim =
         | Strike of actor: string * skill: string * mult: float * aimedAt: string
         /// A strike from a projectile in flight, so long after it was launched.
         | PassingStrike of actor: string * skill: string * mult: float * aimedAt: string * elapsed: float
+        /// One hit on one enemy, worked out when the skill was used (a twister reaching it).
+        | DirectHit of actor: string * skill: string * mult: float * enemy: string
         /// After a use's hits: the skill consumes its charges (unless the skip roll succeeds).
         | ConsumeCharges of actor: string * charge: string * skill: string
         /// A cycle picks its next variant.
@@ -1376,7 +1378,7 @@ module Sim =
                             // a strike of the chain that hits several times, spread over the use
                             let n = part.Mods |> List.tryPick (fun m -> if m.Stat = Named "SeqHits" then Some(int m.Value) else None) |> Option.defaultValue 1
                             [ 1 .. n ] |> List.fold (fun w i ->
-                                let passing = match part.Delivery with Projectiles p -> p.Passing > 0.0 | _ -> false
+                                let passing = match part.Delivery with Projectiles p -> p.Passing > 0.0 && p.HitInterval <= 0.0 | _ -> false
                                 if passing then schedule at (PassingStrike(actor.Name, part.Name, mult, target.Def.Name, at - w.Time)) w
                                 else schedule (if n = 1 then at else w.Time + (at - w.Time) * float i / float n) (Strike(actor.Name, part.Name, mult, target.Def.Name)) w) w) w)
                     w
@@ -2297,7 +2299,7 @@ module Sim =
                 let w = react env rng actor OnHit skill (Some target) w
                 if hit.Crit then react env rng actor OnCrit skill (Some target) w else w
 
-    let private onStrike env (rng: Rng) name skillName mult aimedAt (elapsed: float option) (w: World) =
+    let private onStrike env (rng: Rng) name skillName mult aimedAt (elapsed: float option) (direct: bool) (w: World) =
         let actor = actorDef env name
         let skill = skillOf actor skillName
         let living = alive w |> List.map (fun e -> e.Def)
@@ -2390,12 +2392,21 @@ module Sim =
                 let ctx, mods, areaMult, delivery = shape sk
                 let strike (w: World) =
                     match delivery, elapsed with
+                    | _ when direct -> (if primary.Name = aimedAt then hitEnemy env rng actor sk mult aimedAt w else w)
+                    | Projectiles p, None when p.Passing > 0.0 && p.HitInterval > 0.0 ->
+                        // what is inside the projectiles as they travel: every hit at its own time
+                        Geometry.dwellHits rng env.Fight.Walls p env.Fight.Reach areaMult primary living
+                        |> List.fold (fun w (t, target) ->
+                            if t <= 0.0 then hitEnemy env rng actor sk mult target w
+                            else schedule (w.Time + t) (DirectHit(name, skillName, mult, target)) w) w
                     | Projectiles p, Some t when p.Passing > 0.0 ->
                         // where the projectile is by now, on its way towards where it was aimed
                         let at = Vec.scale (p.Speed * t) (Vec.ofAngle (Vec.angle primary.Position))
                         living |> List.filter (Geometry.within at (Geometry.radius p.Passing areaMult)) |> List.map (fun e -> e.Name)
-                    | _ -> Geometry.targetsFrom rng env.Fight.Walls env.Fight.Reach delivery areaMult primary living
-                    |> List.fold (fun w target -> hitEnemy env rng actor sk mult target w) w
+                        |> List.fold (fun w target -> hitEnemy env rng actor sk mult target w) w
+                    | _ ->
+                        Geometry.targetsFrom rng env.Fight.Walls env.Fight.Reach delivery areaMult primary living
+                        |> List.fold (fun w target -> hitEnemy env rng actor sk mult target w) w
                 let w = strike w
                 // Aftershock: a slam has a chance to hit its area once more
                 if sk.Tags.Contains Slam && rng.Chance(Mods.sumBase ctx [ Named "AftershockChance" ] mods) then
@@ -2808,8 +2819,9 @@ module Sim =
                 | _ -> w
             match ev with
             | Ready name -> onReady env rng name w
-            | Strike (name, skill, mult, aimedAt) -> onStrike env rng name skill mult aimedAt None w
-            | PassingStrike (name, skill, mult, aimedAt, elapsed) -> onStrike env rng name skill mult aimedAt (Some elapsed) w
+            | Strike (name, skill, mult, aimedAt) -> onStrike env rng name skill mult aimedAt None false w
+            | PassingStrike (name, skill, mult, aimedAt, elapsed) -> onStrike env rng name skill mult aimedAt (Some elapsed) false w
+            | DirectHit (name, skill, mult, enemy) -> onStrike env rng name skill mult enemy None true w
             | EnemyAttack name -> enemyAttack env rng name w
             | PeriodicTick (name, periodic) -> onPeriodic env rng name periodic w
             | ManaArrives amount ->

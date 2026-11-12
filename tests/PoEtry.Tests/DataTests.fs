@@ -391,6 +391,28 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
             equal false (s.Mods |> List.exists (fun m -> match m.Stat with Convert _ -> true | _ -> false))
         | Error e -> failwith e)
 
+    test "Twister: flown at 3 m a second for 3 s; an enemy inside it is hit at most every 0.66 s" (fun () ->
+        let spear = (Items.parse db.Value "Rarity: Normal\nHardwood Spear\n--------\n").Weapon
+        match Gems.skill db.Value ModDb.empty spear { Gem = "Twister"; Level = 20; Quality = 0; StatSet = 1; Supports = [] } with
+        | Ok (s, _) ->
+            match s.Delivery with
+            | Projectiles p ->
+                equal (30.0, 90.0, 5.0, 0.66, 15.0) (p.Speed, p.Range, p.Passing, p.HitInterval, p.SpreadPerProjectile)
+                let at x size = { EnemyDef.atLevel 83 1e6 with Name = sprintf "e%.0f" x; Position = Vec.make x 0.0; Size = size }
+                // straight through a small enemy 3 m away: it arrives after (30 - 5 - 4) / 30 s and is gone before 0.66 s are over
+                let straight = { p with Wander = 0.0 }
+                let hits = Geometry.dwellHits (Rng 1u) [] straight 100.0 1.0 (at 30.0 4.0) [ at 30.0 4.0 ]
+                equal 1 hits.Length
+                near 0.726 (fst hits.Head) // on the server tick (33 ms)
+                // a large one keeps it inside for (2 x 25) / 30 s: three hits, 0.66 s apart
+                let big = Geometry.dwellHits (Rng 1u) [] straight 100.0 1.0 (at 40.0 20.0) [ at 40.0 20.0 ]
+                equal 3 big.Length
+                near 0.66 (fst big.[1] - fst big.[0])
+                // out of its 9 m reach: nothing
+                equal 0 (Geometry.dwellHits (Rng 1u) [] straight 100.0 1.0 (at 120.0 4.0) [ at 120.0 4.0 ]).Length
+            | d -> failwithf "%A" d
+        | Error e -> failwith e)
+
     test "Ice Shot: the shards spring from the enemy hit and cannot hit it" (fun () ->
         let bow = (Items.parse db.Value "Rarity: Normal\nWarmonger Bow\n--------\n").Weapon
         match Gems.skill db.Value ModDb.empty bow { Gem = "Ice Shot"; Level = 20; Quality = 0; StatSet = 1; Supports = [] } with

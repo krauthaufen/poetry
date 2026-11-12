@@ -386,6 +386,40 @@ module Geometry =
             let p = if p.RangeVariation > 0.0 then { p with Range = p.Range * (1.0 + p.RangeVariation * (2.0 * rng.Float() - 1.0)) } else p
             trace rng walls p (Vec.add origin (Vec.scale p.StartOffset dir)) dir alive)
 
+    /// Projectiles that hit what is inside them as they travel (a twister): every flight is
+    /// followed tick by tick, and an enemy inside one is hit, but by the whole volley no more
+    /// often than once per `HitInterval`. Seconds after the launch, and who.
+    let dwellHits (rng: Rng) (walls: Wall list) (p: ProjectileShape) (reach: float) (areaMult: float) (primary: EnemyDef) (alive: EnemyDef list) : (float * string) list =
+        let r = radius p.Passing areaMult
+        let tick = Constants.serverTick
+        let along (points: Vec list) =
+            // where the flight is after every tick
+            let rec walk (pts: Vec list) (carry: float) acc =
+                match pts with
+                | a :: (b :: _ as rest) ->
+                    let len = Vec.dist a b
+                    let step = p.Speed * tick
+                    let rec onLeg d acc = if d <= len then onLeg (d + step) (Vec.add a (Vec.scale (d / max 1e-9 len) (Vec.sub b a)) :: acc) else d - len, acc
+                    let carry, acc = onLeg carry acc
+                    walk rest carry acc
+                | _ -> List.rev acc
+            walk points 0.0 []
+        paths rng walls { p with Pierce = 1000 } reach primary []
+        |> List.collect (fun path -> along path.Points |> List.mapi (fun k at -> float k * tick, at))
+        |> List.sortBy fst
+        |> List.fold
+            (fun (acc, last: Map<string, float>) (t, at) ->
+                alive
+                |> List.filter (within at r)
+                |> List.fold
+                    (fun (acc, last: Map<string, float>) e ->
+                        if Map.tryFind e.Name last |> Option.exists (fun t0 -> t - t0 < p.HitInterval - 1e-9) then acc, last
+                        else (t, e.Name) :: acc, Map.add e.Name t last)
+                    (acc, last))
+            ([], Map.empty)
+        |> fst
+        |> List.rev
+
     /// Enemies hit by one use: names, each once per hit it receives.
     let targetsFrom (rng: Rng) (walls: Wall list) (reach: float) (delivery: Delivery) (areaMult: float) (primary: EnemyDef) (alive: EnemyDef list) : string list =
         match delivery with

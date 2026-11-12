@@ -670,27 +670,37 @@ module Gems =
                         // "travel erratically along the ground": they stray within
                         // "spark_pathing_width_bounds", as far as speed x lifetime takes them, in a
                         // fan that widens with their number
-                        Wander = statOf "spark_pathing_width_bounds" |> Option.defaultValue 0.0
+                        Wander = statOf "spark_pathing_width_bounds" |> Option.defaultValue (if (statOf "twister_base_movement_speed").IsSome then Constants.twisterWander else 0.0)
                         Bounces = flagOf "spark_projectile_bounces_off_walls"
                         Speed =
                             (if (statOf "spark_pathing_width_bounds").IsSome then Map.tryFind data.Name Constants.erraticProjectileSpeed |> Option.defaultValue 0.0
-                             else Map.tryFind data.Name Constants.passingProjectileSpeed |> Option.defaultValue 0.0)
+                             else
+                                 // a twister's own speed ("twister_base_movement_speed", units per second)
+                                 statOf "twister_base_movement_speed"
+                                 |> Option.orElse (Map.tryFind data.Name Constants.passingProjectileSpeed)
+                                 |> Option.defaultValue 0.0)
                         // "The Projectile itself does not Hit enemies, but repeatedly discharges bolts
                         // of Lightning at nearby enemies": within the skill's radius of where it is
-                        Passing = (if (Map.containsKey data.Name Constants.passingProjectileSpeed) && set.Label = data.Name then radius |> Option.defaultValue 0.0 else 0.0)
+                        // "repeatedly Hitting enemies within": what is inside the twister as it moves
+                        Passing =
+                            (if (Map.containsKey data.Name Constants.passingProjectileSpeed && set.Label = data.Name) || (statOf "twister_base_movement_speed").IsSome
+                             then radius |> Option.defaultValue 0.0 else 0.0)
                         Range =
                             (match statOf "spark_pathing_width_bounds", Map.tryFind data.Name Constants.erraticProjectileSpeed, statOf "base_skill_effect_duration" with
                              | Some _, Some speed, Some ms -> speed * ms / 1000.0
+                             | _ when (statOf "twister_base_movement_speed").IsSome ->
+                                 // it lives for its duration and gets as far as its speed takes it
+                                 (statOf "twister_base_movement_speed").Value * (statOf "base_skill_effect_duration" |> Option.defaultValue 0.0) / 1000.0
                              | _ ->
                                  // shards that live for a fixed time fly as far as their speed takes them
                                  match (if behind then Map.tryFind data.Name Constants.timedProjectiles else None) with
                                  | Some (speed, life) -> speed * life
                                  | None -> (ProjectileShape.make 1).Range)
                         RangeVariation = (if behind then (statOf "active_skill_projectile_speed_+%_variation_final" |> Option.defaultValue 0.0) / 100.0 else 0.0)
-                        SpreadPerProjectile = (if (statOf "spark_pathing_width_bounds").IsSome then Constants.erraticFanStep else 0.0)
+                        SpreadPerProjectile = (if (statOf "spark_pathing_width_bounds").IsSome then Constants.erraticFanStep else statOf "minimum_per_projectile_spread_angle_degrees" |> Option.defaultValue 0.0)
                         // "can Hit the same target no more than once every N seconds"; a rain: "Can Hit
                         // each enemy only once every N seconds", one arrow every so often
-                        HitInterval = ((statOf "spark_min_time_between_target_clearing_ms" |> Option.defaultValue 0.0) + (statOf "rain_hit_delay_ms" |> Option.defaultValue 0.0)) / 1000.0
+                        HitInterval = ((statOf "spark_min_time_between_target_clearing_ms" |> Option.defaultValue 0.0) + (statOf "rain_hit_delay_ms" |> Option.defaultValue 0.0) + (statOf "twister_hit_interval_ms" |> Option.defaultValue 0.0)) / 1000.0
                         Every = (statOf "rain_of_arrows_delay_per_arrow" |> Option.defaultValue 0.0) / 1000.0
                         Spread = (if flagAny "projectiles_nova" then 360.0 elif flagOf "projectiles_barrage" then 0.0 else (statOf "total_projectile_spread_angle_override" |> Option.map (fun v -> v * Constants.spreadOverrideDegrees) |> Option.defaultValue 30.0))
                         Pierce = (if flagOf "always_pierce" then 100 else int (statOf "projectile_base_number_of_targets_to_pierce" |> Option.defaultValue 0.0))

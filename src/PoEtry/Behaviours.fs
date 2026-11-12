@@ -1342,6 +1342,8 @@ module Behaviours =
     /// "..._number_of_pulses", else duration / interval.
     let sustained (db: GameDb) (charMods: ModDb) (setup: GemSetup) (skill: Skill) : ((HitTiming * float) list * Rule list) option =
         match Gems.data db setup.Gem with
+        // (a projectile that is flown and hits what is inside it works its hits out itself)
+        | Some _ when (match skill.Delivery with Projectiles p -> p.Passing > 0.0 && p.HitInterval > 0.0 | _ -> false) -> None
         | Some d when d.Types.Contains "Sustained" || (Gems.rawStats db charMods { setup with Supports = [] } |> List.exists (fun (k, v) -> k.EndsWith "_hit_interval_ms" && v > 0.0)) ->
             // a projectile that keeps hitting what it stays on (Twister: "..._hit_interval_ms" for
             // its duration) is used again and again; a Sustained effect stands and isn't recast
