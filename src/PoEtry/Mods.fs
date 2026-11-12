@@ -161,18 +161,184 @@ module Mod =
         else
             None
 
-/// Mods indexed by stat, so a query only looks at the mods that can matter.
-type ModDb = Map<Stat, Mod list>
+/// A stat as a key: a small number for the stats that are cases of their own, a text for the
+/// ones named by a string. (An ordered map keyed by the stat itself compares stats
+/// structurally at every step of every lookup, which was a quarter of a fight's time.)
+module StatKey =
+    let private damageType (t: DamageType) =
+        match t with
+        | Physical -> 0
+        | Lightning -> 1
+        | Cold -> 2
+        | Fire -> 3
+        | Chaos -> 4
+
+    let private scope (s: DamageScope) =
+        match s with
+        | AllDamage -> 0
+        | Elemental -> 1
+        | OfType t -> 2 + damageType t
+
+    let private ailment (a: Ailment) =
+        match a with
+        | Ignite -> 0
+        | Bleed -> 1
+        | Poison -> 2
+        | Shock -> 3
+        | Chill -> 4
+        | Freeze -> 5
+        | Electrocute -> 6
+        | HeavyStun -> 7
+        | Pin -> 8
+        | Daze -> 9
+        | Maim -> 10
+        | Blind -> 11
+        | Hinder -> 12
+
+    let private ailmentOption (a: Ailment option) =
+        match a with
+        | None -> 0
+        | Some a -> 1 + ailment a
+
+    /// The stat's number, or -1 for one that is known by its text (`name`).
+    let rec code (s: Stat) : int =
+        match s with
+        | Named _ | Attribute _ -> -1
+        | ForMinions inner -> (let c = code inner in if c < 0 then -1 else 1000 + c)
+        | Damage sc -> scope sc
+        | AddedMin t -> 10 + damageType t
+        | AddedMax t -> 20 + damageType t
+        | AddedDamageEffect -> 30
+        | LuckyDamage -> 31
+        | CritChance -> 32
+        | CritBonus -> 33
+        | HitChance -> 34
+        | DoubleDamageChance -> 35
+        | AreaOfEffect -> 36
+        | AdditionalProjectiles -> 37
+        | Pierce -> 38
+        | Chains -> 39
+        | Penetration t -> 40 + damageType t
+        | Speed -> 50
+        | CooldownRecovery -> 51
+        | SkillDuration -> 52
+        | DotTaken -> 53
+        | Armour -> 54
+        | PhysicalReduction -> 55
+        | AilmentThreshold -> 56
+        | PoiseThreshold -> 57
+        | MaxLife -> 58
+        | MaxMana -> 59
+        | Resist t -> 60 + damageType t
+        | MaxResist t -> 70 + damageType t
+        | DamageTaken sc -> 80 + scope sc
+        | MaxEnergyShield -> 90
+        | Evasion -> 91
+        | Deflection -> 92
+        | LifeRegen -> 93
+        | LifeRegenPercent -> 94
+        | ManaRegen -> 95
+        | ManaCostEfficiency -> 96
+        | ManaCost -> 97
+        | ManaOnKill -> 98
+        | ManaLeech -> 99
+        | SkillConvert (f, i) -> 100 + damageType f * 5 + damageType i
+        | Convert (f, i) -> 130 + damageType f * 5 + damageType i
+        | GainAs (f, i) -> 160 + damageType f * 5 + damageType i
+        | AilmentChance a -> 200 + ailment a
+        | AilmentMagnitude a -> 220 + ailmentOption a
+        | AilmentDuration a -> 240 + ailmentOption a
+        | AilmentStacks a -> 260 + ailment a
+        | Buildup a -> 280 + ailment a
+
+    /// The text of a stat without a number.
+    let rec name (s: Stat) : string =
+        match s with
+        | Named n -> n
+        | Attribute a -> "\u0001" + a
+        | ForMinions inner -> "\u0002" + name inner
+        | _ -> ""
+
+/// A mod with its stat's key (in the part of a db that is not indexed yet).
+type KeyedMod = { Code: int; Name: string; Mod: Mod }
+
+/// Mods indexed by stat, so a query only looks at the mods that can matter. The index is
+/// built once and never changed; mods added later lie in a short list before it (`Recent`,
+/// newest first), which is folded into a new index once it grows. `Order` is every mod,
+/// newest first. Two dbs are equal when they hold the same mods in the same order.
+[<CustomEquality; NoComparison>]
+type ModDb =
+    { Coded: System.Collections.Generic.Dictionary<int, Mod list>
+      Names: System.Collections.Generic.Dictionary<string, Mod list>
+      Recent: KeyedMod list
+      RecentCount: int
+      Order: Mod list }
+    override this.Equals(other: obj) =
+        match other with
+        | :? ModDb as o -> this.Order = o.Order
+        | _ -> false
+    override this.GetHashCode() = List.length this.Order
 
 module ModDb =
-    let empty: ModDb = Map.empty
+    /// The index of these mods (newest first).
+    let private index (order: Mod list) : ModDb =
+        let coded = System.Collections.Generic.Dictionary<int, Mod list>()
+        let names = System.Collections.Generic.Dictionary<string, Mod list>()
+        // oldest first, each put before the ones of its stat: newest first per stat
+        for m in List.rev order do
+            let c = StatKey.code m.Stat
+            if c >= 0 then
+                match coded.TryGetValue c with
+                | true, ms -> coded.[c] <- m :: ms
+                | _ -> coded.[c] <- [ m ]
+            else
+                let n = StatKey.name m.Stat
+                match names.TryGetValue n with
+                | true, ms -> names.[n] <- m :: ms
+                | _ -> names.[n] <- [ m ]
+        { Coded = coded; Names = names; Recent = []; RecentCount = 0; Order = order }
+
+    let empty: ModDb = index []
 
     let add (db: ModDb) (m: Mod) : ModDb =
-        Map.add m.Stat (m :: (Map.tryFind m.Stat db |> Option.defaultValue [])) db
+        if db.RecentCount >= 16 then index (m :: db.Order)
+        else
+            let c = StatKey.code m.Stat
+            { db with
+                Recent = { Code = c; Name = (if c < 0 then StatKey.name m.Stat else ""); Mod = m } :: db.Recent
+                RecentCount = db.RecentCount + 1
+                Order = m :: db.Order }
 
-    let addList (mods: Mod list) (db: ModDb) = List.fold add db mods
+    let addList (mods: Mod list) (db: ModDb) =
+        match mods with
+        | [] -> db
+        | _ when db.RecentCount + List.length mods > 16 -> index (List.fold (fun order m -> m :: order) db.Order mods)
+        | _ -> List.fold add db mods
+
     let ofList (mods: Mod list) = addList mods empty
-    let toList (db: ModDb) = db |> Map.toList |> List.collect snd
+
+    /// Every mod, stat by stat (in the stats' own order), the newest of a stat first.
+    let toList (db: ModDb) = db.Order |> List.sortWith (fun a b -> compare a.Stat b.Stat)
+
+    /// Whether any mod is of a stat like this.
+    let hasStat (pred: Stat -> bool) (db: ModDb) = db.Order |> List.exists (fun m -> pred m.Stat)
+
+    /// The mods of a stat, newest first, each given to `f`.
+    let inline forStat (stat: Stat) (db: ModDb) ([<InlineIfLambda>] f: Mod -> unit) =
+        let c = StatKey.code stat
+        if c >= 0 then
+            for k in db.Recent do
+                if k.Code = c then f k.Mod
+            match db.Coded.TryGetValue c with
+            | true, ms -> for m in ms do f m
+            | _ -> ()
+        else
+            let n = StatKey.name stat
+            for k in db.Recent do
+                if k.Code < 0 && k.Name = n then f k.Mod
+            match db.Names.TryGetValue n with
+            | true, ms -> for m in ms do f m
+            | _ -> ()
 
 /// Queries over a mod db, PoE style:
 ///   total = base * (1 + sum increased / 100) * product (1 + more / 100)
@@ -180,14 +346,11 @@ module Mods =
     let private fold ctx kind stats (db: ModDb) f init =
         let mutable acc = init
         for stat in stats do
-            match Map.tryFind stat db with
-            | Some ms ->
-                for m in ms do
-                    if m.Kind = kind then
-                        match Mod.eval ctx m with
-                        | Some v -> acc <- f acc v
-                        | None -> ()
-            | None -> ()
+            ModDb.forStat stat db (fun m ->
+                if m.Kind = kind then
+                    match Mod.eval ctx m with
+                    | Some v -> acc <- f acc v
+                    | None -> ())
         acc
 
     let sumBase ctx stats db = fold ctx Base stats db (+) 0.0

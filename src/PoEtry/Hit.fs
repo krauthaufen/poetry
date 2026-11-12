@@ -205,7 +205,7 @@ module Hit =
         let total = raw |> List.sumBy snd
         if total > 1.0 then raw |> List.map (fun (t, v) -> t, v / total) else raw
 
-    let private hasAny pred (db: ModDb) = db |> Map.exists (fun stat _ -> pred stat)
+    let private hasAny pred (db: ModDb) = ModDb.hasStat pred db
 
     /// Push base damage through conversion: the skill's own first, then everything else on
     /// the result. Within a step every type converts at once, in any direction, and what
