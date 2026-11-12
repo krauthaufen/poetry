@@ -903,6 +903,24 @@ module Gems =
                         let p, c = buildSet alt data s (data.Name + ": " + s.Label) tags level quality supportStats weapon shield
                         { p with Consumes = None }, c)
                     |> List.unzip
+                // "Channelling this Skill for longer makes the initial eruption more violent": the
+                // eruption's own spray has so many more projectiles per stage after the first
+                let parts =
+                    let own = statsWith alt data set level quality
+                    let pick (ending: string) = own |> List.tryPick (fun (k, v) -> if k.EndsWith ending then Some v else None)
+                    match pick "_initial_explosion_number_of_additional_projectiles_per_additional_stage", pick "_maximum_number_of_stages" with
+                    | Some per, Some stages when per > 0.0 && stages > 1.0 ->
+                        parts
+                        |> List.collect (fun (part: Skill) ->
+                            match part.Delivery with
+                            | Projectiles shape when shape.Rain.IsSome ->
+                                [ part
+                                  { part with
+                                      Name = data.Name + ": Eruption " + part.Name.Substring(data.Name.Length + 2)
+                                      Delivery = Projectiles { shape with Count = int (per * (stages - 1.0)) }
+                                      Mods = Mod.flag (Named "OncePerUse") :: part.Mods } ]
+                            | _ -> [ part ])
+                    | _ -> parts
                 let cov = List.fold Coverage.merge cov (supportCov @ partCov)
                 // supports multiply the cost: "Cost Multiplier 130%" is manaMultiplier 30
                 let costMult =

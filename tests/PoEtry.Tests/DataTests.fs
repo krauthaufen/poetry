@@ -438,6 +438,12 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
             match (s.Parts |> List.find (fun p -> p.Name.EndsWith "Projectiles")).Delivery with
             | Projectiles p -> equal (Some(30.0, 6.0)) p.Rain
             | _ -> failwith "the sprays are projectiles"
+            // the eruption's own spray: 4 more projectiles for each of the 3 stages after the first, once
+            let first = s.Parts |> List.find (fun p -> p.Name = "Volcano: Eruption Projectiles")
+            equal true (first.Mods |> List.exists (fun m -> m.Stat = Named "OncePerUse"))
+            match first.Delivery with
+            | Projectiles p -> equal 12 p.Count
+            | _ -> failwith "the eruption's spray is projectiles"
         | Error e -> failwith e)
 
     test "Charge Regulation's buffs hold while a charge of the kind is held; Arc's infused form" (fun () ->
