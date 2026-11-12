@@ -221,6 +221,33 @@ module Geometry =
         | Nearest -> alive |> List.sortBy (fun e -> Vec.length e.Position) |> List.tryHead
         | Strongest -> alive |> List.sortBy (fun e -> -(Rarity.rank e.Rarity), Vec.length e.Position) |> List.tryHead
 
+    /// Which melee minions find room at an enemy of this radius. Each is a body of some radius
+    /// (MonsterVarieties ObjectSize) with an attack that reaches so far from its centre. They
+    /// stand in rings around the enemy: in ring j a minion's centre is (2j + 1) of its radii
+    /// from the enemy's edge, where it takes up the angle its body covers from there; a ring
+    /// is too far out for it once that distance is more than its reach. In the order given,
+    /// each takes the innermost ring that has the angle left.
+    let meleePlaces (enemyRadius: float) (minions: (float * float) list) : bool list =
+        let place (used: Map<int, float>) (radius: float, reach: float) =
+            let radius = max 0.1 radius
+            let rec ring j =
+                if float (2 * j + 1) * radius > reach && j > 0 then None
+                else
+                    let d = enemyRadius + radius * float (2 * j + 1)
+                    let angle = 2.0 * asin (min 1.0 (radius / d))
+                    let taken = Map.tryFind j used |> Option.defaultValue 0.0
+                    if taken + angle <= 2.0 * System.Math.PI + 1e-9 then Some(j, taken + angle) else ring (j + 1)
+            ring 0
+        minions
+        |> List.fold
+            (fun (used, acc) m ->
+                match place used m with
+                | Some (j, taken) -> Map.add j taken used, true :: acc
+                | None -> used, false :: acc)
+            (Map.empty, [])
+        |> snd
+        |> List.rev
+
     let within center radius (e: EnemyDef) = Vec.dist center e.Position <= radius + e.Size
 
     /// Distance along a ray from `origin` in direction `dir` (unit) at which it enters

@@ -277,6 +277,10 @@ type MinionBody =
       Resist: Map<DamageType, float>
       /// It fights at the monster (true) or from where the player stands.
       Melee: bool
+      /// Its body's radius and how far its attack reaches, game units (for the room melee
+      /// minions need around an enemy).
+      Size: float
+      Reach: float
       /// Seconds until a killed minion is revived (counted from the last death, see the
       /// engine); None: it is gone for good.
       Revive: float option
@@ -1909,6 +1913,18 @@ module Sim =
             schedule next (Ready name) w
 
     /// The actor is free to act; a stunned or frozen player waits.
+    /// Has this melee minion no room at the enemy aimed at? The melee minions in the fight
+    /// take their places in order (see Geometry.meleePlaces).
+    let private crowdedOut env name (w: World) =
+        match (actorDef env name).Body, aimed env w with
+        | Some body, Some enemy when body.Melee ->
+            let melee =
+                env.Fight.Minions
+                |> List.filter (fun m -> (m.Body |> Option.exists (fun b -> b.Melee)) && not (Map.find m.Name w.Actors).Gone)
+            let places = Geometry.meleePlaces enemy.Def.Size (melee |> List.map (fun m -> m.Body.Value.Size, m.Body.Value.Reach))
+            List.zip melee places |> List.exists (fun (m, has) -> m.Name = name && not has)
+        | _ -> false
+
     let private onReady env rng name (w: World) =
         let actor = actorDef env name
         let standing =
@@ -1919,6 +1935,8 @@ module Sim =
         | Some p when name = env.Fight.Player.Name && p.LockedUntil > w.Time -> schedule p.LockedUntil (Ready name) w
         // a totem that isn't placed waits
         | _ when not standing -> schedule (w.Time + 0.1) (Ready name) w
+        // a melee minion that finds no room at the enemy waits for some
+        | _ when crowdedOut env name w -> schedule (w.Time + Constants.crowdedWait) (Ready name) { w with Counts = bump "minion:no room" w.Counts }
         | _ -> onReadyUnlocked env rng name w
 
     /// Statuses the game tracks for "recently" conditions: (name, seconds).

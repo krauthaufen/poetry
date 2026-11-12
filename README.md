@@ -49,7 +49,7 @@ Setup.fight character options player (Encounter.boss 83 Rarity.defaults 30.0)
 
 | Step | Where | What |
 |---|---|---|
-| Game data | `tools/export/export.lua` → `data/game/*.json` | skills and gems per level, item bases, affixes, the passive tree, monsters, stat description templates: exported from the data files PoB-PoE2 extracts from the game. PoB's own parser and calculations are not used |
+| Game data | `tools/export/export.lua` → `data/game/*.json` | skills and gems per level, item bases, affixes, the passive tree, monsters, stat description templates: exported from the data files PoB-PoE2 extracts from the game. PoB's own parser and calculations are not used. `tools/export/minion_sizes.py` adds the minions' body sizes from the game's monster table |
 | Text → stat ids | `StatText.fs` | item and passive text is matched against the game's own description templates, reversed |
 | Stat ids → modifiers | `StatMap.fs` | read word by word; an unknown word makes the stat *unmapped*, never guessed |
 | Gems → skills | `Gems.fs`, `Behaviours.fs` | gem level data, supports, weapon; what a skill does besides hitting (energy, remnants, buffs, curses, totems, ammunition, stages) from its stats |

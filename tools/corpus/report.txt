@@ -638,7 +638,7 @@
 100-ritualist-profane-ritual                         Profane Ritual                                      0 dps (theirs        264)  0 unknown, 2 unmapped, 16 unsimulated
 101-shaman-grim-pillars                              Grim Pillars (pressed Raise Shield)           2579808 dps (theirs    2526742)  0 unknown, 8 unmapped, 26 unsimulated
 102-smith-of-kitava-molten-crash                     Molten Crash                                   101275 dps (theirs      75177)  0 unknown, 10 unmapped, 33 unsimulated  chaos res 78/70
-103-spirit-walker-companion-mighty-silverfist        Mace Strike                                  48357041 dps (theirs          0)  0 unknown, 7 unmapped, 12 unsimulated  energy shield 1168/1088  fire res 77/61  cold res 82/66  lightning res 92/64
+103-spirit-walker-companion-mighty-silverfist        Mace Strike                                  47047263 dps (theirs          0)  0 unknown, 7 unmapped, 12 unsimulated  energy shield 1168/1088  fire res 77/61  cold res 82/66  lightning res 92/64
 104-stormweaver-arc                                  Arc (pressed Spark)                           1299338 dps (theirs     199048)  0 unknown, 8 unmapped, 15 unsimulated
 105-tactician-soaring-midnight                       Soaring Midnight                                  455 dps (theirs        972)  0 unknown, 6 unmapped, 27 unsimulated  armour 149612/215635  deflection 29922/43127  lightning res -179/-200
 106-titan-thunderstorm                               Thunderstorm                                      115 dps (theirs         38)  0 unknown, 9 unmapped, 31 unsimulated  life 9565/9274

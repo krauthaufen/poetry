@@ -79,7 +79,10 @@ type MinionData =
       Evasion: float
       Resist: Map<DamageType, float>
       /// It fights from a distance (tagged ranged or caster and not melee).
-      Ranged: bool }
+      Ranged: bool
+      /// MonsterVarieties ObjectSize (its body's radius) and its attack range, game units.
+      ObjectSize: float
+      AttackRange: float }
 
 type GemData =
     { GameId: string
@@ -183,7 +186,9 @@ module GameData =
                   Resist = Map.ofList [ Fire, num "fireResist" 0.0; Cold, num "coldResist" 0.0; Lightning, num "lightningResist" 0.0; Chaos, num "chaosResist" 0.0 ]
                   Ranged =
                     (let tags = Json.list (Json.field "monsterTags" j) |> List.choose Json.str
-                     not (List.contains "melee" tags) && (List.contains "ranged" tags || List.contains "caster" tags)) })
+                     not (List.contains "melee" tags) && (List.contains "ranged" tags || List.contains "caster" tags))
+                  ObjectSize = num "objectSize" 1.0
+                  AttackRange = num "attackRange" 10.0 })
         | _ -> Map.empty
 
     /// skills.json: grantedEffectId -> skill.

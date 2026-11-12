@@ -18,7 +18,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
    whose description or behaviour changed.
 5. Go through the lists below; the wiki's version history of a skill says what changed.
 
-## Rules (91)
+## Rules (92)
 
 ### Hit damage
 
@@ -85,6 +85,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | The same minion gem twice | PoB lists both; that the tree's and the gem's are one is a guess | guess |
 | Count | 1 per gem, or the gem's pack size; how many a build reserves spirit for is unknown from the API | | guess, usually too low |
 | Who a monster attacks | monster tags are data; who is attacked is not known | guess |
+| Room for melee minions | sizes and ranges: game data (the wolves' collision size was lowered to the other minions' in 0.4.0c). The rings, measuring the range from the minion's centre, and the order are a guess. Getting stuck on the way (terrain, other monsters) is not modelled | data; guess |
 | Temporary minions | game data; renewing the oldest is a guess | data; guess |
 | Playing summoning skills | beside the main skill, a skill that raises temporary minions is used while fewer than its limit are out (Unearth: and there is a corpse or dead minion) | | guess |
 | Totems | gem data | data; the simplifications are guesses |
@@ -156,10 +157,11 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 |---|---|---|
 | Ward remnants | data; overflow: user | data + user + guess |
 
-## Constants (6)
+## Constants (7)
 
 | Constant | Value | What it stands for |
 |---|---|---|
+| `crowdedWait` | `0.25` | A melee minion without room at the enemy looks again after this long. A guess. |
 | `playerLightStunDuration` | `0.35` | Seconds a light stun interrupts the player. GUESS (no player constant in the data). |
 | `orbPulseInterval` | `0.25` | Seconds between the pulses of a Frost Bomb (its exposure grows with each): not in the data; 0.25 s lets one bomb reach its cap just as it detonates. A guess. |
 | `iceCrystalWidth` | `8.0` | Width (units) of one Ice Crystal of a wall: a wall has one per so much of its length (Frost Wall, 5.6 m: seven). Not in the data. A guess. |

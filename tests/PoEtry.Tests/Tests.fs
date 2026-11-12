@@ -842,7 +842,7 @@ let main _ =
 
     // ---- minions that can be killed ----
     let body life revive =
-        { Life = life; EnergyShield = 0.0; Armour = 0.0; Evasion = 0.0; Resist = Map.empty; Melee = true; Revive = revive; Power = 0.55; LifeRegen = 0.0 }
+        { Life = life; EnergyShield = 0.0; Armour = 0.0; Evasion = 0.0; Resist = Map.empty; Melee = true; Size = 1.0; Reach = 12.0; Revive = revive; Power = 0.55; LifeRegen = 0.0 }
 
     test "minions: a monster kills a minion, it is revived after its revive time and killed again" (fun () ->
         // the player can't be hurt, so every attack (60 a second) goes at the skeleton with 100
@@ -889,6 +889,20 @@ let main _ =
         let o = Sim.run { Fight.single (attacker Physical 60.0 1.0) player 20.0 with MaxTime = 20.0; Minions = [ skeleton ] } 1u
         equal 4 o.Counts.["minion:died"]
         equal 2 o.Counts.["trigger:Nova"])
+
+    test "minions: room around an enemy; big melee minions crowd each other out, small ones don't" (fun () ->
+        // skeletons (radius 1, reach 12) around a monster of radius 4: thirty find room
+        equal 30 (Geometry.meleePlaces 4.0 [ for _ in 1 .. 30 -> 1.0, 12.0 ] |> List.filter id |> List.length)
+        // big beasts (radius 6, reach 16): at 10 from its centre each covers 2 asin 0.6 = 73.7 degrees,
+        // four fit; the next ring would be 18 from its edge, out of reach
+        equal [ true; true; true; true; false; false ] (Geometry.meleePlaces 4.0 [ for _ in 1 .. 6 -> 6.0, 16.0 ])
+        // around a boss of radius 10 (16 away, 44 degrees each): eight
+        equal 8 (Geometry.meleePlaces 10.0 [ for _ in 1 .. 12 -> 6.0, 16.0 ] |> List.filter id |> List.length)
+        // those without room don't attack: six bite, of which four have room
+        let beast i = { Actor.make (sprintf "Beast %d" i) [ noIgnite; sure ] [ strike "Bite" 100.0 ] with Body = Some { body 1e9 None with Size = 6.0; Reach = 16.0 } }
+        let small = { boss 1e12 with Size = 4.0 }
+        let o = Sim.run { Fight.single small (Actor.make "Player" [ noIgnite ] [ idle ]) 5.5 with MaxTime = 5.5; Minions = [ for i in 1 .. 6 -> beast i ] } 1u
+        near (4.0 * 5.0 * 100.0) o.DamageBy.["Bite (hit)"])
 
     test "minions: temporary ones are out until summoned, last their duration, and are summoned anew when all are out" (fun () ->
         let call cd = { Skill.make "Call" [ Spell ] with Hits = []; Cooldown = Some cd }

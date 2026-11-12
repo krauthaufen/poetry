@@ -114,6 +114,8 @@ module Constants =
     /// brought up to a minion's and then 25% more ("server side mod added in 0.3", PoB
     /// SpectreBeastDamageFixup; not in the data).
     let spectreDamageFixup = 1.25
+    /// A melee minion without room at the enemy looks again after this long. A guess.
+    let crowdedWait = 0.25
     /// Seconds until killed minions are revived when the gem does not say: Character.ot
     /// global_resummon_time_ms = 7500 (PoB Misc.lua characterConstants; the 7.5 s of the
     /// 0.2.0e patch notes). The minion gems carry their own minion_base_resummon_time_ms

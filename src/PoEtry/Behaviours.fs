@@ -1280,6 +1280,8 @@ module Behaviours =
                 t, min (75.0 + Mods.sumBase ctx [ MaxResist t ] db) (own + Mods.sumBase ctx [ Resist t ] db))
             |> Map.ofList
           Melee = not m.Ranged
+          Size = m.ObjectSize
+          Reach = m.AttackRange
           Revive = revive |> Option.map (fun s -> s / Mods.inc ctx [ Named "MinionReviveSpeed" ] db)
           Power = m.Life
           LifeRegen = life * Mods.sumBase ctx [ LifeRegenPercent ] db / 100.0 }
