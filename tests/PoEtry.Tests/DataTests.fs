@@ -441,7 +441,7 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         // minion life has 4760 life and 452 energy shield (MinionLife at 62 is 5682, x 0.53,
         // 15% of it as energy shield), 1692 armour and 619 evasion (a monster's of its level)
         let mage = db.Value.Minions.["RaisedSkeletonFrostMage"]
-        let b = Behaviours.minionBody mage 62 [ Mod.inc MaxLife 86.0; Mod.base' (Resist Fire) 90.0 ] (Some 12.0)
+        let b = Behaviours.minionBody Ctx.empty mage 62 [ Mod.inc MaxLife 86.0; Mod.base' (Resist Fire) 90.0 ] (Some 12.0)
         near 4760.0 (floor b.Life)
         near 452.0 (round b.EnergyShield)
         near 1692.0 b.Armour
@@ -451,7 +451,7 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         near 75.0 b.Resist.[Fire]
         near 0.53 b.Power
         // "Minions Revive 50% faster"
-        near 8.0 (Behaviours.minionBody mage 62 [ Mod.inc (Named "MinionReviveSpeed") 50.0 ] (Some 12.0)).Revive.Value
+        near 8.0 (Behaviours.minionBody Ctx.empty mage 62 [ Mod.inc (Named "MinionReviveSpeed") 50.0 ] (Some 12.0)).Revive.Value
         // what the stats mean
         let mods id v = match StatMap.meaning id v with Mods ms -> ms | m -> failwithf "%s -> %A" id m
         equal (box [ { Mod.inc MaxLife 20.0 with Stat = ForMinions MaxLife } ]) (box (mods "minion_maximum_life_+%" 20.0))

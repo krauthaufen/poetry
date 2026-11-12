@@ -1258,13 +1258,13 @@ module Behaviours =
     /// life multiplier, a share of it as energy shield instead; armour and evasion of a
     /// monster of its level x the monster's multipliers; its resistances. "Minions have ..."
     /// mods of the owner apply. Resistances are capped at 75% plus what raises the maximum.
-    let minionBody (m: MinionData) (level: int) (minionMods: Mod list) (revive: float option) : MinionBody =
+    let minionBody (ctx: Ctx) (m: MinionData) (level: int) (minionMods: Mod list) (revive: float option) : MinionBody =
         let db = ModDb.ofList minionMods
-        let mult stat = Mods.mult Ctx.empty [ stat ] db
+        let mult stat = Mods.mult ctx [ stat ] db
         let baseLife = floor (Constants.allyLife level * m.Life)
         let life = baseLife * (1.0 - m.EnergyShield) * mult MaxLife
         { Life = life
-          EnergyShield = baseLife * m.EnergyShield * mult MaxEnergyShield + life * Mods.sumBase Ctx.empty [ Named "LifeAsExtraEnergyShield" ] db / 100.0
+          EnergyShield = baseLife * m.EnergyShield * mult MaxEnergyShield + life * Mods.sumBase ctx [ Named "LifeAsExtraEnergyShield" ] db / 100.0
           Armour = Constants.monsterArmour level * m.Armour * mult Armour
           Evasion = Constants.monsterEvasion level * m.Evasion * mult Evasion
           Resist =
@@ -1272,12 +1272,12 @@ module Behaviours =
             |> List.filter (fun t -> t <> Physical)
             |> List.map (fun t ->
                 let own = Map.tryFind t m.Resist |> Option.defaultValue 0.0
-                t, min (75.0 + Mods.sumBase Ctx.empty [ MaxResist t ] db) (own + Mods.sumBase Ctx.empty [ Resist t ] db))
+                t, min (75.0 + Mods.sumBase ctx [ MaxResist t ] db) (own + Mods.sumBase ctx [ Resist t ] db))
             |> Map.ofList
           Melee = not m.Ranged
-          Revive = revive |> Option.map (fun s -> s / Mods.inc Ctx.empty [ Named "MinionReviveSpeed" ] db)
+          Revive = revive |> Option.map (fun s -> s / Mods.inc ctx [ Named "MinionReviveSpeed" ] db)
           Power = m.Life
-          LifeRegen = life * Mods.sumBase Ctx.empty [ LifeRegenPercent ] db / 100.0 }
+          LifeRegen = life * Mods.sumBase ctx [ LifeRegenPercent ] db / 100.0 }
 
     /// How many of a gem's temporary minions can be out at once (its limit stat).
     let summonLimit (raw: (string * float) list) : int option =
@@ -1368,14 +1368,28 @@ module Behaviours =
                 | m :: _ ->
                     let raw = gemRaw gem
                     let limit = summonLimit raw
+                    let companion = gem.Name.StartsWith "Companion: " || (data |> Option.exists (fun d -> d.Types.Contains "Companion"))
+                    // what its body has is read as a companion's ("Companions have ...")
+                    let bodyCtx = if companion then { Ctx.empty with SkillTags = Set.ofList [ Tag "Companion" ] } else Ctx.empty
                     let level = levelOf gem.Name gem.Level
                     let weapon, fixup = minionWeapon m level byName.IsSome
                     let minionMods = if fixup = 1.0 then minionMods else Mod.more (Damage AllDamage) ((fixup - 1.0) * 100.0) :: minionMods
+                    let targetsAlly sid =
+                        Map.tryFind sid db.Skills
+                        |> Option.exists (fun d -> d.StatSets |> List.exists (fun set -> set.Stats |> List.contains "command_minion_target_ally_below_x_life"))
                     let skills =
                         m.SkillList
                         |> List.choose (fun sid ->
                             match Gems.minionSkill db charMods (Some weapon) sid (float level) supports with
-                            | Ok (s, _) when not s.BaseDamage.IsEmpty -> Some { s with Name = m.Name + ": " + s.Name; Cost = 0.0 }
+                            // (a command that blows up another minion is not something to do all the time)
+                            | Ok (s, _) when not s.BaseDamage.IsEmpty && not (targetsAlly sid) ->
+                                // a Command skill (is_commandable_skill), a companion's skill
+                                let command =
+                                    Map.tryFind sid db.Skills
+                                    |> Option.exists (fun d -> d.StatSets |> List.exists (fun set -> set.Stats |> List.contains "is_commandable_skill"))
+                                let extra = (if command then [ Tag "Command" ] else []) @ (if companion then [ Tag "Companion" ] else [])
+                                let tag (x: Skill) = { x with Tags = extra |> List.fold (fun ts tg -> Set.add tg ts) x.Tags }
+                                Some { tag s with Name = m.Name + ": " + s.Name; Cost = 0.0; Parts = s.Parts |> List.map tag }
                             | _ -> None)
                     let estimate (s: Skill) =
                         (s.BaseDamage |> Map.toList |> List.sumBy (fun (_, r) -> (r.Min + r.Max) / 2.0)) * s.BaseMultiplier / max 0.05 s.BaseTime
@@ -1399,7 +1413,7 @@ module Behaviours =
                         let untouchable =
                             data |> Option.exists (fun d ->
                                 d.Types.Contains "MinionsAreUndamagable" || d.Description.Contains "untargetable" || d.Description.Contains "not directly engage")
-                        let body = if untouchable then None else Some(minionBody m level minionMods None)
+                        let body = if untouchable then None else Some(minionBody bodyCtx m level minionMods None)
                         let most = most + int (Mods.sumBase Ctx.empty [ Named "TemporaryMinionLimit" ] (ModDb.ofList minionMods))
                         [ for i in 1 .. most -> { Actor.make (sprintf "%s %d" m.Name i) minionMods ordered with Body = body; Pool = Some gem.Name } ],
                         (if summonedBy raw then [] else [ sprintf "%s: what summons its minions is not simulated" gem.Name ])
@@ -1409,7 +1423,7 @@ module Behaviours =
                             raw
                             |> List.tryPick (fun (k, v) -> if k = "minion_base_resummon_time_ms" then Some(v / 1000.0) else None)
                             |> Option.defaultValue Constants.minionReviveSeconds
-                        let body = minionBody m level minionMods (Some revive)
+                        let body = minionBody bodyCtx m level minionMods (Some revive)
                         [ for i in 1 .. count ->
                             let name = if count > 1 then sprintf "%s %d" m.Name i else m.Name
                             { Actor.make name minionMods ordered with Body = Some body } ],

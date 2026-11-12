@@ -737,6 +737,11 @@ module StatMap =
         | "minion_chaos_resistance_%" -> one (Mod.base' (ForMinions(Resist Chaos)) v)
         | "minion_maximum_all_elemental_resistances_%" -> Some(Mods(DamageType.elemental |> List.map (fun t -> Mod.base' (ForMinions(MaxResist t)) v)))
         | "temporary_minion_limit_+" -> one (Mod.base' (ForMinions(Named "TemporaryMinionLimit")) v)
+        | "minion_cooldown_recovery_+%" -> one (Mod.inc (ForMinions CooldownRecovery) v)
+        | "minion_command_skill_cooldown_speed_+%" -> one (Mod.inc (ForMinions CooldownRecovery) v |> Mod.whenever (SkillIs(Tag "Command")))
+        | "minion_commanded_skill_damage_+%" -> one (Mod.inc (ForMinions(Damage AllDamage)) v |> Mod.whenever (SkillIs(Tag "Command")))
+        | "minion_command_skill_skill_speed_+%" -> one (Mod.inc (ForMinions Speed) v |> Mod.whenever (SkillIs(Tag "Command")))
+        | "companion_%_damage_as_chaos" -> Some(Mods [ for t in DamageType.all -> Mod.base' (ForMinions(GainAs(t, Chaos))) v |> Mod.whenever (SkillIs(Tag "Companion")) ])
         | "minion_resummon_speed_+%" -> one (Mod.inc (ForMinions(Named "MinionReviveSpeed")) v)
         | "minion_maximum_life_%_to_gain_as_maximum_energy_shield" -> one (Mod.base' (ForMinions(Named "LifeAsExtraEnergyShield")) v)
         | "minion_attack_speed_+%" -> one (Mod.inc (ForMinions Speed) v |> Mod.whenever (SkillIs Attack))
@@ -1314,7 +1319,15 @@ module StatMap =
                             let rest = id.Substring 7
                             explicit rest value |> Option.orElse (explicit ("base_" + rest) value) |> Option.orElse (defensive rest value) |> Option.bind wrapMinions
                         else None
+                    // "Companions have / deal ...": what minions have, for the minions that are companions
+                    let companionOwn =
+                        if id.StartsWith "companion_" then
+                            match direct ("minion_" + id.Substring 10) value with
+                            | Some (Mods ms) -> Some(Mods(ms |> List.map (Mod.whenever (SkillIs(Tag "Companion")))))
+                            | _ -> None
+                        else None
                     if minionOwn.IsSome then minionOwn
+                    elif companionOwn.IsSome then companionOwn
                     elif id.StartsWith "allies_in_presence_" then direct (id.Substring 19) value |> Option.bind wrapMinions
                     elif id.StartsWith "you_and_allies_in_presence_" then
                         match direct (id.Substring 27) value with
