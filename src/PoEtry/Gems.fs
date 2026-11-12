@@ -670,7 +670,12 @@ module Gems =
                         // fan that widens with their number
                         Wander = statOf "spark_pathing_width_bounds" |> Option.defaultValue 0.0
                         Bounces = flagOf "spark_projectile_bounces_off_walls"
-                        Speed = (if (statOf "spark_pathing_width_bounds").IsSome then Map.tryFind data.Name Constants.erraticProjectileSpeed |> Option.defaultValue 0.0 else 0.0)
+                        Speed =
+                            (if (statOf "spark_pathing_width_bounds").IsSome then Map.tryFind data.Name Constants.erraticProjectileSpeed |> Option.defaultValue 0.0
+                             else Map.tryFind data.Name Constants.passingProjectileSpeed |> Option.defaultValue 0.0)
+                        // "The Projectile itself does not Hit enemies, but repeatedly discharges bolts
+                        // of Lightning at nearby enemies": within the skill's radius of where it is
+                        Passing = (if (Map.containsKey data.Name Constants.passingProjectileSpeed) && set.Label = data.Name then radius |> Option.defaultValue 0.0 else 0.0)
                         Range =
                             (match statOf "spark_pathing_width_bounds", Map.tryFind data.Name Constants.erraticProjectileSpeed, statOf "base_skill_effect_duration" with
                              | Some _, Some speed, Some ms -> speed * ms / 1000.0

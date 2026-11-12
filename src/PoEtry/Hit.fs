@@ -20,6 +20,9 @@ type ProjectileShape =
       PerCharge: (string * int) option
       /// Projectiles start where the skill lands (on the aimed enemy), not at the player.
       FromImpact: bool
+      /// The projectile hits nothing itself: as it travels (`Speed`) it strikes every enemy
+      /// within this radius of where it is (Ball Lightning). 0: an ordinary projectile.
+      Passing: float
       /// A rain that falls into a cone of this many degrees in front of the player, as long as
       /// the rain's area (0: a disc around the target).
       RainCone: float
@@ -81,6 +84,7 @@ module ProjectileShape =
           Explosion = None
           PerCharge = None
           FromImpact = false
+          Passing = 0.0
           RainCone = 0.0
           RangeVariation = 0.0
           SkipPrimary = false

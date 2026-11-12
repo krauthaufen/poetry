@@ -221,7 +221,7 @@ module Geometry =
         | Nearest -> alive |> List.sortBy (fun e -> Vec.length e.Position) |> List.tryHead
         | Strongest -> alive |> List.sortBy (fun e -> -(Rarity.rank e.Rarity), Vec.length e.Position) |> List.tryHead
 
-    let private within center radius (e: EnemyDef) = Vec.dist center e.Position <= radius + e.Size
+    let within center radius (e: EnemyDef) = Vec.dist center e.Position <= radius + e.Size
 
     /// Distance along a ray from `origin` in direction `dir` (unit) at which it enters
     /// the enemy's circle, if it does within `range`.

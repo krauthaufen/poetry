@@ -1345,7 +1345,8 @@ module Behaviours =
         | Some d when d.Types.Contains "Sustained" || (Gems.rawStats db charMods { setup with Supports = [] } |> List.exists (fun (k, v) -> k.EndsWith "_hit_interval_ms" && v > 0.0)) ->
             // a projectile that keeps hitting what it stays on (Twister: "..._hit_interval_ms" for
             // its duration) is used again and again; a Sustained effect stands and isn't recast
-            let stands = d.Types.Contains "Sustained"
+            // (a ball in flight does not stand: the next one is cast while it travels)
+            let stands = d.Types.Contains "Sustained" && not (Map.containsKey setup.Gem Constants.passingProjectileSpeed)
             let own = Gems.rawStats db charMods { setup with Supports = [] }
             let pick (endings: string list) = own |> List.tryPick (fun (k, v) -> if v > 0.0 && endings |> List.exists (fun (e: string) -> k.EndsWith e) then Some v else None)
             let interval = pick [ "_frequency_ms"; "_pulse_delay_ms"; "_pulse_interval_ms"; "_every_x_ms"; "_fireball_delay_ms"; "_hit_interval_ms" ] |> Option.map (fun v -> v / 1000.0)
@@ -1360,9 +1361,10 @@ module Behaviours =
                     | None when duration > 0.0 -> int (duration / dt)
                     | None ->
                         // a slow projectile that strikes what is near as it passes (Ball Lightning):
-                        // for as long as the target is within its radius
+                        // one discharge per interval for its whole flight; each hits what is
+                        // within its radius of where the ball is by then
                         match Map.tryFind setup.Gem Constants.passingProjectileSpeed, pick [ "active_skill_base_area_of_effect_radius" ] with
-                        | Some speed, Some r -> int (2.0 * (r + Constants.passedMonsterRadius) / speed / dt + 1e-9)
+                        | Some speed, Some _ -> int ((ProjectileShape.make 1).Range / speed / dt + 1e-9)
                         | _ -> 1
                 let n = max 1 (min 200 n)
                 let lasts = if duration > 0.0 then duration else float n * dt

@@ -396,6 +396,8 @@ module Sim =
     type private Event =
         | Ready of actor: string
         | Strike of actor: string * skill: string * mult: float * aimedAt: string
+        /// A strike from a projectile in flight, so long after it was launched.
+        | PassingStrike of actor: string * skill: string * mult: float * aimedAt: string * elapsed: float
         /// After a use's hits: the skill consumes its charges (unless the skip roll succeeds).
         | ConsumeCharges of actor: string * charge: string * skill: string
         /// A cycle picks its next variant.
@@ -966,7 +968,7 @@ module Sim =
     let private ballInFlight (actorName: string) (gem: string) (w: World) =
         w.Queue |> Map.exists (fun _ ev ->
             match ev with
-            | Strike (a, name, _, _) -> a = actorName && (name = gem || name.StartsWith(gem + " "))
+            | Strike (a, name, _, _) | PassingStrike (a, name, _, _, _) -> a = actorName && (name = gem || name.StartsWith(gem + " "))
             | _ -> false)
 
     /// Curses on an enemy that Hexblast can detonate: those at least half expired (their
@@ -1319,7 +1321,7 @@ module Sim =
                         Queue =
                             w.Queue |> Map.filter (fun _ ev ->
                                 match ev with
-                                | Strike (a, name, _, _) -> not (a = actor.Name && (name = gem || name.StartsWith(gem + " ")))
+                                | Strike (a, name, _, _) | PassingStrike (a, name, _, _, _) -> not (a = actor.Name && (name = gem || name.StartsWith(gem + " ")))
                                 | _ -> true)
                         Counts = bump ("warped into:" + gem) w.Counts }
                     |> updateActor actor.Name (fun st ->
@@ -1374,7 +1376,9 @@ module Sim =
                             // a strike of the chain that hits several times, spread over the use
                             let n = part.Mods |> List.tryPick (fun m -> if m.Stat = Named "SeqHits" then Some(int m.Value) else None) |> Option.defaultValue 1
                             [ 1 .. n ] |> List.fold (fun w i ->
-                                schedule (if n = 1 then at else w.Time + (at - w.Time) * float i / float n) (Strike(actor.Name, part.Name, mult, target.Def.Name)) w) w) w)
+                                let passing = match part.Delivery with Projectiles p -> p.Passing > 0.0 | _ -> false
+                                if passing then schedule at (PassingStrike(actor.Name, part.Name, mult, target.Def.Name, at - w.Time)) w
+                                else schedule (if n = 1 then at else w.Time + (at - w.Time) * float i / float n) (Strike(actor.Name, part.Name, mult, target.Def.Name)) w) w) w)
                     w
             // Ice Crystals the use leaves behind (Grim Pillars): each stands at a random spot of the
             // skill's area (around the user, or around the target), and those whose explosion
@@ -2293,7 +2297,7 @@ module Sim =
                 let w = react env rng actor OnHit skill (Some target) w
                 if hit.Crit then react env rng actor OnCrit skill (Some target) w else w
 
-    let private onStrike env (rng: Rng) name skillName mult aimedAt (w: World) =
+    let private onStrike env (rng: Rng) name skillName mult aimedAt (elapsed: float option) (w: World) =
         let actor = actorDef env name
         let skill = skillOf actor skillName
         let living = alive w |> List.map (fun e -> e.Def)
@@ -2385,7 +2389,12 @@ module Sim =
                 let sk, w = variant w
                 let ctx, mods, areaMult, delivery = shape sk
                 let strike (w: World) =
-                    Geometry.targetsFrom rng env.Fight.Walls env.Fight.Reach delivery areaMult primary living
+                    match delivery, elapsed with
+                    | Projectiles p, Some t when p.Passing > 0.0 ->
+                        // where the projectile is by now, on its way towards where it was aimed
+                        let at = Vec.scale (p.Speed * t) (Vec.ofAngle (Vec.angle primary.Position))
+                        living |> List.filter (Geometry.within at (Geometry.radius p.Passing areaMult)) |> List.map (fun e -> e.Name)
+                    | _ -> Geometry.targetsFrom rng env.Fight.Walls env.Fight.Reach delivery areaMult primary living
                     |> List.fold (fun w target -> hitEnemy env rng actor sk mult target w) w
                 let w = strike w
                 // Aftershock: a slam has a chance to hit its area once more
@@ -2799,7 +2808,8 @@ module Sim =
                 | _ -> w
             match ev with
             | Ready name -> onReady env rng name w
-            | Strike (name, skill, mult, aimedAt) -> onStrike env rng name skill mult aimedAt w
+            | Strike (name, skill, mult, aimedAt) -> onStrike env rng name skill mult aimedAt None w
+            | PassingStrike (name, skill, mult, aimedAt, elapsed) -> onStrike env rng name skill mult aimedAt (Some elapsed) w
             | EnemyAttack name -> enemyAttack env rng name w
             | PeriodicTick (name, periodic) -> onPeriodic env rng name periodic w
             | ManaArrives amount ->

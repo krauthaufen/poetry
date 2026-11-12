@@ -364,13 +364,17 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         near 70.0 (Behaviours.spiritUses db.Value (sheetOf plain) plain |> List.sumBy (fun u -> u.Flat))
         near 1.0 (Setup.loadWith db.Value treeJson plain Options.defaults).Vitals.StartLife)
 
-    test "Ball Lightning: a bolt every 0.2 s for as long as the target is within its radius" (fun () ->
+    test "Ball Lightning: a discharge every 0.2 s of its flight, at what is within its radius" (fun () ->
         let setup = { Gem = "Ball Lightning"; Level = 20; Quality = 0; StatSet = 1; Supports = [] }
         match Gems.skill db.Value ModDb.empty None setup with
         | Ok (s, _) ->
-            // radius 18 and a boss of 10 on either side, at 40 units per second: 1.4 s, seven bolts
+            // 10 m of flight at 40 units per second: 2.5 s, a discharge every 0.2 s; each hits
+            // what is within 18 units of where the ball is by then
             let pattern, _ = (Behaviours.sustained db.Value ModDb.empty setup s).Value
-            equal 7 pattern.Length
+            equal 12 pattern.Length
+            match s.Delivery with
+            | Projectiles p -> equal (18.0, 40.0) (p.Passing, p.Speed)
+            | d -> failwithf "%A" d
         | Error e -> failwith e)
 
     test "Ice Shot: the shards spring from the enemy hit and cannot hit it" (fun () ->

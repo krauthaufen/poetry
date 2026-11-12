@@ -171,9 +171,6 @@ module Constants =
     /// "10 metres per second" poe2db shows for it.
     let passingProjectileSpeed = Map.ofList [ "Ball Lightning", 40.0 ]
 
-    /// Radius (units) of the monster such a projectile passes: a boss is 10, others 4.
-    let passedMonsterRadius = 10.0
-
     /// "Skills take 5% longer to perform for each time they Repeat" (keyword text, Repeating Skills).
     let longerPerRepeat = 0.05
 

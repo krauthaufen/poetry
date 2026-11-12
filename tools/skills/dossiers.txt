@@ -197,11 +197,11 @@
   set Ball Lightning   active_skill_shock_chance_+%_final=375 active_skill_base_area_of_effect_radius=18 ball_lightning_base_hit_frequency_ms=200 ball_lightning_infused_acceleration=-25 ball_lightning_infused_burning_ground_interval_ms=350  | spell_minimum_base_lightning_damage spell_maximum_base_lightning_damage base_is_projectile is_area_damage can_perform_skill_while_moving precise_cursor_targeting_uses_contact_point_height_offset active_skill_consumes_a_fire_infusion
   set Fire-Infused     ball_lightning_infused_acceleration=-25 ball_lightning_infused_burning_ground_interval_ms=350 active_skill_base_secondary_area_of_effect_radius=26  | spell_minimum_base_lightning_damage spell_maximum_base_lightning_damage spell_minimum_base_fire_damage spell_maximum_base_fire_damage base_is_projectile is_area_damage can_perform_skill_while_moving precise_cursor_targeting_uses_contact_point_height_offset active_skill_consumes_a_fire_infusion
   set Ignited Ground   ball_lightning_infused_acceleration=-25 ball_lightning_infused_burning_ground_interval_ms=350 active_skill_base_tertiary_area_of_effect_radius=9 base_skill_effect_duration=4000  | spell_minimum_base_lightning_damage spell_maximum_base_lightning_damage spell_minimum_base_fire_damage spell_maximum_base_fire_damage base_is_projectile is_area_damage can_perform_skill_while_moving precise_cursor_targeting_uses_contact_point_height_offset active_skill_consumes_a_fire_infusion
-  play: buff Ball Lightning
+  play: spam Ball Lightning
   built Ball Lightning                     x1.00, 1.00s, cd None x1, cost 96 +0/s, hits [(1.0, 1.0)], 1 projectiles, pierce 0, chain 0
   built Ball Lightning infused             x1.00, 1.00s, cd None x1, cost 96 +0/s, hits [(1.0, 1.0)], 1 projectiles, pierce 0, chain 0
-  fight: 332 dps; Ball Lightning (hit) 55%, Ball Lightning infused (hit) 45%
-         crits:Ball Lightning 8, hits:Ball Lightning 91, hits:Ball Lightning infused 6, infused:Ball Lightning 6, uninfused:Ball Lightning 91, uses:Ball Lightning 14
+  fight: 282 dps; Ball Lightning infused (hit) 52%, Ball Lightning (hit) 48%
+         crits:Ball Lightning 10, hits:Ball Lightning 65, hits:Ball Lightning infused 6, infused:Ball Lightning 6, uninfused:Ball Lightning 159, uses:Ball Lightning 15
   types without a model: CreatesGroundEffect
 
 #### Barkskin   [AttackInPlace Buff Duration HasReservation OngoingSkill Persistent]
@@ -1807,8 +1807,8 @@
   play: spam Ice Shot
   built Ice Shot                           x3.44, 0.93s, cd None x1, cost 40 +0/s, hits [(1.0, 1.0)], 1 projectiles, pierce 0, chain 0
         part Ice Shot: Shards             x3.44, hits [(1.0, 1.0)]
-  fight: 163 dps; Ice Shot (hit) 100%
-         crits:Ice Shot 3, hits:Ice Shot 15, uses:Ice Shot 16
+  fight: 139 dps; Ice Shot (hit) 100%
+         hits:Ice Shot 15, uses:Ice Shot 16
 
 #### Ice Strike   [Area Attack AttackInPlace Cold Melee MeleeSingleTarget PerformsFinalStrike]   needs: Quarterstaff
   Perform a fast icy Strike. Using this Attack three times in quick succession causes a final strike that is slower and more powerful.
@@ -2017,7 +2017,7 @@ pushed out of the way.
   play: spam Lightning Spear
   built Lightning Spear                    x3.43, 1.04s, cd None x1, cost 46 +0/s, hits [(1.0, 1.0)], 1 projectiles, pierce 0, chain 0
         part Lightning Spear: Lightning Bolts x2.34, hits [(1.0, 1.0)]
-  fight: 163 dps; Lightning Spear (hit) 100%
+  fight: 164 dps; Lightning Spear (hit) 100%
          hits:Lightning Spear 28, uses:Lightning Spear 15
 
 #### Lightning Warp   [Area AreaSpell CreatesGroundEffect Damage Duration GamepadDoNotForceSkillAtLocation GeneratesInfusion GeneratesRemnants Lightning Movement Spell]
@@ -2222,8 +2222,8 @@ Purple Flames of Chayula for a duration.
   play: spam Molten Blast
   built Molten Blast                       x2.65, 1.27s, cd None x1, cost 40 +0/s, hits [(1.0, 1.0)], 1 projectiles, pierce 0, chain 0
         part Molten Blast: Shrapnel       x2.65, hits [(1.0, 1.0)]
-  fight: 104 dps; Molten Blast (hit) 97%, Ignite 3%
-         crits:Molten Blast 1, hits:Molten Blast 11, inflict:Ignite 1, uses:Molten Blast 12
+  fight: 111 dps; Molten Blast (hit) 100%
+         crits:Molten Blast 2, hits:Molten Blast 11, uses:Molten Blast 12
 
 #### Molten Crash   [Area Attack Bear ConsumesRage CreatesFissure Jumping Melee Movement Shapeshift Slam Travel]   needs: Talisman
   Shapeshift into a burning monstrosity and leap through the air to crash down upon the earth, Slamming twice and creating Molten Fissures. Consumes Rage to create additional Molten Fissures.
@@ -3293,8 +3293,8 @@ Purple Flames of Chayula for a duration.
   play: spam Spearfield
   built Spearfield                         x1.00, 0.89s, cd None x1, cost 39 +0/s, hits [(1.0, 1.0)], area 69
         part Spearfield: Explosion        x2.04, hits [(1.0, 1.0)]
-  fight: 3 dps; Spearfield: Explosion (hit) 100%, Spearfield (hit) 0%
-         crits:Spearfield 1, hits:Spearfield 16, hits:Spearfield: Explosion 10, inflict:Maim 26, uses:Spearfield 17
+  fight: 12 dps; Spearfield: Explosion (hit) 100%, Spearfield (hit) 0%
+         crits:Spearfield 2, crits:Spearfield: Explosion 3, hits:Spearfield 16, hits:Spearfield: Explosion 39, inflict:Maim 55, uses:Spearfield 17
   types without a model: Hazard
 
 #### Spectre: {0}   [AttackInPlace CreatesMinion CreatesUndeadMinion HasReservation Minion MinionsCanExplode MultipleReservation Persistent]
