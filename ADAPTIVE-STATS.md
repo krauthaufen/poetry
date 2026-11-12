@@ -252,6 +252,21 @@ per row keyed by the stacks it reads.
 
 - How often do an actor's stacks change in a typical fight compared with the number of
   hits? The table only wins if the second is much larger. A counter in `Sim.run` answers it.
+  **Measured** (2026-11-12, one 20 s boss fight each, JavaScript, counters in `skillDb` and
+  `Hit.rollWith`; corpus builds 121, 024, 011, 047):
+
+  | build | actors | events | hits rolled | asks for a skill's mods | buff map is another object | stacks really differ (per actor and skill asked) | per actor |
+  |---|---|---|---|---|---|---|---|
+  | Oracle, no minions | 1 | 1,033 | 190 | 864 | 337 | 100 | 37 |
+  | Spirit Walker, 35 minions | 36 | 7,107 | 1,841 | 11,188 | 2,102 | 414 | 323 |
+  | Infernalist | 2 | 797 | 157 | 709 | 225 | 99 | 43 |
+  | Monk, 16 minions | 17 | 3,360 (est.) | 642 | 3,365 | 719 | 128 | 90 |
+
+  So a skill's mods are asked for 7 to 27 times per real change of the stacks they could
+  depend on, and hits outnumber an actor's stack changes about 5 to 1. The hand-made
+  `ReferenceEquals` cache misses three times more often than it must (a buff refreshed with
+  the same stacks is another map). A fight is 150 to 400 µs per event today; each hit makes
+  roughly 140 to 230 `Mods.*` queries.
 - Is the no-dependency rule for the engine firm, or is an optional layer acceptable?
 - Should the table also serve the front end (the sheet's numbers shown live while the tree
   is edited)? Then the same generated module runs in the page with the build as its model,
