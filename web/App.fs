@@ -163,6 +163,11 @@ type Model =
       /// The gem the fights after a change of passives press: the one the first fight found
       /// strongest ("" before; finding it costs as much as the fight itself).
       Pressing : string
+      /// The fight is asked again while runs are still out: which asking this is, how many
+      /// runs the numbers shown are of, and whether more are coming.
+      Round : int
+      Runs : int
+      More : bool
       Selected : int option
       Hovered : int option
       Level : int }
@@ -177,7 +182,7 @@ let init : Model =
       Centre = V2d (0.0, 0.0); Height = 9000.0
       Camera = { Sky = V3d (0.0, 1.0, 0.0); Location = V3d (0.0, 0.0, 7794.2); Forward = V3d (0.0, 0.0, -1.0); Up = V3d (0.0, 1.0, 0.0); Right = V3d (1.0, 0.0, 0.0) }
       Near = 7000.0; Far = 8600.0
-      Touches = []; Travel = 0.0; Page = V2d (0.0, 0.0); Pending = None; Choices = Map.empty; JewelSprites = Map.empty; Jewels = Map.empty; Unlocks = Map.empty; Opened = Data.pack (Data.ofList ([] : V3f list)); OpenedUv = Data.pack (Data.ofList ([] : V2f list)); Rings = Data.pack (Data.ofList ([] : V3f list)); RingsUv = Data.pack (Data.ofList ([] : V2f list)); Pressing = ""; Selected = None; Hovered = None; Level = 0 }
+      Touches = []; Travel = 0.0; Page = V2d (0.0, 0.0); Pending = None; Choices = Map.empty; JewelSprites = Map.empty; Jewels = Map.empty; Unlocks = Map.empty; Opened = Data.pack (Data.ofList ([] : V3f list)); OpenedUv = Data.pack (Data.ofList ([] : V2f list)); Rings = Data.pack (Data.ofList ([] : V3f list)); RingsUv = Data.pack (Data.ofList ([] : V2f list)); Pressing = ""; Round = 0; Runs = 0; More = false; Selected = None; Hovered = None; Level = 0 }
 
 /// The camera straight above the centre, so far up that `Height` of the tree is seen through
 /// its 60 degree lens; the depth range close around the tree's plane (its layers are a unit
@@ -197,7 +202,7 @@ let private passives (m : Model) =
     else ""
 
 let private sheetUrl (m : Model) = "__sim?op=character" + passives m + "&build=" + m.Build
-let private fightUrl (m : Model) = "__sim?op=fight&runs=5&time=20&life=1e12&scenario=" + m.Scenario + (if m.Pressing <> "" then "&gem=" + m.Pressing.Replace (" ", "%20") else "") + passives m + "&build=" + m.Build
+let private fightUrl (m : Model) = "__sim?op=fight&runs=16&time=20&life=1e12&round=" + string m.Round + "&scenario=" + m.Scenario + (if m.Pressing <> "" then "&gem=" + m.Pressing.Replace (" ", "%20") else "") + passives m + "&build=" + m.Build
 
 // ---- the passive tree ----
 
@@ -615,8 +620,13 @@ let rec update (msg : Msg) (m : Model) : Model =
         | 200, Ok j when Json.string (Json.field "error" j) <> "" -> { m with Fighting = false; Status = "the fight failed: " + Json.string (Json.field "error" j) }
         | 200, Ok j ->
             let dps k = Json.field "dps" j |> Json.field k |> Json.number
+            // (while runs are still out the fight is asked again: the next answer is of more of them)
+            let more = Json.bool (Json.field "more" j)
             { m with
                 Fighting = false
+                Runs = Json.int (Json.field "runs" j)
+                More = more
+                Round = (if more then m.Round + 1 else m.Round)
                 Gem = Json.string (Json.field "gem" j)
                 Dps = [ { Label = "DPS"; Value = short (dps "mean") }; { Label = "one in ten below"; Value = short (dps "p10") }; { Label = "median"; Value = short (dps "p50") }; { Label = "one in ten above"; Value = short (dps "p90") } ]
                 Shares =
@@ -868,7 +878,11 @@ let private tooltip (m : Model) : Node<Msg> =
                 div { Dom.Class "state"; state }
         }
 
-let private status (m : Model) = if m.Fighting then "fighting ..." else m.Status
+let private status (m : Model) =
+    if m.Fighting then "fighting ..."
+    elif m.More then sprintf "%d fights, more coming" m.Runs
+    elif m.Status = "" && m.Runs > 0 then sprintf "%d fights" m.Runs
+    else m.Status
 
 let view (m : Model) : Node<Msg> =
     body {

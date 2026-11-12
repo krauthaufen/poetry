@@ -126,7 +126,7 @@ module Report =
                     "minions", strs c.MinionNotes ] ]
 
     /// A fight as asked for: { scenario: "boss" | "pinnacle" | "pack" | "surrounded", level,
-    /// time, runs, life (0: the enemies' own), gem ("": the strongest to press) }.
+    /// time, runs, seed (the first run's, 1), life (0: the enemies' own), gem ("": the strongest to press) }.
     /// Missing fields take the defaults (a level 83 boss, 30 s, 20 runs).
     let fight (c: Loaded) (request: Json) : Json =
         let n key d = Json.numField key request |> Option.defaultValue d
@@ -148,7 +148,9 @@ module Report =
             | g -> g
         let play = Setup.auto c o gem
         let f = Setup.fight c o (Setup.player c o play None) enemies
-        let summary = [ for seed in 1 .. runs -> Sim.run f (uint32 seed) ] |> Summary.ofOutcomes
+        // (`seed`: the first of the runs' consecutive seeds, so that several askers each run their own)
+        let first = max 1 (int (n "seed" 1.0))
+        let summary = [ for seed in first .. first + runs - 1 -> Sim.run f (uint32 seed) ] |> Summary.ofOutcomes
         obj
             [ "gem", JStr gem
               "scenario", JStr scenario

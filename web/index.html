@@ -8,13 +8,98 @@
   <script>window.global = globalThis;</script>
   <script>
     // The simulator behind urls: a fetch of "__sim?op=...&build=<url>&..." is answered by
-    // the worker. The character is read from its url here (once per url) and sent along.
+    // workers. The character is read from its url here (once per url) and sent along.
+    //
+    // A fight is run once per seed, spread over a few workers. A fetch of it is answered
+    // with what has come back so far, as one report over those runs ("runs": how many,
+    // "more": whether others are still out); the page asks again (with another "round=")
+    // and is answered once there is more. A question about other passives drops the runs
+    // still waiting for the one before.
     (() => {
-      const worker = new Worker(new URL("./sim-worker.js", document.baseURI), { type: "module" });
-      const waiting = new Map();
+      const count = Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 2) - 1));
+      const workers = [];
+      const jobs = [];          // { request, done, fight } waiting for a worker
+      const feed = (w) => {
+        if (w.busy) return;
+        // a question about the character goes to the first worker only (it keeps the sheet)
+        const at = jobs.findIndex((j) => j.fight || w.index === 0);
+        if (at < 0) return;
+        const job = jobs.splice(at, 1)[0];
+        w.busy = job;
+        w.worker.postMessage({ id: 0, request: JSON.stringify(job.request) });
+      };
+      for (let i = 0; i < count; i++) {
+        const w = { index: i, busy: null, worker: new Worker(new URL("./sim-worker.js", document.baseURI), { type: "module" }) };
+        w.worker.onmessage = (e) => { const job = w.busy; w.busy = null; if (job) job.done(e.data.answer); feed(w); };
+        workers.push(w);
+      }
+      const ask = (request, fight) => new Promise((done) => { jobs.push({ request, done, fight }); workers.forEach(feed); });
+
+      const mean = (xs) => xs.reduce((a, b) => a + b, 0) / Math.max(1, xs.length);
+      const stats = (xs) => {
+        const s = [...xs].sort((a, b) => a - b);
+        const q = (p) => s[Math.min(s.length - 1, Math.max(0, Math.round(p * (s.length - 1))))];
+        return { mean: mean(s), p10: q(0.1), p50: q(0.5), p90: q(0.9) };
+      };
+      // name/value lists of several runs as one: each name's mean over all runs
+      const pairs = (lists, sorted) => {
+        const sum = new Map();
+        for (const l of lists) for (const { name, value } of l || []) sum.set(name, (sum.get(name) || 0) + value);
+        const out = [...sum].map(([name, value]) => ({ name, value: value / lists.length }));
+        return sorted ? out.sort((a, b) => b.value - a.value) : out.sort((a, b) => (a.name < b.name ? -1 : 1));
+      };
+      const merged = (f) => {
+        const rs = f.results;
+        const clears = rs.map((r) => r.clear && r.clear.mean).filter((x) => x != null);
+        return {
+          gem: f.gem, scenario: rs[0].scenario, runs: rs.length, more: rs.length < f.total && !f.failed,
+          killRate: mean(rs.map((r) => r.killRate)),
+          clear: clears.length === rs.length ? stats(clears) : null,
+          dps: stats(rs.map((r) => r.dps.mean)),
+          damageShare: pairs(rs.map((r) => r.damageShare), true),
+          uptime: pairs(rs.map((r) => r.uptime), true),
+          counts: pairs(rs.map((r) => r.counts), false),
+          deathRate: mean(rs.map((r) => r.deathRate)),
+          damageTakenPerSecond: mean(rs.map((r) => r.damageTakenPerSecond)),
+          lowestLife: { mean: mean(rs.map((r) => r.lowestLife.mean)), worst: Math.min(...rs.map((r) => r.lowestLife.worst)) },
+          waitingForMana: mean(rs.map((r) => r.waitingForMana)),
+        };
+      };
+
+      const fights = new Map();
+      let current = "";
+      const settle = (f) => {
+        // whoever waits is answered once there is more than was last told (or nothing more comes)
+        if (!f.waiters.length) return;
+        if (f.error) { f.waiters.splice(0).forEach((w) => w(JSON.stringify({ error: f.error }))); return; }
+        if (f.results.length > f.told || (f.results.length >= f.total && f.results.length > 0)) {
+          f.told = f.results.length;
+          const text = JSON.stringify(merged(f));
+          f.waiters.splice(0).forEach((w) => w(text));
+        }
+      };
+      const fight = (key, request) => {
+        let f = fights.get(key);
+        if (!f) {
+          f = { results: [], total: Math.max(1, request.runs || 12), told: 0, waiters: [], gem: "", error: "", failed: false };
+          fights.set(key, f);
+          if (fights.size > 8) fights.delete(fights.keys().next().value);
+          // runs of the question before that no worker has begun are not wanted any more
+          for (let i = jobs.length - 1; i >= 0; i--) if (jobs[i].fight && jobs[i].fight !== key) jobs.splice(i, 1);
+          current = key;
+          const one = (seed, gem) => ask({ ...request, runs: 1, seed, ...(gem ? { gem } : {}) }, key).then((text) => {
+            let r; try { r = JSON.parse(text); } catch { r = { error: "no answer" }; }
+            if (r.error) { if (!f.results.length) f.error = r.error; f.failed = true; } else { f.results.push(r); f.gem = r.gem; }
+            settle(f);
+            return r;
+          });
+          // the first run finds the gem to press (if none was named); the others press it
+          one(1, request.gem).then((r) => { if (!r.error) for (let s = 2; s <= f.total; s++) one(s, r.gem); });
+        }
+        return new Promise((done) => { f.waiters.push(done); settle(f); });
+      };
+
       const builds = new Map();
-      let next = 1;
-      worker.onmessage = (e) => { const done = waiting.get(e.data.id); waiting.delete(e.data.id); if (done) done(e.data.answer); };
       const plain = window.fetch.bind(window);
       const answer = (text, status = 200) => new Response(text, { status, headers: { "content-type": "application/json" } });
       window.fetch = async (input, init) => {
@@ -28,6 +113,8 @@
         const buildUrl = cut < 0 ? "" : query.slice(cut + 6);
         const request = {};
         for (const [k, v] of params) request[k] = v !== "" && !isNaN(Number(v)) ? Number(v) : v;
+        delete request.round;
+        const key = JSON.stringify(request) + "|" + buildUrl;
         try {
           if (!builds.has(buildUrl)) builds.set(buildUrl, plain(buildUrl).then((r) => { if (!r.ok) throw new Error(`${buildUrl}: status ${r.status}`); return r.text(); }));
           request.build = await builds.get(buildUrl);
@@ -35,8 +122,7 @@
           builds.delete(buildUrl);
           return answer(JSON.stringify({ error: String(err && err.message || err) }));
         }
-        const id = next++;
-        return new Promise((resolve) => { waiting.set(id, (text) => resolve(answer(text))); worker.postMessage({ id, request: JSON.stringify(request) }); });
+        return answer(await (request.op === "fight" ? fight(key, request) : ask(request, "")));
       };
     })();
   </script>
