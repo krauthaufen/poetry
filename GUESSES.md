@@ -85,7 +85,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | The same minion gem twice | PoB lists both; that the tree's and the gem's are one is a guess | guess |
 | Count | 1 per gem, or the gem's pack size; how many a build reserves spirit for is unknown from the API | | guess, usually too low |
 | Who a monster attacks | monster tags are data; who is attacked is not known | guess |
-| Death and revival | time: game data (the wiki says 7.5 s); the rule for further deaths: wiki Minion | data; 12 s for gems without the stat is a guess |
+| Death and revival | time: game data (the wiki says 7.5 s); the reset: user observation (the wiki has each further death add only a n-th of the time) | data; user; 12 s for gems without the stat is a guess |
 | Temporary minions | game data; renewing the oldest is a guess | data; guess |
 | Playing summoning skills | beside the main skill, a skill that raises temporary minions is used while fewer than its limit are out (Unearth: and there is a corpse or dead minion) | | guess |
 | Totems | gem data | data; the simplifications are guesses |

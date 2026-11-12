@@ -2819,17 +2819,16 @@ module Sim =
         | _ -> w
 
     /// Mark "<what>Recently" for 4 s (gained / consumed charges...).
-    /// When killed minions come back: `seconds` after the first death; each further death
-    /// while they wait adds a n-th of that for the n-th death, and never more than the full
-    /// time from now. `waiting`: the time set so far and the deaths counted.
+    /// When killed minions come back: all together, `seconds` after the last death; every
+    /// death starts the wait anew for all of them (user observation; the wiki has each further
+    /// death add only a n-th of the time). `waiting`: the time set so far and the deaths counted.
     let nextRevival (now: float) (seconds: float) (waiting: (float * int) option) : float * int =
         match waiting with
-        | Some (at, n) when at > now -> min (now + seconds) (at + seconds / float (n + 1)), n + 1
+        | Some (at, n) when at > now -> now + seconds, n + 1
         | _ -> now + seconds, 1
 
     /// A minion is killed: it leaves the fight; a reviving one comes back with the others
-    /// once none has died for its revive time. Each further death while they wait adds less:
-    /// the n-th adds a n-th of the time, and never more than the full time from now.
+    /// once none has died for its revive time.
     let private killMinion env (rng: Rng) (minion: Actor) (w: World) =
         let body = minion.Body.Value
         let player = env.Fight.Player
