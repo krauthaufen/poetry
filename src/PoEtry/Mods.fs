@@ -156,7 +156,8 @@ module Mod =
 
     /// The mod's value in this context, or None if a condition fails.
     let eval ctx (m: Mod) =
-        if List.forall (holds ctx) m.Conds then
+        if m.Conds.IsEmpty then Some m.Value
+        elif List.forall (holds ctx) m.Conds then
             Some(m.Value * List.fold (fun k c -> k * stackFactor ctx c) 1.0 m.Conds)
         else
             None
@@ -259,13 +260,23 @@ module StatKey =
         | ForMinions inner -> "\u0002" + name inner
         | _ -> ""
 
+module ModKind =
+    let number (k: ModKind) =
+        match k with
+        | Base -> 0
+        | Inc -> 1
+        | More -> 2
+        | Flag -> 3
+        | Override -> 4
+
 /// A mod with its stat's key (in the part of a db that is not indexed yet).
 type KeyedMod = { Code: int; Name: string; Mod: Mod }
 
-/// Mods by their stats' keys, newest first per stat.
+/// Mods by their stats' keys and their kinds, newest first: a numbered stat's under its
+/// number x 8 + its kind's, a named one's under its name, one list per kind.
 type ModIndex =
     { Coded: System.Collections.Generic.Dictionary<int, Mod list>
-      Names: System.Collections.Generic.Dictionary<string, Mod list> }
+      Names: System.Collections.Generic.Dictionary<string, Mod list[]> }
 
 /// Mods indexed by stat, so a query only looks at the mods that can matter. An index is
 /// built once and never changed; mods added later lie in a short list before the indexes
@@ -288,19 +299,24 @@ module ModDb =
     /// The index of these mods (newest first).
     let private index (order: Mod list) : ModIndex =
         let coded = System.Collections.Generic.Dictionary<int, Mod list>()
-        let names = System.Collections.Generic.Dictionary<string, Mod list>()
+        let names = System.Collections.Generic.Dictionary<string, Mod list[]>()
         // oldest first, each put before the ones of its stat: newest first per stat
         for m in List.rev order do
             let c = StatKey.code m.Stat
+            let k = ModKind.number m.Kind
             if c >= 0 then
-                match coded.TryGetValue c with
-                | true, ms -> coded.[c] <- m :: ms
-                | _ -> coded.[c] <- [ m ]
+                let key = c * 8 + k
+                match coded.TryGetValue key with
+                | true, ms -> coded.[key] <- m :: ms
+                | _ -> coded.[key] <- [ m ]
             else
                 let n = StatKey.name m.Stat
                 match names.TryGetValue n with
-                | true, ms -> names.[n] <- m :: ms
-                | _ -> names.[n] <- [ m ]
+                | true, kinds -> kinds.[k] <- m :: kinds.[k]
+                | _ ->
+                    let kinds = Array.create 5 []
+                    kinds.[k] <- [ m ]
+                    names.[n] <- kinds
         { Coded = coded; Names = names }
 
     let empty: ModDb = { Layers = []; Recent = []; RecentCount = 0; Order = [] }
@@ -338,23 +354,25 @@ module ModDb =
     /// Whether any mod is of a stat like this.
     let hasStat (pred: Stat -> bool) (db: ModDb) = db.Order |> List.exists (fun m -> pred m.Stat)
 
-    /// The mods of a stat, newest first, each given to `f`.
-    let inline forStat (stat: Stat) (db: ModDb) ([<InlineIfLambda>] f: Mod -> unit) =
+    /// The mods of a stat and a kind, newest first, each given to `f`.
+    let inline forStat (stat: Stat) (kind: ModKind) (db: ModDb) ([<InlineIfLambda>] f: Mod -> unit) =
         let c = StatKey.code stat
+        let k = ModKind.number kind
         if c >= 0 then
-            for k in db.Recent do
-                if k.Code = c then f k.Mod
+            for r in db.Recent do
+                if r.Code = c && r.Mod.Kind = kind then f r.Mod
+            let key = c * 8 + k
             for layer in db.Layers do
-                match layer.Coded.TryGetValue c with
+                match layer.Coded.TryGetValue key with
                 | true, ms -> for m in ms do f m
                 | _ -> ()
         else
             let n = StatKey.name stat
-            for k in db.Recent do
-                if k.Code < 0 && k.Name = n then f k.Mod
+            for r in db.Recent do
+                if r.Code < 0 && r.Mod.Kind = kind && r.Name = n then f r.Mod
             for layer in db.Layers do
                 match layer.Names.TryGetValue n with
-                | true, ms -> for m in ms do f m
+                | true, kinds -> for m in kinds.[k] do f m
                 | _ -> ()
 
 /// Queries over a mod db, PoE style:
@@ -363,11 +381,10 @@ module Mods =
     let private fold ctx kind stats (db: ModDb) f init =
         let mutable acc = init
         for stat in stats do
-            ModDb.forStat stat db (fun m ->
-                if m.Kind = kind then
-                    match Mod.eval ctx m with
-                    | Some v -> acc <- f acc v
-                    | None -> ())
+            ModDb.forStat stat kind db (fun m ->
+                match Mod.eval ctx m with
+                | Some v -> acc <- f acc v
+                | None -> ())
         acc
 
     let sumBase ctx stats db = fold ctx Base stats db (+) 0.0

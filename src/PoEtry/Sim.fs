@@ -647,7 +647,7 @@ module Sim =
             let limit = ds |> List.map (fun d -> d.MaxStacks) |> List.max
             ds |> List.sortByDescending (fun d -> d.Dps) |> List.truncate limit)
 
-    let private status (e: EnemyState) =
+    let private statusOf (e: EnemyState) =
         let fromDebuffs = e.Debuffs |> Map.map (fun _ x -> x.Stacks)
         let withDots =
             activeDots e
@@ -672,6 +672,27 @@ module Sim =
         // low life: at or below 35% (PoE2); full life: untouched
         |> fun m -> if e.Life <= 0.35 * e.Def.Life then Map.add "LowLife" 1 m else m
         |> fun m -> if e.Life >= e.Def.Life then Map.add "FullLife" 1 m else m
+
+    /// The last few enemies asked about with their statuses: one hit asks several times about
+    /// the very same enemy value. (A pair is put in whole, so a reader on another thread sees
+    /// an old pair or a new one, never a mixed one.)
+    let private statusSeen : (EnemyState * Map<string, int>) option[] = Array.create 4 None
+    let mutable private statusNext = 0
+
+    let private status (e: EnemyState) : Map<string, int> =
+        let mutable found = None
+        for i in 0 .. statusSeen.Length - 1 do
+            match statusSeen.[i] with
+            | Some (seen, s) when obj.ReferenceEquals(seen, e) -> found <- Some s
+            | _ -> ()
+        match found with
+        | Some s -> s
+        | None ->
+            let s = statusOf e
+            let at = statusNext % statusSeen.Length
+            statusNext <- at + 1
+            statusSeen.[at] <- Some (e, s)
+            s
 
     let private defender (e: EnemyState) : Defender =
         let debuffMods =
