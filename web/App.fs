@@ -24,7 +24,6 @@ type Passive =
       Name : string
       Ascendancy : string
       Icon : string
-      IconOff : string
       IconRect : V4d
       Frame : string
       FrameOn : V4d
@@ -36,7 +35,7 @@ type Link = { A : int; B : int; Of : string; Ribbon : Buffer<V3f> }
 
 /// An ascendancy: where its part of the tree is laid out (the middle of its background), and
 /// its class art in the small background sheet.
-type Ascendancy = { Called : string; Middle : V2d; Art : V4d }
+type Ascendancy = { Called : string; Middle : V2d; Art : string }
 
 type Msg =
     | Located of string
@@ -77,13 +76,8 @@ type Model =
       /// The ascendancies' passives and connections (drawn for the character's own only).
       Ascended : Passive list
       AscendedLinks : Link list
-      /// The same by the sheet their icon, and their frame, is in.
-      IconsSmall : Passive list
-      IconsLarge : Passive list
-      FramesSmall : Passive list
-      FramesMedium : Passive list
-      FramesLarge : Passive list
-      FramesAscendancy : Passive list
+      /// Those that are drawn (not a class' start, a hidden socket or an ascendancy's).
+      Shown : Passive list
       /// Sockets that are only there while something is in them (the Voices jewel's).
       Sinister : Passive list
       Links : Link list
@@ -102,8 +96,8 @@ let init : Model =
     { Build = ""; Scenario = "boss"; Status = "locating"; Title = ""; Class = ""; Ascendancy = ""; Tab = "character"
       Pools = []; Defences = []; Resistances = []; Minions = []
       NotUnderstood = 0; Fighting = false; Gem = ""; Dps = []; Shares = []
-      Passives = []; Ascendancies = []; Ascended = []; AscendedLinks = []; IconsSmall = []; IconsLarge = []; FramesSmall = []; FramesMedium = []; FramesLarge = []; FramesAscendancy = []; Sinister = []; Links = []; Neighbours = Map.empty; Web = Data.pack (Data.ofList ([] : V3f list)); Allocated = Set.empty; Edited = false
-      Centre = V2d (0.0, 0.0); Height = 5000.0; Held = None; Moved = false }
+      Passives = []; Ascendancies = []; Ascended = []; AscendedLinks = []; Shown = []; Sinister = []; Links = []; Neighbours = Map.empty; Web = Data.pack (Data.ofList ([] : V3f list)); Allocated = Set.empty; Edited = false
+      Centre = V2d (0.0, 0.0); Height = 9000.0; Held = None; Moved = false }
 
 /// The passives as the simulator is told them (only once they were changed here).
 let private passives (m : Model) =
@@ -158,7 +152,7 @@ let private readTree (j : Json) (m : Model) : Model =
         match Json.list x |> List.map Json.number with
         | [ s; px; py; w; h ] when int s < sheets.Length ->
             let name, sw, sh = sheets.[int s]
-            "sprites/" + name, V4d (px / sw, py / sh, w / sw, h / sh)
+            name, V4d (px / sw, py / sh, w / sw, h / sh)
         | _ -> "", V4d (0.0, 0.0, 0.0, 0.0)
     let frames = Json.field "frames" j
     let nodes = Json.field "nodes" j |> Json.list
@@ -180,7 +174,6 @@ let private readTree (j : Json) (m : Model) : Model =
               Name = Json.string (Json.field "name" n)
               Ascendancy = Json.string (Json.field "ascendancy" n)
               Icon = icon
-              IconOff = icon.Replace ("sprites/skills_", "sprites/skills-disabled_")
               IconRect = rect
               Frame = frame
               FrameOn = on
@@ -189,8 +182,7 @@ let private readTree (j : Json) (m : Model) : Model =
     let ascendancies =
         Json.field "ascendancies" j |> Json.list
         |> List.map (fun a ->
-            let art = match Json.field "art" a |> Json.list |> List.map Json.number with [ u; v; w; h ] -> V4d (u, v, w, h) | _ -> V4d (0.0, 0.0, 0.0, 0.0)
-            { Called = Json.string (Json.field "name" a); Middle = V2d (Json.number (Json.field "x" a), Json.number (Json.field "y" a)); Art = art })
+            { Called = Json.string (Json.field "name" a); Middle = V2d (Json.number (Json.field "x" a), Json.number (Json.field "y" a)); Art = Json.string (Json.field "art" a) })
     let middleOf = ascendancies |> List.map (fun a -> a.Called, a.Middle) |> Map.ofList
     let ascendancyOf = passives |> List.map (fun p -> p.Id, p.Ascendancy) |> Map.ofList
     let edges = Json.field "edges" j |> Json.list |> List.map (fun e -> Json.list e |> List.map Json.number)
@@ -205,23 +197,13 @@ let private readTree (j : Json) (m : Model) : Model =
         |> List.map (fun p ->
             let q = (V2d (p.X, p.Y) - middleOf.[p.Ascendancy]) * ascendancyScale
             { p with X = q.X; Y = q.Y })
-    // TEMPORARY (FableCube dogfood/poetry.md, "a texture per draw"): only the passives nearest
-    // the middle of the tree are drawn, as every textured draw uploads its sheet again
-    let shown =
-        passives |> List.filter (fun p -> p.Kind <> "start" && not p.Hidden && p.Ascendancy = "")
-        |> List.sortBy (fun p -> p.X * p.X + p.Y * p.Y)
-        |> List.truncate 260
+    let shown = passives |> List.filter (fun p -> p.Kind <> "start" && not p.Hidden && p.Ascendancy = "")
     { m with
         Passives = passives
         Ascendancies = ascendancies
         Ascended = ascended
         AscendedLinks = ascendedLinks
-        IconsSmall = shown |> List.filter (fun p -> p.Icon.Contains "skills_64")
-        IconsLarge = shown |> List.filter (fun p -> p.Icon.Contains "skills_128")
-        FramesSmall = shown |> List.filter (fun p -> p.Frame.Contains "_104_104")
-        FramesMedium = shown |> List.filter (fun p -> p.Frame.Contains "_152_156")
-        FramesLarge = shown |> List.filter (fun p -> p.Frame.Contains "_220_224")
-        FramesAscendancy = []
+        Shown = shown
         Sinister = passives |> List.filter (fun p -> p.Hidden)
         Links = links
         Neighbours = nodes |> List.map (fun n -> Json.int (Json.field "id" n), (Json.field "to" n |> Json.list |> List.map Json.int)) |> Map.ofList
@@ -405,6 +387,7 @@ let private icon (m : Model) (p : Passive) : Scene<Msg> =
         Sg.Translate (p.X, -p.Y, 1.0)
         Sg.Scale (p.IconSize)
         Sg.OnClick (fun _ -> Toggle p.Id)
+        Sg.Texture ("Atlas", p.Icon)
         Sg.Uniform ("Rect", p.IconRect)
         Sg.Uniform ("Tint", (if m.Allocated.Contains p.Id then white else dim))
         quad
@@ -416,6 +399,7 @@ let private frame (m : Model) (p : Passive) : Scene<Msg> =
         Sg.Translate (p.X, -p.Y, 2.0)
         Sg.Scale (p.Size)
         Sg.OnClick (fun _ -> Toggle p.Id)
+        Sg.Texture ("Atlas", p.Frame)
         Sg.Uniform ("Rect", (if m.Allocated.Contains p.Id then p.FrameOn else p.FrameOff))
         Sg.Uniform ("Tint", white)
         quad
@@ -471,16 +455,16 @@ let private tree (m : Model) : Node<Msg> =
                         sg {
                             Sg.Translate (0.0, 0.0, 0.2)
                             Sg.Scale (artSize)
-                            Sg.Texture ("Atlas", "sprites/ascendancy-background_250_250_BC7.png")
-                            Sg.Uniform ("Rect", a.Art)
+                            Sg.Texture ("Atlas", a.Art)
+                            Sg.Uniform ("Rect", V4d (0.0, 0.0, 1.0, 1.0))
                             Sg.Uniform ("Tint", V4d (0.6, 0.6, 0.6, 0.02))
                             quad
                         }
                         sg {
                             Sg.Translate (0.0, 0.0, 0.3)
                             Sg.Scale (ringSize)
-                            Sg.Texture ("Atlas", "sprites/ascendancy-background_1000_1000_BC7.png")
-                            Sg.Uniform ("Rect", V4d (0.0, 0.0, 0.5, 1.0))
+                            Sg.Texture ("Atlas", "art/ring.png")
+                            Sg.Uniform ("Rect", V4d (0.0, 0.0, 1.0, 1.0))
                             Sg.Uniform ("Tint", V4d (0.8, 0.8, 0.8, 0.02))
                             quad
                         }
@@ -496,50 +480,31 @@ let private tree (m : Model) : Node<Msg> =
                             mesh Topology.Triangles { Mesh.Attribute ("Positions", l.Ribbon) }
                         }
             }
-            // the passives, sheet by sheet: a sheet is bound once for all that are drawn from it
+            // the passives: icon and frame, each out of its own sheet (wombat keeps the sheets
+            // in one atlas, as none is more than 1024 px a side). Every loop sits in a scope of
+            // its own: several loops in one scope are built as one plain list and walked
+            // recursively (FableCube dogfood/poetry.md).
             sg {
                 Sg.Shader { Shaders.sprite }
-                // (one model list per sheet: a list inside a list's element would be walked by a
-                // recursive function, a stack frame per passive; see FableCube dogfood/poetry.md)
                 sg {
-                    Sg.Texture ("Atlas", "sprites/skills_64_64_BC1.png")
-                    for p in m.IconsSmall do
-                        icon m p
-                    for p in m.Ascended do
-                        if p.Ascendancy = m.Ascendancy && p.Icon.Contains "skills_64" then icon m p
+                    for p in m.Shown do
+                        if p.Icon <> "" then icon m p
                 }
                 sg {
-                    Sg.Texture ("Atlas", "sprites/skills_128_128_BC1.png")
-                    for p in m.IconsLarge do
-                        icon m p
-                    for p in m.Ascended do
-                        if p.Ascendancy = m.Ascendancy && p.Icon.Contains "skills_128" then icon m p
+                    for p in m.Shown do
+                        if p.Frame <> "" then frame m p
                 }
                 sg {
-                    Sg.Texture ("Atlas", "sprites/group-background_104_104_BC7.png")
-                    for p in m.FramesSmall do
-                        frame m p
                     for p in m.Ascended do
-                        if p.Ascendancy = m.Ascendancy && p.Frame.Contains "_104_104" then frame m p
+                        if p.Ascendancy = m.Ascendancy && p.Icon <> "" then icon m p
                 }
                 sg {
-                    Sg.Texture ("Atlas", "sprites/group-background_152_156_BC7.png")
-                    for p in m.FramesMedium do
-                        frame m p
                     for p in m.Ascended do
-                        if p.Ascendancy = m.Ascendancy && p.Frame.Contains "_152_156" then frame m p
+                        if p.Ascendancy = m.Ascendancy && p.Frame <> "" then frame m p
+                }
+                sg {
                     for p in m.Sinister do
                         if m.Allocated.Contains p.Id then frame m p
-                }
-                sg {
-                    Sg.Texture ("Atlas", "sprites/group-background_220_224_BC7.png")
-                    for p in m.FramesLarge do
-                        frame m p
-                }
-                sg {
-                    Sg.Texture ("Atlas", "sprites/group-background_92_92_BC7.png")
-                    for p in m.Ascended do
-                        if p.Ascendancy = m.Ascendancy && p.Frame.Contains "_92_92" then frame m p
                 }
             }
         }

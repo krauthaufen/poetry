@@ -75,19 +75,52 @@ nodes.sort(key=lambda n: n["id"])
 # art: where each node's icon is in the sprite sheets (pob-web's PNG atlases of the game's
 # tree art, with their index _sprites.json), and the frames per kind and state
 sprites = json.load(open(sys.argv[2])) if len(sys.argv) > 2 else {}
+spriteDir = os.path.dirname(sys.argv[2]) if len(sys.argv) > 2 else ""
+artDir = os.path.join(root, "web", "public", "art")
+# wombat keeps textures of up to 1024 px a side in its own atlas, and draws from that however
+# many draws there are; a bigger one is uploaded again per draw. So a sheet that is bigger is
+# cut into pages of our own (web/public/art), each at most 1024 px.
+PAGE = 1024
 sheets, sheetIndex = [], {}
-def sheet(name):
-    if name not in sheetIndex:
-        s = next(v for v in sprites.values() if v["sheet"] == name)
-        sheetIndex[name] = len(sheets)
-        sheets.append({"name": name, "w": s["width"], "h": s["height"]})
-    return sheetIndex[name]
+def sheet(url, w, h):
+    if url not in sheetIndex:
+        sheetIndex[url] = len(sheets)
+        sheets.append({"name": url, "w": w, "h": h})
+    return sheetIndex[url]
+pages = {}
+def paged(v, sprite):
+    """Where a sprite of a too big sheet is in that sheet's pages: [sheet, x, y, w, h]."""
+    from PIL import Image
+    Image.MAX_IMAGE_PIXELS = None
+    name = v["sheet"]
+    if name not in pages:
+        os.makedirs(artDir, exist_ok=True)
+        source = Image.open(os.path.join(spriteDir, name))
+        cw, ch = v["cellW"], v["cellH"]
+        per = (PAGE // cw) * (PAGE // ch)
+        cols = PAGE // cw
+        where = {}
+        names = sorted(v["sprites"])
+        for n in range(0, len(names), per):
+            page = Image.new("RGBA", (PAGE, PAGE))
+            url = "art/%s-%d.png" % (name.replace(".png", ""), n // per)
+            for i, s in enumerate(names[n:n + per]):
+                r = v["sprites"][s]
+                x, y = (i % cols) * cw, (i // cols) * ch
+                page.paste(source.crop((r["x"], r["y"], r["x"] + r["w"], r["y"] + r["h"])), (x, y))
+                where[s] = [url, x, y, r["w"], r["h"]]
+            page.save(os.path.join(root, "web", "public", url))
+        pages[name] = where
+    url, x, y, w, h = pages[name][sprite]
+    return [sheet(url, PAGE, PAGE), x, y, w, h]
 def find(sprite, prefer):
     for want in prefer:
         for key, v in sprites.items():
             if key.startswith(want) and sprite in v["sprites"]:
+                if v["width"] > PAGE or v["height"] > PAGE:
+                    return paged(v, sprite)
                 r = v["sprites"][sprite]
-                return [sheet(v["sheet"]), r["x"], r["y"], r["w"], r["h"]]
+                return [sheet("sprites/" + v["sheet"], v["width"], v["height"]), r["x"], r["y"], r["w"], r["h"]]
     return None
 if sprites:
     for node in nodes:
@@ -112,14 +145,26 @@ classes = [{"name": c["name"], "ascendancies": [a["name"] for a in c.get("ascend
 # moves the character's own to the middle of the tree, over its class art (the small sheet)
 ascendancies = []
 if len(sys.argv) > 2:
-    small = json.load(open(os.path.join(os.path.dirname(sys.argv[2]), "ascendancy-background_250_250_BC7.json")))
+    # the class art: the pictures of the big sheet (1500 px each) as files of their own, made
+    # smaller; and the ring around the ascendancy out of its sheet
+    from PIL import Image
+    Image.MAX_IMAGE_PIXELS = None
+    os.makedirs(artDir, exist_ok=True)
+    big = next(v for k, v in sprites.items() if k.startswith("ascendancy-background_1500"))
+    source = Image.open(os.path.join(spriteDir, big["sheet"]))
     for c in src["classes"]:
         for a in c.get("ascendancies", []):
             bg = a.get("background")
-            art = small["sprites"].get("Classes" + a["name"])
-            if bg:
-                ascendancies.append({"name": a["name"], "x": round(bg["x"], 1), "y": round(bg["y"], 1), "width": bg["width"],
-                                     "art": [art["x"] / small["width"], art["y"] / small["height"], art["w"] / small["width"], art["h"] / small["height"]] if art else None})
+            if not bg: continue
+            r = big["sprites"].get(bg.get("image") or ("Classes" + a["name"]))
+            url = None
+            if r:
+                url = "art/class-%s.png" % a["name"].lower().replace(" ", "-")
+                source.crop((r["x"], r["y"], r["x"] + r["w"], r["y"] + r["h"])).resize((PAGE, PAGE), Image.LANCZOS).save(os.path.join(root, "web", "public", url))
+            ascendancies.append({"name": a["name"], "x": round(bg["x"], 1), "y": round(bg["y"], 1), "width": bg["width"], "art": url})
+    ring = next(v for k, v in sprites.items() if k.startswith("ascendancy-background_4000"))
+    r = ring["sprites"]["BGTree"]
+    Image.open(os.path.join(spriteDir, ring["sheet"])).crop((r["x"], r["y"], r["x"] + r["w"], r["y"] + r["h"])).resize((PAGE, PAGE), Image.LANCZOS).save(os.path.join(artDir, "ring.png"))
 out = os.path.join(root, "web", "public")
 os.makedirs(out, exist_ok=True)
 
