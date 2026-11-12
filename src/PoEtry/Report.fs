@@ -37,7 +37,26 @@ module Report =
 
     /// The character sheet: who it is, pools, defences, resistances, what can be pressed, the
     /// socket groups, the minions, and what was not understood.
-    let character (c: Loaded) : Json =
+    /// (`slots`: the tree's jewel sockets in the order a character's jewels are numbered.)
+    let character (slots: int list) (c: Loaded) : Json =
+        // a jewel in a socket of the tree: its item text is rarity, name, base, properties, mods
+        let jewel (slot: string, text: string) =
+            if not (slot.StartsWith "Jewel ") then None
+            else
+                match System.Int32.TryParse(slot.Substring 6) with
+                | true, n ->
+                    (if n < 1000 then List.tryItem n slots else Some n)
+                    |> Option.map (fun node ->
+                        let lines = text.Split('\n') |> List.ofArray
+                        let parts = lines |> List.fold (fun acc l -> if l = "--------" then [] :: acc else (match acc with h :: r -> (h @ [ l ]) :: r | [] -> [ [ l ] ])) [ [] ] |> List.rev
+                        let head = parts |> List.tryHead |> Option.defaultValue []
+                        let rarity = head |> List.tryHead |> Option.map (fun (l: string) -> l.Replace("Rarity: ", "")) |> Option.defaultValue ""
+                        let rest = parts |> List.skip (min 1 parts.Length) |> List.concat |> List.filter (fun l -> l <> "")
+                        obj [ "node", num (float node); "rarity", JStr rarity
+                              "name", JStr (head |> List.tryItem 1 |> Option.defaultValue "")
+                              "base", JStr (head |> List.tryItem 2 |> Option.defaultValue "")
+                              "mods", JArr(rest |> List.map JStr) ])
+                | _ -> None
         let v = c.Vitals
         let cov = c.Sheet.Coverage
         obj
@@ -51,6 +70,7 @@ module Report =
                   [ "Strength"; "Dexterity"; "Intelligence" ]
                   |> List.tryFind (fun a -> stats |> List.exists (fun (s: string) -> s.EndsWith("to " + a)))
                   |> Option.map (fun a -> obj [ "id", num (float i); "name", JStr a ])))
+              "jewels", JArr(c.Build.Items |> List.choose jewel)
               "passivesSet1", JArr(c.Build.TreeNodesSet1 |> List.map (fun i -> num (float i)))
               "passivesSet2", JArr(c.Build.TreeNodesSet2 |> List.map (fun i -> num (float i)))
               "attributes", obj [ "str", num v.Str; "dex", num v.Dex; "int", num v.Int ]
@@ -168,7 +188,7 @@ type Session(read: string -> string) =
                 | _ -> ""
             let choices = Json.strField "choices" j |> Option.defaultValue ""
             match Json.strField "op" j with
-            | Some "character" -> Report.write (Report.character (this.Load(build, passives, choices)))
+            | Some "character" -> Report.write (Report.character (Tree.jewelSlots tree.Value) (this.Load(build, passives, choices)))
             | Some "fight" -> Report.write (Report.fight (this.Load(build, passives, choices)) j)
             | other -> Report.write (JObj(Map.ofList [ "error", JStr(sprintf "unknown op %A" other) ]))
         with e ->

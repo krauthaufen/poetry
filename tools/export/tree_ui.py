@@ -217,7 +217,11 @@ for (a, b, orbit) in edges.values():
     else:
         paths.append("M%.0f %.0fL%.0f %.0f" % (x1, y1, x2, y2))
         drawn.append([a, b])
-json.dump({"box": box, "classes": classes, "nodes": nodes, "edges": drawn, "sheets": sheets, "frames": frames, "ascendancies": ascendancies}, open(os.path.join(out, "tree.json"), "w"), separators=(",", ":"))
+# a jewel in a socket: its picture by unique name or base type (pob-web's jewel-sockets sheet)
+js = sprites["jewel-sockets_152_156_BC7.dds.zst"]
+ji = sheet("sprites/" + js["sheet"], js["width"], js["height"])
+jewels = {k: [ji, v["x"], v["y"], v["w"], v["h"]] for k, v in js["sprites"].items()}
+json.dump({"jewels": jewels, "box": box, "classes": classes, "nodes": nodes, "edges": drawn, "sheets": sheets, "frames": frames, "ascendancies": ascendancies}, open(os.path.join(out, "tree.json"), "w"), separators=(",", ":"))
 svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="%d %d %d %d">'
        '<path d="%s" fill="none" stroke="#4a4136" stroke-width="14" stroke-linecap="round"/></svg>') % (box[0], box[1], box[2], box[3], "".join(paths))
 open(os.path.join(out, "tree.svg"), "w").write(svg)

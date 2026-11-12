@@ -32,6 +32,9 @@ type Passive =
       FrameOn : V4d
       FrameOff : V4d }
 
+/// A jewel in a socket of the tree, and its picture in the jewel sheet.
+type Jewel = { Called : string; Base : string; Rarity : string; Mods : string list; Sprite : string; SpriteRect : V4d }
+
 /// A connection: its two passives and its ribbon (triangles); an ascendancy's own are laid
 /// out for the middle of the tree.
 type Link = { A : int; B : int; Of : string; Ribbon : V3f list }
@@ -139,6 +142,9 @@ type Model =
       /// What an allocated passive with a choice was chosen to be ("Strength", ...).
       Choices : Map<int, string>
       /// The passive whose tooltip is pinned (clicked), and the one under the mouse.
+      /// The pictures of jewels in sockets, by unique name or base type; the character's jewels by socket.
+      JewelSprites : Map<string, string * V4d>
+      Jewels : Map<int, Jewel>
       Selected : int option
       Hovered : int option
       Level : int }
@@ -153,7 +159,7 @@ let init : Model =
       Centre = V2d (0.0, 0.0); Height = 9000.0
       Camera = { Sky = V3d (0.0, 1.0, 0.0); Location = V3d (0.0, 0.0, 7794.2); Forward = V3d (0.0, 0.0, -1.0); Up = V3d (0.0, 1.0, 0.0); Right = V3d (1.0, 0.0, 0.0) }
       Near = 7000.0; Far = 8600.0
-      Touches = []; Travel = 0.0; Page = V2d (0.0, 0.0); Asked = 0; Pending = None; Choices = Map.empty; Selected = None; Hovered = None; Level = 0 }
+      Touches = []; Travel = 0.0; Page = V2d (0.0, 0.0); Asked = 0; Pending = None; Choices = Map.empty; JewelSprites = Map.empty; Jewels = Map.empty; Selected = None; Hovered = None; Level = 0 }
 
 /// The camera straight above the centre, so far up that `Height` of the tree is seen through
 /// its 60 degree lens; the depth range close around the tree's plane (its layers are a unit
@@ -275,6 +281,7 @@ let private readTree (j : Json) (m : Model) : Model =
     let web = edges |> List.filter (fun e -> own e = "") |> List.collect (ribbon 14.0 at)
     let shown = (passives |> List.filter (fun p -> p.Kind <> "start" && p.Ascendancy = "")) @ ascended
     { m with
+        JewelSprites = Json.field "jewels" j |> Json.members |> List.map (fun (k, v) -> k, sprite v) |> Map.ofList
         Passives = Array.ofList passives
         Ascendancies = ascendancies
         Shown = shown
@@ -521,6 +528,13 @@ let rec update (msg : Msg) (m : Model) : Model =
                     Allocated = (if m.Edited then m.Allocated else Json.field "passives" j |> Json.list |> List.map Json.int |> Set.ofList)
                     Choices = (if m.Edited then m.Choices else Json.field "choices" j |> Json.list |> List.map (fun c -> Json.int (Json.field "id" c), Json.string (Json.field "name" c)) |> Map.ofList)
                     Level = int (n [ "level" ])
+                    Jewels =
+                        Json.field "jewels" j |> Json.list
+                        |> List.map (fun x ->
+                            let s k = Json.string (Json.field k x)
+                            let pic = Map.tryFind (s "name") m.JewelSprites |> Option.orElse (Map.tryFind (s "base") m.JewelSprites) |> Option.defaultValue ("", V4d (0.0, 0.0, 0.0, 0.0))
+                            Json.int (Json.field "node" x), { Called = s "name"; Base = s "base"; Rarity = s "rarity"; Mods = Json.field "mods" x |> Json.list |> List.map Json.string; Sprite = fst pic; SpriteRect = snd pic })
+                        |> Map.ofList
                     Pools = [ row "Life" (n [ "pools"; "life" ]); row "Mana" (n [ "pools"; "mana" ]); row "Energy Shield" (n [ "pools"; "energyShield" ]); row "Spirit" (n [ "pools"; "spirit" ]) ]
                     Defences = [ row "Armour" (n [ "defences"; "armour" ]); row "Evasion" (n [ "defences"; "evasion" ]); row "Deflection" (n [ "defences"; "deflection" ]); row "Block" (n [ "defences"; "block" ]) ]
                     Resistances = named "resistances"
@@ -590,11 +604,17 @@ let private chosen (m : Model) (p : Passive) : V4d =
 
 /// A passive's icon: out of the sheet bound above, dim until it is allocated.
 let icon (m : Model) (p : Passive) : Scene<Msg> =
+    // (a socket with a jewel in it shows the jewel, over its frame)
+    let jewel = Map.tryFind p.Id m.Jewels |> Option.filter (fun j -> j.Sprite <> "" && m.Allocated.Contains p.Id)
+    let z = if jewel.IsSome then 3.0 else 1.0
+    let size = if jewel.IsSome then p.Size else p.IconSize
+    let sheet = match jewel with Some j -> j.Sprite | None -> p.Icon
+    let rect = match jewel with Some j -> j.SpriteRect | None -> p.IconRect
     sg {
-        Sg.Translate (p.X, -p.Y, 1.0)
-        Sg.Scale (p.IconSize)
-        Sg.Texture ("Atlas", p.Icon)
-        Sg.Uniform ("Rect", p.IconRect)
+        Sg.Translate (p.X, -p.Y, z)
+        Sg.Scale (size)
+        Sg.Texture ("Atlas", sheet)
+        Sg.Uniform ("Rect", rect)
         Sg.Uniform ("Tint", (if m.Allocated.Contains p.Id then chosen m p else dim))
         quad
     }
@@ -723,9 +743,14 @@ let private tooltip (m : Model) : Node<Msg> =
         let state = if has then "Allocated" else "Unallocated"
         // (a chosen attribute grants that one)
         let stats = match Map.tryFind p.Id m.Choices with Some c when has -> p.Stats |> List.map (fun s -> s.Replace ("any Attribute", c)) | _ -> p.Stats
+        let j = Map.tryFind p.Id m.Jewels
+        let jewel = match j with Some j -> j.Mods | None -> []
+        let called = match j with Some j -> j.Called | None -> ""
+        let based = match j with Some j -> j.Base | None -> ""
+        let rarity = match j with Some j -> j.Rarity.ToLower () | None -> ""
         div {
-            Dom.Style [ Css.Left (sprintf "%.0fpx" (max 12.0 (min x (m.Page.X - wide - 12.0)))); Css.Top (sprintf "%.0fpx" (max (top + 8.0) (min y (m.Page.Y - 190.0)))); Css.Width (sprintf "%.0fpx" wide) ]
-            Dom.Class ("passive-tip " + p.Kind)
+            Dom.Style [ Css.Left (sprintf "%.0fpx" (max 12.0 (min x (m.Page.X - wide - 12.0)))); Css.Top (sprintf "%.0fpx" (max (top + 8.0) (min y (m.Page.Y - 190.0 - 22.0 * float jewel.Length)))); Css.Width (sprintf "%.0fpx" wide) ]
+            Dom.Class ("passive-tip " + p.Kind + (if pinned then " pinned" else ""))
             Dom.Attr ("data-check", "tooltip")
             div { Dom.Class "name"; title }
             div {
@@ -733,6 +758,14 @@ let private tooltip (m : Model) : Node<Msg> =
                 for s in stats do
                     div { s }
             }
+            if has && jewel.Length > 0 then
+                div {
+                    Dom.Class ("jewel " + rarity)
+                    div { Dom.Class "called"; called }
+                    div { Dom.Class "base"; based }
+                    for l in jewel do
+                        div { Dom.Class (if l = "Corrupted" then "corrupted" else "mod"); l }
+                }
             if pinned then
                 div {
                     Dom.Class "actions"
