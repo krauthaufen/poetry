@@ -442,6 +442,10 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
                 equal 34 p.Count
                 equal (Some(69.0, 6.0)) p.Rain
                 equal true p.TouchTriggered
+                // a cone in front of the player: nothing comes up behind them
+                let at x = { EnemyDef.atLevel 83 1e6 with Name = sprintf "e%.0f" x; Position = Vec.make x 0.0; Size = 10.0 }
+                let hits = [ for seed in 1u .. 50u do yield! Geometry.targetsFrom (Rng seed) [] 100.0 boom.Delivery 1.0 (at 30.0) [ at 30.0; at -30.0 ] ]
+                equal true (not hits.IsEmpty && hits |> List.forall ((=) "e30"))
             | d -> failwithf "%A" d
             equal true (boom.Mods |> List.exists (fun m -> m.Stat = Damage AllDamage && m.Kind = More && m.Value = -80.0))
         | Error e -> failwith e)

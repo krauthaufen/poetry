@@ -20,6 +20,9 @@ type ProjectileShape =
       PerCharge: (string * int) option
       /// Projectiles start where the skill lands (on the aimed enemy), not at the player.
       FromImpact: bool
+      /// A rain that falls into a cone of this many degrees in front of the player, as long as
+      /// the rain's area (0: a disc around the target).
+      RainCone: float
       /// Each projectile's reach varies by up to this share either way (its speed varies).
       RangeVariation: float
       /// Shards that spring from the enemy that was hit and fly on: they cannot hit it.
@@ -78,6 +81,7 @@ module ProjectileShape =
           Explosion = None
           PerCharge = None
           FromImpact = false
+          RainCone = 0.0
           RangeVariation = 0.0
           SkipPrimary = false
           Rain = None

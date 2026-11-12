@@ -404,7 +404,10 @@ module Geometry =
             let last = System.Collections.Generic.Dictionary<string, float>()
             [ for k in 0 .. p.Count - 1 do
                 let r, a = area * sqrt (rng.Float()), 2.0 * System.Math.PI * rng.Float()
-                let at = Vec.add primary.Position (Vec.scale r (Vec.ofAngle a))
+                let at =
+                    if p.RainCone > 0.0 then
+                        Vec.scale r (Vec.ofAngle (Vec.angle primary.Position + (a / (2.0 * System.Math.PI) - 0.5) * p.RainCone * System.Math.PI / 180.0))
+                    else Vec.add primary.Position (Vec.scale r (Vec.ofAngle a))
                 let now = float k * p.Every
                 if not p.TouchTriggered || alive |> List.exists (within at 0.0) then
                     for e in alive |> List.filter (within at impact) do

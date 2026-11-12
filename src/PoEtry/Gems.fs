@@ -652,7 +652,7 @@ module Gems =
         let field =
             match Map.tryFind (data.Name, set.Label) partConditions |> Option.exists (List.contains "Field"), radius, (data.StatSets |> List.tryPick (fun st -> statsWith altQuality data st level quality |> List.tryPick (fun (k, v) -> if k = "spear_wall_cm_per_spear" then Some v else None))), statOf "active_skill_base_secondary_area_of_effect_radius" with
             | true, Some r, Some cm, Some blast when cm > 0.0 ->
-                Some(Projectiles { ProjectileShape.make (max 1 (int (r / (cm / 10.0)))) with Rain = Some(r, blast); TouchTriggered = true; FromImpact = true })
+                Some(Projectiles { ProjectileShape.make (max 1 (int (r / (cm / 10.0)))) with Rain = Some(r, blast); RainCone = Constants.spearfieldCone; TouchTriggered = true; FromImpact = true })
             | _ -> None
         let delivery =
             if field.IsSome then field.Value
