@@ -405,14 +405,19 @@ let private frame (m : Model) (p : Passive) : Scene<Msg> =
         quad
     }
 
+/// How far above the tree the camera is, to see `Height` of it with its 60 degree lens.
+let private distance (m : Model) = m.Height / (2.0 * tan (System.Math.PI / 6.0))
+
 let private tree (m : Model) : Node<Msg> =
     renderControl {
         Dom.Style [ Css.Position "absolute"; Css.Left "0"; Css.Top "0"; Css.Width "100%"; Css.Height "100%"; Css.TouchAction "none" ]
-        // straight down on the tree: what is seen is `Height` tall
-        RenderControl.Perspective (60.0, 10.0, 400000.0)
+        // straight down on the tree: what is seen is `Height` tall. The depth range is kept
+        // close around the tree's plane: its layers are a unit apart, and with a wide range
+        // they are told apart by luck, the ground hiding the tree on some frames
+        RenderControl.Perspective (60.0, distance m * 0.9, distance m * 1.1)
         RenderControl.Camera
             { Sky = V3d (0.0, 1.0, 0.0)
-              Location = V3d (m.Centre.X, m.Centre.Y, m.Height / (2.0 * tan (System.Math.PI / 6.0)))
+              Location = V3d (m.Centre.X, m.Centre.Y, distance m)
               Forward = V3d (0.0, 0.0, -1.0)
               Up = V3d (0.0, 1.0, 0.0)
               Right = V3d (1.0, 0.0, 0.0) }
