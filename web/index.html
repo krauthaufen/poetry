@@ -46,7 +46,8 @@
        unique orange #af6025, gem teal #1ba29b, currency #aa9e82; fire #960000, cold #366492, lightning #ffd700, chaos #d02090 */
     :root { --ink: #c8c8c8; --gold: #aa9e82; --dim: #7f7f7f; --stone: #0c0b0a; --slab: #151311; --edge: #3b3024; --fire: #960000;
             --magic: #8888ff; --rare: #ffff77; --unique: #af6025; --gem: #1ba29b; --cold: #366492; --lightning: #ffd700; --chaos: #d02090; }
-    html, body, #app { margin: 0; min-height: 100%; }
+    html, body, #app { margin: 0; height: 100%; }
+    #app > div { position: relative; min-height: 100%; }
     body { background: radial-gradient(ellipse at top, #1c1814 0%, var(--stone) 60%) fixed !important; color: var(--ink) !important;
            font: 15px/1.45 "Fontin", "Palatino Linotype", "Book Antiqua", Georgia, serif !important; }
     #app header { padding: 18px 28px 10px; border-bottom: 1px solid var(--edge); display: flex; align-items: baseline; gap: 24px; flex-wrap: wrap; }

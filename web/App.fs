@@ -31,7 +31,7 @@ type Passive =
 
 /// A connection: its two passives and its ribbon (triangles); an ascendancy's own are laid
 /// out for the middle of the tree.
-type Link = { A : int; B : int; Of : string; Ribbon : Buffer<V3f> }
+type Link = { A : int; B : int; Of : string; Ribbon : V3f list }
 
 /// An ascendancy: where its part of the tree is laid out (the middle of its background), and
 /// its class art in the small background sheet.
@@ -45,6 +45,8 @@ type Msg =
     | Tab of string
     | TreeData of Fetched
     | Toggle of int
+    /// A click on the tree, at this place of it.
+    | Click of V3d
     | Grab of V3d
     /// (with where the camera was when the pointer's place on the tree was worked out)
     | Drag of V3d * V3d
@@ -74,13 +76,16 @@ type Model =
       /// all connections as one mesh, what is allocated (and whether that was changed here).
       Passives : Passive list
       Ascendancies : Ascendancy list
-      /// The ascendancies' passives and connections (drawn for the character's own only).
-      Ascended : Passive list
-      AscendedLinks : Link list
-      /// Those that are drawn (not a class' start, a hidden socket or an ascendancy's).
+      /// Those that can be drawn: the tree's, every ascendancy's (laid out for the middle of
+      /// the tree; only the character's own is shown) and the hidden sockets.
       Shown : Passive list
-      /// Sockets that are only there while something is in them (the Voices jewel's).
-      Sinister : Passive list
+      /// What is drawn as one mesh each (the view has a single loop, over the passives: with
+      /// a second one FableCube rebuilds the whole render control on every change, see its
+      /// dogfood/poetry.md): the character's ascendancy's connections, the connections
+      /// between allocated passives, and the ascendancy's class art.
+      AscendancyWeb : Buffer<V3f>
+      Path : Buffer<V3f>
+      Art : string
       Links : Link list
       Neighbours : Map<int, int list>
       Web : Buffer<V3f>
@@ -89,6 +94,12 @@ type Model =
       /// The view on the tree: its centre, and the height of what is seen (tree units).
       Centre : V2d
       Height : float
+      /// The camera for that view and its depth range, kept here by `look`: the render
+      /// control wants them as fields of the model (given values worked out in the view, it
+      /// is made anew, canvas and all, whenever they change; FableCube dogfood/poetry.md).
+      Camera : Camera
+      Near : float
+      Far : float
       /// The point of the tree held while dragging; whether the pointer has moved since.
       Held : V3d option
       Moved : bool }
@@ -97,8 +108,21 @@ let init : Model =
     { Build = ""; Scenario = "boss"; Status = "locating"; Title = ""; Class = ""; Ascendancy = ""; Tab = "character"
       Pools = []; Defences = []; Resistances = []; Minions = []
       NotUnderstood = 0; Fighting = false; Gem = ""; Dps = []; Shares = []
-      Passives = []; Ascendancies = []; Ascended = []; AscendedLinks = []; Shown = []; Sinister = []; Links = []; Neighbours = Map.empty; Web = Data.pack (Data.ofList ([] : V3f list)); Allocated = Set.empty; Edited = false
-      Centre = V2d (0.0, 0.0); Height = 9000.0; Held = None; Moved = false }
+      Passives = []; Ascendancies = []; Shown = []; AscendancyWeb = Data.pack (Data.ofList ([] : V3f list)); Path = Data.pack (Data.ofList ([] : V3f list)); Art = ""; Links = []; Neighbours = Map.empty; Web = Data.pack (Data.ofList ([] : V3f list)); Allocated = Set.empty; Edited = false
+      Centre = V2d (0.0, 0.0); Height = 9000.0
+      Camera = { Sky = V3d (0.0, 1.0, 0.0); Location = V3d (0.0, 0.0, 7794.2); Forward = V3d (0.0, 0.0, -1.0); Up = V3d (0.0, 1.0, 0.0); Right = V3d (1.0, 0.0, 0.0) }
+      Near = 7000.0; Far = 8600.0
+      Held = None; Moved = false }
+
+/// The camera straight above the centre, so far up that `Height` of the tree is seen through
+/// its 60 degree lens; the depth range close around the tree's plane (its layers are a unit
+/// apart: with a wide range they are told apart by luck).
+let private look (m : Model) : Model =
+    let distance = m.Height / (2.0 * tan (System.Math.PI / 6.0))
+    { m with
+        Camera = { Sky = V3d (0.0, 1.0, 0.0); Location = V3d (m.Centre.X, m.Centre.Y, distance); Forward = V3d (0.0, 0.0, -1.0); Up = V3d (0.0, 1.0, 0.0); Right = V3d (1.0, 0.0, 0.0) }
+        Near = distance * 0.9
+        Far = distance * 1.1 }
 
 /// The passives as the simulator is told them (only once they were changed here).
 let private passives (m : Model) =
@@ -188,38 +212,54 @@ let private readTree (j : Json) (m : Model) : Model =
     let ascendancyOf = passives |> List.map (fun p -> p.Id, p.Ascendancy) |> Map.ofList
     let edges = Json.field "edges" j |> Json.list |> List.map (fun e -> Json.list e |> List.map Json.number)
     let own (e : float list) = ascendancyOf.[int e.[0]]
-    let links = edges |> List.filter (fun e -> own e = "") |> List.map (fun e -> { A = int e.[0]; B = int e.[1]; Of = ""; Ribbon = Data.pack (Data.ofList (ribbon 26.0 at e)) })
+    let links = edges |> List.filter (fun e -> own e = "") |> List.map (fun e -> { A = int e.[0]; B = int e.[1]; Of = ""; Ribbon = ribbon 26.0 at e })
     let ascendedLinks =
         edges |> List.filter (fun e -> own e <> "" && middleOf.ContainsKey (own e))
-        |> List.map (fun e -> { A = int e.[0]; B = int e.[1]; Of = own e; Ribbon = Data.pack (Data.ofList (ribbonAt 22.0 at middleOf.[own e] ascendancyScale e)) })
+        |> List.map (fun e -> { A = int e.[0]; B = int e.[1]; Of = own e; Ribbon = ribbonAt 22.0 at middleOf.[own e] ascendancyScale e })
     // an ascendancy's passives, where they are drawn: around the middle of the tree
     let ascended =
         passives |> List.filter (fun p -> p.Ascendancy <> "" && middleOf.ContainsKey p.Ascendancy)
         |> List.map (fun p ->
             let q = (V2d (p.X, p.Y) - middleOf.[p.Ascendancy]) * ascendancyScale
             { p with X = q.X; Y = q.Y })
-    let shown = passives |> List.filter (fun p -> p.Kind <> "start" && not p.Hidden && p.Ascendancy = "")
+    let shown = (passives |> List.filter (fun p -> p.Kind <> "start" && p.Ascendancy = "")) @ ascended
     { m with
         Passives = passives
         Ascendancies = ascendancies
-        Ascended = ascended
-        AscendedLinks = ascendedLinks
         Shown = shown
-        Sinister = passives |> List.filter (fun p -> p.Hidden)
-        Links = links
+        Links = links @ ascendedLinks
         Neighbours = nodes |> List.map (fun n -> Json.int (Json.field "id" n), (Json.field "to" n |> Json.list |> List.map Json.int)) |> Map.ofList
         // (packed here: a buffer is one value to the view, where a list would be followed element by element)
         Web = Data.pack (Data.ofList (edges |> List.filter (fun e -> own e = "") |> List.collect (ribbon 14.0 at))) }
+
+/// The connections between allocated passives, as one mesh.
+let private paths (m : Model) : Model =
+    { m with
+        Path =
+            Data.pack (Data.ofList (
+                m.Links
+                |> List.filter (fun l -> (l.Of = "" || l.Of = m.Ascendancy) && m.Allocated.Contains l.A && m.Allocated.Contains l.B)
+                |> List.collect (fun l -> l.Ribbon))) }
 
 /// The character's ascendancy, once the tree and the character are both there: the game's
 /// character data names it as the class ("Spirit Walker"); else the one its allocated
 /// passives belong to; none for a character that has not ascended.
 let private settle (m : Model) : Model =
-    if m.Ascendancies |> List.exists (fun a -> a.Called = m.Class) then { m with Ascendancy = m.Class }
-    else
-        match m.Passives |> List.tryFind (fun p -> p.Ascendancy <> "" && m.Allocated.Contains p.Id) with
-        | Some p -> { m with Ascendancy = p.Ascendancy }
-        | None -> m
+    let m =
+        if m.Ascendancies |> List.exists (fun a -> a.Called = m.Class) then { m with Ascendancy = m.Class }
+        else
+            match m.Passives |> List.tryFind (fun p -> p.Ascendancy <> "" && m.Allocated.Contains p.Id) with
+            | Some p -> { m with Ascendancy = p.Ascendancy }
+            | None -> m
+    { m with
+        Art = (match m.Ascendancies |> List.tryFind (fun a -> a.Called = m.Ascendancy) with Some a -> a.Art | None -> "")
+        AscendancyWeb = Data.pack (Data.ofList (m.Links |> List.filter (fun l -> l.Of <> "" && l.Of = m.Ascendancy) |> List.collect (fun l -> l.Ribbon))) }
+    |> paths
+
+/// Whether a passive is drawn: the tree's own, the character's ascendancy's, and a hidden
+/// socket only once it is allocated.
+let private visible (m : Model) (p : Passive) =
+    (p.Ascendancy = "" || p.Ascendancy = m.Ascendancy) && (not p.Hidden || m.Allocated.Contains p.Id)
 
 /// Where a character's passives start: its class' start and its ascendancy's.
 let private roots (m : Model) : Set<int> =
@@ -292,7 +332,20 @@ let update (msg : Msg) (m : Model) : Model =
         | s, _ -> { m with Status = "the passive tree could not be read (status " + string s + ")" }
     // (the click that ends a drag allocates nothing)
     | Toggle _ when m.Moved -> m
-    | Toggle id -> { toggle id m with Fighting = true }
+    | Click _ when m.Moved -> m
+    // the passive under the click: the nearest one whose frame covers the place (the
+    // character's own ascendancy is drawn in the middle, over the tree's passives there)
+    | Click p ->
+        let near (ps : Passive list) =
+            ps
+            |> List.filter (fun q -> (q.X - p.X) * (q.X - p.X) + (q.Y + p.Y) * (q.Y + p.Y) <= q.Size * q.Size / 4.0)
+            |> List.sortBy (fun q -> (q.X - p.X) * (q.X - p.X) + (q.Y + p.Y) * (q.Y + p.Y))
+            |> List.tryHead
+        // (the ascendancy's lie over the tree's own there: they come first)
+        match near (m.Shown |> List.filter (fun q -> q.Ascendancy <> "" && visible m q)) |> Option.orElse (near (m.Shown |> List.filter (visible m))) with
+        | Some q -> paths { toggle q.Id m with Fighting = true }
+        | None -> m
+    | Toggle id -> paths { toggle id m with Fighting = true }
     | Grab p -> { m with Held = Some p; Moved = false }
     // A place on the tree comes from the last frame drawn. While dragging, the model is ahead
     // of that frame: a place worked out under an older camera would move the view again by
@@ -303,7 +356,7 @@ let update (msg : Msg) (m : Model) : Model =
         match m.Held with
         | Some held ->
             let d = V2d (held.X - p.X, held.Y - p.Y)
-            if abs d.X + abs d.Y < m.Height / 400.0 then m else { m with Centre = m.Centre + d; Moved = true }
+            if abs d.X + abs d.Y < m.Height / 400.0 then m else look { m with Centre = m.Centre + d; Moved = true }
         | None -> m
     | Release -> { m with Held = None }
     | Zoom (p, _, wheel) ->
@@ -311,7 +364,7 @@ let update (msg : Msg) (m : Model) : Model =
         let k = if wheel > 0.0 then 1.15 else 1.0 / 1.15
         let height = max 600.0 (min 60000.0 (m.Height * k))
         let k = height / m.Height
-        { m with Height = height; Centre = V2d (p.X + (m.Centre.X - p.X) * k, p.Y + (m.Centre.Y - p.Y) * k) }
+        look { m with Height = height; Centre = V2d (p.X + (m.Centre.X - p.X) * k, p.Y + (m.Centre.Y - p.Y) * k) }
     | Sheet r when r.Url <> sheetUrl m -> m
     | Sheet r ->
         match r.Status, Native.parseJson r.Text with
@@ -376,23 +429,22 @@ let private scenario (m : Model) (key : string) (name : string) : Node<Msg> =
 /// A square of side 1 around the origin, its texture coordinates from the top left. (Two
 /// triangles, not a strip: many strips drawn together come out joined, see FableCube
 /// dogfood/poetry.md.)
-let private quad<'m> : Scene<'m> =
+let quad<'m> : Scene<'m> =
     mesh Topology.Triangles {
         Mesh.Attribute ("Positions", Data.pack (Data.ofList [ V3f (-0.5f, -0.5f, 0.0f); V3f (0.5f, -0.5f, 0.0f); V3f (-0.5f, 0.5f, 0.0f); V3f (-0.5f, 0.5f, 0.0f); V3f (0.5f, -0.5f, 0.0f); V3f (0.5f, 0.5f, 0.0f) ]))
         Mesh.Attribute ("DiffuseColorCoordinates", Data.pack (Data.ofList [ V2f (0.0f, 1.0f); V2f (1.0f, 1.0f); V2f (0.0f, 0.0f); V2f (0.0f, 0.0f); V2f (1.0f, 1.0f); V2f (1.0f, 0.0f) ]))
     }
 
 /// (A tint's fourth part is how transparent the art may be before it is cut away.)
-let private white = V4d (1.0, 1.0, 1.0, 0.35)
+let white = V4d (1.0, 1.0, 1.0, 0.35)
 
-let private dim = V4d (0.42, 0.42, 0.45, 0.35)
+let dim = V4d (0.42, 0.42, 0.45, 0.35)
 
 /// A passive's icon: out of the sheet bound above, dim until it is allocated.
-let private icon (m : Model) (p : Passive) : Scene<Msg> =
+let icon (m : Model) (p : Passive) : Scene<Msg> =
     sg {
         Sg.Translate (p.X, -p.Y, 1.0)
         Sg.Scale (p.IconSize)
-        Sg.OnClick (fun _ -> Toggle p.Id)
         Sg.Texture ("Atlas", p.Icon)
         Sg.Uniform ("Rect", p.IconRect)
         Sg.Uniform ("Tint", (if m.Allocated.Contains p.Id then white else dim))
@@ -400,33 +452,22 @@ let private icon (m : Model) (p : Passive) : Scene<Msg> =
     }
 
 /// Its frame, the allocated one once it is.
-let private frame (m : Model) (p : Passive) : Scene<Msg> =
+let frame (m : Model) (p : Passive) : Scene<Msg> =
     sg {
         Sg.Translate (p.X, -p.Y, 2.0)
         Sg.Scale (p.Size)
-        Sg.OnClick (fun _ -> Toggle p.Id)
         Sg.Texture ("Atlas", p.Frame)
         Sg.Uniform ("Rect", (if m.Allocated.Contains p.Id then p.FrameOn else p.FrameOff))
         Sg.Uniform ("Tint", white)
         quad
     }
 
-/// How far above the tree the camera is, to see `Height` of it with its 60 degree lens.
-let private distance (m : Model) = m.Height / (2.0 * tan (System.Math.PI / 6.0))
-
-let private tree (m : Model) : Node<Msg> =
+let tree (m : Model) : Node<Msg> =
     renderControl {
-        Dom.Style [ Css.Position "absolute"; Css.Left "0"; Css.Top "0"; Css.Width "100%"; Css.Height "100%"; Css.TouchAction "none" ]
-        // straight down on the tree: what is seen is `Height` tall. The depth range is kept
-        // close around the tree's plane: its layers are a unit apart, and with a wide range
-        // they are told apart by luck, the ground hiding the tree on some frames
-        RenderControl.Perspective (60.0, distance m * 0.9, distance m * 1.1)
-        RenderControl.Camera
-            { Sky = V3d (0.0, 1.0, 0.0)
-              Location = V3d (m.Centre.X, m.Centre.Y, distance m)
-              Forward = V3d (0.0, 0.0, -1.0)
-              Up = V3d (0.0, 1.0, 0.0)
-              Right = V3d (1.0, 0.0, 0.0) }
+        Dom.Style [ Css.Position "absolute"; Css.Left "0"; Css.Top "64px"; Css.Width "100%"; Css.Height "calc(100% - 64px)"; Css.TouchAction "none"; Css.UserSelect "none"
+                    Css.Prop ("visibility", (if m.Tab = "tree" then "visible" else "hidden")) ]
+        RenderControl.Perspective (60.0, m.Near, m.Far)
+        RenderControl.Camera m.Camera
         sg {
             // the ground: what the pointer holds while dragging, and zooms towards
             sg {
@@ -434,13 +475,19 @@ let private tree (m : Model) : Node<Msg> =
                 Sg.Uniform ("Color", V4d (0.047, 0.047, 0.055, 1.0))
                 Sg.Translate (0.0, 0.0, -1.0)
                 Sg.Scale (200000.0)
+                // the only thing that takes the pointer, and by a ray against its box: picking
+                // by pixel would draw every sprite once more on each pointer move (and with
+                // thousands of them the canvas came out empty for two frames after each)
+                Sg.Intersectable (ProxyBox (V3d (-0.5, -0.5, -0.000001), V3d (0.5, 0.5, 0.000001)))
+                Sg.OnClick (fun e -> Click e.WorldPosition)
                 Sg.OnPointerDown (fun e -> Grab e.WorldPosition)
                 Sg.OnPointerMove (fun e -> Drag (e.WorldPosition, e.Eye))
                 Sg.OnPointerUp (fun _ -> Release)
                 Sg.OnScroll (fun e -> Zoom (e.WorldPosition, e.Eye, e.Wheel.Y))
                 quad
             }
-            // every connection, dim; the allocated ones over them in the game's gold
+            // every connection, dim; the ascendancy's own; the allocated ones over them in the
+            // game's orange. Each is one mesh, made in the update.
             sg {
                 Sg.Shader { Shaders.flat }
                 Sg.NoEvents true
@@ -449,74 +496,45 @@ let private tree (m : Model) : Node<Msg> =
                     mesh Topology.Triangles { Mesh.Attribute ("Positions", m.Web) }
                 }
                 sg {
+                    Sg.Uniform ("Color", V4d (0.227, 0.227, 0.306, 1.0))
+                    Sg.Translate (0.0, 0.0, 0.6)
+                    mesh Topology.Triangles { Mesh.Attribute ("Positions", m.AscendancyWeb) }
+                }
+                sg {
                     Sg.Uniform ("Color", V4d (0.686, 0.376, 0.145, 1.0))
-                    Sg.Translate (0.0, 0.0, 0.5)
-                    for l in m.Links do
-                        if m.Allocated.Contains l.A && m.Allocated.Contains l.B then
-                            mesh Topology.Triangles { Mesh.Attribute ("Positions", l.Ribbon) }
+                    Sg.Translate (0.0, 0.0, 0.7)
+                    mesh Topology.Triangles { Mesh.Attribute ("Positions", m.Path) }
                 }
             }
-            // the character's ascendancy in the middle: its class art, the ring around it, and its
-            // connections (dim, or the game's orange once both ends are allocated)
+            // the character's ascendancy in the middle: its class art and the ring around it
             sg {
                 Sg.Shader { Shaders.sprite }
                 Sg.NoEvents true
-                for a in m.Ascendancies do
-                    if a.Called = m.Ascendancy then
-                        sg {
-                            Sg.Translate (0.0, 0.0, 0.2)
-                            Sg.Scale (artSize)
-                            Sg.Texture ("Atlas", a.Art)
-                            Sg.Uniform ("Rect", V4d (0.0, 0.0, 1.0, 1.0))
-                            Sg.Uniform ("Tint", V4d (0.6, 0.6, 0.6, 0.02))
-                            quad
-                        }
-                        sg {
-                            Sg.Translate (0.0, 0.0, 0.3)
-                            Sg.Scale (ringSize)
-                            Sg.Texture ("Atlas", "art/ring.png")
-                            Sg.Uniform ("Rect", V4d (0.0, 0.0, 1.0, 1.0))
-                            Sg.Uniform ("Tint", V4d (0.8, 0.8, 0.8, 0.02))
-                            quad
-                        }
-            }
-            sg {
-                Sg.Shader { Shaders.flat }
-                Sg.NoEvents true
-                Sg.Translate (0.0, 0.0, 0.6)
-                for l in m.AscendedLinks do
-                    if l.Of = m.Ascendancy then
-                        sg {
-                            Sg.Uniform ("Color", (if m.Allocated.Contains l.A && m.Allocated.Contains l.B then V4d (0.686, 0.376, 0.145, 1.0) else V4d (0.227, 0.227, 0.306, 1.0)))
-                            mesh Topology.Triangles { Mesh.Attribute ("Positions", l.Ribbon) }
-                        }
-            }
-            // the passives: icon and frame, each out of its own sheet (wombat keeps the sheets
-            // in one atlas, as none is more than 1024 px a side). Every loop sits in a scope of
-            // its own: several loops in one scope are built as one plain list and walked
-            // recursively (FableCube dogfood/poetry.md).
-            sg {
-                Sg.Shader { Shaders.sprite }
                 sg {
-                    for p in m.Shown do
+                    Sg.Translate (0.0, 0.0, 0.2)
+                    Sg.Scale (artSize)
+                    Sg.Texture ("Atlas", (if m.Art = "" then "art/ring.png" else m.Art))
+                    Sg.Uniform ("Rect", V4d (0.0, 0.0, 1.0, 1.0))
+                    Sg.Uniform ("Tint", (if m.Art = "" then V4d (0.0, 0.0, 0.0, 2.0) else V4d (0.6, 0.6, 0.6, 0.02)))
+                    quad
+                }
+                sg {
+                    Sg.Translate (0.0, 0.0, 0.3)
+                    Sg.Scale (ringSize)
+                    Sg.Texture ("Atlas", "art/ring.png")
+                    Sg.Uniform ("Rect", V4d (0.0, 0.0, 1.0, 1.0))
+                    Sg.Uniform ("Tint", (if m.Art = "" then V4d (0.0, 0.0, 0.0, 2.0) else V4d (0.8, 0.8, 0.8, 0.02)))
+                    quad
+                }
+            }
+            // the passives, icon under frame: the one loop of this view
+            sg {
+                Sg.Shader { Shaders.sprite }
+                Sg.NoEvents true
+                for p in m.Shown do
+                    if visible m p then
                         if p.Icon <> "" then icon m p
-                }
-                sg {
-                    for p in m.Shown do
                         if p.Frame <> "" then frame m p
-                }
-                sg {
-                    for p in m.Ascended do
-                        if p.Ascendancy = m.Ascendancy && p.Icon <> "" then icon m p
-                }
-                sg {
-                    for p in m.Ascended do
-                        if p.Ascendancy = m.Ascendancy && p.Frame <> "" then frame m p
-                }
-                sg {
-                    for p in m.Sinister do
-                        if m.Allocated.Contains p.Id then frame m p
-                }
             }
         }
     }
@@ -549,11 +567,11 @@ let view (m : Model) : Node<Msg> =
                 div { Dom.Class "headline"; Dom.Attr ("data-check", "dps"); m.Dps.Head.Value + " DPS" }
             div { Dom.Class "status"; Dom.Attr ("data-check", "status"); status m }
         }
-        if m.Tab = "tree" then
-            div {
-                Dom.Class "treeview"
-                tree m
-            }
+        // The tree is always there and only hidden under the other tab, and it is a child of
+        // the page itself: under an `if`, or inside another element, the render control is
+        // one value to FableCube and made anew, canvas and every draw, whenever anything in
+        // it changes (its dogfood/poetry.md).
+        tree m
         if m.Tab = "character" then
             div {
                 Dom.Class "main"
