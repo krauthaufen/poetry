@@ -74,7 +74,9 @@ type Model =
       Shares : Share list
       /// The passive tree: its passives and connections, who neighbours whom, the ribbons of
       /// all connections as one mesh, what is allocated (and whether that was changed here).
-      Passives : Passive list
+      /// (Arrays: read by the update alone, and as arrays they are one value each to the view,
+      /// where a list in the model costs load time and memory element by element.)
+      Passives : Passive[]
       Ascendancies : Ascendancy list
       /// Those that can be drawn: the tree's, every ascendancy's (laid out for the middle of
       /// the tree; only the character's own is shown) and the hidden sockets.
@@ -86,7 +88,7 @@ type Model =
       AscendancyWeb : Buffer<V3f>
       Path : Buffer<V3f>
       Art : string
-      Links : Link list
+      Links : Link[]
       Neighbours : Map<int, int list>
       Web : Buffer<V3f>
       Allocated : Set<int>
@@ -108,7 +110,7 @@ let init : Model =
     { Build = ""; Scenario = "boss"; Status = "locating"; Title = ""; Class = ""; Ascendancy = ""; Tab = "character"
       Pools = []; Defences = []; Resistances = []; Minions = []
       NotUnderstood = 0; Fighting = false; Gem = ""; Dps = []; Shares = []
-      Passives = []; Ascendancies = []; Shown = []; AscendancyWeb = Data.pack (Data.ofList ([] : V3f list)); Path = Data.pack (Data.ofList ([] : V3f list)); Art = ""; Links = []; Neighbours = Map.empty; Web = Data.pack (Data.ofList ([] : V3f list)); Allocated = Set.empty; Edited = false
+      Passives = [||]; Ascendancies = []; Shown = []; AscendancyWeb = Data.pack (Data.ofList ([] : V3f list)); Path = Data.pack (Data.ofList ([] : V3f list)); Art = ""; Links = [||]; Neighbours = Map.empty; Web = Data.pack (Data.ofList ([] : V3f list)); Allocated = Set.empty; Edited = false
       Centre = V2d (0.0, 0.0); Height = 9000.0
       Camera = { Sky = V3d (0.0, 1.0, 0.0); Location = V3d (0.0, 0.0, 7794.2); Forward = V3d (0.0, 0.0, -1.0); Up = V3d (0.0, 1.0, 0.0); Right = V3d (1.0, 0.0, 0.0) }
       Near = 7000.0; Far = 8600.0
@@ -224,10 +226,10 @@ let private readTree (j : Json) (m : Model) : Model =
             { p with X = q.X; Y = q.Y })
     let shown = (passives |> List.filter (fun p -> p.Kind <> "start" && p.Ascendancy = "")) @ ascended
     { m with
-        Passives = passives
+        Passives = Array.ofList passives
         Ascendancies = ascendancies
         Shown = shown
-        Links = links @ ascendedLinks
+        Links = Array.ofList (links @ ascendedLinks)
         Neighbours = nodes |> List.map (fun n -> Json.int (Json.field "id" n), (Json.field "to" n |> Json.list |> List.map Json.int)) |> Map.ofList
         // (packed here: a buffer is one value to the view, where a list would be followed element by element)
         Web = Data.pack (Data.ofList (edges |> List.filter (fun e -> own e = "") |> List.collect (ribbon 14.0 at))) }
@@ -237,7 +239,7 @@ let private paths (m : Model) : Model =
     { m with
         Path =
             Data.pack (Data.ofList (
-                m.Links
+                List.ofArray m.Links
                 |> List.filter (fun l -> (l.Of = "" || l.Of = m.Ascendancy) && m.Allocated.Contains l.A && m.Allocated.Contains l.B)
                 |> List.collect (fun l -> l.Ribbon))) }
 
@@ -248,12 +250,12 @@ let private settle (m : Model) : Model =
     let m =
         if m.Ascendancies |> List.exists (fun a -> a.Called = m.Class) then { m with Ascendancy = m.Class }
         else
-            match m.Passives |> List.tryFind (fun p -> p.Ascendancy <> "" && m.Allocated.Contains p.Id) with
+            match List.ofArray m.Passives |> List.tryFind (fun p -> p.Ascendancy <> "" && m.Allocated.Contains p.Id) with
             | Some p -> { m with Ascendancy = p.Ascendancy }
             | None -> m
     { m with
         Art = (match m.Ascendancies |> List.tryFind (fun a -> a.Called = m.Ascendancy) with Some a -> a.Art | None -> "")
-        AscendancyWeb = Data.pack (Data.ofList (m.Links |> List.filter (fun l -> l.Of <> "" && l.Of = m.Ascendancy) |> List.collect (fun l -> l.Ribbon))) }
+        AscendancyWeb = Data.pack (Data.ofList (List.ofArray m.Links |> List.filter (fun l -> l.Of <> "" && l.Of = m.Ascendancy) |> List.collect (fun l -> l.Ribbon))) }
     |> paths
 
 /// Whether a passive is drawn: the tree's own, the character's ascendancy's, and a hidden
@@ -263,7 +265,7 @@ let private visible (m : Model) (p : Passive) =
 
 /// Where a character's passives start: its class' start and its ascendancy's.
 let private roots (m : Model) : Set<int> =
-    m.Passives
+    List.ofArray m.Passives
     |> List.filter (fun p -> (p.Kind = "start" && m.Neighbours.ContainsKey p.Id) || (p.Kind = "ascstart" && p.Ascendancy = m.Ascendancy))
     |> List.map (fun p -> p.Id)
     |> Set.ofList
@@ -277,13 +279,13 @@ let private open' (m : Model) (asc : Map<int, string>) (id : int) =
 /// Allocating a passive takes the shortest way to it from what is allocated; deallocating
 /// one drops it and all that then hangs loose from the start.
 let private toggle (id : int) (m : Model) : Model =
-    let asc = m.Passives |> List.map (fun p -> p.Id, p.Ascendancy) |> Map.ofList
-    let starts = m.Passives |> List.filter (fun p -> p.Kind = "start") |> List.map (fun p -> p.Id) |> Set.ofList
+    let asc = List.ofArray m.Passives |> List.map (fun p -> p.Id, p.Ascendancy) |> Map.ofList
+    let starts = List.ofArray m.Passives |> List.filter (fun p -> p.Kind = "start") |> List.map (fun p -> p.Id) |> Set.ofList
     let next (i : int) = Map.tryFind i m.Neighbours |> Option.defaultValue [] |> List.filter (fun n -> open' m asc n && not (starts.Contains n))
     if m.Allocated.Contains id then
         let left = m.Allocated.Remove id
         // what still hangs on a start (the class' own start is whichever touches the allocated)
-        let seeds = left |> Set.filter (fun i -> (Map.tryFind i m.Neighbours |> Option.defaultValue [] |> List.exists starts.Contains) || (asc.[i] <> "" && (m.Passives |> List.exists (fun p -> p.Id = i && p.Kind = "ascstart"))))
+        let seeds = left |> Set.filter (fun i -> (Map.tryFind i m.Neighbours |> Option.defaultValue [] |> List.exists starts.Contains) || (asc.[i] <> "" && (List.ofArray m.Passives |> List.exists (fun p -> p.Id = i && p.Kind = "ascstart"))))
         let rec grow (seen : Set<int>) (front : int list) =
             match front with
             | [] -> seen
@@ -318,7 +320,7 @@ let private short (v : float) =
 
 let private row (label : string) (v : float) = { Label = label; Value = sprintf "%.0f" v }
 
-let update (msg : Msg) (m : Model) : Model =
+let rec update (msg : Msg) (m : Model) : Model =
     match msg with
     | Located href ->
         match Native.queryParam "build" href with
@@ -358,7 +360,11 @@ let update (msg : Msg) (m : Model) : Model =
             let d = V2d (held.X - p.X, held.Y - p.Y)
             if abs d.X + abs d.Y < m.Height / 400.0 then m else look { m with Centre = m.Centre + d; Moved = true }
         | None -> m
-    | Release -> { m with Held = None }
+    // letting go without having moved is a click on the place held
+    | Release ->
+        match m.Held with
+        | Some p when not m.Moved -> update (Click p) { m with Held = None }
+        | _ -> { m with Held = None }
     | Zoom (p, _, wheel) ->
         // towards the point under the pointer
         let k = if wheel > 0.0 then 1.15 else 1.0 / 1.15
@@ -479,7 +485,6 @@ let tree (m : Model) : Node<Msg> =
                 // by pixel would draw every sprite once more on each pointer move (and with
                 // thousands of them the canvas came out empty for two frames after each)
                 Sg.Intersectable (ProxyBox (V3d (-0.5, -0.5, -0.000001), V3d (0.5, 0.5, 0.000001)))
-                Sg.OnClick (fun e -> Click e.WorldPosition)
                 Sg.OnPointerDown (fun e -> Grab e.WorldPosition)
                 Sg.OnPointerMove (fun e -> Drag (e.WorldPosition, e.Eye))
                 Sg.OnPointerUp (fun _ -> Release)
