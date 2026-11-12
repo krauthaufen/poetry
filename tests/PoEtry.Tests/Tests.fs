@@ -159,6 +159,24 @@ let main _ =
         let ignite = inflicts |> List.pick (function Dot (Ignite, t, dps, dur, n) -> Some(t, dps, dur, n) | _ -> None)
         equal (Fire, 20.0, 4.0, 1) ignite)
 
+    test "Flammability left by earlier fire hits adds to the chance to ignite" (fun () ->
+        let def = enemy []
+        let threshold = Ailments.threshold def
+        // a fire hit of the whole ailment threshold: 20% Flammability (1% per 5% of the threshold)
+        let hit = { Crit = false; Unmitigated = Map.ofList [ Fire, threshold ]; Dealt = Map.empty }
+        near 20.0 (Ailments.flammability ctx ModDb.empty def hit)
+        near 0.0 (Ailments.flammability ctx ModDb.empty def { hit with Unmitigated = Map.ofList [ Cold, threshold ] })
+        // with 35% already on the enemy the same hit ignites with 55%
+        let primed = { def with Mods = ModDb.add def.Mods (Mod.base' (Named "Flammability") 35.0) }
+        near 55.0 (Ailments.chance ctx ModDb.empty primed hit Ignite))
+
+    test "one critical hit roll per use: every hit of the use shares it" (fun () ->
+        let skill = { fireSpell 100.0 with BaseCrit = 50.0 }
+        let rng = Rng 3u
+        // a roll below the chance: all crit; above: none, whatever the hit's own dice would say
+        equal true ([ for _ in 1 .. 200 -> Hit.rollWith (Some 0.2) rng ctx ModDb.empty skill (enemy []) ] |> List.forall (fun h -> h.Crit))
+        equal true ([ for _ in 1 .. 200 -> Hit.rollWith (Some 0.8) rng ctx ModDb.empty skill (enemy []) ] |> List.forall (fun h -> not h.Crit)))
+
     test "ignite chance scales with damage over ailment threshold" (fun () ->
         let def = enemy []
         let threshold = Ailments.threshold def
@@ -499,6 +517,10 @@ let main _ =
         let spears = Projectiles { ProjectileShape.make 10000 with Rain = Some(69.0, 6.0); TouchTriggered = true }
         let touched = float (Geometry.targetsFrom (Rng 1u) [] infinity spears 1.0 boss [ boss ]).Length / 10000.0
         if abs (touched - (10.0 / 69.0) ** 2.0) > 0.005 then failwithf "spears: %.4f" touched
+        // "Can Hit each enemy only once every 0.12 seconds", an arrow every 0.08: of arrows that
+        // all land on the enemy, every second one hits
+        let dense = Projectiles { ProjectileShape.make 100 with Rain = Some(1.0, 7.0); Every = 0.08; HitInterval = 0.12 }
+        equal 50 (Geometry.targetsFrom (Rng 1u) [] infinity dense 1.0 boss [ boss ]).Length
         // without the wait, the blast radius counts as well
         let rain = Projectiles { ProjectileShape.make 10000 with Rain = Some(69.0, 6.0) }
         let rained = float (Geometry.targetsFrom (Rng 1u) [] infinity rain 1.0 boss [ boss ]).Length / 10000.0

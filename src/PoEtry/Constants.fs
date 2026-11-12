@@ -65,6 +65,7 @@ module Constants =
 
     // ---- threshold ailments ----
     let igniteChanceMultiplier = gc "IgniteChanceMultiplier"
+    let flammabilityDuration = gc "BaseFlammabilityDuration"
     let shockChanceMultiplier = gc "ShockChanceMultiplier"
     let baseShockMagnitude = gc "BaseShockMagnitude"
     let shockDuration = gc "BaseShockDuration"
@@ -146,6 +147,8 @@ module Constants =
 
     /// Maim: maim_movement_speed_+%_final -30 (BuffTemplates LabyrinthTrapMaim; base value not in data).
     let maimSlow = 30.0
+    /// Maim also gives 15% reduced Evasion Rating (wiki, Maim).
+    let maimEvasionReduced = 15.0
     /// Hinder: hinder_movement_speed_+%_final; no value in the data, GUESS.
     let hinderSlow = 30.0
 

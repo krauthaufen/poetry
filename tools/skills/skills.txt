@@ -342,7 +342,7 @@ Falling Thunder              used by  4  sets: Melee, Projectile
     not simulated: zero_projectiles_if_no_power_charges
 Firestorm                    used by  4  sets: Firestorm, Ice Bolts, Lightning Bolts
     Rain a storm of flaming bolts over the targeted area. Can Consume all three types of Elemental Infusion, creating a much larger storm when Fire-Infused, causing lightning bolts when Lightning-Infused, and raining ice bolts when Cold-Infused.
-    unmapped: firestorm_max_number_of_storms, rain_hit_delay_ms
+    unmapped: firestorm_max_number_of_storms
 Kelari, the Tainted Sands    used by  4  sets: Kelari, the Tainted Sands
     Summon Kelari, an invulnerable Sand Djinn Minion, to do your bidding. Kelari will only act when you Command him to do so. Kelari delivers swift Hits with massive Critical Hit potential.
     types without a model: CommandableMinion, MinionsAreUndamagable
@@ -791,7 +791,7 @@ Ice Strike                   used by  1  sets: Normal Strikes, Third Strike
 Icestorm                     used by  1  sets: Storm, Improved Bolt
     Conjure a hail of icy bolts over the targeted area. Chill and Freeze on enemies in front of you are Consumed to fuel the Icestorm by creating improved bolts.
     types without a model: SkillConsumesFreeze
-    unmapped: cold_damage_cannot_chill, icestorm_max_number_of_storms, rain_hit_delay_ms, firestorm_improved_bolts_per_chill_consumed, firestorm_improved_bolts_per_monster_power_of_freeze_consumed
+    unmapped: cold_damage_cannot_chill, icestorm_max_number_of_storms, firestorm_improved_bolts_per_chill_consumed, firestorm_improved_bolts_per_monster_power_of_freeze_consumed
 Killing Palm                 used by  1  sets: Killing Palm
     Dash to an enemy and Strike them, Culling enemies if their life is low enough and performing additional dashing Strikes to other Cullable targets in range if your target was Culled. Each enemy killed by this strike grants a Power Charge, with higher Rarity monsters granting additional Charges. Enemies around you that can be Culled will be highlighted.
     types without a model: GeneratesCharges
@@ -1125,7 +1125,7 @@ Primal Bounty                used by  0  sets: Primal Bounty
     unmapped: skill_triggered_by_owl_feathers, owl_feather_buff_timer_ms
 Rain of Arrows               used by  0  sets: Rain of Arrows
     Fire a hail of arrows into the air, causing them to rain from above. Consumes a Frenzy Charge to fire more arrows.
-    unmapped: base_number_of_arrow_rains_allowed, rain_of_arrows_delay_per_arrow, rain_hit_delay_ms
+    unmapped: base_number_of_arrow_rains_allowed
 Rain of Blades               used by  0  sets: Rain of Blades
     Pour your Runic Ward into conjuring blades. For the duration of the Buff, these blades fall on enemies Hit by your Projectile Attacks.
     types without a model: EmpowersOtherSkill, IndeterminateEmpowermentAmount

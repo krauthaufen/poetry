@@ -436,7 +436,9 @@ module Sim =
           RageCarry: float
           /// Parts of skills that wait to be set off by another skill (bolts in the ground until a
           /// detonator is used): part name -> how many wait.
-          Pending: Map<string, int> }
+          Pending: Map<string, int>
+          /// The critical hit roll (0..1) of the last use of each skill and its parts.
+          CritRolls: Map<string, float> }
 
     type private EnemyState =
         { Def: EnemyDef
@@ -444,6 +446,8 @@ module Sim =
           Debuffs: Map<string, Effect>
           Dots: DotInstance list
           Buildup: Map<Ailment, float>
+          /// Flammability left by fire hits: (magnitude in percent, gone at), each on its own.
+          Flammability: (float * float) list
           Db: ModDb }
 
     type private PlayerState =
@@ -503,10 +507,12 @@ module Sim =
           /// Debuffs that record a share of the damage an enemy takes and take it again as life
           /// at the end (Inevitable Agony): owner, skill, enemy, the enemy's life when applied,
           /// the share, when it ends.
-          Agonies: (string * string * string * float * float * float) list
+          Agonies: (string * string * string * float * float * float) list // (owner, skill, enemy, hit damage recorded, share, ends at)
           /// Ice Crystals beside an enemy: (owner, explosion part, enemy, the enemy's life when
           /// they appeared, life of one crystal, how many, gone at). Newest first.
-          Crystals: (string * string * string * float * float * int * float) list }
+          Crystals: (string * string * string * float * float * int * float) list
+          /// Evasion entropy of each defender: (value 0..99, time of the last attempted hit).
+          Entropy: Map<string, float * float> }
 
     /// Fixed for the whole fight: mod dbs built once, buffs layered on per event.
     type private Env =
@@ -767,7 +773,10 @@ module Sim =
         | Some v, Some p when dt > 0.0 && p.Died.IsNone ->
             let t0 = w.Time - dt
             let overlap until = max 0.0 (min w.Time until - t0)
-            let stream pool = p.Recoups |> List.sumBy (fun (until, rate, pl) -> if pl = pool then rate * overlap until else 0.0)
+            let stream (pool: string) =
+                let parts = p.Recoups |> List.filter (fun (_, _, pl) -> pl = pool) |> List.map (fun (until, rate, _) -> rate * overlap until)
+                // leech: "only the instance with the highest recovery rate will be active" (wiki, Leech)
+                if pool.StartsWith "Leech" then (if parts.IsEmpty then 0.0 else List.max parts) else List.sum parts
             // leech: each instance is recovered over one second (keyword text)
             let leech = stream "LeechMana"
             let regen = v.ManaRegen * dt
@@ -1000,6 +1009,21 @@ module Sim =
         | None -> skill
         | step -> (skill :: skill.Parts) |> List.tryFind (fun p -> (partNamed p "SeqSteps:").IsSome && inStep step p) |> Option.defaultValue skill
 
+    /// Does an attack with this chance to hit land? Evasion is not rolled for each hit: the
+    /// defender has an entropy value, random at the first attack and again after 100 server ticks
+    /// (3.33 s) without one; each attempt adds the chance to hit, and at 100 or more it hits and
+    /// 100 is taken off (wiki, Evasion). All attackers share the defender's value.
+    let private lands (rng: Rng) (defender: string) (hitChance: float) (w: World) : bool * World =
+        if hitChance >= 100.0 then true, w
+        else
+            let value =
+                match Map.tryFind defender w.Entropy with
+                | Some (v, at) when w.Time - at <= 100.0 * Constants.serverTick -> v
+                | _ -> floor (rng.Float() * 100.0)
+            let value = value + hitChance
+            let hit = value >= 100.0
+            hit, { w with Entropy = Map.add defender ((if hit then value - 100.0 else value), w.Time) w.Entropy }
+
     /// Glory and Combo a skill needs before it can be used: (counter, amount).
     let private requirements (skill: Skill) =
         let own name = skill.Mods |> List.sumBy (fun m -> if m.Stat = Named name && m.Kind = Base then m.Value else 0.0)
@@ -1161,6 +1185,10 @@ module Sim =
         match aimed env w with
         | None -> w
         | Some target ->
+            // the use's critical hit roll, for the skill and every part of it
+            let w =
+                let r = rng.Float()
+                updateActor actor.Name (fun st -> { st with CritRolls = (skill :: skill.Parts) |> List.fold (fun m p -> Map.add p.Name r m) st.CritRolls }) w
             let st = Map.find actor.Name w.Actors
             let ctx = Skill.ctx skill false (skillStacks actor skill st) (status target)
             let mods = skillDb env actor skill st
@@ -1401,7 +1429,7 @@ module Sim =
                 | Some pct when skill.Duration > 0.0 ->
                     let lasts = skill.Duration * Mods.mult ctx [ SkillDuration ] mods
                     { w with
-                        Agonies = (actor.Name, skill.Name, target.Def.Name, target.Life, pct / 100.0, w.Time + useTime + lasts) :: (w.Agonies |> List.filter (fun (a, s, _, _, _, _) -> not (a = actor.Name && s = skill.Name)))
+                        Agonies = (actor.Name, skill.Name, target.Def.Name, 0.0, pct / 100.0, w.Time + useTime + lasts) :: (w.Agonies |> List.filter (fun (a, s, _, _, _, _) -> not (a = actor.Name && s = skill.Name)))
                         Counts = bump ("recording:" + skill.Name) w.Counts }
                 | _ -> w
             // an infusion a part needed is used up; a part that waits is put down
@@ -1794,7 +1822,11 @@ module Sim =
                     let accuracy = Mods.total ctx [ Named "Accuracy" ] mods
                     if accuracy <= 0.0 then 100.0
                     else
-                        let evasion = Constants.monsterEvasion e.Def.Level * Mods.mult Ctx.empty [ Evasion ] e.Db
+                        // Blind: 20% less evasion (and accuracy); Maim: 15% reduced evasion (wiki, Blind, Maim)
+                        let evasion =
+                            Constants.monsterEvasion e.Def.Level * Mods.mult Ctx.empty [ Evasion ] e.Db
+                            * (if enemyStatus.ContainsKey "Blinded" then 1.0 - Constants.blindAccuracyLess / 100.0 else 1.0)
+                            * (if enemyStatus.ContainsKey "Maimed" then 1.0 - Constants.maimEvasionReduced / 100.0 else 1.0)
                         let distance = max 0.0 (Vec.length e.Def.Position - e.Def.Size)
                         Hit.accuracyHitChance evasion (Hit.accuracyAtDistance distance accuracy)
                 | None -> 100.0
@@ -1829,7 +1861,8 @@ module Sim =
                     let st = states |> List.find enemyStatus.ContainsKey
                     updateEnemy target (fun en -> { en with Debuffs = Map.remove st en.Debuffs }) w |> fun w -> { w with Counts = bump ("consumed:" + st) w.Counts }
                 else w
-            if not (rng.Chance hitChance) then
+            let landed, w = lands rng target hitChance w
+            if not landed then
                 { w with Counts = bump ("miss:" + skill.Name) w.Counts }
             else
             // a hit that takes a state off the enemy without needing it ("Consumes Shock")
@@ -1846,7 +1879,10 @@ module Sim =
                     match Mods.sumInc ctx [ Named "EnemyDamageTaken" ] mods with
                     | 0.0 -> def
                     | x -> { def with Mods = ModDb.add def.Mods (Mod.inc (DamageTaken AllDamage) x) }
-                let hit = Hit.roll rng ctx mods skill def
+                // one critical hit roll per use, shared by all its hits; skills that keep hitting
+                // on their own (Sustained) roll for every hit
+                let critRoll = if skill.Tags.Contains(Tag "Type:Sustained") then None else Map.tryFind skill.Name (Map.find actor.Name w.Actors).CritRolls
+                let hit = Hit.rollWith critRoll rng ctx mods skill def
                 // Culling Strike: an enemy at or below the threshold for its rarity dies, before the hit's damage
                 let hit =
                     let cctx = { ctx with Crit = hit.Crit }
@@ -1870,7 +1906,16 @@ module Sim =
                         Dealt = Dmg.map (fun _ v -> v * mult) hit.Dealt }
                 // ailments are rolled before the damage lands; a shock the hit applies already
                 // counts for the hit itself (user observation)
-                let inflicted = Ailments.fromHit rng ctx mods def hit
+                // Flammability earlier hits left on the enemy adds to this hit's chance to Ignite,
+                // and this hit leaves its own
+                let flammable = e.Flammability |> List.filter (fun (_, until) -> until > w.Time)
+                let inflicted =
+                    let total = flammable |> List.sumBy fst
+                    Ailments.fromHit rng ctx mods (if total > 0.0 then { def with Mods = ModDb.add def.Mods (Mod.base' (Named "Flammability") total) } else def) hit
+                let w =
+                    match Ailments.flammability ctx mods def hit with
+                    | f when f > 0.0 -> updateEnemy target (fun en -> { en with Flammability = (f, w.Time + Constants.flammabilityDuration) :: flammable }) w
+                    | _ -> w
                 // a part that only inflicts (a poison burst): what it would have dealt counts
                 // for the ailment, the hit itself deals nothing
                 let hit = if Mods.flag ctx (Named "NoHitDamage") mods then { hit with Dealt = Dmg.map (fun _ _ -> 0.0) hit.Dealt; Unmitigated = Dmg.map (fun _ _ -> 0.0) hit.Unmitigated } else hit
@@ -1895,6 +1940,8 @@ module Sim =
                         // the enemy as it is now: what the hit consumed stays consumed
                         Enemies = Map.add target { (Map.find target w.Enemies) with Life = (if dead then 0.0 else life) } w.Enemies
                         DamageBy = addf (skill.Name + " (hit)") (min dealt e.Life) w.DamageBy
+                        // "25% of Hit Damage dealt to them while Debuffed": hits are what is recorded
+                        Agonies = w.Agonies |> List.map (fun ((o, s, en, recorded, share, until) as a) -> if en = target && until > w.Time then (o, s, en, recorded + min dealt e.Life, share, until) else a)
                         Counts = w.Counts |> bump ("hits:" + skill.Name) |> (if hit.Crit then bump ("crits:" + skill.Name) else id)
                         Kills = if dead then (target, e.Def.Rarity, w.Time) :: w.Kills else w.Kills }
                 // overkill explosions: nearby enemies are ignited for a share of the overkill
@@ -1925,7 +1972,10 @@ module Sim =
                         + Dmg.get Fire hit.Dealt * Mods.sumBase ctx [ Named "ArmourBreakOfFire" ] mods / 100.0
                         + dealt * Mods.sumBase ctx [ Named "ArmourBreakOfDamage" ] mods / 100.0
                         + Mods.sumBase ctx [ Named "ArmourBreakFlat" ] mods
-                    let broken = share * Mods.mult ctx [ Named "ArmourBreakAmount" ] mods
+                    // "Players Break 3 times Armour against Normal Monsters and 2 times Armour against Magic Monsters"
+                    let broken =
+                        share * Mods.mult ctx [ Named "ArmourBreakAmount" ] mods
+                        * (if actor.Name <> env.Fight.Player.Name then 1.0 else match e.Def.Rarity with Normal -> 3.0 | Magic -> 2.0 | _ -> 1.0)
                     if dead || broken <= 0.0 then w
                     else
                         let baseArmour = max 0.0 (Mods.total Ctx.empty [ Armour ] e.Db)
@@ -2054,12 +2104,27 @@ module Sim =
                             let combo =
                                 if own "Requires:Combo" <= 0.0 || ownHit || not (skill.Tags.Contains Attack) || not (skill.Tags.Contains(Tag "Type:Melee")) then 0.0
                                 else 1.0 + (if rng.Chance(own "ComboExtraChance") then 1.0 else 0.0)
-                            let add key amount cap (w: World) =
+                            // `per`: what the gain is limited by ("each Skill can only generate Glory once
+                            // every 0.5 seconds per monster"; Combo "once per strike"); `fade`: what is
+                            // lost when nothing was gained for a while
+                            let add key amount cap (per: string) every (fade: float -> float -> float) (w: World) =
                                 if amount <= 0.0 then w
-                                else updateActor actor.Name (fun st -> { st with Energy = Map.add key (min cap ((Map.tryFind key st.Energy |> Option.defaultValue 0.0) + amount)) st.Energy }) w
+                                else
+                                    let st = Map.find actor.Name w.Actors
+                                    let stamp, lastKey = key + "@" + per, key + "@last"
+                                    let since k = w.Time - (Map.tryFind k st.Energy |> Option.defaultValue -1e9)
+                                    if since stamp < every then w
+                                    else
+                                        let have = fade (Map.tryFind key st.Energy |> Option.defaultValue 0.0) (since lastKey)
+                                        updateActor actor.Name (fun st ->
+                                            { st with Energy = st.Energy |> Map.add key (min cap (have + amount)) |> Map.add stamp w.Time |> Map.add lastKey w.Time }) w
                             w
-                            |> add ("Glory:" + s.Name) glory (own "Requires:Glory" * (1.0 + own "GloryRequiredMore" / 100.0))
-                            |> add ("Combo:" + s.Name) combo (own "Requires:Combo")) w
+                            // "Skills lose 2 Glory per second if they haven't gained Glory in the past 15 seconds"
+                            |> add ("Glory:" + s.Name) glory (own "Requires:Glory" * (1.0 + own "GloryRequiredMore" / 100.0)) target 0.5
+                                   (fun have idle -> if idle > 15.0 && idle < 1e8 then max 0.0 (have - 2.0 * (idle - 15.0)) else have)
+                            // Combo counts the strikes "in the last 8 seconds"
+                            |> add ("Combo:" + s.Name) combo (own "Requires:Combo") "strike" 1e-9
+                                   (fun have idle -> if idle > 8.0 && idle < 1e8 then 0.0 else have)) w
                 // Banners: attack hits build Glory; a full banner is placed at once
                 let w =
                     if actor.Banners.IsEmpty || not (skill.Tags.Contains Attack) then w
@@ -2067,7 +2132,11 @@ module Sim =
                         let power = MonsterPower.ofRarity e.Def.Rarity
                         actor.Banners |> List.fold (fun w b ->
                             let key = "Glory:" + b.Name
-                            let have = (Map.tryFind key (Map.find actor.Name w.Actors).Energy |> Option.defaultValue 0.0) + power * b.PerAttackHit / 100.0
+                            // once every 0.5 seconds per monster
+                            let stamp = key + "@" + target
+                            let fresh = w.Time - (Map.tryFind stamp (Map.find actor.Name w.Actors).Energy |> Option.defaultValue -1e9) >= 0.5
+                            let w = if fresh then updateActor actor.Name (fun st -> { st with Energy = Map.add stamp w.Time st.Energy }) w else w
+                            let have = (Map.tryFind key (Map.find actor.Name w.Actors).Energy |> Option.defaultValue 0.0) + (if fresh then power * b.PerAttackHit / 100.0 else 0.0)
                             let up = (Map.find actor.Name w.Actors).Buffs |> Map.tryFind ("Banner:" + b.Name) |> Option.exists (fun x -> x.Expires > w.Time)
                             if up then updateActor actor.Name (fun st -> { st with Energy = Map.add key (min b.Glory have) st.Energy }) w
                             elif have >= b.Glory then
@@ -2209,12 +2278,15 @@ module Sim =
                                                     let gain = (MonsterPower.ofRarity e.Def.Rarity / 2.0 + (if rng.Chance c.ChargeOnKillChance then 1.0 else 0.0)) * c.ChargeGainMult
                                                     Map.add c.Buff (min c.MaxCharges ((Map.tryFind c.Buff m |> Option.defaultValue 0.0) + gain)) m) p.CharmCharges }) }
                         if e.Def.Rarity = Rare || e.Def.Rarity = Unique then fst (charm env "KillRare" w) else w
-                // rage from hitting (once per moment, however many enemies the use hits) and from kills
+                // rage from hitting and from kills
                 let w =
                     if actor.Name <> env.Fight.Player.Name then w
                     else
                         let st = Map.find actor.Name w.Actors
-                        let onHit = if st.RageAt = w.Time && w.Time > 0.0 then 0.0 else Mods.sumBase ctx [ Named "RageOnHit" ] mods
+                        // "Only one Hit every 0.5 seconds can cause you to gain Rage" (wiki, Rage)
+                        let fresh = w.Time - (Map.tryFind "RageHitAt" st.Energy |> Option.defaultValue -1e9) >= 0.5
+                        let onHit = if fresh then Mods.sumBase ctx [ Named "RageOnHit" ] mods else 0.0
+                        let w = if onHit > 0.0 then updateActor actor.Name (fun st -> { st with Energy = Map.add "RageHitAt" w.Time st.Energy }) w else w
                         let _, _, _, _, onKill = env.Rage
                         gainRage env (onHit + (if dead then onKill else 0.0)) w
                 let w = markRecently actor.Name true hit.Crit dead w
@@ -2355,7 +2427,8 @@ module Sim =
                     let h = Vitals.monsterHitChance v.Evasion accuracy
                     // Glancing Blows: the evade roll is unlucky (both of two rolls must evade)
                     if v.UnluckyEvade then 100.0 - (100.0 - h) * (100.0 - h) / 100.0 else h
-                if not (rng.Chance hitChance) then
+                let landed, w = lands rng "Player" hitChance w
+                if not landed then
                     { w with Counts = bump "enemy:evaded" w.Counts }
                 else
                     let blockRoll () = rng.Chance v.Block
@@ -2621,7 +2694,7 @@ module Sim =
                         let drop w = { w with Agonies = w.Agonies |> List.filter (fun x -> x <> a) }
                         match Map.tryFind enemy w.Enemies with
                         | Some e when e.Life > 0.0 ->
-                            let owed = share * max 0.0 (mark - e.Life)
+                            let owed = share * mark
                             if w.Time >= until || owed >= e.Life then
                                 let dealt = min owed e.Life
                                 let dead = owed >= e.Life
@@ -2860,7 +2933,8 @@ module Sim =
               LoadDue = Set.empty
               RageAt = 0.0
               RageCarry = 0.0
-              Pending = Map.empty }
+              Pending = Map.empty
+              CritRolls = Map.empty }
         let w0 =
             { Player =
                 fight.Player.Vitals
@@ -2908,6 +2982,7 @@ module Sim =
                         |> Map.ofList
                       Dots = []
                       Buildup = Map.empty
+                      Flammability = []
                       Db = ModDb.ofList d.Mods })
                 |> Map.ofList
               Actors =
@@ -2957,7 +3032,8 @@ module Sim =
               CorpsesUsed = 0
               Bombs = []
               Agonies = []
-              Crystals = [] }
+              Crystals = []
+              Entropy = Map.empty }
             |> fun w -> actors |> List.fold (fun w a -> schedule 0.0 (Ready a.Name) w) w
             |> fun w -> actors |> List.fold (fun w a -> a.Cycles |> List.fold (fun w c -> schedule 0.0 (CycleTick(a.Name, c.Name)) w) w) w
             |> fun w -> actors |> List.fold scheduleResourceTimers w

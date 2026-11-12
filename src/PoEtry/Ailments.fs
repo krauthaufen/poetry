@@ -99,10 +99,20 @@ module Ailments =
             Dmg.sumOf (scalesFromWith ctx mods a) hit.Unmitigated / threshold defender * multiplier
         let c =
             match a with
-            | Ignite -> (fromDamage Constants.igniteChanceMultiplier + baseChance) * mult
+            // the chance to Ignite is "the total Magnitude of Flammability on the target, including
+            // the amount added by that Hit" (keyword text): what earlier hits left is on the defender
+            | Ignite -> (fromDamage Constants.igniteChanceMultiplier + baseChance) * mult + Mods.sumBase Ctx.empty [ Named "Flammability" ] defender.Mods
             | Shock -> (fromDamage Constants.shockChanceMultiplier + baseChance) * mult
             | _ -> baseChance * mult
         min 100.0 (max 0.0 c)
+
+    /// The Flammability a hit adds to its target: 1% per 5% of the ailment threshold its fire
+    /// damage is (up to 100%), for `flammabilityDuration` seconds, each on its own.
+    let flammability (ctx: Ctx) mods defender (hit: HitResult) =
+        let ctx = { ctx with Crit = hit.Crit }
+        let baseChance, mult = chanceMods ctx mods Ignite
+        if Dmg.sumOf (scalesFromWith ctx mods Ignite) hit.Unmitigated <= 0.0 then 0.0
+        else min 100.0 (max 0.0 ((Dmg.sumOf (scalesFromWith ctx mods Ignite) hit.Unmitigated / threshold defender * Constants.igniteChanceMultiplier + baseChance) * mult))
 
     /// Everything this hit inflicts, rolling chances with the given Rng.
     let fromHit (rng: Rng) (ctx: Ctx) mods (defender: Defender) (hit: HitResult) : Inflict list =

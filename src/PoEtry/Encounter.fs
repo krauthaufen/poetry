@@ -398,11 +398,19 @@ module Geometry =
         | Projectiles ({ Rain = Some (area, impact) } as p) ->
             // every projectile lands at a random point of the area and hits what is in reach
             let area, impact = radius area areaMult, radius impact areaMult
-            [ for _ in 1 .. p.Count do
+            // "Can Hit each enemy only once every N seconds": what lands on an enemy too soon
+            // after the last one that hit it does nothing to it
+            let last = System.Collections.Generic.Dictionary<string, float>()
+            [ for k in 0 .. p.Count - 1 do
                 let r, a = area * sqrt (rng.Float()), 2.0 * System.Math.PI * rng.Float()
                 let at = Vec.add primary.Position (Vec.scale r (Vec.ofAngle a))
+                let now = float k * p.Every
                 if not p.TouchTriggered || alive |> List.exists (within at 0.0) then
-                    yield! alive |> List.filter (within at impact) |> List.map (fun e -> e.Name) ]
+                    for e in alive |> List.filter (within at impact) do
+                        let ok = p.HitInterval <= 0.0 || p.Every <= 0.0 || not (last.ContainsKey e.Name) || now - last.[e.Name] >= p.HitInterval - 1e-9
+                        if ok then
+                            last.[e.Name] <- now
+                            yield e.Name ]
         | Projectiles ({ Scatter = Some (near, far, cone, impact) } as p) ->
             let impact = radius impact areaMult
             let away = Vec.angle primary.Position

@@ -48,7 +48,10 @@ type ProjectileShape =
       /// N seconds": seconds (0: the usual rule, see CanShotgun).
       HitInterval: float
       /// Units per second, for projectiles whose hits are timed (HitInterval).
-      Speed: float }
+      Speed: float
+      /// Seconds between the projectiles of a rain ("One arrow lands every 0.08 seconds"); with
+      /// HitInterval, an enemy is hit by the rain at most once per interval.
+      Every: float }
 
 /// How a skill use finds its targets.
 type Delivery =
@@ -66,7 +69,8 @@ module ProjectileShape =
           Spread = 30.0
           Pierce = 0
           Chains = 0
-          ChainRange = 30.0
+          // "projectiles have a base chaining distance of 6 metres" (wiki, Chain)
+          ChainRange = 60.0
           Range = 100.0
           CanShotgun = true
           Explosion = None
@@ -82,7 +86,8 @@ module ProjectileShape =
           Bounces = false
           SpreadPerProjectile = 0.0
           HitInterval = 0.0
-          Speed = 0.0 }
+          Speed = 0.0
+          Every = 0.0 }
 
 /// A skill as the engine sees it: where its damage comes from and how long it takes.
 type Skill =
@@ -352,9 +357,15 @@ module Hit =
     let mitigate ctx mods defender unmitigated = mitigateWith false ctx mods defender unmitigated
 
     /// Full hit: crit roll, damage roll, mitigation.
-    let roll (rng: Rng) (ctx: Ctx) mods (skill: Skill) (defender: Defender) =
+    /// `critRoll`: the number (0..1) rolled when the skill was used: "When a skill is used or
+    /// triggered, it performs a critical hit check by rolling a number ... all hits from that
+    /// skill will be a critical hit" (wiki, Critical hit). None: rolled for this hit alone.
+    let rollWith (critRoll: float option) (rng: Rng) (ctx: Ctx) mods (skill: Skill) (defender: Defender) =
         let chance = critChance ctx mods skill
-        let first = rng.Chance chance
+        let first =
+            match critRoll with
+            | Some r -> chance >= 100.0 || (chance > 0.0 && r * 100.0 < chance)
+            | None -> rng.Chance chance
         // Inevitable Critical Hits: a hit that does not roll a critical hit rolls again until it
         // does, with 30% less critical damage bonus for each re-roll (none left after four)
         let rerolls =
@@ -380,3 +391,5 @@ module Hit =
         { Crit = crit
           Unmitigated = unmitigated
           Dealt = mitigateWith (rng.Chance(Mods.sumBase ctx [ Named "NegateEnemyResistChance" ] mods)) ctx mods defender unmitigated }
+
+    let roll (rng: Rng) (ctx: Ctx) mods (skill: Skill) (defender: Defender) = rollWith None rng ctx mods skill defender

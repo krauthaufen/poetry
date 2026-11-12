@@ -19,7 +19,7 @@ Confidence levels:
 | Conversion chains | damage that arrives at a type can convert again further down the order | PoB handles one extra step; we chain fully | guess |
 | Converted damage scaling | uses only the modifiers of its final type, none from the source type | CalcOffence.lua `calcDamage` sums converted base into the destination | pob |
 | Gain as extra | taken from the **base** damage of the source type; conversion then applies to base and gained damage alike (so a fully converted skill stays fully converted) | user's in-game damage split (Falling Thunder is "almost only elemental" with 28% gain as extra physical); PoB does the opposite (gain after conversion) | user observation |
-| Damage roll | each type rolled independently and uniformly in [min, max] | — | guess |
+| Damage roll | each type rolled independently and uniformly in [min, max] | wiki: "randomly chooses a number within this range", mean (min+max)/2 | data |
 | Lucky damage | roll twice, take the higher (per type) | PoB uses an expected value of (min + 2·max)/3, the same distribution | pob |
 | Increased / more | (1 + Σinc/100) × Π(1 + more/100), scopes: all, elemental, the type itself | CalcOffence.lua `calcDamage` | pob |
 | Crit chance | (base + flat) × inc × more, capped 0–100 | CalcOffence.lua ~3713 | pob |
@@ -32,7 +32,7 @@ Confidence levels:
 |---|---|---|---|
 | Who rolls | attacks roll accuracy against the monster's evasion; spells always hit; "always hit" overrides | game rule | data |
 | Player accuracy | 6 per level above 1 + 6 per Dexterity + flat, x increased / more | Character.ot, PoB AccuracyPerDexBase | pob |
-| Hit chance | round(1.25 A / (A + 0.3 E)), between 5% and 100% | PoB calcs.hitChance | pob |
+| Hit chance | round(1.25 A / (A + 0.3 E)), between 5% and 100% | PoB calcs.hitChance; wiki Accuracy: chance = Acc x 1.25 x 100 / (Acc + Eva x 0.3), 5% to 100%; no penalty within 2 m, up to 90% less accuracy beyond 9 m | data |
 | Distance | accuracy is full up to 2 m and falls linearly to 90% less at 9 m | Character.ot accuracy_rating_+%_final_at_max_distance_scaled, PoB falloff | pob |
 | Monster evasion | DefaultMonsterStats evasion for its level | game data | data |
 
@@ -41,7 +41,7 @@ Confidence levels:
 | Mechanic | Rule | Source | Confidence |
 |---|---|---|---|
 | Resist layers | Σ resist mods (base, exposure, curses all as flat resist on the enemy), capped at max resist (75 + mods, ≤90), floor −200 | CalcOffence.lua `calcResistForType` | pob |
-| **Order of exposure / curses / penetration** | exposure and curses lower resist first, then penetration applies | PoB does the same | guess, **needs an in-game test** |
+| **Order of exposure / curses / penetration** | exposure and curses lower resist first, then penetration applies | PoB does the same; wiki Penetration: "applied last and is only effective against positive resistances" | data |
 | Penetration | lowers resist, but never below 0 (or below the "can penetrate down to a minimum of X" floor); does nothing to resist already at or below the floor | CalcOffence.lua `calcPenResist` (minPen = 0); floor: game text | pob + data |
 | Armour | reduction = A / (A + 10 × damage), using that hit's physical damage, plus flat physical reduction, capped at 75% for monsters | CalcDefence.lua `armourReductionF`; Monster.ot cap | pob + data |
 | Damage taken | (1 + Σinc taken) × Π more taken; scopes as for damage | CalcOffence.lua ~4060 | pob |
@@ -89,11 +89,11 @@ Confidence levels:
 | Mechanic | Rule | Confidence |
 |---|---|---|
 | Use time | base time / (inc × more `Speed`) | pob |
-| Cooldown | cooldown / (inc × more `CooldownRecovery`), starts when the use starts | guess |
+| Cooldown | cooldown / (inc × more `CooldownRecovery`), starts when the use starts; wiki Cooldown: "By default, cooldowns begin from when you use a skill" | data |
 | Hits | one hit at the end of the use, unless the skill or actor gives a hit pattern | modelling choice |
 | Triggered skills | use immediately, cost no time, respect their cooldown | guess per trigger |
 | Meta gems | energy from rules; at max energy, trigger and subtract max | modelling choice; energy amounts per hook must come from gem data |
-| Server ticks | not quantised: actions happen at exact times | guess, PoE uses 33 ms ticks |
+| Server ticks | not quantised: actions happen at exact times; wiki Skill speed: one non-channelling action per server frame of 33 ms (the minimum use time we apply) | data |
 | DoT damage | integrated exactly between events (DoT dps is constant between events) | exact |
 | Resources (mana, life costs) | not modelled | missing |
 
@@ -123,6 +123,14 @@ Confidence levels:
 | Area radius | floor(base × floor(100 × sqrt(area multiplier)) / 100); hits enemies whose body overlaps | PoB calcRadius | pob |
 | Projectiles | fanned evenly over the spread angle towards the aimed enemy; first enemy along the path is hit; pierce continues, chains jump to the nearest unhit enemy in chain range | — | guess (geometry), data (counts) |
 | Default spread | 30° unless the skill sets `total_projectile_spread_angle_override` | — | guess |
+| Critical hit roll | rolled once when a skill is used or triggered: every hit of that use is a critical hit or none is. Skills that keep hitting on their own (Sustained) roll for every hit | wiki Critical hit: "When a skill is used or triggered, it performs a critical hit check by rolling a number ... all hits from that skill will be a critical hit"; "Sustained skill will roll critical hit chance for each hit individually" | data |
+| Evasion entropy | an attack is not rolled against evasion each time: the defender has an entropy value, random at the first attack and again after 3.33 s without one; each attempt adds the chance to hit, at 100 it hits and 100 is taken off. All attackers share it. The second check that can downgrade a critical hit is not modelled | wiki Evasion | data |
+| Flammability | a fire hit leaves Flammability on the enemy: 1% per 5% of the ailment threshold its fire damage is, for 8 s, each on its own. The chance to Ignite is all the Flammability on the enemy including the hit's own. Non-hit igniters (needing 50%) are not modelled | keyword text, wiki Ignite, `BaseFlammabilityDuration` | data |
+| Chain range | 6 m for projectiles | wiki Chain: "base chaining distance of 6 metres" | data |
+| Glory and Combo limits | a skill gains Glory at most once every 0.5 s per monster, and loses 2 per second once 15 s have passed without any; Combo counts once per strike and is lost after 8 s without one | wiki Glory, Combo | data |
+| Armour Break by rarity | a player breaks three times the armour on normal and twice on magic monsters | wiki Armour Break | data |
+| Blind and Maim on monsters | Blind: 20% less accuracy and evasion; Maim: 30% slower, 15% reduced evasion | wiki Blind, Maim | data |
+| Rain of Arrows hit limit | an arrow lands every 0.08 s and an enemy is hit by the rain at most once every 0.12 s | `rain_of_arrows_delay_per_arrow`, `rain_hit_delay_ms` | data |
 | Several projectiles, one enemy | projectiles that leave the player together (`ProjectilesFromUser`): only one of a volley can collide with the same enemy, the others fly on. Not so where the skill says otherwise ("These fragments can Merge" and the `projectiles_can_shotgun` flag, "Multiple Projectiles can hit the same enemy", "fired in sequence"), for shards that spring from an impact (Falling Thunder, Ice Shot: user), and for what hovers, is lobbed or rains down (no `ProjectilesFromUser`): there every projectile is flown and hits what it meets. Each projectile hits an enemy at most once | wiki Projectile ("If multiple projectiles are fired simultaneously, only one of them can collide with the same target, unless otherwise stated"); the skill descriptions that state the exception; user for impact shards | data |
 | Spark | every spark is flown: a fan from the player that widens by 15 degrees per spark (three: a 30 degree cone; 25 or more: a circle), the cold-infused one a full circle at a random angle to the enemy. A spark keeps its heading but zigzags inside a band 20 units wide (`spark_pathing_width_bounds`), a new sideways offset every 20 units, for 2 s at 100 units per second (200 units). A wall ends it (the player's Spark lacks `spark_projectile_bounces_off_walls`). Sparks of one cast hit the same enemy at most once every 0.66 s (`spark_min_time_between_target_clearing_ms`): one that may not hit passes through, one that hits is gone | game tables (GrantedEffectStatSets, Projectiles), gem text; user: cone widening with the number, gone on hit. The 15 degrees and the zigzag step are guesses | data / guess |
 | Full circle from the player | a nova of projectiles is not aimed: its first projectile lies at a random angle to the enemy | geometry | guess |
@@ -211,7 +219,7 @@ Checked against PoB's defensive numbers for 131 public characters (`tools/corpus
 | Mechanic | Rule | Source | Confidence |
 |---|---|---|---|
 | Order | energy shield, then the "taken from mana before life" share of the rest, life down to 1, Runic Ward, death | game text, user (ward) | data + user |
-| Chaos vs energy shield | chaos damage removes twice as much energy shield | PoE2 rule (recollection) | guess, **check** |
+| Chaos vs energy shield | chaos damage removes twice as much energy shield | PoE2 rule (recollection); wiki Energy shield: "Chaos damage removes twice as much Energy Shield" | data |
 | Bypass | "X% of damage bypasses energy shield" skips it | stat text | data |
 | Armour vs elemental | "X% of armour applies to <type> damage": armour formula with that share, after resistance | stat text; order a guess | guess |
 | Damage taken | increased / reduced damage taken by type multiplies after mitigation; flat physical reduction applies to melee hits before armour | stat text | guess (order) |
@@ -219,7 +227,7 @@ Checked against PoB's defensive numbers for 131 public characters (`tools/corpus
 | Recoup | share of damage taken from hits (by type) returns to the pool evenly over 8 s; "recoup speed" shortens it | game keyword text | data |
 | ES recharge | starts 4 s after the last damage taken (hits and damage over time), / (1 + faster start); 12.5% per second x recharge rate | PoB, Character.ot | pob |
 | Life flask | drunk when life falls below half, if charges allow; amount x life recovery rate over its duration | player behaviour | guess |
-| Leech (life, mana) | % of physical attack damage dealt, from one enemy per hit event; each instance is recovered over one second ("Leech Life X% less quickly" stretches it) | game keyword text; the one-enemy rule is a guess | data / guess |
+| Leech (life, mana) | % of physical attack damage dealt, from one enemy per hit event; each instance is recovered over one second ("Leech Life X% less quickly" stretches it) | game keyword text; the one-enemy rule is a guess; wiki Leech: over one second, hit damage capped at 40,000, "only the instance with the highest recovery rate will be active" | data |
 | Ailments on the player | threshold = half of maximum life (PlayerAilmentThresholdLifeFactor) + mods. Ignite: chance = fire / threshold x IgniteChanceMultiplier, burns 4 s, strongest only, lowered by fire resistance. Shock: chance likewise, +20% damage taken for 4 s. Chill: slow = ChillEffectMultiplier x cold / threshold for 2 s. Freeze: builds cold x FreezeDamageScalePlayer / freeze threshold, frozen 2 s at 100%. "Avoid", "effect on you" and duration stats apply. Unmitigated hit damage is used. Bleed / poison from monsters: not modelled | GameConstants "...Player" | data; using unmitigated damage is a guess |
 | Light stun on the player | chance = hit / stun threshold (maximum life before CI + mods); physical +100%, melee +33% (monster object stats); nothing below 15% (LightStunMinimumChancePlayer); interrupts for 0.35 s (GUESS); a stun only delays the next action, it does not cancel one under way. | game constants; formula a guess | guess |
 | Heavy stun on the player | not applied: "Players and their Minions usually cannot be Heavily Stunned" (only while raising a shield, parrying or mounted, which are not modelled) | game keyword text | data |
@@ -314,9 +322,9 @@ The game's standard buffs and debuffs, with the numbers of its keyword text. Sta
 | Effect | Rule | Source | Confidence |
 |---|---|---|---|
 | Onslaught | 20% increased skill speed (x Onslaught effect) | keyword text | data |
-| Arcane Surge | 15% increased cast speed (x effect); its 20% more mana regeneration is not applied; 4 s | keyword text; duration is a guess | data / guess |
+| Arcane Surge | 15% increased cast speed (x effect); its 20% more mana regeneration is not applied; 4 s | keyword text; duration is a guess; wiki: 15% increased cast speed, 20% more mana regeneration, 10 s | data |
 | Unholy Might | 30% of damage gained as extra chaos (x magnitude); "You have Unholy Might", also "while not on Low Mana" and "while you have no Energy Shield"; minions likewise | keyword text | data |
-| Tailwind | per stack 2% increased skill speed and 10% increased evasion, up to 10; a stack per skill use, all lost when hit; it does not expire by itself (guess) | keyword text | data / guess |
+| Tailwind | per stack 2% increased skill speed and 10% increased evasion, up to 10; a stack per skill use, all lost when hit; it does not expire by itself (guess) | keyword text; buff table limit 10; wiki: 2% skill speed, 10% evasion, 1% movement speed per stack | data |
 | Withered | 5% increased chaos damage taken per stack, up to 10 (x magnitude), for the stated seconds (4 if none) | keyword text | data |
 | Critical Weakness | +0.5% crit chance against the enemy per stack, up to 20; "every second in your Presence for N seconds" is a steady N stacks on every enemy | keyword text; presence area ignored | data |
 | Culling Strike | an enemy at or below 35% / 20% / 10% / 5% life (normal / magic / rare / unique; x increased threshold) is killed, checked before the hit's damage | GameConstants, keyword text | data |
@@ -376,7 +384,7 @@ The game's standard buffs and debuffs, with the numbers of its keyword text. Sta
 | Mantra of Destruction | once its Combo is built it empowers the next attack: 69% of all damage gained as extra chaos damage (level 20). The Purple Flames from kills with that attack are not modelled | `mantra_of_destruction_grant_all_damage_%_to_gain_as_chaos_with_attacks`, `skill_empowers_next_x_melee_attacks` | data |
 | Temper Weapon | each use is one strike of the hammer and empowers 3 attacks, 12 at most. Every hit of an empowered attack triggers Combust (the gem's second effect, a fire area attack); an empowerment is used up when the attack's last hit has landed | `temper_weapon_empowers_per_strike`, `imbue_weapon_max_exerts`, `TemperWeaponCombustionPlayer` | data / guess |
 | Freezing Mark, Voltaic Mark | a hit on the marked enemy while it is Frozen (Electrocuted) gives the buff: 30% of damage gained as extra cold (lightning) damage for 10 s. The mark is not taken off, so the buff is refreshed for as long as the enemy stays frozen. Against a boss that is hard to freeze the buff is rare; PoB has it always | `*_damage_buff_damage_%_to_gain_as_cold`, `base_secondary_skill_effect_duration`, description | data / guess |
-| Inevitable Agony | the debuff records 25% of the life the enemy loses while it lasts (12 s) and takes that much life again when it ends, or at once when that would kill. It is not cast again while it runs. Damage over time is recorded too (the game records hits only) | `curse_pain_synchronisation_base_recorded_damage_%_to_apply`, description | data / guess |
+| Inevitable Agony | the debuff records 25% of the life the enemy loses while it lasts (12 s) and takes that much life again when it ends, or at once when that would kill. It is not cast again while it runs. Damage over time is recorded too (the game records hits only) | `curse_pain_synchronisation_base_recorded_damage_%_to_apply`, description; wiki: "25% of Hit Damage dealt to them while Debuffed": hits only | data |
 | Berserk | besides stronger Rage: 6% of maximum life is lost per minute for every Rage held, while Rage is not draining (life stays at 1 or above) | `skill_base_life_loss_%_per_minute_per_rage_while_not_losing_rage_to_apply` | data |
 | Time of Need | heals its amount of life every 8.1 s (faster with cooldown recovery). Removing curses and ailments is not modelled | `skill_time_of_need_gain_x_life`, `base_cooldown_modifiable_repeat_interval_ms` | data |
 | Ghost Dance | up to `ghost_dance_max_stacks` Ghost Shrouds, all there at the start, one more every repeat interval (faster with cooldown recovery). A hit taken (not an evaded one) spends one, and for 4 s ("Recently") energy shield regenerates at 2% of evasion per second, x energy shield recovery rate; losing another only restarts the 4 s | gem stats, stat text | data |
@@ -465,7 +473,7 @@ The game's standard buffs and debuffs, with the numbers of its keyword text. Sta
 | Mechanic | Rule | Source | Confidence |
 |---|---|---|---|
 | Charges, rage, motes | stacks on the player with a maximum each (charges: 3 + max charge stats; rage 30 + max rage; motes below) | data | data |
-| Rage | 1% more attack damage per rage (x rage effect). Gained on attack / melee hits (once per use, however many enemies it hits), on kills and when hit, and regenerated (Eternal Rage). Lost at 1 per 0.2 s; the loss pauses for 4 s on gaining rage or taking damage (decay and delay modifiers apply). A fight starts at maximum rage if anything on the character or its skills generates rage, else at none | game keyword text, GameConstants; "once per use" is a guess | data / guess |
+| Rage | 1% more attack damage per rage (x rage effect). Gained on attack / melee hits (once per use, however many enemies it hits), on kills and when hit, and regenerated (Eternal Rage). Lost at 1 per 0.2 s; the loss pauses for 4 s on gaining rage or taking damage (decay and delay modifiers apply). A fight starts at maximum rage if anything on the character or its skills generates rage, else at none | game keyword text, GameConstants; "once per use" is a guess; wiki Rage: "Only one Hit every 0.5 seconds can cause you to gain Rage"; game constants for maximum, loss and delay | data |
 | Charge duration | 15 s × (1 + increased charge duration); all charges of a kind share one timer, gaining one (also at maximum) refreshes it, and they expire together. Removing a charge doesn't refresh. The user's power charges: 15 × 2.2 = 33 s, matching the game | PoB CalcSetup base 15 s; user (33 s, expiry behaviour) | pob + user |
 | Start of a fight | everything at its maximum (steady state mid-map); `--start empty` starts frenzy / endurance / motes at 0. Changing areas resets charges to 0 in game, so a map starts empty and the charge-building phase is part of every map | user | — |
 | Kept charges and their timer | a consume that keeps the charges ("chance to not remove") freezes their timer at its current value (it does not restart it); the user sees the timer stand still while slamming continuously, so the pause is at least the time between slams; default 1 s (any value above ~0.6 s gives the same results for this build), `--kept-pause S` | user observation | user |
