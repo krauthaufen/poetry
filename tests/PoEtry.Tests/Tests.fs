@@ -94,6 +94,14 @@ let main _ =
         near 80.0 r.[Fire].Max
         near 40.0 r.[Cold].Max)
 
+    test "an evaded critical hit is an ordinary hit; cold builds no stun" (fun () ->
+        // a roll of 1 or more stands for the second evasion test having been passed
+        let sk = { fireSpell 100.0 with BaseCrit = 100.0 }
+        let plain = Hit.rollWith (Some 1.0) (Rng 1u) ctx ModDb.empty sk (enemy [])
+        let crit = Hit.rollWith (Some 0.0) (Rng 1u) ctx ModDb.empty sk (enemy [])
+        equal (false, true) (plain.Crit, crit.Crit)
+        equal false (List.contains Cold (Ailments.scalesFrom HeavyStun)))
+
     test "conversion goes in any direction" (fun () ->
         // Blueflame Bracers: fire to cold
         let r = Hit.convert ctx (ModDb.ofList [ Mod.base' (Convert(Fire, Cold)) 100.0 ]) (Map.ofList [ Fire, Range.fixedAt 10.0 ])

@@ -42,6 +42,10 @@ module Constants =
     /// Character.ot base_critical_hit_damage_bonus
     let playerBaseCritBonus = 100.0
     let monsterBaseCritBonus = mc "base_critical_hit_damage_bonus"
+    /// Monster.ot poise_decay_delay_ms, poise_decay_%_per_second: a monster's Heavy Stun bar
+    /// drains by so much of the bar per second once it has gone so long without any buildup.
+    let stunDecayDelay = mc "poise_decay_delay_ms" / 1000.0
+    let stunDecayPerSecond = mc "poise_decay_%_per_second"
 
     /// Order of "gain as extra" and conversion: gain first, then convert everything.
     let gainBeforeConversion = true

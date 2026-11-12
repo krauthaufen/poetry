@@ -365,7 +365,8 @@ module Hit =
     /// triggered, it performs a critical hit check by rolling a number ... all hits from that
     /// skill will be a critical hit" (wiki, Critical hit). None: rolled for this hit alone.
     let rollWith (critRoll: float option) (rng: Rng) (ctx: Ctx) mods (skill: Skill) (defender: Defender) =
-        let chance = critChance ctx mods skill
+        // (a roll of 1 or more: the critical hit was evaded, the hit is an ordinary one)
+        let chance = if critRoll |> Option.exists (fun r -> r >= 1.0) then 0.0 else critChance ctx mods skill
         let first =
             match critRoll with
             | Some r -> chance >= 100.0 || (chance > 0.0 && r * 100.0 < chance)

@@ -18,7 +18,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
    whose description or behaviour changed.
 5. Go through the lists below; the wiki's version history of a skill says what changed.
 
-## Rules (90)
+## Rules (85)
 
 ### Hit damage
 
@@ -31,14 +31,6 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | Rule | Source, and what is guessed | Confidence |
 |---|---|---|
 | Duration | game keyword text ("Fully Broken for 12 seconds"); the partial case is our reading | data / guess |
-
-### Ailments
-
-| Rule | Source, and what is guessed | Confidence |
-|---|---|---|
-| Buildup sources | PoB `buildupTypes` | guess for heavy stun (no melee/physical bonus yet) |
-| Buildup decay | — | guess, **known to be wrong**, needs data |
-| Daze, maim, blind, hinder | — | guess (duration) |
 
 ### Timing and the event engine
 
@@ -76,8 +68,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | Skill cost | skill data; PoB SupportManaMultiplier | data (efficiency formula: guess) |
 | Mana on kill | game text | guess (DoT kills) |
 | Monster hits | PoB enemy presets; rarity mod from Mods.dat | pob heuristic + guess |
-| Monster movement | maim −30% from BuffTemplates; hinder, speed, range: guesses | guess |
-| Monster hit chance | PoB monsterHitChance; blind value a guess | pob + guess |
+| Monster movement | maim −30% from BuffTemplates; hinder 30%: wiki Hinder; speed and range: guesses | guess |
 | Mana flask | item / data; base charges per kill and drink policy: guesses | data + guess |
 | Body armour scoped | game text | guess (order) |
 | Runic Ward | game item text | guess |
@@ -88,7 +79,6 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | Life flask | player behaviour | guess |
 | Ailments on the player | GameConstants "...Player" | data; using unmitigated damage is a guess |
 | Light stun on the player | game constants; formula a guess | guess |
-| Evasion | PoE2 0.3 (recollection) | guess |
 | Skills | game data | data; choice of skill is a guess |
 | Count | 1 per gem, or the gem's pack size; how many a build reserves spirit for is unknown from the API | | guess, usually too low |
 | Totems | gem data | data; the simplifications are guesses |

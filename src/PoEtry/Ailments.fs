@@ -21,7 +21,8 @@ module Ailments =
         | Chill
         | Freeze -> [ Cold ]
         | Electrocute -> [ Lightning ]
-        | HeavyStun -> DamageType.all
+        // "All non-Cold damage from a hit adds Heavy Stun buildup" (wiki, Stun)
+        | HeavyStun -> DamageType.all |> List.filter ((<>) Cold)
         | Pin -> [ Physical ]
         | Daze
         | Maim

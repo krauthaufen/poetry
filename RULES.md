@@ -73,15 +73,15 @@ Confidence levels:
 | Chill | magnitude = 100 × cold / threshold × mods, capped 50%; applied when ≥1% | CalcOffence.lua ~5386 | pob |
 | PoB's shock formula | PoB still has the PoE1 `50 × (dmg/threshold)^0.4` shock effect | CalcOffence.lua ~5515 | pob-wrong, we use the flat 20% |
 | Freeze / electrocute / heavy stun / pin buildup | per hit: dmg × scale / poise threshold × `Buildup` mods × 100% of the bar; at 100% the status applies and the bar resets | CalcOffence.lua ~5405; GameConstants `*DamageScale` | pob + data |
-| Buildup sources | freeze: cold; electrocute: lightning, only with `Named "CanElectrocute"`; heavy stun: all damage; pin: physical, only with `Named "CanPin"` | PoB `buildupTypes` | guess for heavy stun (no melee/physical bonus yet) |
-| Buildup decay | none: the bar never drains | — | guess, **known to be wrong**, needs data |
+| Buildup sources | freeze: cold; electrocute: lightning, only with `Named "CanElectrocute"`; heavy stun: all damage but cold, physical and melee each 50% more; pin: physical, only with `Named "CanPin"` | PoB `buildupTypes`; wiki Stun ("All non-Cold damage from a hit adds Heavy Stun buildup", "Physical damage and Melee Damage each have 50% more") | data |
+| Buildup decay | the Heavy Stun bar drains by 5% of the bar per second once 8 s have passed without any buildup. Freeze, electrocute and pin bars do not drain (no values in the data) | Monster.ot `poise_decay_delay_ms`, `poise_decay_%_per_second`; wiki Stun ("decreases over time if the target has not had any Heavy Stun buildup applied to them for a certain period") | data; the other bars: missing |
 | Repeat-freeze threshold growth (`FreezeModifierDuration` etc.) | not modelled | — | missing |
 | Statuses after buildup | freeze 4 s, electrocute 5 s, pin 3 s, heavy stun 2 s (Monster.ot `base_heavy_stun_duration_ms`) | GameConstants, Monster.ot | data |
 | Heavy stun buildup | physical damage and melee damage each build 50% more (multiplicative); a Dazed enemy takes 50% more; Daze lasts 8 s | game keyword text | data |
 | Chill | magnitude from cold damage against the ailment threshold, at least 30%, at most 50% | game keyword text, GameConstants | data |
 | Isolated | an enemy with no ally within 6 m | game keyword text | data |
 | After a buildup ailment | once frozen, electrocuted, heavily stunned or pinned, the monster's threshold for that is 500% more while it lasts and for 14 / 15 / 16.5 / 13 s after (`<X>ThresholdModifier`, `<X>ModifierDuration`) | GameConstants; that the time starts when the status ends is our reading | data |
-| Daze, maim, blind, hinder | flat chance × inc × more, 4 s | — | guess (duration) |
+| Daze, maim, blind, hinder | flat chance × inc × more; Daze lasts 8 s, the others 4 s | game keyword text; wiki Daze, Blind | data |
 
 ## Timing and the event engine
 
@@ -124,6 +124,8 @@ Confidence levels:
 | Default spread | 30° unless the skill sets `total_projectile_spread_angle_override` | — | guess |
 | Critical hit roll | rolled once when a skill is used or triggered: every hit of that use is a critical hit or none is. Skills that keep hitting on their own (Sustained) roll for every hit | wiki Critical hit: "When a skill is used or triggered, it performs a critical hit check by rolling a number ... all hits from that skill will be a critical hit"; "Sustained skill will roll critical hit chance for each hit individually" | data |
 | Evasion entropy | an attack is not rolled against evasion each time: the defender has an entropy value, random at the first attack and again after 3.33 s without one; each attempt adds the chance to hit, at 100 it hits and 100 is taken off. All attackers share it. The second check that can downgrade a critical hit is not modelled | wiki Evasion | data |
+| Evaded critical hits | a hit that lands and would be critical is tested against evasion once more, by a plain roll; if that would have evaded, it is an ordinary hit. For attacks against monsters and for monsters' hits on the player | wiki Evasion ("the chance to evade is tested again independently. If this check is passed, the critical hit is downgraded to a non-critical hit") | data |
+| What evasion works against | monsters can evade attacks, never spells; the player can evade every hit (not the telegraphed boss skills, which are not modelled) | wiki Evasion ("Monsters cannot evade spell hits", "Player Evasion now works on all hits except boss skills that have a red flash") | data |
 | Flammability | a fire hit leaves Flammability on the enemy: 1% per 5% of the ailment threshold its fire damage is, for 8 s, each on its own. The chance to Ignite is all the Flammability on the enemy including the hit's own. Non-hit igniters (needing 50%) are not modelled | keyword text, wiki Ignite, `BaseFlammabilityDuration` | data |
 | Chain range | 6 m for projectiles | wiki Chain: "base chaining distance of 6 metres" | data |
 | Glory and Combo limits | a skill gains Glory at most once every 0.5 s per monster, and loses 2 per second once 15 s have passed without any; Combo counts once per strike and is lost after 8 s without one | wiki Glory, Combo | data |
@@ -166,8 +168,8 @@ Confidence levels:
 | Mana leech | % of physical attack damage dealt, each hit counted as at most 40,000 damage, from **one enemy per hit event** (the largest instance), recovered over one second; only the strongest instance runs | GameConstants EffectiveMaxDamageForLeech; wiki Leech; one enemy: user | data + user |
 | Mana on kill | flat and % of max mana per kill, also for damage-over-time kills? no: hit kills only | game text | guess (DoT kills) |
 | Monster hits | 1.5 × level damage × (1/4.4 normal/magic/rare, 4/4.4 unique) × rarity damage modifier, every 1.5 s, 40% physical / 20% each element | PoB enemy presets; rarity mod from Mods.dat | pob heuristic + guess |
-| Monster movement | walk towards the player at 3.5 m/s until within 0.8 m; frozen / stunned / electrocuted / pinned don't move; maimed and hindered 30% slower; chilled slower by its magnitude | maim −30% from BuffTemplates; hinder, speed, range: guesses | guess |
-| Monster hit chance | 1 − 0.95 E / (E + 4 Acc); blinded monsters have 20% less accuracy | PoB monsterHitChance; blind value a guess | pob + guess |
+| Monster movement | walk towards the player at 3.5 m/s until within 0.8 m; frozen / stunned / electrocuted / pinned don't move; maimed and hindered 30% slower; chilled slower by its magnitude | maim −30% from BuffTemplates; hinder 30%: wiki Hinder; speed and range: guesses | guess |
+| Monster hit chance | 1 − 0.95 E / (E + 4 Acc); blinded monsters have 20% less accuracy | PoB monsterHitChance; wiki Blind | pob + data |
 | Deflection | P(not deflected) = Acc / (Acc + 0.12 D) × 1.5 − 0.5, capped 95%; deflected hits deal 40% less | PoB deflectChance; GameConstants | pob + data |
 | Mitigation | armour A / (A + 10 D) capped 90% for physical, resistances for the rest; "damage removed from mana first", then energy shield, then life | PoB; game text | pob |
 | Frozen / stunned / electrocuted monsters | don't attack | buff data `stopped_by_*` | data |
@@ -176,7 +178,7 @@ Confidence levels:
 | Item defences | armour pieces and weapons are read in local context (their "increased" lines are local and already in the shown values, runes included); jewellery, jewels, tree and quest rewards in global context | game text is identical for local and global variants | data |
 | Body armour scoped | "increased Evasion / Energy Shield from Equipped Body Armour" scale that item's values; "+1 ES per X Item Evasion on Equipped Body Armour" reads the scaled body evasion | game text | guess (order) |
 | Keystones | handled by name: Chaos Inoculation = maximum life 1, chaos immunity, no life regeneration | game text | data |
-| Not modelled | monster skills and phases, ranged monsters, monsters moving (they stand where the encounter puts them) | — | missing |
+| Not modelled | monster skills and phases, ranged monsters | — | missing |
 
 ### The character sheet
 
@@ -230,7 +232,6 @@ Checked against PoB's defensive numbers for 131 public characters (`tools/corpus
 | Ailments on the player | threshold = half of maximum life (PlayerAilmentThresholdLifeFactor) + mods. Ignite: chance = fire / threshold x IgniteChanceMultiplier, burns 4 s, strongest only, lowered by fire resistance. Shock: chance likewise, +20% damage taken for 4 s. Chill: slow = ChillEffectMultiplier x cold / threshold for 2 s. Freeze: builds cold x FreezeDamageScalePlayer / freeze threshold, frozen 2 s at 100%. "Avoid", "effect on you" and duration stats apply. Unmitigated hit damage is used. Bleed / poison from monsters: not modelled | GameConstants "...Player" | data; using unmitigated damage is a guess |
 | Light stun on the player | chance = hit / stun threshold (maximum life before CI + mods); physical +100%, melee +33% (monster object stats); nothing below 15% (LightStunMinimumChancePlayer); interrupts for 0.35 s (GUESS); a stun only delays the next action, it does not cancel one under way. | game constants; formula a guess | guess |
 | Heavy stun on the player | not applied: "Players and their Minions usually cannot be Heavily Stunned" (only while raising a shield, parrying or mounted, which are not modelled) | game keyword text | data |
-| Evasion | every monster hit can be evaded | PoE2 0.3 (recollection) | guess |
 
 ### Keystones
 

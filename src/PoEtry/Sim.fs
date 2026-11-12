@@ -450,6 +450,8 @@ module Sim =
           Debuffs: Map<string, Effect>
           Dots: DotInstance list
           Buildup: Map<Ailment, float>
+          /// When the Heavy Stun bar last grew (it drains after a while without).
+          StunBuildupAt: float
           /// Flammability left by fire hits: (magnitude in percent, gone at), each on its own.
           Flammability: (float * float) list
           Db: ModDb }
@@ -904,7 +906,13 @@ module Sim =
         | Status (a, _, duration) -> addDebuff target (Ailment.status a) duration 1 [] w
         | AddBuildup (a, pct) ->
             let e = w.Enemies.[target]
-            let total = (Map.tryFind a e.Buildup |> Option.defaultValue 0.0) + pct
+            // the Heavy Stun bar drains once it has gone a while without any buildup
+            let had =
+                let had = Map.tryFind a e.Buildup |> Option.defaultValue 0.0
+                let idle = w.Time - e.StunBuildupAt - Constants.stunDecayDelay
+                if a = HeavyStun && idle > 0.0 then max 0.0 (had - Constants.stunDecayPerSecond * idle) else had
+            let w = if a = HeavyStun then updateEnemy target (fun e -> { e with StunBuildupAt = w.Time }) w else w
+            let total = had + pct
             if total >= 100.0 && not (Map.containsKey (Ailment.status a) e.Debuffs) then
                 updateEnemy target (fun e -> { e with Buildup = Map.add a 0.0 e.Buildup }) w
                 |> addDebuff target (Ailment.status a) (Constants.buildupDuration a) 1 []
@@ -1937,6 +1945,10 @@ module Sim =
                 // one critical hit roll per use, shared by all its hits; skills that keep hitting
                 // on their own (Sustained) roll for every hit
                 let critRoll = if skill.Tags.Contains(Tag "Type:Sustained") then None else Map.tryFind skill.Name (Map.find actor.Name w.Actors).CritRolls
+                // "If ... that hit would deal a critical hit, the chance to evade is tested again
+                // independently. If this check is passed, the critical hit is downgraded to a
+                // non-critical hit" (wiki, Evasion)
+                let critRoll = if hitChance < 100.0 && rng.Chance(100.0 - hitChance) then Some 1.0 else critRoll
                 let hit = Hit.rollWith critRoll rng ctx mods skill def
                 // Culling Strike: an enemy at or below the threshold for its rarity dies, before the hit's damage
                 let hit =
@@ -2515,7 +2527,8 @@ module Sim =
                                 m |> Map.add from ((Map.tryFind from m |> Option.defaultValue 0.0) - moved)
                                   |> Map.add into ((Map.tryFind into m |> Option.defaultValue 0.0) + moved))
                             atk.Damage
-                    let crit = rng.Chance(atk.CritChance * v.EnemyCritChanceMult)
+                    // a critical hit is tested against evasion once more: evaded, it is an ordinary hit
+                    let crit = rng.Chance(atk.CritChance * v.EnemyCritChanceMult) && not (hitChance < 100.0 && rng.Chance(100.0 - hitChance))
                     // "Defend with X% of Armour against Projectile Attacks / Critical Hits"
                     let armourShare = (if atk.Melee then 1.0 else v.ArmourVsProjectiles) * (if crit then v.ArmourVsCrits else 1.0)
                     let critMult = if crit then 1.0 + Constants.monsterBaseCritBonus / 100.0 * (1.0 - v.LessCritDamageTaken / 100.0) else 1.0
@@ -3053,6 +3066,7 @@ module Sim =
                         |> Map.ofList
                       Dots = []
                       Buildup = Map.empty
+                      StunBuildupAt = 0.0
                       Flammability = []
                       Db = ModDb.ofList d.Mods })
                 |> Map.ofList
