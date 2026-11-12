@@ -48,6 +48,8 @@ let spriteFragment (f : Textured) =
         let dy = (f.Uv.Y - r.Y) / r.W - 0.5f
         let d = 2.0f * sqrt (dx * dx + dy * dy)
         let fade = if t.W < 0.015f then fade * max 0.0f (min 1.0f ((0.66f - d) / 0.15f)) else fade
+        // (beyond the fade the portrait's square must not cover the tree's connections)
+        if t.W < 0.015f && d > 0.655f then discard ()
         return { Color = V4f (0.047f + (c.X * t.X - 0.047f) * fade, 0.047f + (c.Y * t.Y - 0.047f) * fade, 0.055f + (c.Z * t.Z - 0.055f) * fade, 1.0f) }
     }
 

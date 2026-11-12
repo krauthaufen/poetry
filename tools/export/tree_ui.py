@@ -193,7 +193,8 @@ drawn = []
 paths = []
 starts = {int(k) for k, n in src["nodes"].items() if n.get("classesStart")}
 for (a, b, orbit) in edges.values():
-    # a class' start is the emblem in the middle: its connections are not drawn as lines
+    # a class' start is an ornament of the ring in the middle, not a passive: the game draws
+    # no connection from it to the first passives
     if a in starts or b in starts:
         continue
     # nor is a way from an ascendancy into the tree (the Pathfinder's "Path of the ..."):

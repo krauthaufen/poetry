@@ -59,8 +59,8 @@ type Msg =
     | Close
     /// The place of the tree under a pointer that came down, with where the camera was when
     /// it was worked out.
-    /// The page's size, as the bridge in index.html answers `__window`.
-    | Sized of Fetched
+    /// The tree's control was drawn at this size (and whenever it changes).
+    | Sized of ControlSize
     | PointerDown of Event
     | PointerMove of Event
     | PointerUp of Event
@@ -132,11 +132,8 @@ type Model =
       /// let go without having moved is a click).
       Touches : (int * V2d) list
       Travel : float
-      /// The page's size in its own pixels (0 until the bridge has said), asked again with
-      /// every pointer that comes down (`Asked` counts them), so that a turned phone or a
-      /// resized window is followed.
+      /// The page's size in its own pixels (0 until the tree's control has said its size).
       Page : V2d
-      Asked : int
       /// A click that could not be placed yet (the page's size was not known).
       Pending : V2d option
       /// What an allocated passive with a choice was chosen to be ("Strength", ...).
@@ -159,7 +156,7 @@ let init : Model =
       Centre = V2d (0.0, 0.0); Height = 9000.0
       Camera = { Sky = V3d (0.0, 1.0, 0.0); Location = V3d (0.0, 0.0, 7794.2); Forward = V3d (0.0, 0.0, -1.0); Up = V3d (0.0, 1.0, 0.0); Right = V3d (1.0, 0.0, 0.0) }
       Near = 7000.0; Far = 8600.0
-      Touches = []; Travel = 0.0; Page = V2d (0.0, 0.0); Asked = 0; Pending = None; Choices = Map.empty; JewelSprites = Map.empty; Jewels = Map.empty; Selected = None; Hovered = None; Level = 0 }
+      Touches = []; Travel = 0.0; Page = V2d (0.0, 0.0); Pending = None; Choices = Map.empty; JewelSprites = Map.empty; Jewels = Map.empty; Selected = None; Hovered = None; Level = 0 }
 
 /// The camera straight above the centre, so far up that `Height` of the tree is seen through
 /// its 60 degree lens; the depth range close around the tree's plane (its layers are a unit
@@ -300,10 +297,7 @@ let private paths (m : Model) : Model =
         List.ofArray m.Links
         |> List.filter (fun l -> (l.Of = "" || l.Of = m.Ascendancy) && m.Allocated.Contains l.A && m.Allocated.Contains l.B)
         |> List.collect (fun l -> l.Ribbon)
-    // (always `Capacity` vertices: what is left over lies in one point and draws nothing)
-    let ribbons = List.truncate m.Capacity ribbons
-    let padded = ribbons @ List.replicate (max 0 (m.Capacity - ribbons.Length)) (V3f (0.0f, 0.0f, 0.0f))
-    { m with Path = Data.pack (Data.ofList padded); PathUv = noUv padded }
+    { m with Path = Data.pack (Data.ofList ribbons); PathUv = noUv ribbons }
 
 /// The character's ascendancy, once the tree and the character are both there: the game's
 /// character data names it as the class ("Spirit Walker"); else the one its allocated
@@ -469,21 +463,19 @@ let rec update (msg : Msg) (m : Model) : Model =
     // A place on the tree comes from the last frame drawn; under an older camera than the
     // model's it is no use.
     | Zoom (_, eye, _) when abs (eye.X - m.Centre.X) + abs (eye.Y - m.Centre.Y) > m.Height / 1e5 -> m
-    | Sized r ->
-        match Native.parseJson r.Text with
-        | Ok j when Json.number (Json.field "width" j) > 0.0 ->
-            let m = { m with Page = V2d (Json.number (Json.field "width" j), Json.number (Json.field "height" j)) }
-            // a click that waited for this
-            match m.Pending with
-            | Some p ->
-                let q = placeAt m m.Centre m.Height p
-                update (Click (V3d (q.X, q.Y, 0.0))) { m with Pending = None }
-            | None -> m
-        | _ -> m
+    | Sized s ->
+        // (the page's pixels: the control's own divided by the device's ratio; it lies below the header)
+        let m = { m with Page = V2d (s.Pixels.X / max 0.01 s.PixelRatio, s.Pixels.Y / max 0.01 s.PixelRatio + top) }
+        // a click that waited for this
+        match m.Pending with
+        | Some p ->
+            let q = placeAt m m.Centre m.Height p
+            update (Click (V3d (q.X, q.Y, 0.0))) { m with Pending = None }
+        | None -> m
     | PointerDown e ->
         let others = m.Touches |> List.filter (fun (i, _) -> i <> e.PointerId)
         let m = { m with Touches = (e.PointerId, e.Position) :: others }
-        if others.IsEmpty then { m with Travel = 0.0; Asked = m.Asked + 1 } else m
+        if others.IsEmpty then { m with Travel = 0.0 } else m
     | PointerMove e ->
         match m.Touches |> List.tryFind (fun (i, _) -> i = e.PointerId) with
         | Some (_, before) -> gesture e.PointerId before e.Position m
@@ -639,6 +631,7 @@ let tree (m : Model) : Node<Msg> =
         Dom.OnPointerUp PointerUp
         RenderControl.Perspective (60.0, m.Near, m.Far)
         RenderControl.Camera m.Camera
+        RenderControl.OnResize Sized
         sg {
             // the ground: what the pointer holds while dragging, and zooms towards
             sg {
@@ -658,16 +651,15 @@ let tree (m : Model) : Node<Msg> =
             sg {
                 Sg.Shader { Shaders.flat }
                 Sg.NoEvents true
-                if m.Loaded then
-                    sg {
-                        Sg.Uniform ("Color", V4d (0.227, 0.227, 0.306, 1.0))
-                        mesh Topology.Triangles { Mesh.Attribute ("Positions", m.Web); Mesh.Attribute ("DiffuseColorCoordinates", m.WebUv) }
-                    }
-                    sg {
-                        Sg.Uniform ("Color", V4d (0.82, 0.74, 0.47, 1.0))
-                        Sg.Translate (0.0, 0.0, 0.7)
-                        mesh Topology.Triangles { Mesh.Attribute ("Positions", m.Path); Mesh.Attribute ("DiffuseColorCoordinates", m.PathUv) }
-                    }
+                sg {
+                    Sg.Uniform ("Color", V4d (0.227, 0.227, 0.306, 1.0))
+                    mesh Topology.Triangles { Mesh.Attribute ("Positions", m.Web); Mesh.Attribute ("DiffuseColorCoordinates", m.WebUv) }
+                }
+                sg {
+                    Sg.Uniform ("Color", V4d (0.82, 0.74, 0.47, 1.0))
+                    Sg.Translate (0.0, 0.0, 0.7)
+                    mesh Topology.Triangles { Mesh.Attribute ("Positions", m.Path); Mesh.Attribute ("DiffuseColorCoordinates", m.PathUv) }
+                }
                 if m.Art <> "" then
                     sg {
                         Sg.Uniform ("Color", V4d (0.227, 0.227, 0.306, 1.0))
@@ -748,8 +740,10 @@ let private tooltip (m : Model) : Node<Msg> =
         let called = match j with Some j -> j.Called | None -> ""
         let based = match j with Some j -> j.Base | None -> ""
         let rarity = match j with Some j -> j.Rarity.ToLower () | None -> ""
+        // (about how tall it gets, to keep all of it on the page)
+        let tall = 110.0 + 22.0 * float p.Stats.Length + (if jewel.IsEmpty then 0.0 else 80.0 + 22.0 * float jewel.Length) + (if pinned then 60.0 else 0.0) + (if pinned && not p.Options.IsEmpty then 120.0 else 0.0)
         div {
-            Dom.Style [ Css.Left (sprintf "%.0fpx" (max 12.0 (min x (m.Page.X - wide - 12.0)))); Css.Top (sprintf "%.0fpx" (max (top + 8.0) (min y (m.Page.Y - 190.0 - 22.0 * float jewel.Length)))); Css.Width (sprintf "%.0fpx" wide) ]
+            Dom.Style [ Css.Left (sprintf "%.0fpx" (max 12.0 (min x (m.Page.X - wide - 12.0)))); Css.Top (sprintf "%.0fpx" (max (top + 8.0) (min y (m.Page.Y - tall)))); Css.Width (sprintf "%.0fpx" wide) ]
             Dom.Class ("passive-tip " + p.Kind + (if pinned then " pinned" else ""))
             Dom.Attr ("data-check", "tooltip")
             div { Dom.Class "name"; title }
@@ -766,17 +760,21 @@ let private tooltip (m : Model) : Node<Msg> =
                     for l in jewel do
                         div { Dom.Class (if l = "Corrupted" then "corrupted" else "mod"); l }
                 }
+            if not p.Options.IsEmpty && pinned then
+                div {
+                    Dom.Class "select"
+                    div { Dom.Class "one"; "Select One:" }
+                    for o in p.Options do
+                        button { Dom.Class ("choice " + o + (if has && Map.tryFind p.Id m.Choices = Some o then " active" else "")); Dom.OnClick (fun _ -> Allocate (p.Id, o)); "+5 to " + o }
+                }
             if pinned then
                 div {
                     Dom.Class "actions"
-                    if not p.Options.IsEmpty then
-                        for o in p.Options do
-                            button { Dom.Class ("choice " + o + (if has && Map.tryFind p.Id m.Choices = Some o then " active" else "")); Dom.OnClick (fun _ -> Allocate (p.Id, o)); o }
                     if p.Options.IsEmpty && not has then
-                        button { Dom.Class "tab"; Dom.OnClick (fun _ -> Allocate (p.Id, "")); "Allocate" }
+                        button { Dom.Class "act"; Dom.OnClick (fun _ -> Allocate (p.Id, "")); "Allocate" }
                     if has then
-                        button { Dom.Class "tab"; Dom.OnClick (fun _ -> Deallocate p.Id); "Refund" }
-                    button { Dom.Class "tab"; Dom.OnClick (fun _ -> Close); "Close" }
+                        button { Dom.Class "act"; Dom.OnClick (fun _ -> Deallocate p.Id); "Refund" }
+                    button { Dom.Class "act close"; Dom.OnClick (fun _ -> Close); "Close" }
                 }
             if not pinned then
                 div { Dom.Class "state"; state }
@@ -798,7 +796,6 @@ let view (m : Model) : Node<Msg> =
             if m.Title <> "" then span { Dom.Fetch (fightUrl m, Fought) }
         }
         span { Dom.Fetch ("tree.json", TreeData) }
-        span { Dom.Fetch ("__window?" + string m.Asked, Sized) }
         div {
             if m.Tab = "tree" then
                 tooltip m
