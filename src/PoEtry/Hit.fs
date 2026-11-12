@@ -10,7 +10,9 @@ type ProjectileShape =
       ChainRange: float
       Range: float
       /// Several projectiles of one use may hit the same enemy (each projectile still
-      /// hits an enemy at most once). Geometry decides how many actually do.
+      /// hits an enemy at most once). Geometry decides how many actually do. Projectiles fired
+      /// together do not, unless the skill says so (they "can Merge", are fired in sequence,
+      /// or spring from an impact).
       CanShotgun: bool
       /// Radius of an explosion where a projectile hits, if any.
       Explosion: float option
@@ -26,7 +28,21 @@ type ProjectileShape =
       /// Chance (%) to bounce off a wall once ("chain 1 extra time from terrain").
       TerrainChain: float
       /// Projectiles appear this far from their origin, along their direction (game units).
-      StartOffset: float }
+      StartOffset: float
+      /// Width (game units) of the band an erratic projectile strays in around its heading
+      /// (Spark's "pathing width bounds"); 0: it flies straight.
+      Wander: float
+      /// An erratic projectile bounces off walls ("spark_projectile_bounces_off_walls": a
+      /// monster's sparks do, the player's do not have the stat).
+      Bounces: bool
+      /// Degrees between neighbouring projectiles where the fan widens with their number
+      /// (0: `Spread` is the whole fan whatever the count).
+      SpreadPerProjectile: float
+      /// "Projectiles fired at the same time can Hit the same target no more than once every
+      /// N seconds": seconds (0: the usual rule, see CanShotgun).
+      HitInterval: float
+      /// Units per second, for projectiles whose hits are timed (HitInterval).
+      Speed: float }
 
 /// How a skill use finds its targets.
 type Delivery =
@@ -53,7 +69,12 @@ module ProjectileShape =
           SkipPrimary = false
           Rain = None
           TerrainChain = 0.0
-          StartOffset = 0.0 }
+          StartOffset = 0.0
+          Wander = 0.0
+          Bounces = false
+          SpreadPerProjectile = 0.0
+          HitInterval = 0.0
+          Speed = 0.0 }
 
 /// A skill as the engine sees it: where its damage comes from and how long it takes.
 type Skill =

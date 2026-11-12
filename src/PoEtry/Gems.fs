@@ -656,13 +656,34 @@ module Gems =
                     { ProjectileShape.make count with
                         // "projectiles_nova": fired in a full circle
                         // "projectiles_barrage": fired one after the other at the target, so each can hit it
+                        // "travel erratically along the ground": they stray within
+                        // "spark_pathing_width_bounds", as far as speed x lifetime takes them, in a
+                        // fan that widens with their number
+                        Wander = statOf "spark_pathing_width_bounds" |> Option.defaultValue 0.0
+                        Bounces = flagOf "spark_projectile_bounces_off_walls"
+                        Speed = (if (statOf "spark_pathing_width_bounds").IsSome then Map.tryFind data.Name Constants.erraticProjectileSpeed |> Option.defaultValue 0.0 else 0.0)
+                        Range =
+                            (match statOf "spark_pathing_width_bounds", Map.tryFind data.Name Constants.erraticProjectileSpeed, statOf "base_skill_effect_duration" with
+                             | Some _, Some speed, Some ms -> speed * ms / 1000.0
+                             | _ -> (ProjectileShape.make 1).Range)
+                        SpreadPerProjectile = (if (statOf "spark_pathing_width_bounds").IsSome then Constants.erraticFanStep else 0.0)
+                        // "can Hit the same target no more than once every N seconds"
+                        HitInterval = (statOf "spark_min_time_between_target_clearing_ms" |> Option.defaultValue 0.0) / 1000.0
                         Spread = (if flagAny "projectiles_nova" then 360.0 elif flagOf "projectiles_barrage" then 0.0 else statOf "total_projectile_spread_angle_override" |> Option.defaultValue 30.0)
                         Pierce = (if flagOf "always_pierce" then 100 else int (statOf "projectile_base_number_of_targets_to_pierce" |> Option.defaultValue 0.0))
                         Chains = int (statOf "number_of_chains" |> Option.defaultValue 0.0)
                         // projectiles that drop on their targets, one each, in a number the skill
                         // sets itself (Dark Effigy's "one per afflicted enemy, up to 100"): never two on one enemy
+                        // "If multiple projectiles are fired simultaneously, only one of them can
+                        // collide with the same target, unless otherwise stated" (wiki, Projectile).
+                        // Stated: "These fragments can Merge", "Multiple Projectiles can hit the same
+                        // enemy", "fired in sequence"; and what springs from an impact or rains down
                         CanShotgun =
-                            not (data.Types.Contains "ProjectileNoCollision" && data.Types.Contains "ProjectilesNumberModifiersNotApplied")
+                            // (the rule is for a volley leaving the player, "ProjectilesFromUser": embers
+                            // hovering overhead, grenades and what drops from the sky land one by one)
+                            (flagOf "projectiles_barrage" || behind || rains || not (data.Types.Contains "ProjectilesFromUser")
+                             || [ "can Merge"; "can hit the same"; "Hit the same target"; "in sequence" ] |> List.exists data.Description.Contains)
+                            && not (data.Types.Contains "ProjectileNoCollision" && data.Types.Contains "ProjectilesNumberModifiersNotApplied")
                             // Spiral Volley: "Each target can only be Hit once"
                             && not (data.Description.Contains "Each target can only be Hit once")
                         PerCharge = perCharge

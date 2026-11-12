@@ -779,11 +779,13 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         let weak = run []
         equal (box 0) (box (count weak "hits:Grim Pillars: Explosion"))
         if count weak "crystals:Grim Pillars: Explosion" = 0 then failwith "no crystals"
-        // 8 pillars over a radius of 4 m, explosions of 2 m: two of them reach the enemy
+        // 8 pillars at random within 4 m of the caster, explosions of 2 m, the boss (1 m wide) 3 m
+        // away: each pillar reaches it or not, by where it stands
         let strong = run [ "20000% increased Spell Damage" ]
-        let shattered = count strong "shattered:Grim Pillars: Explosion"
+        let shattered, hits = count strong "shattered:Grim Pillars: Explosion", count strong "hits:Grim Pillars: Explosion"
         if shattered = 0 then failwith "nothing shattered"
-        equal (box (2 * shattered)) (box (count strong "hits:Grim Pillars: Explosion")))
+        let perUse = float hits / float (count strong "uses:Grim Pillars")
+        if perUse < 1.0 || perUse > 6.0 then failwithf "%.1f explosions per use" perUse)
 
     test "Shattering Spite: spear hits pile up Bloodstone Lances, thirty are shattered at once" (fun () ->
         let gem name = { Name = name; Level = 20; Quality = 0; Enabled = true; IsSupport = false; StatSet = 1 }

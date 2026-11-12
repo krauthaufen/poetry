@@ -164,8 +164,8 @@ module Constants =
     let revealedWeaknessLifeShare = 0.45
 
     /// Slow projectiles that hit from a distance as they pass (game table Projectiles,
-    /// ProjectileSpeed): Ball Lightning 400. Read as tenths of a unit per second (an arrow's
-    /// 3260 is then 33 m/s, a Fireball's 1040 10 m/s): a guess at the unit.
+    /// ProjectileSpeed): Ball Lightning 400. In tenths of a unit per second: Spark's 1000 is the
+    /// "10 metres per second" poe2db shows for it.
     let passingProjectileSpeed = Map.ofList [ "Ball Lightning", 40.0 ]
 
     /// Radius (units) of the monster such a projectile passes: a boss is 10, others 4.
@@ -177,3 +177,12 @@ module Constants =
     /// Seconds between the pulses of a Frost Bomb (its exposure grows with each): not in the
     /// data; 0.25 s lets one bomb reach its cap just as it detonates. A guess.
     let orbPulseInterval = 0.25
+
+    /// Speed (units per second) of projectiles whose reach is their speed times their lifetime
+    /// (game table Projectiles, ProjectileSpeed in tenths of a unit per second, see
+    /// `passingProjectileSpeed`): Spark 1000.
+    let erraticProjectileSpeed = Map.ofList [ "Spark", 100.0 ]
+
+    /// Degrees between neighbouring erratic projectiles (Spark's spray widens with every
+    /// spark; the angle is not in the data). A guess.
+    let erraticFanStep = 15.0

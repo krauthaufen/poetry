@@ -454,6 +454,40 @@ let main _ =
         // impact inside the boss: every projectile hits
         equal 36 (Geometry.targetsFrom (Rng 1u) [] 35.0 (Projectiles p) 1.0 boss [ boss ] |> List.length))
 
+    test "geometry: erratic projectiles zigzag within their band and hit what a leg crosses" (fun () ->
+        let boss = { dummy "b" 30.0 0.0 with Size = 10.0 }
+        let p = { ProjectileShape.make 1 with Wander = 20.0; Range = 200.0 }
+        for seed in 1u .. 50u do
+            // heading straight at the enemy: at most 10 off its centre line, so it hits, and stops there
+            let at = Geometry.trace (Rng seed) [] p Vec.zero (Vec.make 1.0 0.0) [ boss ]
+            equal [ "b" ] at.Hit
+            // heading away at a right angle: never nearer than 20, and it flies its whole reach
+            let off = Geometry.trace (Rng seed) [] p Vec.zero (Vec.make 0.0 1.0) [ boss ]
+            equal [] off.Hit
+            near 200.0 (List.last off.Points).Y
+            // every corner of the zigzag lies within half the band of the heading
+            for pt in off.Points do
+                if abs pt.X > 10.0 + 1e-9 then failwithf "strayed %f" pt.X
+            if off.Points |> List.forall (fun pt -> abs pt.X < 1e-9) then failwith "flew straight"
+        // a full circle of 36 from the player, at a random angle to the enemy: the share that
+        // heads into it hits (2 asin(10/30) = 39 of 360 degrees, a little more for the zigzag)
+        let ring = { p with Count = 36; Spread = 360.0 }
+        let hits = [ 1u .. 200u ] |> List.sumBy (fun seed -> Geometry.targetsFrom (Rng seed) [] infinity (Projectiles ring) 1.0 boss [ boss ] |> List.length)
+        let share = float hits / (200.0 * 36.0)
+        if share < 0.10 || share > 0.20 then failwithf "share %.3f" share
+        // "fired at the same time can Hit the same target no more than once every 0.66 seconds":
+        // nine sparks sent the same way all reach the enemy within a moment, and one hits
+        let volley = { p with Count = 9; Spread = 0.0; HitInterval = 0.66; Speed = 100.0 }
+        equal [ "b" ] (Geometry.targetsFrom (Rng 3u) [] infinity (Projectiles volley) 1.0 boss [ boss ])
+        // a second enemy behind is hit by one of the sparks that passed through the first
+        let behind = { dummy "c" 70.0 0.0 with Size = 10.0 }
+        equal [ "b"; "c" ] (Geometry.targetsFrom (Rng 3u) [] infinity (Projectiles volley) 1.0 boss [ boss; behind ])
+        // the fan widens with every spark: 15 degrees apart, three span 30, twenty-five the full circle
+        let fan n = Geometry.paths (Rng 1u) [] { p with Count = n; SpreadPerProjectile = 15.0; Wander = 0.0; Range = 10.0 } infinity boss [] |> List.map (fun path -> Vec.angle (List.last path.Points) * 180.0 / System.Math.PI)
+        near -15.0 (List.head (fan 3))
+        near 15.0 (List.last (fan 3))
+        near 60.0 (List.last (fan 9)))
+
     test "geometry: a projectile bounces off a wall once with terrain chain" (fun () ->
         // flying +x from the origin, wall at x = 20; the enemy sits off-axis, within chain
         // range of the wall, so the chain has to target it (a mirror bounce would miss)

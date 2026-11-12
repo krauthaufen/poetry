@@ -395,7 +395,7 @@ module Setup =
     /// played: buffs it can grant are kept up, cooldown skills that hit or leave something
     /// (remnants, exposure, infusions) are used on cooldown, the main skill is spammed.
     /// Marks, warcries, travel skills and anything else stay unpressed.
-    let auto (c: Loaded) (o: Options) (mainGem: string) : Play list =
+    let rec auto (c: Loaded) (o: Options) (mainGem: string) : Play list =
         let isTotem (name: string) = Gems.data c.Db name |> Option.exists (fun d -> d.Types.Contains "SummonsTotem")
         let inOwnGroup =
             c.Build.Groups
@@ -467,20 +467,38 @@ module Setup =
         // a main skill with a cooldown of its own goes first whenever it is ready: otherwise the
         // other cooldown skills would fill every gap and it would never be used
         match pressed c o mainGem with
-        | Some p when p.Skill.Mods |> List.exists (fun m -> match m.Stat with Named n -> n.StartsWith "Requires:" && m.Value > 0.0 | _ -> false) ->
-            // the main skill needs Glory or Combo: it is used when it has enough, and the weapon's
-            // plain attack (if the character has it) builds in between
+        | Some p when p.Skill.Mods |> List.exists (fun m -> match m.Stat with Named n -> (n.StartsWith "Requires:" || n.StartsWith "NeedsEnemyStacks:") && m.Value > 0.0 | _ -> false) ->
+            // the main skill needs Glory, Combo or a pile on the enemy: it is used when there is
+            // enough, and the weapon's plain attack (if the character has it) builds in between
             let filler =
                 c.Build.Groups |> List.filter (fun g -> g.Enabled) |> List.collect (fun g -> g.Gems) |> List.filter (fun x -> x.Enabled && not x.IsSupport && x.Name <> mainGem)
                 |> List.tryFind (fun x -> (Map.tryFind x.Name c.Db.GemVariants |> Option.defaultValue [] |> List.exists (fun g -> g.GameId.Contains "PlayerDefault")) && (pressed c o x.Name).IsSome)
-            OnCooldown mainGem :: others @ (filler |> Option.map (fun x -> Spam x.Name) |> Option.toList)
+            // a pile of lances grows with every spear hit: the spear skill to build it with is
+            // the one that does best in a short fight beside the main skill
+            let stacker =
+                if not (p.Skill.Mods |> List.exists (fun m -> match m.Stat with Named n -> n.StartsWith "NeedsEnemyStacks:" | _ -> false)) then None
+                else
+                    c.Build.Groups |> List.filter (fun g -> g.Enabled) |> List.collect (fun g -> g.Gems) |> List.filter (fun x -> x.Enabled && not x.IsSupport && x.Name <> mainGem && not (Gems.isPersistentBuff c.Db x.Name))
+                    |> List.filter (fun x -> Gems.data c.Db x.Name |> Option.exists (fun d -> not (d.Types.Contains "Persistent") && not (d.Types.Contains "Triggered")))
+                    |> List.choose (fun x -> pressed c o x.Name |> Option.map (fun q -> x.Name, q))
+                    |> List.filter (fun (_, q) -> q.Skill.Tags.Contains Spear && q.Skill.Tags.Contains Attack && not q.Skill.Hits.IsEmpty && q.Skill.Cooldown.IsNone)
+                    |> List.map (fun (g, _) ->
+                        let short = { o with MaxTime = min o.MaxTime 10.0 }
+                        let boss = Encounter.boss 83 Rarity.defaults 30.0 |> List.map (fun e -> { e with Life = 1e13 })
+                        let out = Sim.run (fight c short (player c short [ OnCooldown mainGem; Spam g ] None) boss) 1u
+                        g, out.DamageBy |> Map.toList |> List.sumBy snd)
+                    |> List.sortByDescending snd
+                    |> List.tryHead |> Option.map fst
+            match stacker with
+            | Some g -> OnCooldown mainGem :: (others |> List.filter (function Spam x | OnCooldown x -> x <> g | _ -> true)) @ [ Spam g ]
+            | None -> OnCooldown mainGem :: others @ (filler |> Option.map (fun x -> Spam x.Name) |> Option.toList)
         | Some p when p.Skill.Cooldown.IsSome && (match main with Spam _ -> true | _ -> false) -> OnCooldown mainGem :: others @ [ main ]
         | _ -> others @ [ main ]
 
     /// The player actor: the play style's skills, meta gems and their triggered spells,
     /// infusions, charges, defences. `main` replaces the play style's first skill (CLI
     /// overrides like --shotgun apply to it).
-    let player (c: Loaded) (o: Options) (play: Play list) (main: (string * Skill) option) : Actor =
+    and player (c: Loaded) (o: Options) (play: Play list) (main: (string * Skill) option) : Actor =
         let db, sheet = c.Db, c.Sheet
         let infusionMaxima = Behaviours.infusionMaxima sheet
         let metas = Behaviours.metas db sheet c.Build o.Infused
@@ -604,7 +622,7 @@ module Setup =
                     Defence.flask "Mana" (ModDb.ofList sheet.Mods) sheet.ManaFlask }
 
     /// A fight against these enemies.
-    let rec fight (c: Loaded) (o: Options) (player: Actor) (enemies: EnemyDef list) : Fight =
+    and fight (c: Loaded) (o: Options) (player: Actor) (enemies: EnemyDef list) : Fight =
         // auras that weaken monsters near you (Overwhelming Presence); presence range is ignored
         let db = ModDb.ofList c.Sheet.Mods
         let aura stat name =

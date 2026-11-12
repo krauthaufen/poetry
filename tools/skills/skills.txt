@@ -1,4 +1,4 @@
-395 skills: 72 with nothing unread, 323 with something the engine does not read
+395 skills: 77 with nothing unread, 318 with something the engine does not read
 
 == to do (most used in the corpus first)
 Blasphemy                    used by 44  sets: Buff
@@ -8,16 +8,11 @@ Blasphemy                    used by 44  sets: Buff
 Temporal Chains              used by 35  sets: Temporal Chains
     Curse all enemies in an area, Slowing them and making other effects on them expire more slowly.
     unmapped: base_temporal_chains_other_buff_time_passed_+%_to_apply
-    not simulated: curse_delay_duration_ms
 Raise Shield                 used by 32  sets: Raise Shield
     Raise your Shield to Block all incoming Blockable hits. Release immediately after Blocking when an enemy is close to perform a Shield Bash, damaging and Stunning enemies. While your Shield is raised you cannot be Light Stunned by hits you Block, but Blocking too much damage may Heavy Stun you. You cannot Evade while your Shield is raised, but Evasion instead grants an equal chance to avoid this Heavy Stun buildup.
     types without a model: ActiveBlock
     unmapped: melee_strike_bonus_attack_distance
     not simulated: active_skill_does_not_decay_heavy_stun_during_action, skill_animation_duration_multiplier_override, raise_shield_base_retaliation_duration_ms, base_parry_buff_damage_taken_+%_final_to_apply
-Ghost Dance                  used by 30  sets: Ghost Dance
-    While active, causes you to periodically gain Ghost Shrouds. If you are Hit while you have a Ghost Shroud, it is immediately consumed to recover Energy Shield based on your Evasion.
-    unmapped: ghost_dance_max_stacks
-    not simulated: skill_base_ghost_dance_grants_%_evasion_as_es_regeneration_per_minute_if_have_lost_ghost_dance_shroud_recently
 Wolf Pack                    used by 23  sets: Minion Info
     Activate to summon a pack of Wolf Companions. The pack treated as a single Companion for effects that count or limit Companions, regardless of the number of Wolves in the pack.
     not simulated: skill_minion_summon_delay_interval_ms
@@ -54,15 +49,9 @@ Barrage                      used by 13  sets: Barrage
     Ready a volley of arrows or spears, Empowering your next Repeatable Bow or Projectile Spear Attack to Repeat multiple times. Consumes your Frenzy Charges on use to add additional repeats.
     types without a model: EmpowersOtherSkill, ModifiesNextSkill
     not simulated: empowered_barrage_maximum_cooldown_ms
-Despair                      used by 13  sets: Despair
-    Curse all targets in an area after a short delay, lowering their Chaos Resistance.
-    not simulated: curse_delay_duration_ms
 Discipline                   used by 13  sets: Discipline
     Emit an Aura that grants you and Allies in your Presence additional Total Energy Shield.
     types without a model: AffectsPresence
-Elemental Weakness           used by 13  sets: Elemental Weakness
-    Curse all targets in an area after a short delay, lowering their Elemental Resistances.
-    not simulated: curse_delay_duration_ms
 Frost Bomb                   used by 13  sets: Frost Bomb
     Create a pulsing Orb of frost. Each pulse inflicts Elemental Exposure on nearby enemies. When the Orb's duration ends, it Detonates, dealing Cold damage to surrounding enemies and leaving behind a Cold Infusion.
     types without a model: DetonatesAfterTime, Orb
@@ -79,7 +68,7 @@ Entangle                     used by 12  sets: Fissures, Vines
     not simulated: entangle_duration_speed_+%_when_wet, entangle_vine_duration_ms
 Repulsion                    used by 12  sets: Repulsion
     Target an area and Curse enemies within with a Verisium Rune, inflicting them with Fragility. Hitting these enemies causes the Curse to Trigger an explosion to deal damage in an area and apply significant Knockback to other enemies near the Cursed target, with more Stun buildup based on the Fragility on the target Hit.
-    not simulated: curse_delay_duration_ms, repulsion_curse_when_detonated_prevent_curse_for_X_ms, curse_repulsion_applies_X_fragility
+    not simulated: repulsion_curse_when_detonated_prevent_curse_for_X_ms, curse_repulsion_applies_X_fragility
 Sigil of Power               used by 12  sets: Sigil of Power
     Place a Sigil on the ground, providing a powerful Spell Damage Buff to you and Allies while standing in it. The Buff becomes more powerful the more mana you spend while standing in the Sigil.
     unmapped: base_number_of_sigil_of_power_allowed
@@ -111,9 +100,6 @@ Combat Frenzy                used by  9  sets: Combat Frenzy
     While active, grants you a Frenzy Charge when you Freeze, Electrocute or Pin an enemy. This can only occur once every few seconds.
     types without a model: GeneratesCharges
     not simulated: skill_combat_frenzy_x_ms_cooldown
-Enfeeble                     used by  9  sets: Enfeeble
-    Curse all targets in an area after a short delay, making them deal less damage.
-    not simulated: curse_delay_duration_ms
 Purity of Ice                used by  9  sets: Purity of Ice
     Emit an Aura that boosts the Cold Resistance of you and Allies in your Presence.
     types without a model: AffectsPresence
@@ -138,7 +124,7 @@ Frost Wall                   used by  8  sets: Frost Wall, Lightning-Infused
     Create a wall of Ice Crystals which holds back enemies. The Crystals explode if sufficiently damaged, or if pushed hard enough, damaging nearby enemies. Consumes a Lightning Infusion if possible to add another Lightning explosion if destroyed.
     types without a model: IceCrystal, Wall
     unmapped: wall_maximum_length, wall_expand_delay_ms
-    not simulated: frost_wall_maximum_life, ice_crystals_damage_+%_final_for_first_500_ms_when_not_killed_by_self, console_cast_on_self_custom_range
+    not simulated: ice_crystals_damage_+%_final_for_first_500_ms_when_not_killed_by_self, console_cast_on_self_custom_range
 Magma Barrier                used by  8  sets: Buff
     While active, increases your Block Chance passively and imbues your Shield with lava over time. When fully imbued, your next Block with your Shield raised will expend the lava to Trigger the Magma Spray skill and grant you an Endurance Charge.
     types without a model: GeneratesCharges
@@ -260,8 +246,7 @@ Fortifying Cry               used by  5  sets: Fortifying Cry
 Grim Pillars                 used by  5  sets: Pillars, Explosion
     Spend Runic Ward to cause damaging Ice-Crystal spears to erupt from the ground around you. These spears can be destroyed for an explosion of Cold damage.
     types without a model: CreatesGroundEffect, IceCrystal
-    unmapped: grim_pillars_number_of_pillars_to_create, base_number_of_grim_pillars_allowed
-    not simulated: frost_wall_maximum_life, frost_wall_damage_taken_+%_final_from_enemies, hazard_damage_+%_final_for_first_500_ms_when_not_killed_by_self
+    not simulated: frost_wall_damage_taken_+%_final_from_enemies, hazard_damage_+%_final_for_first_500_ms_when_not_killed_by_self
 Herald of Blood              used by  5  sets: Buff, Explosion
     While active, killing an enemy with Blood Loss will cause a bloody explosion that deals Physical Attack damage to surrounding enemies. This damage is not based on your Weapon, but is partially based on their accumulated Blood Loss. The explosion destroys their Corpse if the enemy was Normal or Magic, and has a chance to Aggravate Bleeding.
     types without a model: SkillConsumesBleeding
@@ -489,7 +474,6 @@ Rampage                      used by  3  sets: Rampage
     not simulated: skill_cannot_gain_rage_during_use, disable_quadruped_head_movement_when_turning, bear_rampage_base_movement_speed, channelled_skill_suppress_ongoing_rage_cost_for_first_X_ms
 Shattering Spite             used by  3  sets: Shattering Spite
     Stamp your spear, destroying all Bloodstone Lances on each enemy in your Presence to cause a damaging explosion around that enemy. Each explosion gains new benefits when reaching higher thresholds of Bloodstone Lances removed from an enemy, causing them to deal more damage, have increased area of effect, and Leech Life from enemies caught in the blast.
-    unmapped: cannot_inflict_bloodstone_lance
     not simulated: life_leech_also_recovers_based_on_elemental_damage_types, shattering_spite_life_leech_%_with_10_lances, shattering_spite_area_+%_per_lance_with_at_least_5_lances, shattering_spite_%_of_presence_radius
 Spearfield                   used by  3  sets: Spearfield, Explosion
     Stab the ground causing multiple spears to burst out of the ground in front of you in a large area. The spears remain for a duration, or explode when enemies touch them, damaging and Maiming them.
@@ -660,9 +644,6 @@ Voltaic Grenade              used by  2  sets: Voltaic Grenade
     types without a model: DetonatesAfterTime
     unmapped: projectiles_cannot_fork
     not simulated: projectile_ballistic_angle_from_reference_event, fixed_projectile_spread, active_skill_projectile_speed_+%_variation_final_if_multiple_projectiles
-Vulnerability                used by  2  sets: Vulnerability
-    Curse all targets in an area after a short delay. making Hits against them ignore a portion of their Armour.
-    not simulated: curse_delay_duration_ms
 Walking Calamity             used by  2  sets: Walking Calamity
     Build Glory by gaining Rage while already at maximum Rage. When you have maximum Glory, roar to the heavens to bring them down upon your enemies. For the duration of the Skill, meteors rain down around you and you Gain Fire damage and Rage regeneration. This Skill's effects are suppressed if you leave Bear form, but will resume if you return to Bear form before the duration expires.
     unmapped: walking_calamity_spawn_meteor_every_ms, walking_calamity_non_skill_base_all_damage_%_to_gain_as_fire, walking_calamity_large_meteor_every, bear_skills_additional_base_attack_time_when_performing_from_default_stance, walking_calamity_meteor_frequency_+%_per_enemy_in_walking_calamity_radius, walking_calamity_meteor_frequency_+%_cap, walking_calamity_ignore_first_x_enemies_for_frequency_increase
@@ -1045,7 +1026,7 @@ Frozen Locus                 used by  0  sets: Crystal, Explosion
     Leap backward and crack the ground with your staff to call forth an Ice Crystal which can be damaged by you and enemies. If the Crystal is destroyed it causes an icy explosion. This skill can be used while using other skills.
     types without a model: CreatesGroundEffect, IceCrystal
     unmapped: active_skill_is_ignored_by_staggering_palm, active_skill_is_ignored_by_charged_staff, frozen_locus_stat_suppression, active_skill_is_ignored_by_mantra_of_destruction, base_number_of_frozen_locus_allowed
-    not simulated: frost_wall_maximum_life, frost_wall_damage_taken_+%_final_from_enemies
+    not simulated: frost_wall_damage_taken_+%_final_from_enemies
 Fulminating Concoction       used by  0  sets: Fulminating Concoction
     Consume charges from your Mana Flask to throw a flask that explodes, dealing Lightning Attack damage in an area with high chance to Shock. This damage is not based on your unarmed damage, so this is not considered an Unarmed Attack
     not simulated: projectile_behaviour_only_explode, flask_throw_base_charges_used, throw_flask_effects_type
@@ -1126,7 +1107,7 @@ Midnight Zenith              used by  0  sets: Buff, Crystal
     While active, Critical Hits with other skills that kill targets, or hit powerful targets cause you to gain Arctic Petals. Once you have enough Arctic Petals they will be Consumed to create Ice Crystals near the most recent target.
     types without a model: IceCrystal
     unmapped: midnight_star_gain_x_ice_seeds_when_you_critically_hit_a_rare_or_unique_enemy, midnight_star_attempt_to_consume_x_ice_seeds_to_create_an_ice_crystal_each_time_you_gain_ice_seeds, midnight_star_gain_ice_seeds_equal_to_enemy_power_on_kill_with_critical_hit, base_skill_cannot_generate_midnight_star_petals, unique_nattblom_crystals_per_trigger, unique_nattblom_crystal_radius, midnight_star_max_ice_crystals
-    not simulated: base_skill_cannot_generate_energy, frost_wall_maximum_life
+    not simulated: base_skill_cannot_generate_energy
 Molten Blast                 used by  0  sets: Projectile, Shrapnel
     Gouge molten rock from the ground and fling it at the target. The Projectile explodes on collision, damaging enemies and scattering shrapnel in a cone behind it.
     unmapped: double_number_of_projectiles_from_dual_wielding, molten_blast_target_range
@@ -1293,4 +1274,4 @@ Wither                       used by  0  sets: Wither
     not simulated: active_skill_withered_base_duration_ms, wither_channeled_move_targeting_area_X_units_per_second
 
 == nothing unread
-Apocalypse, Arc, Archmage, Armour Breaker, Armour Piercing Rounds, Berserk, Bow Shot, Cast on Block, Cast on Charm Use, Cast on Critical, Cast on Dodge, Cast on Elemental Ailment, Cast on Melee Kill, Cast on Melee Stun, Charge Regulation, Comet, Convalescence, Crossbow Shot, Curse on Block, Elemental Conflux, Elemental Invocation, Enervating Nova, Essence Drain, Eternal Rage, Explosive Transmutation, Fire Spell on Hit, Freezing Shards, Frostbolt, Galvanic Shards, Hammer of the Gods, Hand of Chayula, Herald of Thunder, Incendiary Shot, Inevitable Agony, Iron Ward, Lightning Bolt, Lunar Assault, Mace Strike, Magnetic Salvo, Mana Remnants, Meditate, Mirage Archer, Mirage Deadeye, Mirror of Refraction, Permafrost Bolts, Plasma Blast, Powered by Verisium, Quarterstaff Strike, Rapid Shot, Reaper's Invocation, Remnants of Kalguur, Sacrifice, Scavenged Plating, Shard Scavenger, Shockburst Rounds, Siege Cascade, Siphon Elements, Soulrend, Spear Stab, Spear Throw, Spellslinger, Stormblast Bolts, Thundergod's Wrath, Time Snap, Time of Need, Trinity, Verisium Manifestations, Virtuous Barrier, Void Illusion, Wild Protector, Wind Blast, Wind Dancer
+Apocalypse, Arc, Archmage, Armour Breaker, Armour Piercing Rounds, Berserk, Bow Shot, Cast on Block, Cast on Charm Use, Cast on Critical, Cast on Dodge, Cast on Elemental Ailment, Cast on Melee Kill, Cast on Melee Stun, Charge Regulation, Comet, Convalescence, Crossbow Shot, Curse on Block, Despair, Elemental Conflux, Elemental Invocation, Elemental Weakness, Enervating Nova, Enfeeble, Essence Drain, Eternal Rage, Explosive Transmutation, Fire Spell on Hit, Freezing Shards, Frostbolt, Galvanic Shards, Ghost Dance, Hammer of the Gods, Hand of Chayula, Herald of Thunder, Incendiary Shot, Inevitable Agony, Iron Ward, Lightning Bolt, Lunar Assault, Mace Strike, Magnetic Salvo, Mana Remnants, Meditate, Mirage Archer, Mirage Deadeye, Mirror of Refraction, Permafrost Bolts, Plasma Blast, Powered by Verisium, Quarterstaff Strike, Rapid Shot, Reaper's Invocation, Remnants of Kalguur, Sacrifice, Scavenged Plating, Shard Scavenger, Shockburst Rounds, Siege Cascade, Siphon Elements, Soulrend, Spear Stab, Spear Throw, Spellslinger, Stormblast Bolts, Thundergod's Wrath, Time Snap, Time of Need, Trinity, Verisium Manifestations, Virtuous Barrier, Void Illusion, Vulnerability, Wild Protector, Wind Blast, Wind Dancer

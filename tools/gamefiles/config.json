@@ -74,6 +74,28 @@
         "Buff_StatValues",
         "Stats"
       ]
+    },
+    {
+      "name": "GrantedEffectStatSets",
+      "columns": [
+        "Id",
+        "ImplicitStats",
+        "ConstantStats",
+        "ConstantStatsValues",
+        "IgnoredStats"
+      ]
+    },
+    {
+      "name": "GrantedEffectStatSetsPerLevel",
+      "columns": [
+        "StatSet",
+        "GemLevel",
+        "AdditionalFlags",
+        "AdditionalStats",
+        "AdditionalStatsValues",
+        "FloatStats",
+        "FloatStatsValues"
+      ]
     }
   ]
 }

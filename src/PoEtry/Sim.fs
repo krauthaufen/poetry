@@ -1157,7 +1157,7 @@ module Sim =
             [ 1..triggers ] |> List.fold (fun w _ -> meta.Triggers |> List.fold (fun w name -> trigger env rng actor name w) w) w
 
     /// Start a use of a skill at the current time, aimed at the current target.
-    and private startUse env rng (actor: Actor) (skill: Skill) (useTime: float) (w: World) =
+    and private startUse env (rng: Rng) (actor: Actor) (skill: Skill) (useTime: float) (w: World) =
         match aimed env w with
         | None -> w
         | Some target ->
@@ -1348,21 +1348,31 @@ module Sim =
                             [ 1 .. n ] |> List.fold (fun w i ->
                                 schedule (if n = 1 then at else w.Time + (at - w.Time) * float i / float n) (Strike(actor.Name, part.Name, mult, target.Def.Name)) w) w) w)
                     w
-            // Ice Crystals the use leaves behind (Grim Pillars): they are spread over the skill's
-            // area, and those whose explosion reaches the target count, at least one. They
-            // appear after the use's own hits, which do not damage them.
+            // Ice Crystals the use leaves behind (Grim Pillars): each stands at a random spot of the
+            // skill's area (around the user, or around the target), and those whose explosion
+            // reaches the target count. They appear after the use's own hits, which do not
+            // damage them.
             let w =
                 skill.Parts |> List.filter (fun p -> partFlag p "Crystals") |> List.fold (fun w p ->
                     let sum (q: Skill) name = q.Mods |> List.sumBy (fun m -> if m.Stat = Named name then m.Value else 0.0)
-                    let radius (q: Skill) = match q.Delivery with AreaAroundSelf r | AreaAtTarget r -> r | _ -> 0.0
-                    let share = if radius skill > 0.0 && radius p > 0.0 then min 1.0 ((radius p / radius skill) ** 2.0) else 1.0
-                    let near n = max 1 (int (System.Math.Round(n * share)))
+                    let areaMult = Mods.mult ctx [ AreaOfEffect ] mods
+                    let radius (q: Skill) = match q.Delivery with AreaAroundSelf r | AreaAtTarget r -> Geometry.radius r areaMult | _ -> 0.0
+                    let centre = match skill.Delivery with AreaAroundSelf _ -> Vec.zero | _ -> target.Def.Position
+                    let spread, reach = radius skill, radius p
+                    let stands () =
+                        if spread <= 0.0 || reach <= 0.0 then true
+                        else
+                            let r, a = spread * sqrt (rng.Float()), 2.0 * System.Math.PI * rng.Float()
+                            Vec.dist (Vec.add centre (Vec.scale r (Vec.ofAngle a))) target.Def.Position <= reach + target.Def.Size
                     // one crystal where the skill does not say how many
-                    let life, created = sum p "CrystalLife", max 1.0 (sum p "CrystalsCreated")
-                    if life > 0.0 then
+                    let life, created = sum p "CrystalLife", max 1 (int (sum p "CrystalsCreated"))
+                    let near = [ 1 .. created ] |> List.filter (fun _ -> stands ()) |> List.length
+                    if life > 0.0 && near > 0 then
                         let last = times |> List.map fst |> List.fold max w.Time
                         let lasts = if p.Duration > 0.0 then p.Duration * Mods.mult ctx [ SkillDuration ] mods else 1e9
-                        schedule (last + 1e-6) (PlantCrystals(actor.Name, p.Name, target.Def.Name, near created, life, near (max created (sum p "CrystalLimit")), lasts)) w
+                        // the limit counts every crystal; of those, the share that stands near
+                        let limit = max near (int (System.Math.Round(max (float created) (sum p "CrystalLimit") * float near / float created)))
+                        schedule (last + 1e-6) (PlantCrystals(actor.Name, p.Name, target.Def.Name, near, life, limit, lasts)) w
                     else w) w
             // a seed planted in the target (Living Bomb): it explodes once the enemy has taken
             // enough damage from then on; a new seed replaces the old one

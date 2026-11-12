@@ -518,8 +518,8 @@
   play: cd Cluster Grenade; spam Cluster Grenade
   built Cluster Grenade                    x4.90, 0.78s, cd Some 10.0 x1, cost 99 +0/s, hits [(1.0, 1.0)], 1 projectiles, pierce 0, chain 0
         part Cluster Grenade: Mini Grenades x2.86, hits [(1.0, 1.0)]
-  fight: 17 dps; Cluster Grenade: Mini Grenades (hit) 83%, Cluster Grenade (hit) 17%
-         crits:Cluster Grenade: Mini Grenades 1, hits:Cluster Grenade 2, hits:Cluster Grenade: Mini Grenades 6, uses:Cluster Grenade 3
+  fight: 18 dps; Cluster Grenade: Mini Grenades (hit) 75%, Cluster Grenade (hit) 25%
+         hits:Cluster Grenade 2, hits:Cluster Grenade: Mini Grenades 7, uses:Cluster Grenade 3
   types without a model: DetonatesAfterTime
 
 #### Coiling Bolts   [Chaos Damage Projectile ProjectilesFromUser Spell]
@@ -709,7 +709,7 @@
   play: spam Despair
   built Despair                            x1.00, 0.70s, cd None x1, cost 178 +0/s, hits [(1.0, 1.0)], area 31
   fight: 0 dps; Despair (hit) 0%
-         apply:Curse:Despair 20, hits:Despair 20, uses:Despair 21
+         apply:Curse:Despair 19, hits:Despair 19, uses:Despair 21
 
 #### Detonate Dead   [Area AreaSpell Damage Detonator Fire Physical Spell TargetsDestructibleCorpses]
   Cause a Corpse to violently explode, damaging surrounding enemies.
@@ -900,7 +900,7 @@
   play: spam Elemental Weakness
   built Elemental Weakness                 x1.00, 0.70s, cd None x1, cost 178 +0/s, hits [(1.0, 1.0)], area 31
   fight: 0 dps; Elemental Weakness (hit) 0%
-         apply:Curse:Elemental Weakness 20, hits:Elemental Weakness 20, uses:Elemental Weakness 21
+         apply:Curse:Elemental Weakness 19, hits:Elemental Weakness 19, uses:Elemental Weakness 21
 
 #### Ember Fusillade   [Area AreaSpell Damage Duration Fire Projectile Spell]
   Conjure a blazing Ember that hovers above you. After a short duration, the Ember launches at an enemy, dealing Fire damage in an area on impact and prioritising the last enemy targeted. Recasting this spell resets the duration for all active Embers. Multiple Embers fired in the same Fusillade will attempt to target different enemies. Consumes a Lightning Infusion if possible to cause the entire Fusillade to create beams that Chain to enemies.
@@ -950,7 +950,7 @@
   play: spam Enfeeble
   built Enfeeble                           x1.00, 0.70s, cd None x1, cost 178 +0/s, hits [(1.0, 1.0)], area 31
   fight: 0 dps; Enfeeble (hit) 0%
-         apply:Curse:Enfeeble 20, hits:Enfeeble 20, uses:Enfeeble 21
+         apply:Curse:Enfeeble 19, hits:Enfeeble 19, uses:Enfeeble 21
 
 #### Entangle   [Area CreatesFissure Damage Duration Limit Nature Physical Plant Spell Sustained]
   Conjures a rootbound fissure that crawls forward, damaging enemies in its path. While the fissure persists, vines lash out from it and attach to nearby enemies, damaging and Slowing them.
@@ -1362,8 +1362,8 @@
   play: spam Frozen Locus
   built Frozen Locus                       x1.00, 1.02s, cd None x1, cost 81 +0/s, hits [(1.0, 1.0)], single
         part Frozen Locus: Explosion      x6.12, hits [(1.0, 1.0)]
-  fight: 236 dps; Frozen Locus: Explosion (hit) 100%, Frozen Locus (hit) 0%
-         crits:Frozen Locus 2, hits:Frozen Locus 14, hits:Frozen Locus: Explosion 14, uses:Frozen Locus 15
+  fight: 0 dps; Frozen Locus (hit) 0%
+         crits:Frozen Locus 1, crystals:Frozen Locus: Explosion 14, hits:Frozen Locus 14, uses:Frozen Locus 15
   types without a model: CreatesGroundEffect, IceCrystal
 
 #### Fulminating Concoction   [Area Attack GroundTargetedProjectile Lightning Projectile ProjectileNoCollision ProjectilesFromUser]   needs: Unarmed
@@ -1513,8 +1513,8 @@
   play: spam Glacial Bolt
   built Glacial Bolt                       x1.45, 0.59s, cd None x1, cost 49 +0/s, hits [(1.0, 1.0)], 1 projectiles, pierce 0, chain 0
         part Glacial Bolt: Wall           x2.45, hits [(1.0, 1.0)]
-  fight: 47 dps; Glacial Bolt: Wall (hit) 73%, Glacial Bolt (hit) 27%
-         hits:Glacial Bolt 11, hits:Glacial Bolt: Wall 11, reload:Glacial Bolt 12, uses:Glacial Bolt 12
+  fight: 16 dps; Glacial Bolt (hit) 100%
+         crits:Glacial Bolt 2, crystals:Glacial Bolt: Wall 11, hits:Glacial Bolt 11, reload:Glacial Bolt 12, uses:Glacial Bolt 12
   types without a model: IceCrystal, Wall
 
 #### Glacial Cascade   [Area Attack Cold CreatesFissure Melee SkillConsumesFreeze]   needs: Quarterstaff
@@ -1566,8 +1566,9 @@
   set Explosion        grim_pillars_number_of_pillars_to_create=8 base_skill_effect_duration=10000 base_number_of_grim_pillars_allowed=20 hazard_damage_+%_final_for_first_500_ms_when_not_killed_by_self=-80 active_skill_base_area_of_effect_radius=20 active_skill_hit_damage_freeze_multiplier_+%_final=50  | spell_minimum_base_cold_damage spell_maximum_base_cold_damage spell_minimum_base_cold_damage spell_maximum_base_cold_damage frost_wall_maximum_life frost_wall_damage_taken_+%_final_from_enemies is_area_damage base_skill_show_average_damage_instead_of_dps can_perform_skill_while_moving is_ice_crystal_explosion
   play: spam Grim Pillars
   built Grim Pillars                       x1.00, 0.70s, cd None x1, cost 0 +0/s, hits [(1.0, 1.0)], around self 40
-  fight: 100 dps; Grim Pillars (hit) 100%
-         crits:Grim Pillars 3, hits:Grim Pillars 20, uses:Grim Pillars 21
+        part Grim Pillars: Explosion      x1.00, hits [(1.0, 1.0)]
+  fight: 108 dps; Grim Pillars (hit) 100%
+         crits:Grim Pillars 5, crystals:Grim Pillars: Explosion 20, hits:Grim Pillars 20, uses:Grim Pillars 21
   types without a model: CreatesGroundEffect, IceCrystal
 
 #### Hailstorm Rounds   [Attack CrossbowAmmoSkill MirageArcherCanUse ReservesManually]   needs: Crossbow
@@ -2090,8 +2091,8 @@ pushed out of the way.
   set Explosion        active_skill_base_area_of_effect_radius=10 active_skill_base_physical_damage_%_to_convert_to_lightning=80 base_number_of_projectiles=8 active_skill_base_area_of_effect_radius=14 active_skill_base_physical_damage_%_to_convert_to_lightning=20  | base_is_projectile skill_can_fire_arrows
   play: spam Magnetic Salvo
   built Magnetic Salvo                     x1.56, 1.67s, cd None x1, cost 162 +0/s, hits [(1.0, 1.0)], 8 projectiles, pierce 0, chain 0
-  fight: 545 dps; Magnetic Salvo (hit) 100%
-         crits:Magnetic Salvo 6, hits:Magnetic Salvo 128, uses:Magnetic Salvo 9
+  fight: 77 dps; Magnetic Salvo (hit) 100%
+         crits:Magnetic Salvo 3, hits:Magnetic Salvo 16, uses:Magnetic Salvo 9
 
 #### Malice   [AffectsPresence AttackInPlace Aura Buff Duration HasReservation OngoingSkill Persistent]
   While active, emits an Aura that continuously inflicts Critical Weakness on enemies in your Presence.
@@ -2676,7 +2677,7 @@ Purple Flames of Chayula for a duration.
   play: spam Repulsion
   built Repulsion                          x1.00, 0.50s, cd None x1, cost 0 +0/s, hits [(1.0, 1.0)], area 31
   fight: 0 dps; Repulsion (hit) 0%
-         apply:Curse:Repulsion 28, hits:Repulsion 28, uses:Repulsion 29
+         apply:Curse:Repulsion 26, hits:Repulsion 26, uses:Repulsion 29
 
 #### Requiem   [Attack CrossbowAmmoSkill HasUsageCondition]   needs: Crossbow
   Your weapon passively accumulates anguish from the tormented souls within. When fully charged, use this skill to compose the Requiem, transforming your Crossbow shot into a torrent of anguish for a short, fixed amount of time. Does not use Ammunition.
@@ -2715,6 +2716,7 @@ Purple Flames of Chayula for a duration.
   set Empowered        total_attack_time_+_ms=2000 leap_slam_animation_distance_threshold=200 attack_maximum_action_distance_+=75 active_skill_base_physical_damage_%_to_convert_to_lightning=40 skill_specific_stat_description_mode=3 active_skill_base_area_of_effect_radius=40 active_skill_base_physical_damage_%_to_convert_to_lightning=40 recover_%_of_mana_over_2_seconds_when_consuming_a_divine_fragment=10 recover_%_of_life_over_2_seconds_when_consuming_a_divine_fragment=10  | is_area_damage base_skill_exerted_itself
   play: cd Righteous Descent; spam Righteous Descent
   built Righteous Descent                  x7.24, 0.62s, cd Some 10.0 x1, cost 0 +0/s, hits [(1.0, 1.0)], area 25
+        part Righteous Descent: Empowered x14.49, hits [(1.0, 1.0)]
   fight: 17 dps; Righteous Descent (hit) 100%
          hits:Righteous Descent 2, uses:Righteous Descent 3
   types without a model: ManualCooldownConsumption, Movement, Travel
@@ -2863,10 +2865,10 @@ Purple Flames of Chayula for a duration.
   Stamp your spear, destroying all Bloodstone Lances on each enemy in your Presence to cause a damaging explosion around that enemy. Each explosion gains new benefits when reaching higher thresholds of Bloodstone Lances removed from an enemy, causing them to deal more damage, have increased area of effect, and Leech Life from enemies caught in the blast.
   level 20: cost Some 0.0 (per minute None), cooldown None xNone, multiplier Some 4.53, crit None
   set Shattering Spite damage_per_bloodstone_lance_+%_final=20 active_skill_base_area_of_effect_radius=15 shattering_spite_life_leech_%_with_10_lances=10 shattering_spite_area_+%_per_lance_with_at_least_5_lances=5 active_skill_base_physical_damage_%_to_convert_to_fire=40 active_skill_base_physical_damage_%_to_convert_to_lightning=40 total_attack_time_+_ms=350 shattering_spite_%_of_presence_radius=200 active_skill_damaging_ailment_effect_+%_final=-50  | cannot_inflict_bloodstone_lance life_leech_also_recovers_based_on_elemental_damage_types
-  play: spam Shattering Spite
+  play: cd Shattering Spite
   built Shattering Spite                   x4.53, 0.62s, cd None x1, cost 0 +0/s, hits [(1.0, 1.0)], area 15
-  fight: 159 dps; Shattering Spite (hit) 100%
-         crits:Shattering Spite 4, hits:Shattering Spite 16, uses:Shattering Spite 17
+  fight: 0 dps; 
+         
 
 #### Shield Charge   [ActiveBlock Area Attack Channel Melee NonWeaponAttack Physical RequiresShield Travel]   needs: Armoured Shield
   Channel to charge in the target direction. You will crash into enemies on your path, stopping your charge and dealing damage to enemies in an area, and extra damage to the enemies you collided with. While charging, your Shield is raised and you will Block all incoming Blockable hits.
@@ -3246,8 +3248,8 @@ Purple Flames of Chayula for a duration.
   set Cold-Infused     base_skill_effect_duration=2000 spark_pathing_width_bounds=20 damage_hit_effect_index=1009 spark_min_time_between_target_clearing_ms=660 base_spell_cast_time_ms=500  | spell_minimum_base_lightning_damage spell_maximum_base_lightning_damage spell_minimum_base_lightning_damage spell_maximum_base_lightning_damage spell_minimum_base_cold_damage spell_maximum_base_cold_damage base_number_of_projectiles base_number_of_projectiles base_is_projectile projectiles_should_collide_with_flying_monsters can_perform_skill_while_moving projectiles_nova
   play: spam Spark
   built Spark                              x1.00, 0.70s, cd None x1, cost 56 +0/s, hits [(1.0, 1.0)], 9 projectiles, pierce 0, chain 0
-  fight: 769 dps; Spark (hit) 100%
-         crits:Spark 19, hits:Spark 180, uses:Spark 21
+  fight: 73 dps; Spark (hit) 100%
+         crits:Spark 3, hits:Spark 20, uses:Spark 21
 
 #### Spear Stab   [Area Attack AttackInPlace Melee MeleeSingleTarget Spear]   needs: Spear
   Strike with your Spear.
@@ -3536,7 +3538,7 @@ Purple Flames of Chayula for a duration.
   play: spam Temporal Chains
   built Temporal Chains                    x1.00, 0.70s, cd None x1, cost 178 +0/s, hits [(1.0, 1.0)], area 31
   fight: 0 dps; Temporal Chains (hit) 0%
-         apply:Curse:Temporal Chains 20, hits:Temporal Chains 20, uses:Temporal Chains 21
+         apply:Curse:Temporal Chains 19, hits:Temporal Chains 19, uses:Temporal Chains 21
 
 #### Temporal Rift   [AttackInPlace Buff Cooldown FixedCastTime HasReservation OngoingSkill Persistent PersistentShowsCastTime Spell]
   While active, passively leaves afterimages of your recent past. Cast the Spell to return to the oldest afterimage, teleporting to that location and resetting your Life, Mana and Energy Shield to the values they had at the time. Removes any upcoming damage delayed by Phased Form on use.
@@ -3863,7 +3865,7 @@ Purple Flames of Chayula for a duration.
   play: spam Vulnerability
   built Vulnerability                      x1.00, 0.70s, cd None x1, cost 178 +0/s, hits [(1.0, 1.0)], area 31
   fight: 0 dps; Vulnerability (hit) 0%
-         apply:Curse:Vulnerability 20, hits:Vulnerability 20, uses:Vulnerability 21
+         apply:Curse:Vulnerability 19, hits:Vulnerability 19, uses:Vulnerability 21
 
 #### Walking Calamity   [Area Attack Bear Buff Duration Fire HasUsageCondition Shapeshift]   needs: Talisman
   Build Glory by gaining Rage while already at maximum Rage. When you have maximum Glory, roar to the heavens to bring them down upon your enemies. For the duration of the Skill, meteors rain down around you and you Gain Fire damage and Rage regeneration. This Skill's effects are suppressed if you leave Bear form, but will resume if you return to Bear form before the duration expires.

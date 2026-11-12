@@ -255,7 +255,9 @@ module Geometry =
     /// One projectile's flight: the points it passes (start, bounces, end) and the enemies it hit.
     type Path =
         { Points: Vec list
-          Hit: string list }
+          Hit: string list
+          /// Distance flown at each hit.
+          Dist: float list }
 
     let private dot (a: Vec) (b: Vec) = a.X * b.X + a.Y * b.Y
 
@@ -285,7 +287,7 @@ module Geometry =
     /// Fly one projectile: enemies in its way are hit (pierce lets it continue), a wall
     /// stops it unless the terrain-chain roll lets it bounce (once).
     let trace (rng: Rng) (walls: Wall list) (p: ProjectileShape) (origin: Vec) (dir0: Vec) (alive: EnemyDef list) : Path =
-        let rec go (pos: Vec) (dir: Vec) remaining (hit: string list) bounced (points: Vec list) =
+        let rec go (pos: Vec) (dir: Vec) remaining (hit: string list) bounced (points: Vec list) (dists: float list) =
             let enemy =
                 alive
                 |> List.filter (fun e -> not (List.contains e.Name hit))
@@ -298,8 +300,9 @@ module Geometry =
             | Some (t, e) when t <= remaining && t <= wallT ->
                 let at = Vec.add pos (Vec.scale t dir)
                 let hit = hit @ [ e.Name ]
-                if hit.Length > p.Pierce then { Points = List.rev (at :: points); Hit = hit }
-                else go at dir (remaining - t) hit bounced points
+                let dists = dists @ [ p.Range - remaining + t ]
+                if hit.Length > p.Pierce then { Points = List.rev (at :: points); Hit = hit; Dist = dists }
+                else go at dir (remaining - t) hit bounced points dists
             | _ ->
                 match wall with
                 | Some (t, reflected) when t <= remaining ->
@@ -317,13 +320,55 @@ module Geometry =
                             | Some e -> let d = Vec.sub e.Position at in Vec.scale (1.0 / Vec.length d) d
                             | None -> reflected
                         // step off the wall so the next segment doesn't hit it again
-                        go (Vec.add at (Vec.scale 1e-3 next)) next (remaining - t) hit true (at :: points)
-                    else { Points = List.rev (at :: points); Hit = hit }
-                | _ -> { Points = List.rev (Vec.add pos (Vec.scale remaining dir) :: points); Hit = hit }
-        go origin dir0 p.Range [] false [ origin ]
+                        go (Vec.add at (Vec.scale 1e-3 next)) next (remaining - t) hit true (at :: points) dists
+                    else { Points = List.rev (at :: points); Hit = hit; Dist = dists }
+                | _ -> { Points = List.rev (Vec.add pos (Vec.scale remaining dir) :: points); Hit = hit; Dist = dists }
+        // an erratic projectile: it strays sideways within its band, a new offset every band
+        // width travelled; each leg is flown and tested like a straight one. A wall ends
+        // it, unless it bounces: then it flies on in a random direction (wiki, Bounce).
+        let wander () =
+            let step = max 1.0 p.Wander
+            let rec fly (start: Vec) (dir: Vec) (pos: Vec) along remaining (hit: string list) (dists: float list) (points: Vec list) =
+                if remaining <= 1e-9 then { Points = List.rev points; Hit = hit; Dist = dists }
+                else
+                    let advance = min remaining step
+                    let perp = Vec.make -dir.Y dir.X
+                    let next = Vec.add (Vec.add start (Vec.scale (along + advance) dir)) (Vec.scale ((rng.Float() - 0.5) * p.Wander) perp)
+                    let leg = Vec.sub next pos
+                    let len = Vec.length leg
+                    if len < 1e-9 then fly start dir next (along + advance) (remaining - advance) hit dists points
+                    else
+                        let legDir = Vec.scale (1.0 / len) leg
+                        let flown = p.Range - remaining
+                        let enemy =
+                            alive
+                            |> List.filter (fun e -> not (List.contains e.Name hit))
+                            |> List.choose (fun e -> entry pos legDir e |> Option.map (fun t -> t, e))
+                            |> List.filter (fun (t, _) -> t <= len)
+                            |> List.sortBy fst
+                            |> List.tryHead
+                        let wall = walls |> List.choose (wallHit pos legDir) |> List.filter (fun (t, _) -> t <= len) |> List.sortBy fst |> List.tryHead
+                        match enemy, wall with
+                        | Some (t, e), w when (match w with Some (wt, _) -> t <= wt | None -> true) ->
+                            let at = Vec.add pos (Vec.scale t legDir)
+                            let hit, dists = hit @ [ e.Name ], dists @ [ flown + t * advance / len ]
+                            if hit.Length > p.Pierce then { Points = List.rev (at :: points); Hit = hit; Dist = dists }
+                            else fly start dir next (along + advance) (remaining - advance) hit dists (next :: points)
+                        | _, Some (t, _) when not p.Bounces ->
+                            { Points = List.rev (Vec.add pos (Vec.scale t legDir) :: points); Hit = hit; Dist = dists }
+                        | _, Some (t, reflected) ->
+                            let at = Vec.add pos (Vec.scale t legDir)
+                            // away from the wall, anywhere within 60 degrees of the mirror direction
+                            let turned = Vec.ofAngle (Vec.angle reflected + (rng.Float() - 0.5) * System.Math.PI * 2.0 / 3.0)
+                            fly (Vec.add at (Vec.scale 1e-3 reflected)) turned (Vec.add at (Vec.scale 1e-3 reflected)) 0.0 (remaining - t * advance / len) hit dists (at :: points)
+                        | _ -> fly start dir next (along + advance) (remaining - advance) hit dists (next :: points)
+            fly origin dir0 origin 0.0 p.Range [] [] [ origin ]
+        if p.Wander > 0.0 then wander () else go origin dir0 p.Range [] false [ origin ] []
 
     /// Directions of a use's projectiles.
     let private angles (p: ProjectileShape) aimAngle =
+        // a fan that widens with every projectile, up to the full circle
+        let p = if p.SpreadPerProjectile > 0.0 && p.Spread < 360.0 then { p with Spread = min 360.0 (p.SpreadPerProjectile * float (p.Count - 1)) } else p
         let spread = p.Spread * System.Math.PI / 180.0
         if p.Count <= 1 then [ aimAngle ]
         elif p.Spread >= 360.0 then [ for k in 0 .. p.Count - 1 -> aimAngle + 2.0 * System.Math.PI * float k / float p.Count ]
@@ -333,7 +378,9 @@ module Geometry =
     let paths (rng: Rng) (walls: Wall list) (p: ProjectileShape) (reach: float) (primary: EnemyDef) (alive: EnemyDef list) =
         let origin = if p.FromImpact then impactPoint reach primary else Vec.zero
         let alive = if p.SkipPrimary then alive |> List.filter (fun e -> e.Name <> primary.Name) else alive
-        angles p (Vec.angle primary.Position)
+        // a full circle from the player is not aimed: it lies at a random angle to the enemy
+        let turn = if p.Spread >= 360.0 && not p.FromImpact && p.Count > 1 then 2.0 * System.Math.PI * rng.Float() else 0.0
+        angles p (Vec.angle primary.Position + turn)
         |> List.map (fun a ->
             let dir = Vec.ofAngle a
             trace rng walls p (Vec.add origin (Vec.scale p.StartOffset dir)) dir alive)
@@ -355,6 +402,24 @@ module Geometry =
                 let r, a = area * sqrt (rng.Float()), 2.0 * System.Math.PI * rng.Float()
                 let at = Vec.add primary.Position (Vec.scale r (Vec.ofAngle a))
                 yield! alive |> List.filter (within at impact) |> List.map (fun e -> e.Name) ]
+        | Projectiles p when p.HitInterval > 0.0 && p.Speed > 0.0 ->
+            // every crossing of every projectile, in the order they happen: a target takes a
+            // hit from this volley only if the last one is long enough ago; a projectile that
+            // may not hit passes through, one that hits is spent (pierce: so many more)
+            let crossings =
+                paths rng walls { p with Pierce = 1000 } reach primary alive
+                |> List.mapi (fun i path -> List.zip path.Hit path.Dist |> List.map (fun (n, d) -> d / p.Speed, i, n))
+                |> List.concat
+                |> List.sortBy (fun (t, _, _) -> t)
+            crossings
+            |> List.fold
+                (fun (acc, last: Map<string, float>, used: Map<int, int>) (t, i, n) ->
+                    let spent = (Map.tryFind i used |> Option.defaultValue 0) > p.Pierce
+                    let tooSoon = Map.tryFind n last |> Option.exists (fun t0 -> t - t0 < p.HitInterval)
+                    if spent || tooSoon then acc, last, used
+                    else n :: acc, Map.add n t last, Map.add i ((Map.tryFind i used |> Option.defaultValue 0) + 1) used)
+                ([], Map.empty, Map.empty)
+            |> fun (acc, _, _) -> List.rev acc
         | Projectiles p ->
             let explode (at: Vec) =
                 match p.Explosion with
