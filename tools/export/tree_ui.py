@@ -18,9 +18,15 @@ def group(n):
     g = groups[n["group"] - 1] if isinstance(groups, list) else groups[str(n["group"])]
     return g
 
+# (ornaments are nodes too, "isOnlyImage", and so are nameless ones that hold art together:
+# neither they nor their connections are part of the tree, as in PoB and pob-web)
+def real(n):
+    if n.get("isOnlyImage"): return False
+    return bool(n.get("name")) or n.get("isAscendancyStart") or n.get("isJewelSocket") or bool(n.get("classesStart"))
+
 pos = {}
 for key, n in src["nodes"].items():
-    if "group" not in n or "orbit" not in n:
+    if "group" not in n or "orbit" not in n or not real(n):
         continue
     g = group(n)
     a = angles[n["orbit"]][n["orbitIndex"]]
@@ -126,7 +132,15 @@ def arcData(a, b, p1, p2, c, r):
 
 drawn = []
 paths = []
+starts = {int(k) for k, n in src["nodes"].items() if n.get("classesStart")}
 for (a, b, orbit) in edges.values():
+    # a class' start is the emblem in the middle: its connections are not drawn as lines
+    if a in starts or b in starts:
+        continue
+    # nor is a way from an ascendancy into the tree (the Pathfinder's "Path of the ..."):
+    # the ascendancy is drawn far from where it leads
+    if src["nodes"][str(a)].get("ascendancyName") != src["nodes"][str(b)].get("ascendancyName"):
+        continue
     (x1, y1), (x2, y2) = pos[a], pos[b]
     na, nb = src["nodes"][str(a)], src["nodes"][str(b)]
     dx, dy = x2 - x1, y2 - y1
