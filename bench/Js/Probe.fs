@@ -24,5 +24,11 @@ let main args =
     let gem = timed "what to press" (fun () -> Setup.strongest c o boss |> Option.defaultValue "")
     let fight = Setup.fight c o (Setup.player c o (Setup.auto c o gem) None) boss
     let outs = timed "20 fights of 30 s" (fun () -> [ for seed in 1u .. 20u -> Sim.run fight seed ])
+    // the same through the front end's JSON interface
+    let session = Session read
+    let ask (fields: (string * Json) list) = Report.write (JObj(Map.ofList (("build", JStr text) :: fields)))
+    let sheet = timed "session: character" (fun () -> session.Handle(ask [ "op", JStr "character" ]))
+    let result = timed "session: 20 fights" (fun () -> session.Handle(ask [ "op", JStr "fight"; "runs", JNum 20.0 ]))
+    printfn "sheet %d characters, fight: %s" sheet.Length (result.Substring(0, min 160 result.Length))
     printfn "pressing %s: %.0f dps" gem (outs |> List.averageBy (fun out -> (out.DamageBy |> Map.toList |> List.sumBy snd) / max 0.1 out.Duration))
     0

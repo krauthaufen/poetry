@@ -476,6 +476,17 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
             near 1500.0 (s.Mods |> List.sumBy (fun m -> if m.Stat = Named "ConsumeChargeEveryMs" then m.Value else 0.0))
         | Error e -> failwith e)
 
+    test "report: JSON written is JSON read; a request that makes no sense answers with an error" (fun () ->
+        let j = JObj(Map.ofList [ "name", JStr "a \"quoted\" line\nand a tab\t"; "n", JNum 1234567.0; "x", JNum 0.125; "list", JArr [ JBool true; JNull ]; "bad", JNum nan ])
+        let back = Json.parse (Report.write j)
+        equal (box (Json.strField "name" j)) (box (Json.strField "name" back))
+        equal (box (Some 1234567.0)) (box (Json.numField "n" back))
+        equal (box (Some 0.125)) (box (Json.numField "x" back))
+        equal (box (Some JNull)) (box (Json.field "bad" back))
+        let session = Session(fun f -> failwithf "no data wanted: %s" f)
+        equal true ((session.Handle "{\"op\":\"dance\"}").Contains "error")
+        equal true ((session.Handle "not json").Contains "error"))
+
     test "Frost Wall: a row of Ice Crystals; the cast itself hits nothing" (fun () ->
         match Gems.skill db.Value ModDb.empty None { Gem = "Frost Wall"; Level = 20; Quality = 0; StatSet = 1; Supports = [] } with
         | Ok (s, _) ->
