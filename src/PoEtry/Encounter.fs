@@ -401,6 +401,15 @@ module Geometry =
             [ for _ in 1 .. p.Count do
                 let r, a = area * sqrt (rng.Float()), 2.0 * System.Math.PI * rng.Float()
                 let at = Vec.add primary.Position (Vec.scale r (Vec.ofAngle a))
+                if not p.TouchTriggered || alive |> List.exists (within at 0.0) then
+                    yield! alive |> List.filter (within at impact) |> List.map (fun e -> e.Name) ]
+        | Projectiles ({ Scatter = Some (near, far, cone, impact) } as p) ->
+            let impact = radius impact areaMult
+            let away = Vec.angle primary.Position
+            [ for _ in 1 .. p.Count do
+                let a = away + (rng.Float() - 0.5) * cone * System.Math.PI / 180.0
+                let d = near + (far - near) * rng.Float()
+                let at = Vec.add primary.Position (Vec.scale d (Vec.ofAngle a))
                 yield! alive |> List.filter (within at impact) |> List.map (fun e -> e.Name) ]
         | Projectiles p when p.HitInterval > 0.0 && p.Speed > 0.0 ->
             // every crossing of every projectile, in the order they happen: a target takes a

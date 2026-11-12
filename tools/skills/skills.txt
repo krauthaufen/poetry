@@ -478,7 +478,7 @@ Shattering Spite             used by  3  sets: Shattering Spite
 Spearfield                   used by  3  sets: Spearfield, Explosion
     Stab the ground causing multiple spears to burst out of the ground in front of you in a large area. The spears remain for a duration, or explode when enemies touch them, damaging and Maiming them.
     types without a model: Hazard
-    unmapped: spear_wall_maximum_active_spears, spear_wall_cm_per_spear, spearfield_maim_slows_an_additional_%
+    unmapped: spear_wall_maximum_active_spears, spearfield_maim_slows_an_additional_%
     not simulated: hazard_damage_+%_final_for_first_500_ms_when_not_killed_by_self
 Storm Lance                  used by  3  sets: Projectile, Frenzy-Charged, Lodged Spear, Detonation
     Throw an electrified Spear that lodges in the ground and periodically zaps nearby enemies with Lightning bolts. If the Spear is Detonated by another Skill, it immediately unleashes a volley of bolts and expires. Consumes a Frenzy Charge if possible to fire bolts more frequently for a shorter duration, automatically Detonate at the end of its duration, and create Shocked Ground on Detonation.
@@ -1080,7 +1080,6 @@ Hollow Shell                 used by  0  sets: Hollow Shell
 Ice Fragments                used by  0  sets: Ice Fragments
     
     types without a model: DetonatesAfterTime
-    unmapped: ballistic_ice_chunk_cone_angle, ice_fragment_min_chunk_distance, ice_fragment_max_chunk_distance
 Ice Shards                   used by  0  sets: Ammunition
     Load your Crossbow with a clip of icy bolts that rapidly fire at the ground, leaving a shard of ice at the impact location that arms after a duration. After arming, the ice shards explode when enemies step on them, dealing more damage the longer they have been armed, up to a maximum. Using this Skill again reloads the clip.
     types without a model: Hazard

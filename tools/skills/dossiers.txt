@@ -1828,7 +1828,7 @@
   set Ice-Tipped Arrows base_skill_effect_duration=20000 shearing_bolts_number_of_empowered_attacks=4 shearing_bolts_non_skill_base_physical_damage_%_to_convert_to_cold=100  | can_perform_skill_while_moving
   play: cd Ice-Tipped Arrows; spam Ice-Tipped Arrows
   built Ice-Tipped Arrows                  x1.00, 0.70s, cd Some 12.0 x1, cost 63 +0/s, hits [], single
-  built Ice-Tipped Arrows: Ice Fragments   x1.87, 0.83s, cd Some 0.15 x1, cost 0 +0/s, hits [(1.0, 1.0); (1.0, 1.0); (1.0, 1.0); (1.0, 1.0)], area 18
+  built Ice-Tipped Arrows: Ice Fragments   x1.87, 0.83s, cd Some 0.15 x1, cost 0 +0/s, hits [(1.0, 1.0)], 5 projectiles, pierce 0, chain 0
   fight: 0 dps; 
          uses:Ice-Tipped Arrows 2
   types without a model: EmpowersOtherSkill, ModifiesNextSkill
@@ -3293,8 +3293,8 @@ Purple Flames of Chayula for a duration.
   play: spam Spearfield
   built Spearfield                         x1.00, 0.89s, cd None x1, cost 39 +0/s, hits [(1.0, 1.0)], area 69
         part Spearfield: Explosion        x2.04, hits [(1.0, 1.0)]
-  fight: 19 dps; Spearfield: Explosion (hit) 100%, Spearfield (hit) 0%
-         crits:Spearfield 2, crits:Spearfield: Explosion 3, hits:Spearfield 16, hits:Spearfield: Explosion 65, inflict:Maim 81, uses:Spearfield 17
+  fight: 3 dps; Spearfield: Explosion (hit) 100%, Spearfield (hit) 0%
+         crits:Spearfield 1, hits:Spearfield 16, hits:Spearfield: Explosion 11, inflict:Maim 27, uses:Spearfield 17
   types without a model: Hazard
 
 #### Spectre: {0}   [AttackInPlace CreatesMinion CreatesUndeadMinion HasReservation Minion MinionsCanExplode MultipleReservation Persistent]

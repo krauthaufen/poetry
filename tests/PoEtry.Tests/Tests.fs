@@ -488,6 +488,22 @@ let main _ =
         near 15.0 (List.last (fan 3))
         near 60.0 (List.last (fan 9)))
 
+    test "geometry: scattered chunks and spears in wait hit by where they land" (fun () ->
+        let boss = { dummy "b" 30.0 0.0 with Size = 10.0 }
+        // chunks thrown 1 to 40 units on from the enemy, exploding in 18: those within 28 of
+        // its centre hit, 27 of the 39 units of distance
+        let chunks = Projectiles { ProjectileShape.make 10000 with FromImpact = true; Scatter = Some(1.0, 40.0, 100.0, 18.0) }
+        let share = float (Geometry.targetsFrom (Rng 1u) [] infinity chunks 1.0 boss [ boss ]).Length / 10000.0
+        if abs (share - 27.0 / 39.0) > 0.02 then failwithf "chunks: %.3f" share
+        // spears at random over a radius of 69: only one the enemy stands on (within its own 10) goes off
+        let spears = Projectiles { ProjectileShape.make 10000 with Rain = Some(69.0, 6.0); TouchTriggered = true }
+        let touched = float (Geometry.targetsFrom (Rng 1u) [] infinity spears 1.0 boss [ boss ]).Length / 10000.0
+        if abs (touched - (10.0 / 69.0) ** 2.0) > 0.005 then failwithf "spears: %.4f" touched
+        // without the wait, the blast radius counts as well
+        let rain = Projectiles { ProjectileShape.make 10000 with Rain = Some(69.0, 6.0) }
+        let rained = float (Geometry.targetsFrom (Rng 1u) [] infinity rain 1.0 boss [ boss ]).Length / 10000.0
+        if abs (rained - (16.0 / 69.0) ** 2.0) > 0.008 then failwithf "rain: %.4f" rained)
+
     test "geometry: a projectile bounces off a wall once with terrain chain" (fun () ->
         // flying +x from the origin, wall at x = 20; the enemy sits off-axis, within chain
         // range of the wall, so the chain has to target it (a mirror bounce would miss)

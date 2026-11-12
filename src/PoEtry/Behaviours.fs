@@ -741,14 +741,18 @@ module Behaviours =
             |> Option.map (fun (id, s) ->
                 let fragRaw = Gems.rawStats db charMods { setup with Gem = id; Supports = [] }
                 let fsum k = fragRaw |> List.filter (fun (x, _) -> x = k) |> List.sumBy snd
-                let reach = max 1 (int (System.Math.Round(fsum "base_number_of_projectiles" * 0.8)))
                 let name = skill.Name + ": " + s.Name
                 { s with
                     Name = name; Tags = s.Tags.Add Triggered; Cost = 0.0
                     HitDelay = fsum "base_skill_detonation_time" / 1000.0
-                    // each fragment that lands near enough is one explosion at the target
-                    Delivery = AreaAtTarget(fsum "active_skill_base_area_of_effect_radius")
-                    Hits = [ for _ in 1 .. reach -> 1.0, 1.0 ] },
+                    // every fragment is thrown on from the enemy hit, into a cone away from the
+                    // player, and explodes where it lands
+                    Delivery =
+                        Projectiles
+                            { ProjectileShape.make (max 1 (int (fsum "base_number_of_projectiles"))) with
+                                FromImpact = true
+                                Scatter = Some(fsum "ice_fragment_min_chunk_distance", fsum "ice_fragment_max_chunk_distance", fsum "ballistic_ice_chunk_cone_angle", fsum "active_skill_base_area_of_effect_radius") }
+                    Hits = [ 1.0, 1.0 ] },
                 [ { Hook = OnUse; Filter = Called skill.Name; Chance = 100.0; Reaction = SetStacks(buff, int n) }
                   { Hook = OnHit; Filter = WithTag repeatable; Chance = 100.0; Reaction = IfBuff(buff, TriggerSkill name) } ],
                 [ Mod.base' (Convert(Physical, Cold)) (sum "shearing_bolts_non_skill_base_physical_damage_%_to_convert_to_cold")

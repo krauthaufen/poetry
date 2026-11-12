@@ -423,7 +423,7 @@ module Gems =
               ("Furious Slam", "Enraged"), [ "Part"; "SpendsRage:10" ]
               // the spears a standing enemy touches explode at once (four of them: guess)
               // and, set off within half a second of appearing, deal 80% less
-              ("Spearfield", "Explosion"), [ "Part"; "Hits:4"; "Less:80" ]
+              ("Spearfield", "Explosion"), [ "Part"; "Field"; "Less:80" ]
               // the eruption happens once; the sprays that follow rain down around the volcano
               ("Volcano", ""), [ "Once" ]
               ("Volcano", "Projectiles"), [ "Rain" ]
@@ -646,8 +646,17 @@ module Gems =
             ownStats
             |> List.tryPick (fun (id, v) -> if id.EndsWith "_number_of_projectiles_per_power_charge" then Some("PowerCharge", int v) else None)
         let isProjectileSet = List.contains "base_is_projectile" set.Stats
+        // things that burst out of the ground all over the skill's area and wait there
+        // ("Creates 1 Spear per N metres of Radius"): each at a random spot, going off (secondary
+        // radius) when an enemy touches it
+        let field =
+            match Map.tryFind (data.Name, set.Label) partConditions |> Option.exists (List.contains "Field"), radius, (data.StatSets |> List.tryPick (fun st -> statsWith altQuality data st level quality |> List.tryPick (fun (k, v) -> if k = "spear_wall_cm_per_spear" then Some v else None))), statOf "active_skill_base_secondary_area_of_effect_radius" with
+            | true, Some r, Some cm, Some blast when cm > 0.0 ->
+                Some(Projectiles { ProjectileShape.make (max 1 (int (r / (cm / 10.0)))) with Rain = Some(r, blast); TouchTriggered = true; FromImpact = true })
+            | _ -> None
         let delivery =
-            if isProjectileSet then
+            if field.IsSome then field.Value
+            elif isProjectileSet then
                 // shards sprayed on from the enemy the projectile hit
                 let behind = Map.tryFind (data.Name, set.Label) partConditions |> Option.exists (List.contains "Behind")
                 let rains = Map.tryFind (data.Name, set.Label) partConditions |> Option.exists (List.contains "Rain")
@@ -681,7 +690,7 @@ module Gems =
                         CanShotgun =
                             // (the rule is for a volley leaving the player, "ProjectilesFromUser": embers
                             // hovering overhead, grenades and what drops from the sky land one by one)
-                            (flagOf "projectiles_barrage" || behind || rains || not (data.Types.Contains "ProjectilesFromUser")
+                            (flagOf "projectiles_barrage" || flagAny "projectiles_can_shotgun" || behind || rains || not (data.Types.Contains "ProjectilesFromUser")
                              || [ "can Merge"; "can hit the same"; "Hit the same target"; "in sequence" ] |> List.exists data.Description.Contains)
                             && not (data.Types.Contains "ProjectileNoCollision" && data.Types.Contains "ProjectilesNumberModifiersNotApplied")
                             // Spiral Volley: "Each target can only be Hit once"

@@ -25,6 +25,12 @@ type ProjectileShape =
       /// Projectiles that rain down at random over an area around the target (its radius),
       /// each hitting what is within its own impact radius.
       Rain: (float * float) option
+      /// With Rain: what lands lies in wait and only goes off (in its impact radius) when an
+      /// enemy touches it; one that lands beside every enemy does nothing (Spearfield's spears).
+      TouchTriggered: bool
+      /// Chunks thrown on from the enemy that was hit: each lands at a random distance (from,
+      /// to) within a cone (degrees) pointing away from the player and explodes there (radius).
+      Scatter: (float * float * float * float) option
       /// Chance (%) to bounce off a wall once ("chain 1 extra time from terrain").
       TerrainChain: float
       /// Projectiles appear this far from their origin, along their direction (game units).
@@ -68,6 +74,8 @@ module ProjectileShape =
           FromImpact = false
           SkipPrimary = false
           Rain = None
+          TouchTriggered = false
+          Scatter = None
           TerrainChain = 0.0
           StartOffset = 0.0
           Wander = 0.0
