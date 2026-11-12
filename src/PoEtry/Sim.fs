@@ -1387,7 +1387,7 @@ module Sim =
             // reaches the target count. They appear after the use's own hits, which do not
             // damage them.
             let w =
-                skill.Parts |> List.filter (fun p -> partFlag p "Crystals") |> List.fold (fun w p ->
+                (skill :: skill.Parts) |> List.filter (fun p -> partFlag p "Crystals") |> List.fold (fun w p ->
                     let sum (q: Skill) name = q.Mods |> List.sumBy (fun m -> if m.Stat = Named name then m.Value else 0.0)
                     let areaMult = Mods.mult ctx [ AreaOfEffect ] mods
                     let radius (q: Skill) = match q.Delivery with AreaAroundSelf r | AreaAtTarget r -> Geometry.radius r areaMult | _ -> 0.0
@@ -1399,10 +1399,28 @@ module Sim =
                             let r, a = spread * sqrt (rng.Float()), 2.0 * System.Math.PI * rng.Float()
                             Vec.dist (Vec.add centre (Vec.scale r (Vec.ofAngle a))) target.Def.Position <= reach + target.Def.Size
                     // one crystal where the skill does not say how many
-                    let life, created = sum p "CrystalLife", max 1 (int (sum p "CrystalsCreated"))
-                    let near = [ 1 .. created ] |> List.filter (fun _ -> stands ()) |> List.length
+                    let life = sum p "CrystalLife"
+                    let last = times |> List.map fst |> List.fold max w.Time
+                    // a wall: a row of crystals through the target, across the line to it. Those
+                    // that come up inside the monster are broken by it at once (80% less); the
+                    // others stand, and count if their explosion reaches it
+                    // (only a wall cast onto the target itself: where a bolt's two walls stand is not known)
+                    let wall = if p.Name = skill.Name then sum p "WallLength" else 0.0
+                    let row =
+                        if wall <= 0.0 then []
+                        else
+                            let n = max 1 (int (wall / Constants.iceCrystalWidth))
+                            [ for i in 0 .. n - 1 -> abs ((float i - float (n - 1) / 2.0) * Constants.iceCrystalWidth) ]
+                    let broken = row |> List.filter (fun d -> d <= target.Def.Size) |> List.length
+                    let w =
+                        if life > 0.0 && broken > 0 then
+                            [ 1 .. broken ] |> List.fold (fun w _ -> schedule (last + 1e-6) (Strike(actor.Name, p.Name, Constants.freshCrystalDamage, target.Def.Name)) w) w
+                        else w
+                    let created = if wall > 0.0 then max 1 row.Length else max 1 (int (sum p "CrystalsCreated"))
+                    let near =
+                        if wall > 0.0 then row |> List.filter (fun d -> d > target.Def.Size && d <= reach + target.Def.Size) |> List.length
+                        else [ 1 .. created ] |> List.filter (fun _ -> stands ()) |> List.length
                     if life > 0.0 && near > 0 then
-                        let last = times |> List.map fst |> List.fold max w.Time
                         let lasts = if p.Duration > 0.0 then p.Duration * Mods.mult ctx [ SkillDuration ] mods else 1e9
                         // the limit counts every crystal; of those, the share that stands near
                         let limit = max near (int (System.Math.Round(max (float created) (sum p "CrystalLimit") * float near / float created)))

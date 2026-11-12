@@ -123,7 +123,7 @@ Arctic Armour                used by  8  sets: Arctic Armour
 Frost Wall                   used by  8  sets: Frost Wall, Lightning-Infused
     Create a wall of Ice Crystals which holds back enemies. The Crystals explode if sufficiently damaged, or if pushed hard enough, damaging nearby enemies. Consumes a Lightning Infusion if possible to add another Lightning explosion if destroyed.
     types without a model: IceCrystal, Wall
-    unmapped: wall_maximum_length, wall_expand_delay_ms
+    unmapped: wall_expand_delay_ms
     not simulated: ice_crystals_damage_+%_final_for_first_500_ms_when_not_killed_by_self, console_cast_on_self_custom_range
 Magma Barrier                used by  8  sets: Buff
     While active, increases your Block Chance passively and imbues your Shield with lava over time. When fully imbued, your next Block with your Shield raised will expend the lava to Trigger the Magma Spray skill and grant you an Endurance Charge.
@@ -142,7 +142,7 @@ Azmerian Wolf                used by  7  sets: Minion Info
 Flame Wall                   used by  7  sets: Wall, Projectile Damage
     Create a wall of Fire in front of you, which Ignites everything within its area. Any Projectiles fired through the wall by you and Allies deal added Fire damage. Consumes a Lightning Infusion if possible to also add Lightning damage to the Projectiles.
     types without a model: CausesBurning, Wall
-    unmapped: wall_maximum_length, number_of_allowed_firewalls
+    unmapped: number_of_allowed_firewalls
     not simulated: firewall_attached_projectile_effect_mtx, console_cast_on_self_custom_range, flame_wall_minimum_added_lightning_damage_to_add_to_projectile, flame_wall_maximum_added_lightning_damage_to_add_to_projectile
 Leap Slam                    used by  7  sets: Leap Slam
     Jump into the air, damaging and Knocking Back enemies with your mace where you land. Enemies you would land on are
@@ -175,7 +175,7 @@ Twister                      used by  7  sets: Twister
     Whip up a twister with a flick of your Spear. The twister moves forward erratically, Blinding and repeatedly Hitting enemies within. If a twister touches a Whirlwind from your other skills, it Consumes the Whirlwind to create additional twisters that deal more damage. Passing over Elemental Ground Surfaces or Consuming an elemental Whirlwind will grant twisters extra damage of that element.
     types without a model: InteractsWithElementalGround
     unmapped: twister_consumes_wind_storm, twister_damage_+%_final_per_whirling_slash_stage, twister_gain_%_elemental_damage_of_corresponding_type, twister_bounce_check_angle
-    not simulated: skill_can_add_multiple_charges_per_action, twister_base_movement_speed, minimum_per_projectile_spread_angle_degrees
+    not simulated: skill_can_add_multiple_charges_per_action
 Whirling Slash               used by  7  sets: Melee, Whirlwind
     Perform a circular slash that kicks up a Whirlwind around you, Slowing enemies and Blinding them in its area of effect. Leaving the area collapses the storm, dealing damage and causing Knockback.
     types without a model: InteractsWithElementalGround
@@ -275,7 +275,7 @@ Rend                         used by  5  sets: Normal Strikes, Lightning-Charged
 Shield Wall                  used by  5  sets: Shield Wall
     Ram your Shield into the ground, throwing up a wall of earth. Enemies can attack your wall segments, and your Slams, Warcries, and Shield Charge will instantly shatter them all. The segments explode when shattered, damaging enemies in front of and around them.
     types without a model: CanCreateStoneElementals, Wall
-    unmapped: wall_maximum_length, wall_expand_delay_ms, base_number_of_shield_walls_allowed, shield_wall_damage_+%_final_when_slammed
+    unmapped: wall_expand_delay_ms, base_number_of_shield_walls_allowed, shield_wall_damage_+%_final_when_slammed
     not simulated: shield_wall_maximum_life, shield_wall_damage_+%_final_for_first_500_ms_when_not_killed_by_self
 Skeletal Arsonist            used by  5  sets: Minion Info
     Activate to summon bomb-throwing, Reviving Skeletal Arsonists that can detonate other Minions on Command.
@@ -564,7 +564,6 @@ Gas Grenade                  used by  2  sets: Impact, Poison Cloud, Explosion
 Glacial Lance                used by  2  sets: Spear, Explosion
     Throw a single Piercing lance that leaves icy fragments in its wake. The fragments Chill nearby enemies. Consumes a Frenzy Charge if possible to cause the glacial fragments created by the first Projectile to explode outwards after a short duration, peppering enemies with shrapnel.
     unmapped: projectiles_cannot_split, projectiles_cannot_fork, projectiles_cannot_return
-    not simulated: minimum_per_projectile_spread_angle_degrees
 Lightning Arrow              used by  2  sets: Projectile, Beam
     Fire a charged arrow at the target. On hitting an enemy or wall, the arrow will fire Chaining Lightning beams at nearby enemies.
     types without a model: CanBecomeArrowRain
@@ -637,7 +636,7 @@ Unearth                      used by  2  sets: Unearth
     not simulated: minion_aggro_radius_+%
 Volcano                      used by  2  sets: Eruption, Projectiles
     Uplift a volcano from the earth, damaging enemies standing on it and releasing a spray of molten Projectiles. While the volcano persists, Slamming it will cause another Projectile spray. Channelling this Skill for longer makes the initial eruption more violent, but does not affect subsequent Projectile sprays.
-    unmapped: cast_speed_modifiers_apply_to_over_time_cost, channel_start_lock_cancelling_scales_with_cast_speed, volcano_initial_explosion_damage_+%_final_per_additional_stage, volcano_initial_explosion_number_of_additional_projectiles_per_additional_stage, volcano_base_number_of_geysers_allowed, volcano_gain_stage_every_%_of_cast_time, volcano_delay_between_slams_ms, volcano_slam_unscalable_limit, volcano_sustains_every_%_of_cast_time
+    unmapped: cast_speed_modifiers_apply_to_over_time_cost, channel_start_lock_cancelling_scales_with_cast_speed, volcano_initial_explosion_damage_+%_final_per_additional_stage, volcano_base_number_of_geysers_allowed, volcano_gain_stage_every_%_of_cast_time, volcano_delay_between_slams_ms, volcano_slam_unscalable_limit, volcano_sustains_every_%_of_cast_time
     not simulated: channel_start_duration_as_%_of_cast_time, channel_end_duration_as_%_of_cast_time
 Voltaic Grenade              used by  2  sets: Voltaic Grenade
     Fire a bouncing Grenade that discharges an Electrocuting Lightning blast when its fuse expires, causing all Lightning Hits against enemies to contribute to Electrocution buildup for a duration.
@@ -828,7 +827,7 @@ Perfect Strike               used by  1  sets: Normal Strikes, Perfect Strike
 Primal Strikes               used by  1  sets: Normal Strikes, Spirits, Final Strike
     Perform a Lightning-charged stab that can be chained into a combination of up to three attacks. The first two attacks conjure a charging Wildwood spirit if they Hit a Shocked enemy and refresh Shock duration. The third attack is a large swipe that inflicts Elemental Exposure, and can Consume Shock to conjure a stampede of spirits.
     types without a model: PerformsFinalStrike, SkillConsumesShock
-    unmapped: perfect_strike_timing_window_base_ms, primal_strikes_stag_volley_delay_ms, primal_strikes_stag_volley_spacing, primal_strikes_number_of_stags, base_consume_enemy_shock_on_hit
+    unmapped: perfect_strike_timing_window_base_ms, primal_strikes_stag_volley_spacing, primal_strikes_number_of_stags, base_consume_enemy_shock_on_hit
     not simulated: primal_strikes_stag_is_scaled_with_area_of_effect, all_exposure_on_hit_magnitude
 Raging Spirits               used by  1  sets: Raging Spirits
     While active, Fire Spells you use yourself will also summon Raging Spirits, which are short-lived flaming skulls that rush at nearby enemies and rapidly Attack them, ignoring commands. Enemies will not directly engage these Minions, and can pass through them.

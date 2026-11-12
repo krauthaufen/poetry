@@ -398,6 +398,8 @@ module Gems =
               // the pillars stay as Ice Crystals and explode when destroyed
               ("Grim Pillars", "Explosion"), [ "Part"; "Crystals" ]
               ("Frozen Locus", "Explosion"), [ "Crystals" ]
+              // "Create a wall of Ice Crystals ... The Crystals explode if sufficiently damaged"
+              ("Frost Wall", ""), [ "Crystals" ]
               ("Glacial Bolt", "Wall"), [ "Crystals" ]
               ("Detonate Living", "Explosion"), [ "Part"; "Vs:Cullable" ]
               // an explosion for each ailment consumed

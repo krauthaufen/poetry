@@ -192,6 +192,14 @@ module Constants =
     /// "by approximately 50%" started from "a 90 Degree Cone", so 200 was 90 degrees.
     let spreadOverrideDegrees = 0.45
 
+    /// Width (units) of one Ice Crystal of a wall: a wall has one per so much of its length
+    /// (Frost Wall, 5.6 m: seven). Not in the data. A guess.
+    let iceCrystalWidth = 8.0
+
+    /// "80% less damage if destroyed within 0.5 seconds by something other than you" (Frost
+    /// Wall, wiki Ice Crystal): a crystal that comes up inside a large monster is broken by it.
+    let freshCrystalDamage = 0.2
+
     /// How far (units) a twister strays to either side of its line ("moves forward
     /// erratically"): not in the data. A guess: twice its own radius.
     let twisterWander = 10.0

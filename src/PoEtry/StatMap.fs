@@ -349,6 +349,7 @@ module StatMap =
         | "manifest_a_fragment_of_divinity_in_your_presence_every_4_seconds" -> one (Mod.base' (Named "DivineFragmentEvery") 4.0)
         // Ice Crystals: what one withstands, how many a use makes, how many there can be
         | "frost_wall_maximum_life" -> one (Mod.base' (Named "CrystalLife") v)
+        | "wall_maximum_length" -> one (Mod.base' (Named "WallLength") v)
         | "grim_pillars_number_of_pillars_to_create" -> one (Mod.base' (Named "CrystalsCreated") v)
         | "base_number_of_grim_pillars_allowed" -> one (Mod.base' (Named "CrystalLimit") v)
         | "empower_barrage_base_number_of_barrage_repeats" -> one (Mod.base' (Named "BarrageRepeats") v)

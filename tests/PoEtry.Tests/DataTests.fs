@@ -421,6 +421,17 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
             near (0.75 / s.BaseTime) (fst s.Hits.[1] - fst s.Hits.[0])
         | Error e -> failwith e)
 
+    test "Frost Wall: a row of Ice Crystals; the cast itself hits nothing" (fun () ->
+        match Gems.skill db.Value ModDb.empty None { Gem = "Frost Wall"; Level = 20; Quality = 0; StatSet = 1; Supports = [] } with
+        | Ok (s, _) ->
+            let value name = s.Mods |> List.sumBy (fun m -> if m.Stat = Named name then m.Value else 0.0)
+            // 5.6 m long, each crystal withstanding 12714, exploding over 2 m
+            equal (56.0, 12714.0) (value "WallLength", value "CrystalLife")
+            equal true (s.Mods |> List.exists (fun m -> m.Stat = Named "Crystals"))
+            equal true (s.Mods |> List.exists (fun m -> m.Stat = Named "DetonatedBy:CrystalBreak"))
+            equal (box (AreaAtTarget 20.0)) (box s.Delivery)
+        | Error e -> failwith e)
+
     test "Ice Shot: the shards spring from the enemy hit and cannot hit it" (fun () ->
         let bow = (Items.parse db.Value "Rarity: Normal\nWarmonger Bow\n--------\n").Weapon
         match Gems.skill db.Value ModDb.empty bow { Gem = "Ice Shot"; Level = 20; Quality = 0; StatSet = 1; Supports = [] } with

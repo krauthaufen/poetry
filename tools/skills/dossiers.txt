@@ -1329,8 +1329,8 @@
   play: cd Frost Wall; spam Frost Wall
   built Frost Wall                         x1.00, 0.80s, cd Some 5.0 x3, cost 79 +0/s, hits [(1.0, 1.0)], area 20
   built Frost Wall infused                 x1.00, 0.80s, cd Some 5.0 x3, cost 79 +0/s, hits [(1.0, 1.0)], area 20
-  fight: 95 dps; Frost Wall (hit) 51%, Frost Wall infused (hit) 49%
-         hits:Frost Wall 6, hits:Frost Wall infused 6, infused:Frost Wall 6, uninfused:Frost Wall 6, uses:Frost Wall 12
+  fight: 72 dps; Frost Wall (hit) 83%, Frost Wall infused (hit) 17%
+         crits:Frost Wall 6, crystals:Frost Wall 12, hits:Frost Wall 30, hits:Frost Wall infused 6, infused:Frost Wall 6, uninfused:Frost Wall 30, uses:Frost Wall 12
   types without a model: IceCrystal, Wall
 
 #### Frostbolt   [Area Cold Damage Projectile ProjectilesFromUser Spell]
@@ -3479,7 +3479,7 @@ Purple Flames of Chayula for a duration.
   play: spam Supporting Fire
   built Supporting Fire                    x1.00, 0.00s, cd None x1, cost 0 +0/s, hits [], single
   minion Artillery Squad: Artillery Squad: Death From Above
-  fight: 1160 dps; Artillery Squad: Death From Above (hit) 100%
+  fight: 1094 dps; Artillery Squad: Death From Above (hit) 100%
          hits:Artillery Squad: Death From Above 12, uses:Artillery Squad: Death From Above 3, uses:Supporting Fire 607
   types without a model: CommandableMinion, MinionsAreUndamagable
 
@@ -3697,8 +3697,8 @@ Purple Flames of Chayula for a duration.
   set Twister          base_skill_effect_duration=3000 twister_base_movement_speed=30 twister_damage_+%_final_per_whirling_slash_stage=80 active_skill_base_area_of_effect_radius=5 twister_hit_interval_ms=660 attacks_chance_to_blind_on_hit_%=100 twister_gain_%_elemental_damage_of_corresponding_type=50 minimum_per_projectile_spread_angle_degrees=15 twister_bounce_check_angle=360 main_hand_weapon_range_+=65  | can_perform_skill_while_moving is_area_damage skill_can_add_multiple_charges_per_action twister_consumes_wind_storm visual_hit_effect_physical_is_wind base_is_projectile always_pierce active_skill_ignore_setting_aim_stance
   play: spam Twister
   built Twister                            x2.32, 0.78s, cd None x1, cost 32 +0/s, hits [(1.0, 1.0)], 1 projectiles, pierce 100, chain 0
-  fight: 147 dps; Twister (hit) 100%
-         crits:Twister 12, hits:Twister 70, inflict:Blind 70, uses:Twister 19
+  fight: 65 dps; Twister (hit) 100%
+         crits:Twister 3, hits:Twister 35, inflict:Blind 35, uses:Twister 19
   types without a model: InteractsWithElementalGround
 
 #### Unbound Avatar   [Buff Cold Cooldown Duration Fire HasUsageCondition Instant InstantNoRepeatWhenHeld InstantShiftAttackForLeftMouse Lightning]
@@ -3826,8 +3826,9 @@ Purple Flames of Chayula for a duration.
   play: buff Volcano
   built Volcano                            x1.00, 3.20s, cd None x1, cost 73 +61/s, hits [(1.0, 1.0)], area 12
         part Volcano: Projectiles         x1.00, hits [(1.0, 1.0)]
-  fight: 373 dps; Volcano: Projectiles (hit) 75%, Volcano (hit) 25%
-         crits:Volcano: Projectiles 7, hits:Volcano 3, hits:Volcano: Projectiles 62, uses:Volcano 3
+        part Volcano: Eruption Projectiles x1.00, hits [(1.0, 1.0)]
+  fight: 437 dps; Volcano: Projectiles (hit) 73%, Volcano (hit) 24%, Volcano: Eruption Projectiles (hit) 4%
+         crits:Volcano 1, crits:Volcano: Projectiles 3, hits:Volcano 3, hits:Volcano: Eruption Projectiles 4, hits:Volcano: Projectiles 73, uses:Volcano 3
 
 #### Voltaic Barrier   [Area Attack Lightning Wall]   needs: Any non-Talisman Martial Weapon
   Raise a pair of electrified pylons in front of you which project a wall of electricity between them, damaging and Electrocuting enemies caught between them. Projectiles you fire through the wall become energised, and discharge that energy on Hit as Chaining Lightning beams.
