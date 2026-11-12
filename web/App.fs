@@ -46,9 +46,10 @@ type Msg =
     | TreeData of Fetched
     | Toggle of int
     | Grab of V3d
-    | Drag of V3d
+    /// (with where the camera was when the pointer's place on the tree was worked out)
+    | Drag of V3d * V3d
     | Release
-    | Zoom of V3d * float
+    | Zoom of V3d * V3d * float
 
 type Model =
     { /// The character's url ("" until the page knows its address, or when none is given).
@@ -293,14 +294,19 @@ let update (msg : Msg) (m : Model) : Model =
     | Toggle _ when m.Moved -> m
     | Toggle id -> { toggle id m with Fighting = true }
     | Grab p -> { m with Held = Some p; Moved = false }
-    | Drag p ->
+    // A place on the tree comes from the last frame drawn. While dragging, the model is ahead
+    // of that frame: a place worked out under an older camera would move the view again by
+    // what it has already moved, and it would swing away. Such an event waits for its frame.
+    | Drag (_, eye) when abs (eye.X - m.Centre.X) + abs (eye.Y - m.Centre.Y) > m.Height / 1e5 -> m
+    | Zoom (_, eye, _) when abs (eye.X - m.Centre.X) + abs (eye.Y - m.Centre.Y) > m.Height / 1e5 -> m
+    | Drag (p, _) ->
         match m.Held with
         | Some held ->
             let d = V2d (held.X - p.X, held.Y - p.Y)
             if abs d.X + abs d.Y < m.Height / 400.0 then m else { m with Centre = m.Centre + d; Moved = true }
         | None -> m
     | Release -> { m with Held = None }
-    | Zoom (p, wheel) ->
+    | Zoom (p, _, wheel) ->
         // towards the point under the pointer
         let k = if wheel > 0.0 then 1.15 else 1.0 / 1.15
         let height = max 600.0 (min 60000.0 (m.Height * k))
@@ -429,9 +435,9 @@ let private tree (m : Model) : Node<Msg> =
                 Sg.Translate (0.0, 0.0, -1.0)
                 Sg.Scale (200000.0)
                 Sg.OnPointerDown (fun e -> Grab e.WorldPosition)
-                Sg.OnPointerMove (fun e -> Drag e.WorldPosition)
+                Sg.OnPointerMove (fun e -> Drag (e.WorldPosition, e.Eye))
                 Sg.OnPointerUp (fun _ -> Release)
-                Sg.OnScroll (fun e -> Zoom (e.WorldPosition, e.Wheel.Y))
+                Sg.OnScroll (fun e -> Zoom (e.WorldPosition, e.Eye, e.Wheel.Y))
                 quad
             }
             // every connection, dim; the allocated ones over them in the game's gold
