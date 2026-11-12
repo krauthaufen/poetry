@@ -3,16 +3,46 @@
 /// and its answers are messages. `?build=<url>` names the character to load.
 module App
 
+open Aardvark.Portable
+open FableCube
 open Pure
 
 type Row = { Label : string; Value : string }
 type Share = { Name : string; Percent : float; Text : string }
+
+/// A passive as the tree draws it: where, how big, and its art in the sprite sheets (a
+/// sheet's url and the sprite's rectangle there as u, v, width, height).
+type Passive =
+    { Id : int
+      X : float
+      Y : float
+      Size : float
+      IconSize : float
+      Kind : string
+      Name : string
+      Ascendancy : string
+      Icon : string
+      IconOff : string
+      IconRect : V4d
+      Frame : string
+      FrameOn : V4d
+      FrameOff : V4d }
+
+/// A connection: its two passives and its ribbon (triangles).
+type Link = { A : int; B : int; Ribbon : Buffer<V3f> }
 
 type Msg =
     | Located of string
     | Sheet of Fetched
     | Fought of Fetched
     | Scenario of string
+    | Tab of string
+    | TreeData of Fetched
+    | Toggle of int
+    | Grab of V3d
+    | Drag of V3d
+    | Release
+    | Zoom of V3d * float
 
 type Model =
     { /// The character's url ("" until the page knows its address, or when none is given).
@@ -20,6 +50,9 @@ type Model =
       Scenario : string
       Status : string
       Title : string
+      Class : string
+      Ascendancy : string
+      Tab : string
       Pools : Row list
       Defences : Row list
       Resistances : Row list
@@ -29,14 +62,171 @@ type Model =
       Fighting : bool
       Gem : string
       Dps : Row list
-      Shares : Share list }
+      Shares : Share list
+      /// The passive tree: its passives and connections, who neighbours whom, the ribbons of
+      /// all connections as one mesh, what is allocated (and whether that was changed here).
+      Passives : Passive list
+      /// The same by the sheet their icon, and their frame, is in.
+      IconsSmall : Passive list
+      IconsLarge : Passive list
+      FramesSmall : Passive list
+      FramesMedium : Passive list
+      FramesLarge : Passive list
+      FramesAscendancy : Passive list
+      Links : Link list
+      Neighbours : Map<int, int list>
+      Web : Buffer<V3f>
+      Allocated : Set<int>
+      Edited : bool
+      /// The view on the tree: its centre, and the height of what is seen (tree units).
+      Centre : V2d
+      Height : float
+      /// The point of the tree held while dragging; whether the pointer has moved since.
+      Held : V3d option
+      Moved : bool }
 
 let init : Model =
-    { Build = ""; Scenario = "boss"; Status = "locating"; Title = ""; Pools = []; Defences = []; Resistances = []; Minions = []
-      NotUnderstood = 0; Fighting = false; Gem = ""; Dps = []; Shares = [] }
+    { Build = ""; Scenario = "boss"; Status = "locating"; Title = ""; Class = ""; Ascendancy = ""; Tab = "character"
+      Pools = []; Defences = []; Resistances = []; Minions = []
+      NotUnderstood = 0; Fighting = false; Gem = ""; Dps = []; Shares = []
+      Passives = []; IconsSmall = []; IconsLarge = []; FramesSmall = []; FramesMedium = []; FramesLarge = []; FramesAscendancy = []; Links = []; Neighbours = Map.empty; Web = Data.pack (Data.ofList ([] : V3f list)); Allocated = Set.empty; Edited = false
+      Centre = V2d (0.0, 0.0); Height = 5000.0; Held = None; Moved = false }
 
-let private sheetUrl (m : Model) = "__sim?op=character&build=" + m.Build
-let private fightUrl (m : Model) = "__sim?op=fight&runs=20&time=30&scenario=" + m.Scenario + "&build=" + m.Build
+/// The passives as the simulator is told them (only once they were changed here).
+let private passives (m : Model) =
+    if m.Edited then "&passives=" + (m.Allocated |> Set.toList |> List.map string |> String.concat ",") else ""
+
+let private sheetUrl (m : Model) = "__sim?op=character" + passives m + "&build=" + m.Build
+let private fightUrl (m : Model) = "__sim?op=fight&runs=20&time=30&scenario=" + m.Scenario + passives m + "&build=" + m.Build
+
+// ---- the passive tree ----
+
+/// The ribbon of a connection, as triangles: a straight one between its passives, or along
+/// its arc ([a, b, cx, cy, r, from, sweep]: degrees clockwise from the top).
+let private ribbon (width : float) (at : Map<int, V2d>) (edge : float list) : V3f list =
+    let quad (p0 : V2d) (p1 : V2d) (q0 : V2d) (q1 : V2d) =
+        let v (p : V2d) = V3f (float32 p.X, float32 -p.Y, 0.0f)
+        [ v p0; v p1; v q0; v q0; v p1; v q1 ]
+    match edge with
+    | [ a; b ] ->
+        let p, q = at.[int a], at.[int b]
+        let d = q - p
+        let len = sqrt (d.X * d.X + d.Y * d.Y)
+        if len <= 0.0 then []
+        else
+            let n = V2d (-d.Y / len, d.X / len) * (width / 2.0)
+            quad (p - n) (p + n) (q - n) (q + n)
+    | [ _; _; cx; cy; r; from; sweep ] ->
+        let steps = max 2 (int (ceil (sweep / 8.0)))
+        let point (radius : float) (i : int) =
+            let a = (from + sweep * float i / float steps) * System.Math.PI / 180.0
+            V2d (cx + radius * sin a, cy - radius * cos a)
+        [ for i in 0 .. steps - 1 do
+            yield! quad (point (r - width / 2.0) i) (point (r + width / 2.0) i) (point (r - width / 2.0) (i + 1)) (point (r + width / 2.0) (i + 1)) ]
+    | _ -> []
+
+/// The tree as fetched (web/public/tree.json, see tools/export/tree_ui.py).
+let private readTree (j : Json) (m : Model) : Model =
+    let sheets = Json.field "sheets" j |> Json.list |> List.map (fun s -> Json.string (Json.field "name" s), Json.number (Json.field "w" s), Json.number (Json.field "h" s))
+    let sprite (x : Json) : string * V4d =
+        match Json.list x |> List.map Json.number with
+        | [ s; px; py; w; h ] when int s < sheets.Length ->
+            let name, sw, sh = sheets.[int s]
+            "sprites/" + name, V4d (px / sw, py / sh, w / sw, h / sh)
+        | _ -> "", V4d (0.0, 0.0, 0.0, 0.0)
+    let frames = Json.field "frames" j
+    let nodes = Json.field "nodes" j |> Json.list
+    let passives =
+        nodes
+        |> List.map (fun n ->
+            let kind = Json.string (Json.field "kind" n)
+            let icon, rect = sprite (Json.field "icon" n)
+            let frame, on = sprite (Json.field kind frames |> Json.field "alloc")
+            let _, off = sprite (Json.field kind frames |> Json.field "normal")
+            { Id = Json.int (Json.field "id" n)
+              X = Json.number (Json.field "x" n)
+              Y = Json.number (Json.field "y" n)
+              // sizes in tree units as pob-web draws them (PoB's GetNodeTargetSize x 2)
+              Size = (match kind with "keystone" -> 240.0 | "notable" -> 160.0 | "jewel" -> 152.0 | "start" -> 0.0 | "ascstart" -> 100.0 | _ -> 108.0)
+              IconSize = (match kind with "keystone" -> 164.0 | "notable" -> 108.0 | "jewel" -> 152.0 | "ascstart" -> 32.0 | _ -> 74.0)
+              Kind = kind
+              Name = Json.string (Json.field "name" n)
+              Ascendancy = Json.string (Json.field "ascendancy" n)
+              Icon = icon
+              IconOff = icon.Replace ("sprites/skills_", "sprites/skills-disabled_")
+              IconRect = rect
+              Frame = frame
+              FrameOn = on
+              FrameOff = off })
+    let at = passives |> List.map (fun p -> p.Id, V2d (p.X, p.Y)) |> Map.ofList
+    let edges = Json.field "edges" j |> Json.list |> List.map (fun e -> Json.list e |> List.map Json.number)
+    let links = edges |> List.map (fun e -> { A = int e.[0]; B = int e.[1]; Ribbon = Data.pack (Data.ofList (ribbon 26.0 at e)) })
+    // TEMPORARY (FableCube dogfood/poetry.md, "a texture per draw"): only the passives nearest
+    // the middle of the tree are drawn, as every textured draw uploads its sheet again
+    let shown =
+        passives |> List.filter (fun p -> p.Kind <> "start")
+        |> List.sortBy (fun p -> p.X * p.X + p.Y * p.Y)
+        |> List.truncate 260
+    { m with
+        Passives = passives
+        IconsSmall = shown |> List.filter (fun p -> p.Icon.Contains "skills_64")
+        IconsLarge = shown |> List.filter (fun p -> p.Icon.Contains "skills_128")
+        FramesSmall = shown |> List.filter (fun p -> p.Frame.Contains "_104_104")
+        FramesMedium = shown |> List.filter (fun p -> p.Frame.Contains "_152_156")
+        FramesLarge = shown |> List.filter (fun p -> p.Frame.Contains "_220_224")
+        FramesAscendancy = shown |> List.filter (fun p -> p.Frame.Contains "_92_92")
+        Links = links
+        Neighbours = nodes |> List.map (fun n -> Json.int (Json.field "id" n), (Json.field "to" n |> Json.list |> List.map Json.int)) |> Map.ofList
+        // (packed here: a buffer is one value to the view, where a list would be followed element by element)
+        Web = Data.pack (Data.ofList (edges |> List.collect (ribbon 14.0 at))) }
+
+/// Where a character's passives start: its class' start and its ascendancy's.
+let private roots (m : Model) : Set<int> =
+    m.Passives
+    |> List.filter (fun p -> (p.Kind = "start" && m.Neighbours.ContainsKey p.Id) || (p.Kind = "ascstart" && p.Ascendancy = m.Ascendancy))
+    |> List.map (fun p -> p.Id)
+    |> Set.ofList
+
+/// Whether a passive can be taken by this character at all (another ascendancy's can't).
+let private open' (m : Model) (asc : Map<int, string>) (id : int) =
+    match Map.tryFind id asc with
+    | Some a -> a = "" || a = m.Ascendancy
+    | None -> false
+
+/// Allocating a passive takes the shortest way to it from what is allocated; deallocating
+/// one drops it and all that then hangs loose from the start.
+let private toggle (id : int) (m : Model) : Model =
+    let asc = m.Passives |> List.map (fun p -> p.Id, p.Ascendancy) |> Map.ofList
+    let starts = m.Passives |> List.filter (fun p -> p.Kind = "start") |> List.map (fun p -> p.Id) |> Set.ofList
+    let next (i : int) = Map.tryFind i m.Neighbours |> Option.defaultValue [] |> List.filter (fun n -> open' m asc n && not (starts.Contains n))
+    if m.Allocated.Contains id then
+        let left = m.Allocated.Remove id
+        // what still hangs on a start (the class' own start is whichever touches the allocated)
+        let seeds = left |> Set.filter (fun i -> (Map.tryFind i m.Neighbours |> Option.defaultValue [] |> List.exists starts.Contains) || (asc.[i] <> "" && (m.Passives |> List.exists (fun p -> p.Id = i && p.Kind = "ascstart"))))
+        let rec grow (seen : Set<int>) (front : int list) =
+            match front with
+            | [] -> seen
+            | i :: rest ->
+                let more = next i |> List.filter (fun n -> left.Contains n && not (seen.Contains n))
+                grow (more |> List.fold (fun s n -> Set.add n s) seen) (rest @ more)
+        { m with Allocated = grow seeds (Set.toList seeds); Edited = true }
+    else
+        // breadth first from the passive towards anything allocated (or a start to begin from)
+        let rec search (seen : Map<int, int>) (front : int list) =
+            match front with
+            | [] -> None
+            | i :: rest ->
+                let near = Map.tryFind i m.Neighbours |> Option.defaultValue []
+                if m.Allocated.Contains i || (near |> List.exists starts.Contains && m.Allocated.IsEmpty) then Some (i, seen)
+                else
+                    let more = next i |> List.filter (fun n -> not (seen.ContainsKey n))
+                    search (more |> List.fold (fun s n -> Map.add n i s) seen) (rest @ more)
+        match search (Map.ofList [ id, id ]) [ id ] with
+        | None -> m
+        | Some (reached, from) ->
+            let rec path (i : int) (acc : int list) = if i = id then i :: acc else path from.[i] (i :: acc)
+            { m with Allocated = path reached [] |> List.fold (fun s n -> Set.add n s) m.Allocated; Edited = true }
+
 
 /// 1234567 as "1.23M", 45678 as "45.7k".
 let private short (v : float) =
@@ -54,6 +244,28 @@ let update (msg : Msg) (m : Model) : Model =
         | Some b -> { m with Build = b; Status = "reading the character" }
         | None -> { m with Status = "no character: add ?build=<url of a character or a PoB build> to the address" }
     | Scenario s -> { m with Scenario = s; Fighting = true; Dps = []; Shares = [] }
+    | Tab t -> { m with Tab = t }
+    | TreeData r ->
+        match r.Status, Native.parseJson r.Text with
+        | 200, Ok j -> readTree j m
+        | s, _ -> { m with Status = "the passive tree could not be read (status " + string s + ")" }
+    // (the click that ends a drag allocates nothing)
+    | Toggle _ when m.Moved -> m
+    | Toggle id -> { toggle id m with Fighting = true }
+    | Grab p -> { m with Held = Some p; Moved = false }
+    | Drag p ->
+        match m.Held with
+        | Some held ->
+            let d = V2d (held.X - p.X, held.Y - p.Y)
+            if abs d.X + abs d.Y < m.Height / 400.0 then m else { m with Centre = m.Centre + d; Moved = true }
+        | None -> m
+    | Release -> { m with Held = None }
+    | Zoom (p, wheel) ->
+        // towards the point under the pointer
+        let k = if wheel > 0.0 then 1.15 else 1.0 / 1.15
+        let height = max 600.0 (min 60000.0 (m.Height * k))
+        let k = height / m.Height
+        { m with Height = height; Centre = V2d (p.X + (m.Centre.X - p.X) * k, p.Y + (m.Centre.Y - p.Y) * k) }
     | Sheet r when r.Url <> sheetUrl m -> m
     | Sheet r ->
         match r.Status, Native.parseJson r.Text with
@@ -65,6 +277,10 @@ let update (msg : Msg) (m : Model) : Model =
             { m with
                 Status = ""
                 Title = sprintf "Level %.0f %s" (n [ "level" ]) (Json.string (Json.field "class" j))
+                Class = Json.string (Json.field "class" j)
+                Ascendancy = Json.string (Json.field "ascendancy" j)
+                // what the character has allocated, until it is changed here
+                Allocated = (if m.Edited then m.Allocated else Json.field "passives" j |> Json.list |> List.map Json.int |> Set.ofList)
                 Pools = [ row "Life" (n [ "pools"; "life" ]); row "Mana" (n [ "pools"; "mana" ]); row "Energy Shield" (n [ "pools"; "energyShield" ]); row "Spirit" (n [ "pools"; "spirit" ]) ]
                 Defences = [ row "Armour" (n [ "defences"; "armour" ]); row "Evasion" (n [ "defences"; "evasion" ]); row "Deflection" (n [ "defences"; "deflection" ]); row "Block" (n [ "defences"; "block" ]) ]
                 Resistances = named "resistances"
@@ -110,49 +326,186 @@ let private scenario (m : Model) (key : string) (name : string) : Node<Msg> =
         name
     }
 
+/// A square of side 1 around the origin, its texture coordinates from the top left. (Two
+/// triangles, not a strip: many strips drawn together come out joined, see FableCube
+/// dogfood/poetry.md.)
+let private quad<'m> : Scene<'m> =
+    mesh Topology.Triangles {
+        Mesh.Attribute ("Positions", Data.pack (Data.ofList [ V3f (-0.5f, -0.5f, 0.0f); V3f (0.5f, -0.5f, 0.0f); V3f (-0.5f, 0.5f, 0.0f); V3f (-0.5f, 0.5f, 0.0f); V3f (0.5f, -0.5f, 0.0f); V3f (0.5f, 0.5f, 0.0f) ]))
+        Mesh.Attribute ("DiffuseColorCoordinates", Data.pack (Data.ofList [ V2f (0.0f, 1.0f); V2f (1.0f, 1.0f); V2f (0.0f, 0.0f); V2f (0.0f, 0.0f); V2f (1.0f, 1.0f); V2f (1.0f, 0.0f) ]))
+    }
+
+let private white = V4d (1.0, 1.0, 1.0, 1.0)
+
+let private dim = V4d (0.42, 0.42, 0.45, 1.0)
+
+/// A passive's icon: out of the sheet bound above, dim until it is allocated.
+let private icon (m : Model) (p : Passive) : Scene<Msg> =
+    sg {
+        Sg.Translate (p.X, -p.Y, 1.0)
+        Sg.Scale (p.IconSize)
+        Sg.OnClick (fun _ -> Toggle p.Id)
+        Sg.Uniform ("Rect", p.IconRect)
+        Sg.Uniform ("Tint", (if m.Allocated.Contains p.Id then white else dim))
+        quad
+    }
+
+/// Its frame, the allocated one once it is.
+let private frame (m : Model) (p : Passive) : Scene<Msg> =
+    sg {
+        Sg.Translate (p.X, -p.Y, 2.0)
+        Sg.Scale (p.Size)
+        Sg.OnClick (fun _ -> Toggle p.Id)
+        Sg.Uniform ("Rect", (if m.Allocated.Contains p.Id then p.FrameOn else p.FrameOff))
+        Sg.Uniform ("Tint", white)
+        quad
+    }
+
+let private tree (m : Model) : Node<Msg> =
+    renderControl {
+        Dom.Style [ Css.Position "absolute"; Css.Left "0"; Css.Top "0"; Css.Width "100%"; Css.Height "100%"; Css.TouchAction "none" ]
+        // straight down on the tree: what is seen is `Height` tall
+        RenderControl.Perspective (60.0, 10.0, 400000.0)
+        RenderControl.Camera
+            { Sky = V3d (0.0, 1.0, 0.0)
+              Location = V3d (m.Centre.X, m.Centre.Y, m.Height / (2.0 * tan (System.Math.PI / 6.0)))
+              Forward = V3d (0.0, 0.0, -1.0)
+              Up = V3d (0.0, 1.0, 0.0)
+              Right = V3d (1.0, 0.0, 0.0) }
+        sg {
+            // the ground: what the pointer holds while dragging, and zooms towards
+            sg {
+                Sg.Shader { Shaders.flat }
+                Sg.Uniform ("Color", V4d (0.047, 0.047, 0.055, 1.0))
+                Sg.Translate (0.0, 0.0, -1.0)
+                Sg.Scale (200000.0)
+                Sg.OnPointerDown (fun e -> Grab e.WorldPosition)
+                Sg.OnPointerMove (fun e -> Drag e.WorldPosition)
+                Sg.OnPointerUp (fun _ -> Release)
+                Sg.OnScroll (fun e -> Zoom (e.WorldPosition, e.Wheel.Y))
+                quad
+            }
+            // every connection, dim; the allocated ones over them in the game's gold
+            sg {
+                Sg.Shader { Shaders.flat }
+                Sg.NoEvents true
+                sg {
+                    Sg.Uniform ("Color", V4d (0.227, 0.227, 0.306, 1.0))
+                    mesh Topology.Triangles { Mesh.Attribute ("Positions", m.Web) }
+                }
+                sg {
+                    Sg.Uniform ("Color", V4d (0.686, 0.376, 0.145, 1.0))
+                    Sg.Translate (0.0, 0.0, 0.5)
+                    for l in m.Links do
+                        if m.Allocated.Contains l.A && m.Allocated.Contains l.B then
+                            mesh Topology.Triangles { Mesh.Attribute ("Positions", l.Ribbon) }
+                }
+            }
+            // the passives, sheet by sheet: a sheet is bound once for all that are drawn from it
+            sg {
+                Sg.Shader { Shaders.sprite }
+                // (one model list per sheet: a list inside a list's element would be walked by a
+                // recursive function, a stack frame per passive; see FableCube dogfood/poetry.md)
+                sg {
+                    Sg.Texture ("Atlas", "sprites/skills_64_64_BC1.png")
+                    for p in m.IconsSmall do
+                        icon m p
+                }
+                sg {
+                    Sg.Texture ("Atlas", "sprites/skills_128_128_BC1.png")
+                    for p in m.IconsLarge do
+                        icon m p
+                }
+                sg {
+                    Sg.Texture ("Atlas", "sprites/group-background_104_104_BC7.png")
+                    for p in m.FramesSmall do
+                        frame m p
+                }
+                sg {
+                    Sg.Texture ("Atlas", "sprites/group-background_152_156_BC7.png")
+                    for p in m.FramesMedium do
+                        frame m p
+                }
+                sg {
+                    Sg.Texture ("Atlas", "sprites/group-background_220_224_BC7.png")
+                    for p in m.FramesLarge do
+                        frame m p
+                }
+                sg {
+                    Sg.Texture ("Atlas", "sprites/group-background_92_92_BC7.png")
+                    for p in m.FramesAscendancy do
+                        frame m p
+                }
+            }
+        }
+    }
+
+let private tab (m : Model) (key : string) (name : string) : Node<Msg> =
+    button {
+        Dom.Class (if m.Tab = key then "tab active" else "tab")
+        Dom.OnClick (fun _ -> Tab key)
+        name
+    }
+
+let private status (m : Model) = if m.Fighting then "fighting ..." else m.Status
+
 let view (m : Model) : Node<Msg> =
     body {
         Dom.OnLocation Located
         if m.Build <> "" then span { Dom.Fetch (sheetUrl m, Sheet) }
         if m.Title <> "" then span { Dom.Fetch (fightUrl m, Fought) }
+        span { Dom.Fetch ("tree.json", TreeData) }
         header {
             h1 { "PoEtry" }
             div { Dom.Class "title"; Dom.Attr ("data-check", "title"); m.Title }
-            div { Dom.Class "status"; Dom.Attr ("data-check", "status"); m.Status }
-        }
-        div {
-            Dom.Class "main"
-            div {
-                Dom.Class "column"
-                panel "Pools" m.Pools
-                panel "Defences" m.Defences
-                panel "Resistances" m.Resistances
-                if not m.Minions.IsEmpty then panel "Minions" m.Minions
-                if m.NotUnderstood > 0 then
-                    div { Dom.Class "note"; sprintf "%d things on this character are not understood yet" m.NotUnderstood }
+            nav {
+                tab m "character" "Character"
+                tab m "tree" "Passive tree"
             }
+            if m.Tab = "tree" then
+                div { Dom.Class "points"; Dom.Attr ("data-check", "points"); sprintf "%d passives" m.Allocated.Count }
+            if not m.Dps.IsEmpty then
+                div { Dom.Class "headline"; Dom.Attr ("data-check", "dps"); m.Dps.Head.Value + " DPS" }
+            div { Dom.Class "status"; Dom.Attr ("data-check", "status"); status m }
+        }
+        if m.Tab = "tree" then
             div {
-                Dom.Class "column wide"
-                nav {
-                    scenario m "boss" "Boss"
-                    scenario m "pinnacle" "Pinnacle"
-                    scenario m "pack" "Pack"
-                    scenario m "surrounded" "Surrounded"
+                Dom.Class "treeview"
+                tree m
+            }
+        if m.Tab = "character" then
+            div {
+                Dom.Class "main"
+                div {
+                    Dom.Class "column"
+                    panel "Pools" m.Pools
+                    panel "Defences" m.Defences
+                    panel "Resistances" m.Resistances
+                    if not m.Minions.IsEmpty then panel "Minions" m.Minions
+                    if m.NotUnderstood > 0 then
+                        div { Dom.Class "note"; sprintf "%d things on this character are not understood yet" m.NotUnderstood }
                 }
-                if m.Fighting then div { Dom.Class "status"; "fighting ..." }
-                if m.Gem <> "" then div { Dom.Class "pressing"; Dom.Attr ("data-check", "gem"); "pressing " + m.Gem }
-                panel "Damage" m.Dps
-                section {
-                    Dom.Class "panel"
-                    h3 { "Who deals it" }
-                    for s in m.Shares do
-                        div {
-                            Dom.Class "share"
-                            div { Dom.Class "bar"; Dom.Style [ Css.Width (sprintf "%.1f%%" s.Percent) ] }
-                            span { Dom.Class "name"; s.Name }
-                            span { Dom.Class "pct"; s.Text }
-                        }
+                div {
+                    Dom.Class "column wide"
+                    nav {
+                        scenario m "boss" "Boss"
+                        scenario m "pinnacle" "Pinnacle"
+                        scenario m "pack" "Pack"
+                        scenario m "surrounded" "Surrounded"
+                    }
+                    if m.Gem <> "" then div { Dom.Class "pressing"; Dom.Attr ("data-check", "gem"); "pressing " + m.Gem }
+                    panel "Damage" m.Dps
+                    section {
+                        Dom.Class "panel"
+                        h3 { "Who deals it" }
+                        for s in m.Shares do
+                            div {
+                                Dom.Class "share"
+                                div { Dom.Class "bar"; Dom.Style [ Css.Width (sprintf "%.1f%%" s.Percent) ] }
+                                span { Dom.Class "name"; s.Name }
+                                span { Dom.Class "pct"; s.Text }
+                            }
+                    }
                 }
             }
-        }
     }

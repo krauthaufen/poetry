@@ -4,7 +4,7 @@ tree export): web/public/tree.json (nodes with position, kind, name, stats, neig
 classes that start there) and web/public/tree.svg (every connection drawn once, as the game
 curves it).
 
-  python3 tools/export/tree_ui.py <PoB src>/TreeData/0_5/tree.json
+  python3 tools/export/tree_ui.py <PoB src>/TreeData/0_5/tree.json [<pob-web>/packages/web/public/data/sprites/_sprites.json]
 """
 import json, math, os, sys
 
@@ -64,6 +64,37 @@ for key, n in src["nodes"].items():
     nodes.append(node)
 nodes.sort(key=lambda n: n["id"])
 
+# art: where each node's icon is in the sprite sheets (pob-web's PNG atlases of the game's
+# tree art, with their index _sprites.json), and the frames per kind and state
+sprites = json.load(open(sys.argv[2])) if len(sys.argv) > 2 else {}
+sheets, sheetIndex = [], {}
+def sheet(name):
+    if name not in sheetIndex:
+        s = next(v for v in sprites.values() if v["sheet"] == name)
+        sheetIndex[name] = len(sheets)
+        sheets.append({"name": name, "w": s["width"], "h": s["height"]})
+    return sheetIndex[name]
+def find(sprite, prefer):
+    for want in prefer:
+        for key, v in sprites.items():
+            if key.startswith(want) and sprite in v["sprites"]:
+                r = v["sprites"][sprite]
+                return [sheet(v["sheet"]), r["x"], r["y"], r["w"], r["h"]]
+    return None
+if sprites:
+    for node in nodes:
+        icon = src["nodes"][str(node["id"])].get("icon")
+        big = node["kind"] in ("notable", "keystone")
+        at = icon and find(icon, ["skills_128", "skills_64", "skills_17"] if big else ["skills_64", "skills_128", "skills_17"])
+        if at: node["icon"] = at
+    def frame(normal, alloc):
+        return {"normal": find(normal, ["group-background"]), "alloc": find(alloc, ["group-background"])}
+    frames = {"small": frame("PSSkillFrame", "PSSkillFrameActive"), "attribute": frame("PSSkillFrame", "PSSkillFrameActive"),
+              "notable": frame("NotableFrameUnallocated", "NotableFrameAllocated"), "keystone": frame("KeystoneFrameUnallocated", "KeystoneFrameAllocated"),
+              "jewel": frame("JewelFrameUnallocated", "JewelFrameAllocated"), "ascstart": frame("AscendancyMiddle", "AscendancyMiddle")}
+else:
+    frames = {}
+
 xs, ys = [p[0] for p in pos.values()], [p[1] for p in pos.values()]
 pad = 600
 box = [math.floor(min(xs) - pad), math.floor(min(ys) - pad), math.ceil(max(xs) - min(xs) + 2 * pad), math.ceil(max(ys) - min(ys) + 2 * pad)]
@@ -113,7 +144,7 @@ for (a, b, orbit) in edges.values():
     else:
         paths.append("M%.0f %.0fL%.0f %.0f" % (x1, y1, x2, y2))
         drawn.append([a, b])
-json.dump({"box": box, "classes": classes, "nodes": nodes, "edges": drawn}, open(os.path.join(out, "tree.json"), "w"), separators=(",", ":"))
+json.dump({"box": box, "classes": classes, "nodes": nodes, "edges": drawn, "sheets": sheets, "frames": frames}, open(os.path.join(out, "tree.json"), "w"), separators=(",", ":"))
 svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="%d %d %d %d">'
        '<path d="%s" fill="none" stroke="#4a4136" stroke-width="14" stroke-linecap="round"/></svg>') % (box[0], box[1], box[2], box[3], "".join(paths))
 open(os.path.join(out, "tree.svg"), "w").write(svg)

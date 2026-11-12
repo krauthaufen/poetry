@@ -12,6 +12,7 @@
     <ToyLib Condition="'$(ToyLib)' == ''">$(MSBuildThisFileDirectory)../../fablecube-toy/lib/</ToyLib>
   </PropertyGroup>
   <ItemGroup>
+    <AppCompile Include="Shaders.fs" />
     <AppCompile Include="App.fs" />
   </ItemGroup>
   <Import Project="$(ToyLib)Toy.props" />
