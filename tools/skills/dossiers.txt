@@ -176,19 +176,25 @@
   level 20: cost None (per minute None), cooldown None xNone, multiplier None, crit None
   set Azmerian Swarms  max_azmerian_swarms=8 base_skill_effect_duration=10000 skill_grants_%_chance_to_summon_azmerian_swarm_on_kill_affected_by_elemental_ailment=100 skill_grants_%_chance_to_summon_azmerian_swarm_on_hitting_unique_or_rare_enemy_affected_by_elemental_ailment=10 skill_desired_amount_override=1 non_skill_base_physical_damage_%_to_convert_to_random_element=100 %_chance_to_apply_hounded_by_wisps_on_hit=100 active_skill_minion_1%_attack_speed_+%_per_X_player_dexterity=5  | minion_damage_+%_final_per_different_elemental_ailment_on_target base_deal_no_damage
   play: (cannot be pressed)
-  minion [DNT] Azmerian Wisp Swarm: [DNT] Azmerian Wisp Swarm: Basic Attack
-  fight: 89 dps; [DNT] Azmerian Wisp Swarm: Basic Attack (hit) 100%
-         hits:[DNT] Azmerian Wisp Swarm: Basic Attack 20, uses:[DNT] Azmerian Wisp Swarm: Basic Attack 21
+  minion [DNT] Azmerian Wisp Swarm 1: [DNT] Azmerian Wisp Swarm: Basic Attack
+  minion [DNT] Azmerian Wisp Swarm 2: [DNT] Azmerian Wisp Swarm: Basic Attack
+  minion [DNT] Azmerian Wisp Swarm 3: [DNT] Azmerian Wisp Swarm: Basic Attack
+  minion [DNT] Azmerian Wisp Swarm 4: [DNT] Azmerian Wisp Swarm: Basic Attack
+  minion [DNT] Azmerian Wisp Swarm 5: [DNT] Azmerian Wisp Swarm: Basic Attack
+  minion [DNT] Azmerian Wisp Swarm 6: [DNT] Azmerian Wisp Swarm: Basic Attack
+  minion [DNT] Azmerian Wisp Swarm 7: [DNT] Azmerian Wisp Swarm: Basic Attack
+  minion [DNT] Azmerian Wisp Swarm 8: [DNT] Azmerian Wisp Swarm: Basic Attack
+  fight: 0 dps; 
+         
 
 #### Azmerian Wolf   [CommandableMinion Companion CreatesCompanion CreatesMinion HasReservation Minion Persistent Physical]
   Summons an ancient Reviving Azmerian Wolf that can howl, calling to spirits convening an Eternal Hunt on Command. It Maims when attacking foes, and can lunge to bite and inflict Bleeding, or howl to inspire nearby allies.
   level 20: cost None (per minute None), cooldown None xNone, multiplier None, crit None
   set Minion Info      display_minion_monster_type=2 minion_base_resummon_time_ms=12000 skill_desired_amount_override=1  | is_resummoning_minion
-  play: spam Azmerian Wolf
-  built Azmerian Wolf                      x1.00, 1.00s, cd None x1, cost 0 +0/s, hits [], single
+  play: (cannot be pressed)
   minion Azmerian Wolf: Azmerian Wolf: Dash, Azmerian Wolf: Bite, Azmerian Wolf: Eternal Hunt, Azmerian Wolf: Basic Attack
-  fight: 5214 dps; Azmerian Wolf: Dash (hit) 27%, Azmerian Wolf: Basic Attack (hit) 22%, Azmerian Wolf: Eternal Hunt (hit) 20%, Azmerian Wolf: Bite (hit) 18%, Bleed 12%
-         crits:Azmerian Wolf: Bite 1, crits:Azmerian Wolf: Dash 1, hits:Azmerian Wolf: Basic Attack 10, hits:Azmerian Wolf: Bite 5, hits:Azmerian Wolf: Dash 3, hits:Azmerian Wolf: Eternal Hunt 2, inflict:Bleed 5, inflict:Maim 10, uses:Azmerian Wolf 15, uses:Azmerian Wolf: Basic Attack 11, uses:Azmerian Wolf: Bite 5, uses:Azmerian Wolf: Dash 3, uses:Azmerian Wolf: Eternal Hunt 2
+  fight: 1949 dps; Azmerian Wolf: Basic Attack (hit) 28%, Azmerian Wolf: Dash (hit) 23%, Azmerian Wolf: Eternal Hunt (hit) 21%, Azmerian Wolf: Bite (hit) 16%, Bleed 12%
+         crits:Azmerian Wolf: Basic Attack 1, hits:Azmerian Wolf: Basic Attack 10, hits:Azmerian Wolf: Bite 5, hits:Azmerian Wolf: Dash 3, hits:Azmerian Wolf: Eternal Hunt 2, inflict:Bleed 5, inflict:Maim 10, minion:hit 5, uses:Azmerian Wolf: Basic Attack 11, uses:Azmerian Wolf: Bite 5, uses:Azmerian Wolf: Dash 3, uses:Azmerian Wolf: Eternal Hunt 2
   types without a model: CommandableMinion
 
 #### Ball Lightning   [Area AreaSpell CreatesGroundEffect Damage Duration Lightning Projectile ProjectilesFromUser Spell Sustained]
@@ -397,11 +403,10 @@
   Activate to summon a cackle of Hyena Companions. The cackle is treated as a single Companion for effects that count or limit Companions, regardless of the number of Hyenas in the cackle. Hyenas whoop when they first appear, Hindering nearby enemies, and have a chance to Maim enemies they Hit.
   level 20: cost None (per minute None), cooldown None xNone, multiplier None, crit None
   set Minion Info      skill_minion_summon_delay_interval_ms=100 skill_desired_amount_override=1  | skill_hyena_cackle_size is_resummoning_minion
-  play: spam Cackling Companions
-  built Cackling Companions                x1.00, 1.00s, cd None x1, cost 0 +0/s, hits [], single
+  play: (cannot be pressed)
   minion Cackling Companion: Cackling Companion: Basic Attack
-  fight: 167 dps; Cackling Companion: Basic Attack (hit) 100%
-         crits:Cackling Companion: Basic Attack 3, hits:Cackling Companion: Basic Attack 20, inflict:Maim 7, uses:Cackling Companion: Basic Attack 21, uses:Cackling Companions 15
+  fight: 54 dps; Cackling Companion: Basic Attack (hit) 100%
+         crits:Cackling Companion: Basic Attack 4, hits:Cackling Companion: Basic Attack 20, inflict:Maim 5, minion:hit 3, uses:Cackling Companion: Basic Attack 21
 
 #### Called Shots   [Area AttackInPlace Buff CanHaveMultipleOngoingSkillInstances HasReservation Meta OngoingSkill Persistent Triggers]
   Applies a socketed Mark Skill to a nearby unmarked Enemy every few seconds. Consuming socketed Marks will cause them to be reapplied to an unmarked Enemy. This reapplication can happen at most once every few seconds.
@@ -557,11 +562,10 @@
   Summon a Reviving Beast Companion to aid you in combat.
   level 20: cost None (per minute None), cooldown None xNone, multiplier None, crit None
   set Minion Info      minion_base_resummon_time_ms=12000 skill_desired_initial_amount=1  | active_skill_minion_damage_+%_final is_resummoning_minion monster_no_life_es_scaling_from_rarity
-  play: spam Companion: {0}
-  built Companion: {0}                     x1.00, 1.00s, cd None x1, cost 0 +0/s, hits [], single
+  play: (cannot be pressed)
   note: Companion: {0}: no monster data
   fight: 0 dps; 
-         uses:Companion: {0} 15
+         
   types without a model: MinionsCanExplode
 
 #### Conductive Runes   [Area Attack Damage Duration Hazard Lightning Limit NonWeaponAttack UseGlobalStats]
@@ -1912,22 +1916,28 @@
   Harness Kelari's power to passively Consume Corpses in your Presence, causing Corpse Beetle Minions to burst forth. The Beetles passively follow you until Commanded. On your Command, they rush the target and explode.
   level 20: cost None (per minute None), cooldown None xNone, multiplier None, crit None
   set Kelari's Malediction skill_desired_amount_override=1 skill_specific_stat_description_mode=2  | base_secondary_skill_effect_duration maximum_corpse_beetles_allowed base_deal_no_damage
-  play: spam Kelari's Malediction
-  built Kelari's Malediction               x1.00, 1.00s, cd None x1, cost 0 +0/s, hits [], single
-  minion Corpse Beetle: Corpse Beetle: Sandblast
-  fight: 12016 dps; Corpse Beetle: Sandblast (hit) 100%
-         crits:Corpse Beetle: Sandblast 3, hits:Corpse Beetle: Sandblast 20, inflict:Blind 4, uses:Corpse Beetle: Sandblast 21
+  play: (cannot be pressed)
+  minion Corpse Beetle 1: Corpse Beetle: Sandblast
+  minion Corpse Beetle 2: Corpse Beetle: Sandblast
+  minion Corpse Beetle 3: Corpse Beetle: Sandblast
+  minion Corpse Beetle 4: Corpse Beetle: Sandblast
+  minion Corpse Beetle 5: Corpse Beetle: Sandblast
+  minion Corpse Beetle 6: Corpse Beetle: Sandblast
+  minion Corpse Beetle 7: Corpse Beetle: Sandblast
+  minion Corpse Beetle 8: Corpse Beetle: Sandblast
+  note: Kelari's Malediction: what summons its minions is not simulated
+  fight: 0 dps; 
+         
   types without a model: MinionsAreUndamagable, TargetsDestructibleCorpses, TargetsDestructibleRareCorpses
 
 #### Kelari, the Tainted Sands   [CommandableMinion CreatesMinion HasReservation Minion Persistent Physical ReserveInAllSets]
   Summon Kelari, an invulnerable Sand Djinn Minion, to do your bidding. Kelari will only act when you Command him to do so. Kelari delivers swift Hits with massive Critical Hit potential.
   level 20: cost None (per minute None), cooldown None xNone, multiplier None, crit None
   set Kelari, the Tainted Sands skill_desired_amount_override=1 apply_X_stacks_of_critical_weakness_on_hit=1 base_critical_strike_multiplier_+=50  | is_resummoning_minion hide_minion_frame
-  play: spam Kelari, the Tainted Sands
-  built Kelari, the Tainted Sands          x1.00, 0.00s, cd None x1, cost 0 +0/s, hits [], single
+  play: (cannot be pressed)
   minion Kelari, the Tainted Sands: Kelari, the Tainted Sands: Kelari's Brutality, Kelari, the Tainted Sands: Kelari's Deception, Kelari, the Tainted Sands: Kelari's Judgment
-  fight: 21372 dps; Kelari, the Tainted Sands: Kelari's Judgment (hit) 35%, Kelari, the Tainted Sands: Kelari's Deception (hit) 29%, Kelari's Deception: Hidden (hit) 14%, Kelari, the Tainted Sands: Kelari's Brutality (hit) 11%, Kelari's Brutality: Eruption (hit) 11%
-         crits:Kelari's Brutality: Eruption 1, crits:Kelari's Deception: Hidden 1, crits:Kelari, the Tainted Sands: Kelari's Brutality 2, crits:Kelari, the Tainted Sands: Kelari's Deception 1, hits:Kelari's Brutality: Eruption 5, hits:Kelari's Deception: Hidden 6, hits:Kelari, the Tainted Sands: Kelari's Brutality 10, hits:Kelari, the Tainted Sands: Kelari's Deception 6, hits:Kelari, the Tainted Sands: Kelari's Judgment 2, inflict:Maim 5, uses:Kelari, the Tainted Sands 607, uses:Kelari, the Tainted Sands: Kelari's Brutality 6, uses:Kelari, the Tainted Sands: Kelari's Deception 6, uses:Kelari, the Tainted Sands: Kelari's Judgment 2
+  fight: 937 dps; Kelari, the Tainted Sands: Kelari's Judgment (hit) 46%, Kelari, the Tainted Sands: Kelari's Deception (hit) 22%, Kelari's Brutality: Eruption (hit) 14%, Kelari's Deception: Hidden (hit) 10%, Kelari, the Tainted Sands: Kelari's Brutality (hit) 9%
+         crits:Kelari's Brutality: Eruption 1, crits:Kelari, the Tainted Sands: Kelari's Brutality 2, hits:Kelari's Brutality: Eruption 5, hits:Kelari's Deception: Hidden 6, hits:Kelari, the Tainted Sands: Kelari's Brutality 10, hits:Kelari, the Tainted Sands: Kelari's Deception 6, hits:Kelari, the Tainted Sands: Kelari's Judgment 2, inflict:Maim 5, minion:hit 4, uses:Kelari, the Tainted Sands: Kelari's Brutality 6, uses:Kelari, the Tainted Sands: Kelari's Deception 6, uses:Kelari, the Tainted Sands: Kelari's Judgment 2
   types without a model: CommandableMinion, MinionsAreUndamagable
 
 #### Killing Palm   [Area Attack GeneratesCharges Melee MeleeSingleTarget Palm Physical]   needs: Quarterstaff
@@ -2132,11 +2142,10 @@ pushed out of the way.
   Manifest a copy of your main hand Melee Martial Weapon as an immortal Companion to fight by your side. In addition to its standard Strikes, the Manifested Weapon gains an additional Attack depending on its weapon type.
   level 20: cost None (per minute None), cooldown None xNone, multiplier None, crit None
   set Manifest Weapon  minion_1%_damage_+%_per_X_player_strength=1 active_skill_minion_1%_attack_speed_+%_per_X_player_dexterity=3 skill_desired_amount_override=1  | is_resummoning_minion
-  play: spam Manifest Weapon
-  built Manifest Weapon                    x1.00, 0.00s, cd None x1, cost 0 +0/s, hits [], single
+  play: (cannot be pressed)
   minion Animated Weapon: Animated Weapon: Mace Slam, Animated Weapon: Quarterstaff Sweep, Animated Weapon: Spear Dash
-  fight: 328 dps; Animated Weapon: Spear Dash (hit) 64%, Animated Weapon: Mace Slam (hit) 28%, Animated Weapon: Quarterstaff Sweep (hit) 8%
-         hits:Animated Weapon: Mace Slam 4, hits:Animated Weapon: Quarterstaff Sweep 3, hits:Animated Weapon: Spear Dash 9, uses:Animated Weapon: Mace Slam 4, uses:Animated Weapon: Quarterstaff Sweep 4, uses:Animated Weapon: Spear Dash 9, uses:Manifest Weapon 607
+  fight: 101 dps; Animated Weapon: Spear Dash (hit) 64%, Animated Weapon: Mace Slam (hit) 29%, Animated Weapon: Quarterstaff Sweep (hit) 7%
+         hits:Animated Weapon: Mace Slam 4, hits:Animated Weapon: Quarterstaff Sweep 3, hits:Animated Weapon: Spear Dash 9, minion:hit 4, uses:Animated Weapon: Mace Slam 4, uses:Animated Weapon: Quarterstaff Sweep 4, uses:Animated Weapon: Spear Dash 9
   types without a model: MinionsAreUndamagable
 
 #### Mantra of Destruction   [Buff Chaos ComboStacking Duration EmpowersOtherSkill HasUsageCondition]   needs: Quarterstaff
@@ -2206,10 +2215,9 @@ Purple Flames of Chayula for a duration.
   Summons a mysterious undamageable Mist Raven that can be Commanded to dive at target location, crashing through an otherworldly mirror and damaging enemies in an area. The raven grants you a Frenzy Charge for each enemy it Culls.
   level 20: cost None (per minute None), cooldown None xNone, multiplier None, crit None
   set Minion Info      display_minion_monster_type=2 minion_base_resummon_time_ms=12000 skill_desired_amount_override=1  | is_resummoning_minion use_owners_culling_threshold_instead_of_your_own kill_enemy_on_hit_if_under_10%_life
-  play: spam Mist Raven
-  built Mist Raven                         x1.00, 1.00s, cd None x1, cost 0 +0/s, hits [], single
+  play: (cannot be pressed)
   fight: 0 dps; 
-         uses:Mist Raven 15
+         
   types without a model: CommandableMinion, GeneratesCharges, MinionsAreUndamagable
 
 #### Molten Blast   [Area Attack AttackInPlace Damage Fire Projectile ProjectilesFromUser RangedAttack]   needs: One Hand Mace / Two Hand Mace
@@ -2267,11 +2275,10 @@ Purple Flames of Chayula for a duration.
   Summon Navira, an invulnerable Water Djinn Minion to do your bidding. Navira will only act when you Command her to do so, bestowing restorative blessings upon you and your Allies with her Spells.
   level 20: cost None (per minute None), cooldown None xNone, multiplier None, crit None
   set Navira, the Last Mirage skill_desired_amount_override=1  | water_djinn_mana_wave_mana_regeneration_rate_+% is_resummoning_minion hide_minion_frame
-  play: spam Navira, the Last Mirage
-  built Navira, the Last Mirage            x1.00, 0.00s, cd None x1, cost 0 +0/s, hits [], single
+  play: (cannot be pressed)
   minion Navira, the Last Mirage: Navira, the Last Mirage: Navira's Fracturing
-  fight: 5952 dps; Navira, the Last Mirage: Navira's Fracturing (hit) 100%
-         hits:Navira, the Last Mirage: Navira's Fracturing 4, inflict:Chill 4, uses:Navira, the Last Mirage 607, uses:Navira, the Last Mirage: Navira's Fracturing 5
+  fight: 363 dps; Navira, the Last Mirage: Navira's Fracturing (hit) 100%
+         hits:Navira, the Last Mirage: Navira's Fracturing 4, inflict:Chill 4, minion:hit 3, uses:Navira, the Last Mirage: Navira's Fracturing 5
   types without a model: CommandableMinion, MinionsAreUndamagable
 
 #### Oil Barrage   [Area Attack Channel ConsumesCharges CreatesGroundEffect Damage Projectile ProjectilesFromUser RangedAttack Shapeshift SkillConsumesPowerChargesOnUse Sustained Wyvern]   needs: Talisman
@@ -2520,8 +2527,8 @@ Purple Flames of Chayula for a duration.
   minion Raging Spirit 8: Raging Spirit: Basic Attack
   minion Raging Spirit 9: Raging Spirit: Basic Attack
   minion Raging Spirit 10: Raging Spirit: Basic Attack
-  fight: 1832 dps; Raging Spirit: Basic Attack (hit) 99%, Ignite 1%
-         crits:Raging Spirit: Basic Attack 7, hits:Raging Spirit: Basic Attack 200, inflict:Ignite 8, uses:Raging Spirit: Basic Attack 210
+  fight: 0 dps; 
+         
 
 #### Rain of Arrows   [Area Attack Bow ConsumesCharges GroundTargetedProjectile MirageArcherCanUse ProjectileNoCollision ProjectileNumber ProjectileSpeed Rain RangedAttack SkillConsumesFrenzyChargesOnUse Sustained]   needs: Bow
   Fire a hail of arrows into the air, causing them to rain from above. Consumes a Frenzy Charge to fire more arrows.
@@ -2558,9 +2565,18 @@ Purple Flames of Chayula for a duration.
   set Minion Info      display_minion_monster_type=1 zombie_decay_rate_increase_+%_final=25 base_number_of_zombies_allowed=10 zombie_base_decay_rate_permyriad=0 power_charged_zombie_movement_speed_+%_final=25 power_charged_zombie_damage_taken_-%_final=30 base_skill_effect_duration=20000  | power_charged_zombie_hit_damage_+%_final can_perform_skill_while_moving
   play: spam Raise Zombie
   built Raise Zombie                       x1.00, 0.60s, cd None x1, cost 102 +0/s, hits [], single
-  note: Raise Zombie: temporary minions are not simulated
+  minion Raised Zombie 1: Raised Zombie: Basic Attack
+  minion Raised Zombie 2: Raised Zombie: Basic Attack
+  minion Raised Zombie 3: Raised Zombie: Basic Attack
+  minion Raised Zombie 4: Raised Zombie: Basic Attack
+  minion Raised Zombie 5: Raised Zombie: Basic Attack
+  minion Raised Zombie 6: Raised Zombie: Basic Attack
+  minion Raised Zombie 7: Raised Zombie: Basic Attack
+  minion Raised Zombie 8: Raised Zombie: Basic Attack
+  minion Raised Zombie 9: Raised Zombie: Basic Attack
+  minion Raised Zombie 10: Raised Zombie: Basic Attack
   fight: 0 dps; 
-         uses:Raise Zombie 24
+         
   types without a model: MinionsCanExplode, TargetsDestructibleCorpses
 
 #### Rake   [Area Attack Melee MeleeSingleTarget Movement Physical Spear]   needs: Spear
@@ -2613,15 +2629,8 @@ Purple Flames of Chayula for a duration.
   minion Ravenous Swarm 1: Ravenous Swarm: Attack
   minion Ravenous Swarm 2: Ravenous Swarm: Attack
   minion Ravenous Swarm 3: Ravenous Swarm: Attack
-  minion Ravenous Swarm 4: Ravenous Swarm: Attack
-  minion Ravenous Swarm 5: Ravenous Swarm: Attack
-  minion Ravenous Swarm 6: Ravenous Swarm: Attack
-  minion Ravenous Swarm 7: Ravenous Swarm: Attack
-  minion Ravenous Swarm 8: Ravenous Swarm: Attack
-  minion Ravenous Swarm 9: Ravenous Swarm: Attack
-  minion Ravenous Swarm 10: Ravenous Swarm: Attack
-  fight: 1800 dps; Ravenous Swarm: Attack (hit) 93%, Poison 7%
-         crits:Ravenous Swarm: Attack 9, hits:Ravenous Swarm: Attack 200, inflict:Poison 200, uses:Ravenous Swarm: Attack 210
+  fight: 88 dps; Ravenous Swarm: Attack (hit) 65%, Poison 35%
+         crits:Ravenous Swarm: Attack 1, hits:Ravenous Swarm: Attack 21, inflict:Poison 21, minion:left 1, summoned:Ravenous Swarm 3, uses:Ravenous Swarm: Attack 24
 
 #### Reap   [Area AreaSpell Damage Duration Physical Spell]
   Conjure a bloody scythe that sweeps across the targeted area, dealing Physical damage to enemies and applying Critical Weakness. Cannot be Triggered.
@@ -2704,8 +2713,8 @@ Purple Flames of Chayula for a duration.
   minion Rhoa Companion 1: Rhoa Companion: Basic Attack
   minion Rhoa Companion 2: Rhoa Companion: Basic Attack
   minion Rhoa Companion 3: Rhoa Companion: Basic Attack
-  fight: 1445 dps; Rhoa Companion: Basic Attack (hit) 100%
-         crits:Rhoa Companion: Basic Attack 3, hits:Rhoa Companion: Basic Attack 48, uses:Rhoa Companion: Basic Attack 51
+  fight: 497 dps; Rhoa Companion: Basic Attack (hit) 100%
+         crits:Rhoa Companion: Basic Attack 4, hits:Rhoa Companion: Basic Attack 48, minion:hit 9, uses:Rhoa Companion: Basic Attack 51
 
 #### Righteous Descent   [Area Attack Cooldown Lightning ManualCooldownConsumption Movement Physical Slam Spear Travel]   needs: Spear
   Leap into the air carried by divine wings, damaging enemies with your spear where you land. If there is a Fragment of Divinity near you or the targeted location, this attack will Consume it when you leap to become Empowered, dealing more damage and granting life and mana recovery. This skill does not use up its Cooldown when empowered.
@@ -2784,11 +2793,10 @@ Purple Flames of Chayula for a duration.
   Summon Ruzhan, an invulnerable Flame Djinn Minion, to do your bidding. Ruzhan emerges to Strike enemies with his greatsword whenever you use a damaging Skill, and casts devastating Fire Spells when Commanded to do so.
   level 20: cost None (per minute None), cooldown None xNone, multiplier None, crit None
   set Ruzhan, the Blazing Sword skill_desired_amount_override=1 djinn_damage_+%_final_per_number_of_damaging_skills_my_parent_has_used_recently=10 skill_specific_stat_description_mode=1  | is_resummoning_minion hide_minion_frame active_skill_tracks_number_of_damaging_skills_recently_for_minions
-  play: spam Ruzhan, the Blazing Sword
-  built Ruzhan, the Blazing Sword          x1.00, 0.00s, cd None x1, cost 0 +0/s, hits [], single
+  play: (cannot be pressed)
   minion Ruzhan, the Blazing Sword: Ruzhan, the Blazing Sword: Ruzhan's Trap, Ruzhan, the Blazing Sword: Ruzhan's Reckoning, Ruzhan, the Blazing Sword: Ruzhan's Fury, Ruzhan, the Blazing Sword: Ruzhan's Zealotry, Ruzhan, the Blazing Sword: Ruzhan's Brand
-  fight: 20822 dps; Ignite 36%, Ruzhan's Reckoning: Fire Wave (hit) 21%, Ruzhan, the Blazing Sword: Ruzhan's Brand (hit) 16%, Ruzhan, the Blazing Sword: Ruzhan's Fury (hit) 15%, Ruzhan's Trap: Tornado (hit) 4%, Ruzhan, the Blazing Sword: Ruzhan's Trap (hit) 3%, Ruzhan, the Blazing Sword: Ruzhan's Reckoning (hit) 3%, Ruzhan, the Blazing Sword: Ruzhan's Zealotry (hit) 2%, Ruzhan's Fury: Explosion (hit) 1%, Ruzhan's Trap: Rune (hit) 0%
-         crits:Ruzhan, the Blazing Sword: Ruzhan's Zealotry 1, hits:Ruzhan's Fury: Explosion 2, hits:Ruzhan's Reckoning: Fire Wave 2, hits:Ruzhan's Trap: Rune 3, hits:Ruzhan's Trap: Tornado 3, hits:Ruzhan, the Blazing Sword: Ruzhan's Brand 10, hits:Ruzhan, the Blazing Sword: Ruzhan's Fury 40, hits:Ruzhan, the Blazing Sword: Ruzhan's Reckoning 2, hits:Ruzhan, the Blazing Sword: Ruzhan's Trap 6, hits:Ruzhan, the Blazing Sword: Ruzhan's Zealotry 3, inflict:Ignite 32, uses:Ruzhan, the Blazing Sword 607, uses:Ruzhan, the Blazing Sword: Ruzhan's Brand 10, uses:Ruzhan, the Blazing Sword: Ruzhan's Fury 3, uses:Ruzhan, the Blazing Sword: Ruzhan's Reckoning 2, uses:Ruzhan, the Blazing Sword: Ruzhan's Trap 3, uses:Ruzhan, the Blazing Sword: Ruzhan's Zealotry 3
+  fight: 1043 dps; Ruzhan, the Blazing Sword: Ruzhan's Fury (hit) 22%, Ruzhan's Reckoning: Fire Wave (hit) 21%, Ruzhan, the Blazing Sword: Ruzhan's Brand (hit) 21%, Ruzhan, the Blazing Sword: Ruzhan's Zealotry (hit) 12%, Ruzhan's Trap: Tornado (hit) 8%, Ruzhan, the Blazing Sword: Ruzhan's Trap (hit) 6%, Ignite 5%, Ruzhan, the Blazing Sword: Ruzhan's Reckoning (hit) 4%, Ruzhan's Fury: Explosion (hit) 1%, Ruzhan's Trap: Rune (hit) 0%
+         crits:Ruzhan's Trap: Rune 1, crits:Ruzhan's Trap: Tornado 1, crits:Ruzhan, the Blazing Sword: Ruzhan's Trap 2, hits:Ruzhan's Fury: Explosion 2, hits:Ruzhan's Reckoning: Fire Wave 2, hits:Ruzhan's Trap: Rune 3, hits:Ruzhan's Trap: Tornado 3, hits:Ruzhan, the Blazing Sword: Ruzhan's Brand 10, hits:Ruzhan, the Blazing Sword: Ruzhan's Fury 40, hits:Ruzhan, the Blazing Sword: Ruzhan's Reckoning 2, hits:Ruzhan, the Blazing Sword: Ruzhan's Trap 6, hits:Ruzhan, the Blazing Sword: Ruzhan's Zealotry 3, inflict:Ignite 2, minion:hit 5, uses:Ruzhan, the Blazing Sword: Ruzhan's Brand 10, uses:Ruzhan, the Blazing Sword: Ruzhan's Fury 3, uses:Ruzhan, the Blazing Sword: Ruzhan's Reckoning 2, uses:Ruzhan, the Blazing Sword: Ruzhan's Trap 3, uses:Ruzhan, the Blazing Sword: Ruzhan's Zealotry 3
   types without a model: CommandableMinion, MinionsAreUndamagable
 
 #### Sacrifice   [AttackInPlace Buff HasReservation Minion OngoingSkill Persistent ReserveInAllSets]
@@ -2990,51 +2998,47 @@ Purple Flames of Chayula for a duration.
   Activate to summon bomb-throwing, Reviving Skeletal Arsonists that can detonate other Minions on Command.
   level 20: cost None (per minute None), cooldown None xNone, multiplier None, crit None
   set Minion Info      display_minion_monster_type=2 minion_base_resummon_time_ms=12000 skeletal_graft_buff_effect_magnitude=15  | is_resummoning_minion
-  play: spam Skeletal Arsonist
-  built Skeletal Arsonist Minion           x1.00, 0.00s, cd None x1, cost 0 +0/s, hits [], single
-  minion Skeletal Arsonist 1: Skeletal Arsonist: Explosive Demise, Skeletal Arsonist: Fire Bomb
-  minion Skeletal Arsonist 2: Skeletal Arsonist: Explosive Demise, Skeletal Arsonist: Fire Bomb
-  minion Skeletal Arsonist 3: Skeletal Arsonist: Explosive Demise, Skeletal Arsonist: Fire Bomb
-  minion Skeletal Arsonist 4: Skeletal Arsonist: Explosive Demise, Skeletal Arsonist: Fire Bomb
-  minion Skeletal Arsonist 5: Skeletal Arsonist: Explosive Demise, Skeletal Arsonist: Fire Bomb
-  minion Skeletal Arsonist 6: Skeletal Arsonist: Explosive Demise, Skeletal Arsonist: Fire Bomb
-  minion Skeletal Arsonist 7: Skeletal Arsonist: Explosive Demise, Skeletal Arsonist: Fire Bomb
-  fight: 2539 dps; Skeletal Arsonist: Explosive Demise (hit) 66%, Skeletal Arsonist: Fire Bomb (hit) 33%, Ignite 0%
-         crits:Skeletal Arsonist: Explosive Demise 2, crits:Skeletal Arsonist: Fire Bomb 5, hits:Skeletal Arsonist: Explosive Demise 49, hits:Skeletal Arsonist: Fire Bomb 91, inflict:Ignite 3, uses:Skeletal Arsonist Minion 607, uses:Skeletal Arsonist: Explosive Demise 49, uses:Skeletal Arsonist: Fire Bomb 98
+  play: (cannot be pressed)
+  minion Skeletal Arsonist 1: Skeletal Arsonist: Fire Bomb
+  minion Skeletal Arsonist 2: Skeletal Arsonist: Fire Bomb
+  minion Skeletal Arsonist 3: Skeletal Arsonist: Fire Bomb
+  minion Skeletal Arsonist 4: Skeletal Arsonist: Fire Bomb
+  minion Skeletal Arsonist 5: Skeletal Arsonist: Fire Bomb
+  minion Skeletal Arsonist 6: Skeletal Arsonist: Fire Bomb
+  minion Skeletal Arsonist 7: Skeletal Arsonist: Fire Bomb
+  fight: 587 dps; Skeletal Arsonist: Fire Bomb (hit) 100%, Ignite 0%
+         crits:Skeletal Arsonist: Fire Bomb 4, hits:Skeletal Arsonist: Fire Bomb 140, inflict:Ignite 1, minion:hit 11, uses:Skeletal Arsonist: Fire Bomb 147
   types without a model: CommandableMinion, CreatesSkeletonMinion, CreatesUndeadMinion, Detonator, MinionsCanExplode
 
 #### Skeletal Brute   [CommandableMinion CreatesMinion CreatesSkeletonMinion CreatesUndeadMinion HasReservation Minion MinionsCanExplode MultipleReservation Persistent Physical]
   Activate to summon hard-hitting, Reviving Skeletal Brutes that can Stun Primed enemies and Warcry on Command. This Warcry Intimidates nearby enemies and Consumes Freeze on enemies and allies to deal damage in an Area around them.
   level 20: cost None (per minute None), cooldown None xNone, multiplier None, crit None
   set Minion Info      display_minion_monster_type=2 minion_base_resummon_time_ms=12000 skeletal_graft_buff_effect_magnitude=60  | is_resummoning_minion
-  play: spam Skeletal Brute
-  built Skeletal Brute Minion              x1.00, 0.00s, cd None x1, cost 0 +0/s, hits [], single
+  play: (cannot be pressed)
   minion Skeletal Brute 1: Skeletal Brute: Bonebreaker, Skeletal Brute: Shattering Roar, Skeletal Brute: Basic Attack
   minion Skeletal Brute 2: Skeletal Brute: Bonebreaker, Skeletal Brute: Shattering Roar, Skeletal Brute: Basic Attack
   minion Skeletal Brute 3: Skeletal Brute: Bonebreaker, Skeletal Brute: Shattering Roar, Skeletal Brute: Basic Attack
   minion Skeletal Brute 4: Skeletal Brute: Bonebreaker, Skeletal Brute: Shattering Roar, Skeletal Brute: Basic Attack
   minion Skeletal Brute 5: Skeletal Brute: Bonebreaker, Skeletal Brute: Shattering Roar, Skeletal Brute: Basic Attack
   minion Skeletal Brute 6: Skeletal Brute: Bonebreaker, Skeletal Brute: Shattering Roar, Skeletal Brute: Basic Attack
-  fight: 2914 dps; Skeletal Brute: Bonebreaker (hit) 66%, Skeletal Brute: Basic Attack (hit) 34%, Skeletal Brute: Shattering Roar (hit) 0%
-         crits:Skeletal Brute: Basic Attack 1, crits:Skeletal Brute: Bonebreaker 2, crits:Skeletal Brute: Shattering Roar 1, hits:Skeletal Brute: Basic Attack 36, hits:Skeletal Brute: Bonebreaker 30, hits:Skeletal Brute: Shattering Roar 12, uses:Skeletal Brute Minion 607, uses:Skeletal Brute: Basic Attack 36, uses:Skeletal Brute: Bonebreaker 30, uses:Skeletal Brute: Shattering Roar 18
+  fight: 1050 dps; Skeletal Brute: Bonebreaker (hit) 68%, Skeletal Brute: Basic Attack (hit) 32%, Skeletal Brute: Shattering Roar (hit) 0%
+         crits:Skeletal Brute: Basic Attack 3, crits:Skeletal Brute: Bonebreaker 3, crits:Skeletal Brute: Shattering Roar 2, hits:Skeletal Brute: Basic Attack 36, hits:Skeletal Brute: Bonebreaker 30, hits:Skeletal Brute: Shattering Roar 12, minion:hit 7, uses:Skeletal Brute: Basic Attack 36, uses:Skeletal Brute: Bonebreaker 30, uses:Skeletal Brute: Shattering Roar 18
   types without a model: CommandableMinion, CreatesSkeletonMinion, CreatesUndeadMinion, MinionsCanExplode
 
 #### Skeletal Cleric   [CreatesMinion CreatesSkeletonMinion CreatesUndeadMinion HasReservation Minion MinionsCanExplode MultipleReservation Persistent]
   Activate to summon Reviving Skeletal Clerics that heal other minions and revive fallen Skeletons.
   level 20: cost None (per minute None), cooldown None xNone, multiplier None, crit None
   set Minion Info      display_minion_monster_type=2 minion_base_resummon_time_ms=12000 skeletal_graft_buff_effect_magnitude=30  | is_resummoning_minion
-  play: spam Skeletal Cleric
-  built Skeletal Cleric Minion             x1.00, 0.00s, cd None x1, cost 0 +0/s, hits [], single
+  play: (cannot be pressed)
   fight: 0 dps; 
-         uses:Skeletal Cleric Minion 607
+         
   types without a model: CreatesSkeletonMinion, CreatesUndeadMinion, MinionsCanExplode
 
 #### Skeletal Frost Mage   [Cold CommandableMinion CreatesMinion CreatesSkeletonMinion CreatesUndeadMinion HasReservation Minion MinionsCanExplode MultipleReservation Persistent]
   Activate to summon Reviving Skeletal Frost Mages that can envelop your Minions in an icy shield on Command.
   level 20: cost None (per minute None), cooldown None xNone, multiplier None, crit None
   set Minion Info      display_minion_monster_type=2 minion_base_resummon_time_ms=12000 skeletal_graft_buff_effect_magnitude=35  | is_resummoning_minion
-  play: spam Skeletal Frost Mage
-  built Skeletal Frost Mage Minion         x1.00, 0.00s, cd None x1, cost 0 +0/s, hits [], single
+  play: (cannot be pressed)
   minion Skeletal Frost Mage 1: Skeletal Frost Mage: Ice Shard
   minion Skeletal Frost Mage 2: Skeletal Frost Mage: Ice Shard
   minion Skeletal Frost Mage 3: Skeletal Frost Mage: Ice Shard
@@ -3042,16 +3046,15 @@ Purple Flames of Chayula for a duration.
   minion Skeletal Frost Mage 5: Skeletal Frost Mage: Ice Shard
   minion Skeletal Frost Mage 6: Skeletal Frost Mage: Ice Shard
   minion Skeletal Frost Mage 7: Skeletal Frost Mage: Ice Shard
-  fight: 15755 dps; Skeletal Frost Mage: Ice Shard (hit) 53%, Ice Shard: Explosion (hit) 47%
-         crits:Ice Shard: Explosion 23, crits:Skeletal Frost Mage: Ice Shard 13, hits:Ice Shard: Explosion 112, hits:Skeletal Frost Mage: Ice Shard 112, inflict:Chill 224, inflict:Freeze 1, uses:Skeletal Frost Mage Minion 607, uses:Skeletal Frost Mage: Ice Shard 119
+  fight: 1379 dps; Skeletal Frost Mage: Ice Shard (hit) 53%, Ice Shard: Explosion (hit) 47%
+         crits:Ice Shard: Explosion 27, crits:Skeletal Frost Mage: Ice Shard 15, hits:Ice Shard: Explosion 112, hits:Skeletal Frost Mage: Ice Shard 112, minion:evaded 2, minion:hit 10, uses:Skeletal Frost Mage: Ice Shard 119
   types without a model: CommandableMinion, CreatesSkeletonMinion, CreatesUndeadMinion, MinionsCanExplode
 
 #### Skeletal Reaver   [CommandableMinion CreatesMinion CreatesSkeletonMinion CreatesUndeadMinion HasReservation Minion MinionsCanExplode MultipleReservation Persistent Physical]
   Activate to summon aggressive, Reviving Skeletal Reavers that can enrage on Command. Skeletal Reavers do more Attack Damage and gain increased Attack speed based on their Rage
   level 20: cost None (per minute None), cooldown None xNone, multiplier None, crit None
   set Minion Info      display_minion_monster_type=2 minion_base_resummon_time_ms=12000 skeletal_graft_buff_effect_magnitude=6 attack_speed_+%_per_rage=3  | is_resummoning_minion
-  play: spam Skeletal Reaver
-  built Skeletal Reaver Minion             x1.00, 0.00s, cd None x1, cost 0 +0/s, hits [], single
+  play: (cannot be pressed)
   minion Skeletal Reaver 1: Skeletal Reaver: Basic Attack
   minion Skeletal Reaver 2: Skeletal Reaver: Basic Attack
   minion Skeletal Reaver 3: Skeletal Reaver: Basic Attack
@@ -3062,16 +3065,15 @@ Purple Flames of Chayula for a duration.
   minion Skeletal Reaver 8: Skeletal Reaver: Basic Attack
   minion Skeletal Reaver 9: Skeletal Reaver: Basic Attack
   minion Skeletal Reaver 10: Skeletal Reaver: Basic Attack
-  fight: 723 dps; Skeletal Reaver: Basic Attack (hit) 100%
-         crits:Skeletal Reaver: Basic Attack 11, hits:Skeletal Reaver: Basic Attack 240, uses:Skeletal Reaver Minion 607, uses:Skeletal Reaver: Basic Attack 250
+  fight: 289 dps; Skeletal Reaver: Basic Attack (hit) 100%
+         crits:Skeletal Reaver: Basic Attack 8, hits:Skeletal Reaver: Basic Attack 240, minion:hit 12, uses:Skeletal Reaver: Basic Attack 250
   types without a model: CommandableMinion, CreatesSkeletonMinion, CreatesUndeadMinion, MinionsCanExplode
 
 #### Skeletal Sniper   [Chaos CommandableMinion CreatesMinion CreatesSkeletonMinion CreatesUndeadMinion Fire HasReservation Minion MinionsCanExplode MultipleReservation Persistent Physical]
   Activate to summon long-ranged, Reviving Skeletal Snipers that can fire a gas arrow on Command.
   level 20: cost None (per minute None), cooldown None xNone, multiplier None, crit None
   set Minion Info      display_minion_monster_type=2 minion_base_resummon_time_ms=12000 skeletal_graft_buff_effect_magnitude=15  | is_resummoning_minion
-  play: spam Skeletal Sniper
-  built Skeletal Sniper Minion             x1.00, 0.00s, cd None x1, cost 0 +0/s, hits [], single
+  play: (cannot be pressed)
   minion Skeletal Sniper 1: Skeletal Sniper: Gas Arrow, Skeletal Sniper: Basic Attack
   minion Skeletal Sniper 2: Skeletal Sniper: Gas Arrow, Skeletal Sniper: Basic Attack
   minion Skeletal Sniper 3: Skeletal Sniper: Gas Arrow, Skeletal Sniper: Basic Attack
@@ -3082,16 +3084,15 @@ Purple Flames of Chayula for a duration.
   minion Skeletal Sniper 8: Skeletal Sniper: Gas Arrow, Skeletal Sniper: Basic Attack
   minion Skeletal Sniper 9: Skeletal Sniper: Gas Arrow, Skeletal Sniper: Basic Attack
   minion Skeletal Sniper 10: Skeletal Sniper: Gas Arrow, Skeletal Sniper: Basic Attack
-  fight: 1642 dps; Skeletal Sniper: Basic Attack (hit) 76%, Skeletal Sniper: Gas Arrow (hit) 18%, Poison 6%, Gas Arrow: Poison Cloud (hit) 0%
-         crits:Gas Arrow: Poison Cloud 1, crits:Skeletal Sniper: Basic Attack 2, crits:Skeletal Sniper: Gas Arrow 1, hits:Gas Arrow: Poison Cloud 30, hits:Skeletal Sniper: Basic Attack 100, hits:Skeletal Sniper: Gas Arrow 30, inflict:Poison 30, uses:Skeletal Sniper Minion 607, uses:Skeletal Sniper: Basic Attack 110, uses:Skeletal Sniper: Gas Arrow 30
+  fight: 536 dps; Skeletal Sniper: Basic Attack (hit) 69%, Skeletal Sniper: Gas Arrow (hit) 20%, Poison 12%, Gas Arrow: Poison Cloud (hit) 0%
+         crits:Gas Arrow: Poison Cloud 4, crits:Skeletal Sniper: Basic Attack 4, crits:Skeletal Sniper: Gas Arrow 4, hits:Gas Arrow: Poison Cloud 30, hits:Skeletal Sniper: Basic Attack 99, hits:Skeletal Sniper: Gas Arrow 30, inflict:Poison 30, minion:died 1, minion:hit 13, uses:Skeletal Sniper: Basic Attack 109, uses:Skeletal Sniper: Gas Arrow 30
   types without a model: CommandableMinion, CreatesSkeletonMinion, CreatesUndeadMinion, MinionsCanExplode
 
 #### Skeletal Storm Mage   [CommandableMinion CreatesMinion CreatesSkeletonMinion CreatesUndeadMinion HasReservation Lightning Minion MinionsCanExplode MultipleReservation Persistent]
   Activate to summon Reviving Skeletal Storm Mages that can call down a lightning strike on dead Skeletons on Command.
   level 20: cost None (per minute None), cooldown None xNone, multiplier None, crit None
   set Minion Info      display_minion_monster_type=2 minion_base_resummon_time_ms=12000 skeletal_graft_buff_effect_magnitude=25  | is_resummoning_minion
-  play: spam Skeletal Storm Mage
-  built Skeletal Storm Mage Minion         x1.00, 0.00s, cd None x1, cost 0 +0/s, hits [], single
+  play: (cannot be pressed)
   minion Skeletal Storm Mage 1: Skeletal Storm Mage: Death Storm, Skeletal Storm Mage: Arc
   minion Skeletal Storm Mage 2: Skeletal Storm Mage: Death Storm, Skeletal Storm Mage: Arc
   minion Skeletal Storm Mage 3: Skeletal Storm Mage: Death Storm, Skeletal Storm Mage: Arc
@@ -3099,16 +3100,15 @@ Purple Flames of Chayula for a duration.
   minion Skeletal Storm Mage 5: Skeletal Storm Mage: Death Storm, Skeletal Storm Mage: Arc
   minion Skeletal Storm Mage 6: Skeletal Storm Mage: Death Storm, Skeletal Storm Mage: Arc
   minion Skeletal Storm Mage 7: Skeletal Storm Mage: Death Storm, Skeletal Storm Mage: Arc
-  fight: 49655 dps; Skeletal Storm Mage: Death Storm (hit) 83%, Skeletal Storm Mage: Arc (hit) 17%
-         crits:Skeletal Storm Mage: Arc 5, crits:Skeletal Storm Mage: Death Storm 3, hits:Skeletal Storm Mage: Arc 63, hits:Skeletal Storm Mage: Death Storm 28, inflict:Shock 10, uses:Skeletal Storm Mage Minion 607, uses:Skeletal Storm Mage: Arc 70, uses:Skeletal Storm Mage: Death Storm 28
+  fight: 2531 dps; Skeletal Storm Mage: Death Storm (hit) 80%, Skeletal Storm Mage: Arc (hit) 20%
+         crits:Skeletal Storm Mage: Arc 5, crits:Skeletal Storm Mage: Death Storm 4, hits:Skeletal Storm Mage: Arc 63, hits:Skeletal Storm Mage: Death Storm 28, minion:hit 13, uses:Skeletal Storm Mage: Arc 70, uses:Skeletal Storm Mage: Death Storm 28
   types without a model: CommandableMinion, CreatesSkeletonMinion, CreatesUndeadMinion, MinionsCanExplode
 
 #### Skeletal Warrior   [CreatesMinion CreatesSkeletonMinion CreatesUndeadMinion HasReservation Minion MinionsCanExplode MultipleReservation Persistent Physical]
   Activate to summon Reviving Skeletal Warriors.
   level 20: cost None (per minute None), cooldown None xNone, multiplier None, crit None
   set Minion Info      display_minion_monster_type=2 minion_base_resummon_time_ms=12000 first_X_minions_have_0_base_spirit_reservation=2 skill_desired_initial_amount=2 skeletal_graft_buff_effect_magnitude=15  | is_resummoning_minion
-  play: spam Skeletal Warrior
-  built Skeletal Warrior Minion            x1.00, 0.00s, cd None x1, cost 0 +0/s, hits [], single
+  play: (cannot be pressed)
   minion Skeletal Warrior 1: Skeletal Warrior: Basic Attack
   minion Skeletal Warrior 2: Skeletal Warrior: Basic Attack
   minion Skeletal Warrior 3: Skeletal Warrior: Basic Attack
@@ -3126,8 +3126,8 @@ Purple Flames of Chayula for a duration.
   minion Skeletal Warrior 15: Skeletal Warrior: Basic Attack
   minion Skeletal Warrior 16: Skeletal Warrior: Basic Attack
   minion Skeletal Warrior 17: Skeletal Warrior: Basic Attack
-  fight: 2064 dps; Skeletal Warrior: Basic Attack (hit) 100%
-         crits:Skeletal Warrior: Basic Attack 14, hits:Skeletal Warrior: Basic Attack 340, uses:Skeletal Warrior Minion 607, uses:Skeletal Warrior: Basic Attack 357
+  fight: 642 dps; Skeletal Warrior: Basic Attack (hit) 100%
+         crits:Skeletal Warrior: Basic Attack 13, hits:Skeletal Warrior: Basic Attack 340, minion:evaded 1, minion:hit 12, uses:Skeletal Warrior: Basic Attack 357
   types without a model: CreatesSkeletonMinion, CreatesUndeadMinion, MinionsCanExplode
 
 #### Skyfall   [Area AreaSpell Cold CreatesMinion Damage HasUsageCondition Minion Physical Spell]
@@ -3299,11 +3299,10 @@ Purple Flames of Chayula for a duration.
   Summon the spirit of the bound monster as a Reviving Minion.
   level 20: cost None (per minute None), cooldown None xNone, multiplier None, crit None
   set Minion Info      minion_base_resummon_time_ms=12000 spectre_warp_start_distance=100 spectre_warp_end_distance=30 spectre_warp_speed_override=100  | is_resummoning_minion
-  play: spam Spectre: {0}
-  built Spectre: {0}                       x1.00, 0.85s, cd None x1, cost 0 +0/s, hits [], single
+  play: (cannot be pressed)
   note: Spectre: {0}: no monster data
   fight: 0 dps; 
-         uses:Spectre: {0}  18
+         
   types without a model: CreatesUndeadMinion, MinionsCanExplode
 
 #### Spell Totem   [ConsumesCharges Duration HasUsageCondition Limit Meta RequiresCharges SkillConsumesEnduranceChargesOnUse SkillConsumesPowerChargesOnUse SummonsTotem]
@@ -3337,11 +3336,10 @@ Purple Flames of Chayula for a duration.
   A flock of mist ravens circle you, dealing damage over time in an area. Their numbers are bolstered by slain foes, or in the Presence of dangerous enemies, but the flock as a whole is considered a single minion. You can Command some of them to take flight, leaving the flock to assail your enemies.
   level 20: cost None (per minute None), cooldown None xNone, multiplier None, crit None
   set Minion Info      display_minion_monster_type=2 minion_base_resummon_time_ms=12000 tangmazu_raven_added_to_your_flock_every_x_power_of_enemies_killed=1 skill_desired_amount_override=1  | tangmazu_raven_added_to_your_flock_every_x_msec_a_rare_or_unique_enemy_is_in_your_presence is_resummoning_minion
-  play: spam Spiraling Conspiracy
-  built Spiraling Conspiracy               x1.00, 1.00s, cd None x1, cost 0 +0/s, hits [], single
+  play: (cannot be pressed)
   minion Raven Conspiracy: Raven Conspiracy: Mad Flight
-  fight: 139 dps; Raven Conspiracy: Mad Flight (hit) 100%
-         hits:Raven Conspiracy: Mad Flight 2, uses:Raven Conspiracy: Mad Flight 3, uses:Spiraling Conspiracy 15
+  fight: 55 dps; Raven Conspiracy: Mad Flight (hit) 100%
+         hits:Raven Conspiracy: Mad Flight 2, minion:evaded 1, minion:hit 5, uses:Raven Conspiracy: Mad Flight 3
   types without a model: CommandableMinion, MinionsAreUndamagable
 
 #### Spirit Vessel   [AttackInPlace Companion CreatesCompanion CreatesMinion HasReservation Meta Minion Persistent]
@@ -3439,11 +3437,10 @@ Purple Flames of Chayula for a duration.
   Activate to summon a Reviving Infernal Hound which Ignites enemies near it.
   level 20: cost None (per minute None), cooldown None xNone, multiplier None, crit None
   set Summon Infernal Hound display_minion_monster_type=8 infernal_familiar_minion_burns_for_%_max_life=20 infernal_familiar_minion_burn_radius=25 skill_desired_amount_override=1  | is_resummoning_minion
-  play: spam Summon Infernal Hound
-  built Summon Infernal Hound              x1.00, 0.00s, cd None x1, cost 0 +0/s, hits [], single
+  play: (cannot be pressed)
   minion Infernal Hound: Infernal Hound: Basic Attack
-  fight: 362 dps; Infernal Hound: Basic Attack (hit) 100%
-         hits:Infernal Hound: Basic Attack 26, uses:Infernal Hound: Basic Attack 27, uses:Summon Infernal Hound 607
+  fight: 102 dps; Infernal Hound: Basic Attack (hit) 100%
+         hits:Infernal Hound: Basic Attack 26, minion:hit 3, uses:Infernal Hound: Basic Attack 27
   types without a model: CreatesDemonMinion, MinionsCanExplode
 
 #### Sunder   [Area Attack ConsumesFullyBrokenArmour CreatesFissure Duration Melee Slam]   needs: One Hand Mace / Two Hand Mace
@@ -3474,11 +3471,10 @@ Purple Flames of Chayula for a duration.
   Recruit artillery Minions that take up positions behind you. They will lie in wait for your Command, then fire volleys of arrows at the target location.
   level 20: cost None (per minute None), cooldown None xNone, multiplier None, crit None
   set Minion Info      minion_1%_damage_+%_per_X_player_strength=1 minion_1%_area_of_effect_+%_per_X_player_dexterity=3 skill_desired_amount_override=1  | 
-  play: spam Supporting Fire
-  built Supporting Fire                    x1.00, 0.00s, cd None x1, cost 0 +0/s, hits [], single
+  play: (cannot be pressed)
   minion Artillery Squad: Artillery Squad: Death From Above
-  fight: 1117 dps; Artillery Squad: Death From Above (hit) 100%
-         hits:Artillery Squad: Death From Above 12, uses:Artillery Squad: Death From Above 3, uses:Supporting Fire 607
+  fight: 394 dps; Artillery Squad: Death From Above (hit) 100%
+         hits:Artillery Squad: Death From Above 12, minion:hit 2, uses:Artillery Squad: Death From Above 3
   types without a model: CommandableMinion, MinionsAreUndamagable
 
 #### Tame Beast   [Companion Duration Minion]
@@ -3714,9 +3710,28 @@ Purple Flames of Chayula for a duration.
   set Unearth          unearth_base_cone_speed_multiplier=50 active_skill_base_area_of_effect_radius=60 bone_cone_angle=40 base_skill_effect_duration=15000 minion_aggro_radius_+%=300 skill_specific_stat_description_mode=1  | spell_minimum_base_physical_damage spell_maximum_base_physical_damage base_number_of_skeletal_constructs_allowed minion_aggro_radius_+% can_perform_skill_while_moving is_area_damage
   play: spam Unearth
   built Unearth                            x1.00, 0.95s, cd None x1, cost 76 +0/s, hits [(1.0, 1.0)], area 60
-  note: Unearth: temporary minions are not simulated
-  fight: 0 dps; 
-         
+  minion Bone Crawler 1: Bone Crawler: Basic Attack
+  minion Bone Crawler 2: Bone Crawler: Basic Attack
+  minion Bone Crawler 3: Bone Crawler: Basic Attack
+  minion Bone Crawler 4: Bone Crawler: Basic Attack
+  minion Bone Crawler 5: Bone Crawler: Basic Attack
+  minion Bone Crawler 6: Bone Crawler: Basic Attack
+  minion Bone Crawler 7: Bone Crawler: Basic Attack
+  minion Bone Crawler 8: Bone Crawler: Basic Attack
+  minion Bone Crawler 9: Bone Crawler: Basic Attack
+  minion Bone Crawler 10: Bone Crawler: Basic Attack
+  minion Bone Crawler 11: Bone Crawler: Basic Attack
+  minion Bone Crawler 12: Bone Crawler: Basic Attack
+  minion Bone Crawler 13: Bone Crawler: Basic Attack
+  minion Bone Crawler 14: Bone Crawler: Basic Attack
+  minion Bone Crawler 15: Bone Crawler: Basic Attack
+  minion Bone Crawler 16: Bone Crawler: Basic Attack
+  minion Bone Crawler 17: Bone Crawler: Basic Attack
+  minion Bone Crawler 18: Bone Crawler: Basic Attack
+  minion Bone Crawler 19: Bone Crawler: Basic Attack
+  minion Bone Crawler 20: Bone Crawler: Basic Attack
+  fight: 31 dps; Unearth (hit) 100%
+         crits:Unearth 1, hits:Unearth 15, uses:Unearth 16
   types without a model: TargetsDestructibleCorpses
 
 #### Unleash   [Buff Cooldown Duration EmpowersOtherSkill ModifiesNextSkill Spell]
@@ -3890,7 +3905,30 @@ Purple Flames of Chayula for a duration.
   set Wardbound Minions base_skill_effect_duration=15000 wardbound_minion_maximum_number_of_casts=6  | wardbound_minions_summon_minion_for_every_X_runic_ward_spent base_number_of_wardbound_minions_allowed can_perform_skill_while_moving
   play: spam Wardbound Minions
   built Wardbound Minions                  x1.00, 0.75s, cd None x1, cost 0 +0/s, hits [], single
-  note: Wardbound Minions: temporary minions are not simulated
+  minion Wardbound Caster 1: Wardbound Caster: Cold Spell
+  minion Wardbound Caster 2: Wardbound Caster: Cold Spell
+  minion Wardbound Caster 3: Wardbound Caster: Cold Spell
+  minion Wardbound Caster 4: Wardbound Caster: Cold Spell
+  minion Wardbound Caster 5: Wardbound Caster: Cold Spell
+  minion Wardbound Caster 6: Wardbound Caster: Cold Spell
+  minion Wardbound Caster 7: Wardbound Caster: Cold Spell
+  minion Wardbound Caster 8: Wardbound Caster: Cold Spell
+  minion Wardbound Caster 9: Wardbound Caster: Cold Spell
+  minion Wardbound Caster 10: Wardbound Caster: Cold Spell
+  minion Wardbound Caster 11: Wardbound Caster: Cold Spell
+  minion Wardbound Caster 12: Wardbound Caster: Cold Spell
+  minion Wardbound Caster 13: Wardbound Caster: Cold Spell
+  minion Wardbound Caster 14: Wardbound Caster: Cold Spell
+  minion Wardbound Caster 15: Wardbound Caster: Cold Spell
+  minion Wardbound Caster 16: Wardbound Caster: Cold Spell
+  minion Wardbound Caster 17: Wardbound Caster: Cold Spell
+  minion Wardbound Caster 18: Wardbound Caster: Cold Spell
+  minion Wardbound Caster 19: Wardbound Caster: Cold Spell
+  minion Wardbound Caster 20: Wardbound Caster: Cold Spell
+  minion Wardbound Caster 21: Wardbound Caster: Cold Spell
+  minion Wardbound Caster 22: Wardbound Caster: Cold Spell
+  minion Wardbound Caster 23: Wardbound Caster: Cold Spell
+  minion Wardbound Caster 24: Wardbound Caster: Cold Spell
   fight: 0 dps; 
          uses:Wardbound Minions 20
   types without a model: MinionsCanExplode
@@ -3942,11 +3980,10 @@ Purple Flames of Chayula for a duration.
   Call upon a Bear Spirit Companion to maul your foes. The Bear Spirit leaps at enemies to Maim them, Leeches Life with its slam, and periodically roars to Intimidate enemies. The Bear Spirit does not count toward your Companion limit.
   level 20: cost None (per minute None), cooldown None xNone, multiplier None, crit None
   set Minion Info      skill_desired_amount_override=1  | is_resummoning_minion
-  play: spam Wild Protector
-  built Wild Protector                     x1.00, 0.00s, cd None x1, cost 0 +0/s, hits [], single
+  play: (cannot be pressed)
   minion Wild Bear Spirit: Wild Bear Spirit: Slam, Wild Bear Spirit: Maul
-  fight: 2485 dps; Wild Bear Spirit: Maul (hit) 88%, Wild Bear Spirit: Slam (hit) 12%
-         crits:Wild Bear Spirit: Maul 1, hits:Wild Bear Spirit: Maul 25, hits:Wild Bear Spirit: Slam 4, uses:Wild Bear Spirit: Maul 26, uses:Wild Bear Spirit: Slam 4, uses:Wild Protector 607
+  fight: 1010 dps; Wild Bear Spirit: Maul (hit) 88%, Wild Bear Spirit: Slam (hit) 12%
+         crits:Wild Bear Spirit: Maul 3, hits:Wild Bear Spirit: Maul 25, hits:Wild Bear Spirit: Slam 4, minion:hit 3, uses:Wild Bear Spirit: Maul 26, uses:Wild Bear Spirit: Slam 4
 
 #### Wildwood's Gifts   [AttackInPlace Buff GeneratesRemnants HasReservation OngoingSkill Persistent]
   You are chosen by Azmerian spirits who provide guidance, allowing you to see nearby Ancient Blooms.
@@ -4018,8 +4055,7 @@ Purple Flames of Chayula for a duration.
   Activate to summon a pack of Wolf Companions. The pack treated as a single Companion for effects that count or limit Companions, regardless of the number of Wolves in the pack.
   level 20: cost None (per minute None), cooldown None xNone, multiplier None, crit None
   set Minion Info      skill_minion_summon_delay_interval_ms=100  | skill_wolf_pack_size is_resummoning_minion
-  play: spam Wolf Pack
-  built Wolf Pack                          x1.00, 1.00s, cd None x1, cost 0 +0/s, hits [], single
+  play: (cannot be pressed)
   minion Wolf Companion 1: Wolf Companion: Leap Slam, Wolf Companion: Basic Attack
   minion Wolf Companion 2: Wolf Companion: Leap Slam, Wolf Companion: Basic Attack
   minion Wolf Companion 3: Wolf Companion: Leap Slam, Wolf Companion: Basic Attack
@@ -4050,6 +4086,6 @@ Purple Flames of Chayula for a duration.
   minion Wolf Companion 28: Wolf Companion: Leap Slam, Wolf Companion: Basic Attack
   minion Wolf Companion 29: Wolf Companion: Leap Slam, Wolf Companion: Basic Attack
   minion Wolf Companion 30: Wolf Companion: Leap Slam, Wolf Companion: Basic Attack
-  fight: 4458 dps; Wolf Companion: Basic Attack (hit) 88%, Wolf Companion: Leap Slam (hit) 12%
-         crits:Wolf Companion: Basic Attack 27, crits:Wolf Companion: Leap Slam 3, hits:Wolf Companion: Basic Attack 660, hits:Wolf Companion: Leap Slam 90, uses:Wolf Companion: Basic Attack 690, uses:Wolf Companion: Leap Slam 90, uses:Wolf Pack 15
+  fight: 1422 dps; Wolf Companion: Basic Attack (hit) 88%, Wolf Companion: Leap Slam (hit) 12%
+         crits:Wolf Companion: Basic Attack 22, crits:Wolf Companion: Leap Slam 5, hits:Wolf Companion: Basic Attack 660, hits:Wolf Companion: Leap Slam 90, minion:hit 12, uses:Wolf Companion: Basic Attack 690, uses:Wolf Companion: Leap Slam 90
 

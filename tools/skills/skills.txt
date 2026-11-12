@@ -1,4 +1,4 @@
-395 skills: 77 with nothing unread, 318 with something the engine does not read
+395 skills: 84 with nothing unread, 311 with something the engine does not read
 
 == to do (most used in the corpus first)
 Blasphemy                    used by 44  sets: Buff
@@ -64,14 +64,11 @@ Sniper's Mark                used by 13  sets: Sniper's Mark
 Entangle                     used by 12  sets: Fissures, Vines
     Conjures a rootbound fissure that crawls forward, damaging enemies in its path. While the fissure persists, vines lash out from it and attach to nearby enemies, damaging and Slowing them.
     types without a model: CreatesFissure
-    unmapped: base_number_of_entangle_roots_allowed, entangle_apply_vines_every_X_ms, entangle_vines_maximum_number_of_vines_allowed, entangle_vines_additional_number_of_vines_allowed_when_wet
+    unmapped: entangle_apply_vines_every_X_ms, entangle_vines_additional_number_of_vines_allowed_when_wet
     not simulated: entangle_duration_speed_+%_when_wet, entangle_vine_duration_ms
 Repulsion                    used by 12  sets: Repulsion
     Target an area and Curse enemies within with a Verisium Rune, inflicting them with Fragility. Hitting these enemies causes the Curse to Trigger an explosion to deal damage in an area and apply significant Knockback to other enemies near the Cursed target, with more Stun buildup based on the Fragility on the target Hit.
     not simulated: repulsion_curse_when_detonated_prevent_curse_for_X_ms, curse_repulsion_applies_X_fragility
-Sigil of Power               used by 12  sets: Sigil of Power
-    Place a Sigil on the ground, providing a powerful Spell Damage Buff to you and Allies while standing in it. The Buff becomes more powerful the more mana you spend while standing in the Sigil.
-    unmapped: base_number_of_sigil_of_power_allowed
 Freezing Mark                used by 11  sets: Mark
     Mark a target, making them more susceptible to being Frozen. When the Marked target is Frozen, the Mark Activates, granting you a Buff which gives extra Cold damage and Consuming the Mark. Marking another target while you have the Buff will remove the Buff.
     unmapped: number_of_marks_allowed_per_type
@@ -80,19 +77,14 @@ Seismic Cry                  used by 11  sets: Seismic Cry
     types without a model: EmpowersOtherSkill
     unmapped: crushing_blow
     not simulated: warcry_minimum_benefit_if_monster_power_present, warcry_empowers_per_X_monster_power, warcry_empowers_per_X_monster_power_mp_cap
-Living Bomb                  used by 10  sets: Living Bomb
-    Plant a seed of Fire inside an enemy. Dealing enough damage to the enemy, or killing it outright, causes the seed to explode, dealing damage in an area and leaving behind a Fire Infusion Remnant.
-    unmapped: living_bomb_base_number_of_bombs_allowed
 Skeletal Cleric              used by 10  sets: Minion Info
     Activate to summon Reviving Skeletal Clerics that heal other minions and revive fallen Skeletons.
     types without a model: CreatesSkeletonMinion, CreatesUndeadMinion, MinionsCanExplode
     unmapped: skeletal_graft_buff_effect_magnitude
-    not simulated: minion_base_resummon_time_ms
 Skeletal Sniper              used by 10  sets: Minion Info
     Activate to summon long-ranged, Reviving Skeletal Snipers that can fire a gas arrow on Command.
     types without a model: CommandableMinion, CreatesSkeletonMinion, CreatesUndeadMinion, MinionsCanExplode
     unmapped: skeletal_graft_buff_effect_magnitude
-    not simulated: minion_base_resummon_time_ms
 Withering Presence           used by 10  sets: Withering Presence
     While active, emits an Aura that periodically Withers enemies in your Presence.
     types without a model: AffectsPresence
@@ -107,12 +99,10 @@ Skeletal Frost Mage          used by  9  sets: Minion Info
     Activate to summon Reviving Skeletal Frost Mages that can envelop your Minions in an icy shield on Command.
     types without a model: CommandableMinion, CreatesSkeletonMinion, CreatesUndeadMinion, MinionsCanExplode
     unmapped: skeletal_graft_buff_effect_magnitude
-    not simulated: minion_base_resummon_time_ms
 Skeletal Storm Mage          used by  9  sets: Minion Info
     Activate to summon Reviving Skeletal Storm Mages that can call down a lightning strike on dead Skeletons on Command.
     types without a model: CommandableMinion, CreatesSkeletonMinion, CreatesUndeadMinion, MinionsCanExplode
     unmapped: skeletal_graft_buff_effect_magnitude
-    not simulated: minion_base_resummon_time_ms
 Thunderstorm                 used by  9  sets: Thunderstorm
     Conjure a thunderstorm which causes lightning strikes and torrential rain in an area. Enemies in the area are Drenched, causing them to become Shocked or Frozen more easily. Plants in the area become Overgrown.
     unmapped: lightning_storm_max_number_of_storms, lightning_storm_hit_frequency_variance_ms
@@ -138,7 +128,6 @@ Tame Beast                   used by  8  sets: Tame Beast
 Azmerian Wolf                used by  7  sets: Minion Info
     Summons an ancient Reviving Azmerian Wolf that can howl, calling to spirits convening an Eternal Hunt on Command. It Maims when attacking foes, and can lunge to bite and inflict Bleeding, or howl to inspire nearby allies.
     types without a model: CommandableMinion
-    not simulated: minion_base_resummon_time_ms
 Flame Wall                   used by  7  sets: Wall, Projectile Damage
     Create a wall of Fire in front of you, which Ignites everything within its area. Any Projectiles fired through the wall by you and Allies deal added Fire damage. Consumes a Lightning Infusion if possible to also add Lightning damage to the Projectiles.
     types without a model: CausesBurning, Wall
@@ -161,7 +150,6 @@ Overwhelming Presence        used by  7  sets: Overwhelming Presence
 Pain Offering                used by  7  sets: Pain Offering
     Skewer a Skeleton on a bone spike to send nearby Minions into a frenzy as long as the spike remains, making their skills faster and harder hitting.  The bone spike is itself a Minion. If it dies, the effect ends immediately.
     types without a model: Offering
-    unmapped: base_number_of_pain_offerings_allowed
 Profane Ritual               used by  7  sets: Profane Ritual
     Mark a Corpse with a profane rune, dealing Chaos damage over time to nearby enemies. When the ritual is complete the Corpse is consumed and you gain a Power Charge.
     types without a model: CreatesGroundRune, DegenOnlySpellDamage, GeneratesCharges, TargetsDestructibleCorpses
@@ -170,7 +158,6 @@ Skeletal Reaver              used by  7  sets: Minion Info
     Activate to summon aggressive, Reviving Skeletal Reavers that can enrage on Command. Skeletal Reavers do more Attack Damage and gain increased Attack speed based on their Rage
     types without a model: CommandableMinion, CreatesSkeletonMinion, CreatesUndeadMinion, MinionsCanExplode
     unmapped: skeletal_graft_buff_effect_magnitude
-    not simulated: minion_base_resummon_time_ms
 Twister                      used by  7  sets: Twister
     Whip up a twister with a flick of your Spear. The twister moves forward erratically, Blinding and repeatedly Hitting enemies within. If a twister touches a Whirlwind from your other skills, it Consumes the Whirlwind to create additional twisters that deal more damage. Passing over Elemental Ground Surfaces or Consuming an elemental Whirlwind will grant twisters extra damage of that element.
     types without a model: InteractsWithElementalGround
@@ -223,7 +210,7 @@ Spell Totem                  used by  6  sets: Spell Totem
     not simulated: totem_elemental_resistance_%, totem_chaos_resistance_%, base_totem_range, active_skill_requires_X_power_or_endurance_charges, spell_totem_maximum_life_+%_final_per_endurance_charge_consumed, spell_totem_totem_duration_+%_final_per_endurance_charge_consumed, spell_totem_damage_+%_final_per_power_charge_consumed
 Thrashing Vines              used by  6  sets: Thrashing Vines
     Spur the growth of huge vines, which emerge randomly within the target area. The vines crash to the ground then retreat, targeting nearby enemies if possible.
-    unmapped: awakened_forest_spawn_vines_per_X%_cast_time, base_number_of_awakened_forests_allowed, plant_skill_damage_+%_final_when_wet
+    unmapped: awakened_forest_spawn_vines_per_X%_cast_time, plant_skill_damage_+%_final_when_wet
     not simulated: active_skill_base_tertiary_area_of_effect_radius, awakened_forest_area_of_effect_+%_final_when_wet, thrashing_vines_retarget_cooldown_ms
 Ancestral Cry                used by  5  sets: Warcry
     Perform a Warcry using Glory gained by Igniting enemies to turn you into an embodiment of Kaom. While embodying Kaom, you Trigger Volcanic Steps while travelling, Melee Strikes and Slams are Ancestrally Boosted, and your Melee Strikes Trigger Volcanic Eruption.
@@ -275,23 +262,20 @@ Rend                         used by  5  sets: Normal Strikes, Lightning-Charged
 Shield Wall                  used by  5  sets: Shield Wall
     Ram your Shield into the ground, throwing up a wall of earth. Enemies can attack your wall segments, and your Slams, Warcries, and Shield Charge will instantly shatter them all. The segments explode when shattered, damaging enemies in front of and around them.
     types without a model: CanCreateStoneElementals, Wall
-    unmapped: wall_expand_delay_ms, base_number_of_shield_walls_allowed, shield_wall_damage_+%_final_when_slammed
+    unmapped: wall_expand_delay_ms, shield_wall_damage_+%_final_when_slammed
     not simulated: shield_wall_maximum_life, shield_wall_damage_+%_final_for_first_500_ms_when_not_killed_by_self
 Skeletal Arsonist            used by  5  sets: Minion Info
     Activate to summon bomb-throwing, Reviving Skeletal Arsonists that can detonate other Minions on Command.
     types without a model: CommandableMinion, CreatesSkeletonMinion, CreatesUndeadMinion, Detonator, MinionsCanExplode
     unmapped: skeletal_graft_buff_effect_magnitude
-    not simulated: minion_base_resummon_time_ms
 Skeletal Brute               used by  5  sets: Minion Info
     Activate to summon hard-hitting, Reviving Skeletal Brutes that can Stun Primed enemies and Warcry on Command. This Warcry Intimidates nearby enemies and Consumes Freeze on enemies and allies to deal damage in an Area around them.
     types without a model: CommandableMinion, CreatesSkeletonMinion, CreatesUndeadMinion, MinionsCanExplode
     unmapped: skeletal_graft_buff_effect_magnitude
-    not simulated: minion_base_resummon_time_ms
 Skeletal Warrior             used by  5  sets: Minion Info
     Activate to summon Reviving Skeletal Warriors.
     types without a model: CreatesSkeletonMinion, CreatesUndeadMinion, MinionsCanExplode
     unmapped: skill_desired_initial_amount, skeletal_graft_buff_effect_magnitude
-    not simulated: minion_base_resummon_time_ms
 Snap                         used by  5  sets: Cold, Lightning, Fire
     Consume the elemental energy from a Frozen, Shocked or Ignited enemy, creating an elemental blast that leaves behind an Infusion Remnant. The blast will spread to other enemies affected by the same Ailment, but those blasts cannot spread further. Can also be cast on a Frostbolt to create a larger cold blast.
     types without a model: ManualCooldownConsumption, SkillConsumesFreeze, SkillConsumesIgnite, SkillConsumesShock
@@ -305,12 +289,11 @@ Sorcery Ward                 used by  5  sets: Sorcery Ward
 Tornado                      used by  5  sets: Tornado
     Create a storm that sucks in enemies and deals Physical damage over time. A Tornado that overlaps an Elemental Ground Surface absorbs that surface's Debuff, applying it to enemies inside the Tornado and causing the Tornado to deal extra damage of that element.
     types without a model: DegenOnlySpellDamage, InteractsWithElementalGround
-    unmapped: number_of_tornados_allowed, tornado_pull_strength_%, tornado_pull_interval_ms, tornado_pushiness
+    unmapped: tornado_pull_strength_%, tornado_pull_interval_ms, tornado_pushiness
     not simulated: tornado_slow_%_at_max_range, tornado_failled_pull_cooldown_ms
 Tornado Shot                 used by  5  sets: Impact, Tornado
     Fire a skyward shot that whips up a Tornado where it lands, dealing Physical damage over time and Hindering enemies standing in it. Arrows, thrown Spears and Crossbow bolts fired at the Tornado are sucked into it, causing the Tornado to spit out a ring of copied Projectiles. Copied Projectiles cannot be copied again, even by further Tornados.
     types without a model: ObjectDurability
-    unmapped: tornado_shot_number_of_hits_allowed, base_number_of_tornado_shots_allowed
     not simulated: console_cast_on_self_custom_range, projectile_damage_modifiers_apply_to_skill_dot, base_modifiers_to_projectile_count_do_not_apply, tornado_shot_projectile_range
 Whirling Assault             used by  5  sets: Whirling Assault
     Advance while hitting enemies around you with a series of spinning Strikes.
@@ -333,7 +316,7 @@ Disengage                    used by  4  sets: Initial Strike, Shockwave
 Elemental Storm              used by  4  sets: Elemental Storm, Fire, Lightning, Cold
     Create a stationary Fire, Cold or Lightning storm at a target location for a duration, based on the highest Elemental Damage type for the Hit that Triggered the storm. Hits which do not deal Elemental Damage will not Trigger the storm.
     types without a model: Orb
-    unmapped: tornado_hinder, tornado_base_damage_interval_ms, number_of_tornados_allowed
+    unmapped: tornado_hinder, tornado_base_damage_interval_ms
     not simulated: skill_can_add_multiple_charges_per_action, damage_cannot_be_reflected_or_leech_if_used_by_other_object
 Falling Thunder              used by  4  sets: Melee, Projectile
     Suffuse your Quarterstaff with electrical energy, then Slam the ground to deal damage in a large cone in front of you. Consumes your Power Charges to fire Lightning Projectiles forwards from the impact.
@@ -427,7 +410,7 @@ Explosive Shot               used by  3  sets: Ammunition
 Explosive Spear              used by  3  sets: Spear, Explosion, Frenzy-Charged
     Hurl a single payload Spear that pierces through enemies and lodges in terrain where it lands. The Spear will explode at the end of its Detonation Time or if Detonated. Consumes a Frenzy Charge if you have one to explode immediately, dealing more damage in a cross-shaped area and creating Ignited Ground.
     types without a model: CreatesGroundEffect, DetonatesAfterTime, Detonator
-    unmapped: base_number_of_remote_spear_mines_allowed, remote_spear_mine_minimum_target_distance
+    unmapped: remote_spear_mine_minimum_target_distance
     not simulated: projectile_ballistic_angle_from_target_distance, base_projectiles_cannot_chain, projectiles_move_with_precise_movement, active_skill_base_tertiary_area_of_effect_radius
 Flash Grenade                used by  3  sets: Flash Grenade
     Fire a bouncing Grenade that unleashes a Blinding, Stunning explosion when its fuse expires.
@@ -483,12 +466,12 @@ Spearfield                   used by  3  sets: Spearfield, Explosion
 Storm Lance                  used by  3  sets: Projectile, Frenzy-Charged, Lodged Spear, Detonation
     Throw an electrified Spear that lodges in the ground and periodically zaps nearby enemies with Lightning bolts. If the Spear is Detonated by another Skill, it immediately unleashes a volley of bolts and expires. Consumes a Frenzy Charge if possible to fire bolts more frequently for a shorter duration, automatically Detonate at the end of its duration, and create Shocked Ground on Detonation.
     types without a model: CreatesGroundEffect
-    unmapped: base_number_of_overcharged_spears_allowed, overcharged_spear_detonate_number_of_beams
+    unmapped: overcharged_spear_detonate_number_of_beams
     not simulated: projectile_ballistic_angle_from_target_distance, base_projectiles_cannot_chain, projectiles_move_with_precise_movement, overcharged_spear_detonated_duration_ms, active_skill_base_tertiary_area_of_effect_radius, arc_chain_distance
 Tempest Bell                 used by  3  sets: Tempest Bell, Impact, Shockwave
     Build Combo by successfully Striking Enemies with other skills. After reaching maximum Combo, use this skill to cause the Bell on your staff to grow to massive size as you drop it on the ground. The Bell damages enemies on impact and can be Hit by your skills, creating a damaging shockwave. Elemental Ailments applied to the Bell cause its shockwaves to deal extra damage of the corresponding type, and Hits which would have caused Knockback increase the area of effect of the shockwaves.
     types without a model: ComboStacking, ManualCooldownConsumption, ObjectDurability, SpecialAncestralBoost
-    unmapped: base_number_of_tempest_bells_allowed, cannot_damage_bell, combo_only_stacks_from_hits_with_weapon_restriction, base_combo_stacks_decay_delay_ms, bell_distance_limit_for_recall, tempest_bell_physical_damage_%_as_elemental_per_ailment
+    unmapped: cannot_damage_bell, combo_only_stacks_from_hits_with_weapon_restriction, base_combo_stacks_decay_delay_ms, bell_distance_limit_for_recall, tempest_bell_physical_damage_%_as_elemental_per_ailment
     not simulated: bell_ailment_threshold, bell_poise_threshold, tempest_bell_area_of_effect_+%_final_per_1_unit_of_knockback
 Temporal Rift                used by  3  sets: Temporal Rift
     While active, passively leaves afterimages of your recent past. Cast the Spell to return to the oldest afterimage, teleporting to that location and resetting your Life, Mana and Energy Shield to the values they had at the time. Removes any upcoming damage delayed by Phased Form on use.
@@ -518,7 +501,7 @@ Blood Boil                   used by  2  sets: Blood Boil
     not simulated: blood_boil_explosion_area_+%_final_per_boil
 Bonestorm                    used by  2  sets: Projectile, Explosion
     Channel to conjure a swarm of bone spikes in the air, then release to fire them at enemies and explode. Shrapnel Impales enemies Hit, causing subsequent Attack Hits against those targets to deal extra damage. Consumes your Power Charges to cause much larger explosions.
-    unmapped: channel_start_lock_cancelling_scales_with_cast_speed, cast_speed_modifiers_apply_to_over_time_cost, bone_spear_target_rectangle_length, base_number_of_allowed_bone_storm_projectiles, spells_impale_on_hit_%_chance, bone_spear_power_charged_aoe_+
+    unmapped: channel_start_lock_cancelling_scales_with_cast_speed, cast_speed_modifiers_apply_to_over_time_cost, bone_spear_target_rectangle_length, spells_impale_on_hit_%_chance, bone_spear_power_charged_aoe_+
     not simulated: skill_animation_duration_multiplier_override
 Chaos Bolt                   used by  2  sets: Chaos Bolt
     Fire a burst of Chaos energy at the target.
@@ -533,7 +516,7 @@ Dark Effigy                  used by  2  sets: Dark Effigy
 Decompose                    used by  2  sets: Poison Cloud, Explosion
     Consume a Corpse to create a cloud of flammable Poisonous gas. Any Burning effects or Detonator skills will explode the gas cloud, creating a fiery explosion.
     types without a model: CreatesGroundEffect, TargetsDestructibleCorpses
-    unmapped: spread_contagion_base_radius_when_using_corpse, explosion_delay_ms, number_of_poison_cloud_allowed
+    unmapped: spread_contagion_base_radius_when_using_corpse, explosion_delay_ms
     not simulated: corpse_explosion_monster_life_permillage_chaos
 Defiance Banner              used by  2  sets: Defiance Banner
     While active, Attacking enemies builds Glory. When you have maximum Glory, you can place an inspiring Banner for a duration with an Aura that grants you and nearby Allies Armour, Evasion and movement speed.
@@ -544,7 +527,7 @@ Demon Form                   used by  2  sets: Demon Form
     not simulated: demon_transformation_cooldown_does_not_tick
 Ember Fusillade              used by  2  sets: Projectile, Explosion, Beam
     Conjure a blazing Ember that hovers above you. After a short duration, the Ember launches at an enemy, dealing Fire damage in an area on impact and prioritising the last enemy targeted. Recasting this spell resets the duration for all active Embers. Multiple Embers fired in the same Fusillade will attempt to target different enemies. Consumes a Lightning Infusion if possible to cause the entire Fusillade to create beams that Chain to enemies.
-    unmapped: blazing_cluster_maximum_number_of_projectiles_allowed, blazing_cluster_delay_between_projectiles_ms, blazing_cluster_subsequent_targeting_radius, ember_fusillade_damage_+%_final_per_ember_fired
+    unmapped: blazing_cluster_delay_between_projectiles_ms, blazing_cluster_subsequent_targeting_radius, ember_fusillade_damage_+%_final_per_ember_fired
 Emergency Reload             used by  2  sets: Emergency Reload
     Instantly reload all your Crossbow Ammunition clips and Empower each clip's Ammunition to deal more damage for a duration.
     types without a model: EmpowersOtherSkill, IndeterminateEmpowermentAmount, ModifiesNextSkill
@@ -559,7 +542,7 @@ Furious Slam                 used by  2  sets: Base, Enraged
 Gas Grenade                  used by  2  sets: Impact, Poison Cloud, Explosion
     Fire a bouncing Grenade that causes a burst of Poison gas when its fuse expires, damaging enemies and leaving behind a growing Poison cloud. Burning effects or Detonator skills will cause the cloud to explode in a fiery blast.
     types without a model: CreatesGroundEffect, DetonatesAfterTime
-    unmapped: projectiles_cannot_fork, number_of_poison_cloud_allowed
+    unmapped: projectiles_cannot_fork
     not simulated: projectile_ballistic_angle_from_reference_event, fixed_projectile_spread, active_skill_projectile_speed_+%_variation_final_if_multiple_projectiles
 Glacial Lance                used by  2  sets: Spear, Explosion
     Throw a single Piercing lance that leaves icy fragments in its wake. The fragments Chill nearby enemies. Consumes a Frenzy Charge if possible to cause the glacial fragments created by the first Projectile to explode outwards after a short duration, peppering enemies with shrapnel.
@@ -572,7 +555,6 @@ Lightning Arrow              used by  2  sets: Projectile, Beam
 Lightning Rod                used by  2  sets: Lightning Rod
     Fire an arrow that drops from above, creating a Lightning burst. The arrow remains in the ground, and any Chaining Lightning beams can Chain to it. When Chained to, the arrows charge up for a brief period before releasing another Lightning burst. The Lightning Arrow Skill reduces this delay, causing bursts to happen more quickly.
     types without a model: ObjectDurability
-    unmapped: number_of_lightning_rods_allowed, lightning_rod_number_of_chains_allowed
 Lingering Illusion           used by  2  sets: Buff
     While active, creates a short-lived illusory copy of yourself whenever you dodge roll. The copy can be damaged by enemies, and copies that are destroyed by an enemy will drop a Remnant that grants you a Power Charge on pickup.
     types without a model: GeneratesCharges
@@ -587,9 +569,6 @@ Parry                        used by  2  sets: Parry
 Poisonburst Arrow            used by  2  sets: Arrow, Poison Burst
     Fire a virulent arrow that creates a burst of Poison on hit, affecting all enemies in an area.
     types without a model: CanBecomeArrowRain
-Rhoa Mount                   used by  2  sets: Rhoa Mount
-    Harnesses a Companion Rhoa you can mount while you're wielding a Bow or Spear. While mounted you can use Bow, thrown Spear, and Mark Skills, and are much less slowed while using Skills, but being Hit will cause Heavy Stun buildup. While you aren't mounted, the Rhoa will attack your enemies alongside you with its beak, but can be damaged.
-    not simulated: minion_base_resummon_time_ms
 Ruzhan, the Blazing Sword    used by  2  sets: Ruzhan, the Blazing Sword
     Summon Ruzhan, an invulnerable Flame Djinn Minion, to do your bidding. Ruzhan emerges to Strike enemies with his greatsword whenever you use a damaging Skill, and casts devastating Fire Spells when Commanded to do so.
     types without a model: CommandableMinion, MinionsAreUndamagable
@@ -609,7 +588,7 @@ Siege Ballista               used by  2  sets: Ballista
     not simulated: totem_elemental_resistance_%, totem_chaos_resistance_%, base_totem_range
 Skyfall                      used by  2  sets: Skyfall, Verisium-Infused
     Build Glory by spending Runic Ward. When you have maximum Glory, you may call down a mass of Verisium from the sky, dealing high damage at the targeted location and summoning a Temporary Minion. Targeting close to you will cause you to jump back as you cast. Consumes a Verisium Infusion, if possible, to increase the number of Minions summoned .
-    unmapped: base_number_of_verisium_octopus_minions_allowed, verisium_comet_number_of_minions_to_create
+    unmapped: verisium_comet_number_of_minions_to_create
     not simulated: active_skill_generates_%_of_ward_spent_as_glory
 Snipe                        used by  2  sets: Arrow, Explosion, Icy Blast
     Channel to charge up your bow before releasing a powerful shot. Releasing with Perfect Timing causes the arrow to explode on impact and Consume Freeze on directly Hitting. Consuming Freeze enhances the explosion.
@@ -627,16 +606,16 @@ Sunder                       used by  2  sets: Wave, Shockwave
 Toxic Growth                 used by  2  sets: Pustules, Explosion
     Fire a rain of Toxic Pustules into the air. The Pustules deal damage on impact, then Detonate after a delay. They can also be Poisoned, causing them to Detonate faster and more violently.
     types without a model: DetonatesAfterTime
-    unmapped: toxic_pustule_burst_1%_more_damage_per_x_stored_poison, toxic_pustule_burst_base_radius_+1_per_x_stored_poison, pustules_grow_as_though_dealing_X_poison_damage_per_minute_when_wet, number_of_projectiles_override, toxic_pustule_max_burst_damage_+%_final_from_stored_poison, toxic_pustule_max_additional_burst_base_radius_+, number_of_poisonbloom_arrow_bloom_allowed
+    unmapped: toxic_pustule_burst_1%_more_damage_per_x_stored_poison, toxic_pustule_burst_base_radius_+1_per_x_stored_poison, pustules_grow_as_though_dealing_X_poison_damage_per_minute_when_wet, number_of_projectiles_override, toxic_pustule_max_burst_damage_+%_final_from_stored_poison, toxic_pustule_max_additional_burst_base_radius_+
     not simulated: toxic_pustule_duration_expires_1%_faster_per_x_stored_poison_damage_multiplied_by_sixty, fixed_projectile_spread
 Unearth                      used by  2  sets: Unearth
     Raise spikes of bone from the earth in front of you, damaging enemies. The bones of Corpses and dead Reviving Minions in the area are ripped out and reassembled into short-lived Bone Construct Minions that fight for you. Larger Corpses create more than one Bone Construct.
     types without a model: TargetsDestructibleCorpses
-    unmapped: base_number_of_skeletal_constructs_allowed, unearth_base_cone_speed_multiplier, bone_cone_angle
+    unmapped: unearth_base_cone_speed_multiplier, bone_cone_angle
     not simulated: minion_aggro_radius_+%
 Volcano                      used by  2  sets: Eruption, Projectiles
     Uplift a volcano from the earth, damaging enemies standing on it and releasing a spray of molten Projectiles. While the volcano persists, Slamming it will cause another Projectile spray. Channelling this Skill for longer makes the initial eruption more violent, but does not affect subsequent Projectile sprays.
-    unmapped: cast_speed_modifiers_apply_to_over_time_cost, channel_start_lock_cancelling_scales_with_cast_speed, volcano_initial_explosion_damage_+%_final_per_additional_stage, volcano_base_number_of_geysers_allowed, volcano_gain_stage_every_%_of_cast_time, volcano_delay_between_slams_ms, volcano_slam_unscalable_limit, volcano_sustains_every_%_of_cast_time
+    unmapped: cast_speed_modifiers_apply_to_over_time_cost, channel_start_lock_cancelling_scales_with_cast_speed, volcano_initial_explosion_damage_+%_final_per_additional_stage, volcano_gain_stage_every_%_of_cast_time, volcano_delay_between_slams_ms, volcano_slam_unscalable_limit, volcano_sustains_every_%_of_cast_time
     not simulated: channel_start_duration_as_%_of_cast_time, channel_end_duration_as_%_of_cast_time
 Voltaic Grenade              used by  2  sets: Voltaic Grenade
     Fire a bouncing Grenade that discharges an Electrocuting Lightning blast when its fuse expires, causing all Lightning Hits against enemies to contribute to Electrocution buildup for a duration.
@@ -661,7 +640,7 @@ Ancestral Warrior Totem      used by  1  sets: Ancestral Warrior Totem
     not simulated: totem_elemental_resistance_%, totem_chaos_resistance_%, base_totem_range, active_skill_requires_X_endurance_charges, non_modifiable_totem_limit, ancestral_warrior_totem_total_use_time_%_as_idle_after_animation
 Azmerian Swarms              used by  1  sets: Azmerian Swarms
     While active, summons short-lived Azmerian Swarms when you kill enemies affected by Elemental Ailments or hit Rare or Unique enemies affected by Elemental Ailments. The swarms are untargetable Minions that pursue nearby enemies to Attack them and infict Faerie Fire on Hit.
-    unmapped: max_azmerian_swarms, skill_grants_%_chance_to_summon_azmerian_swarm_on_kill_affected_by_elemental_ailment, skill_grants_%_chance_to_summon_azmerian_swarm_on_hitting_unique_or_rare_enemy_affected_by_elemental_ailment, non_skill_base_physical_damage_%_to_convert_to_random_element, %_chance_to_apply_hounded_by_wisps_on_hit
+    unmapped: non_skill_base_physical_damage_%_to_convert_to_random_element, %_chance_to_apply_hounded_by_wisps_on_hit
     not simulated: minion_damage_+%_final_per_different_elemental_ailment_on_target, active_skill_minion_1%_attack_speed_+%_per_X_player_dexterity
 Bitter Dead                  used by  1  sets: Bitter Dead, Explosion, Core, Rune
     Spend Ward and target an area, transforming Corpses into bitter cores that seek out enemies and Chill enemies near them. The cores explode at the end of their duration, creating runes which deal additional Cold damage over time.
@@ -729,7 +708,7 @@ Flicker Strike               used by  1  sets: Flicker Strike
 Forge Hammer                 used by  1  sets: Impact, Fissures
     Hurl a fiery hammer that Slams into the ground and lodges there. While the hammer is lodged in the ground, reusing this Skill recalls the hammer and resets the Skill's cooldown. Alternatively, using a Warcry near the lodged hammer causes it to shatter, releasing a number of Molten Fissures in a spiral.
     types without a model: CanCreateStoneElementals, CreatesFissure, ManualCooldownConsumption
-    unmapped: forge_hammer_maximum_hammers, forge_hammer_base_maximum_number_of_fissures, base_number_of_fissures, forge_hammer_hammer_speed
+    unmapped: forge_hammer_maximum_hammers, forge_hammer_base_maximum_number_of_fissures, forge_hammer_hammer_speed
 Frost Darts                  used by  1  sets: Projectile, Explosion, Ice Chunk
     Conjures a number of icy Projectiles that launch towards the target. Projectiles that Hit a Chilled or Frozen target create chunks of ice that deal additional damage on impacting the ground. Consumes a Cold Infusion if possible to cause each Projectile to lodge into the enemy then explode.
     unmapped: never_freeze_or_chill, frost_darts_explode_creates_X_mortars
@@ -745,7 +724,6 @@ Galvanic Field               used by  1  sets: Buff, Orb
 Gas Arrow                    used by  1  sets: Arrow, Poison Cloud, Explosion
     Fire a noxious arrow at the ground, creating a cloud of flammable poisonous gas at the end of its flight. The cloud will detonate if hit by a Detonator skill or if an Ignited enemy touches it, creating a fiery explosion.
     types without a model: CanBecomeArrowRain, CreatesGroundEffect
-    unmapped: number_of_poison_cloud_allowed
 Glacial Bolt                 used by  1  sets: Ammunition
     Load your Crossbow with icy bolts that create two walls of Ice Crystals at the end of their flight.
     types without a model: IceCrystal, Wall
@@ -780,7 +758,7 @@ High Velocity Rounds         used by  1  sets: Ammunition
     types without a model: ConsumesFullyBrokenArmour
 His Scattering Calamity      used by  1  sets: Projectile, Explosion
     Conjure a crackling Wellsprite that hovers above you. After a short duration, the Wellsprite launches at an enemy, dealing Lightning damage in an area on impact and prioritising the last enemy targeted. Recasting this spell resets the duration for all active Wellsprites.
-    unmapped: blazing_cluster_maximum_number_of_projectiles_allowed, blazing_cluster_subsequent_targeting_radius, ember_fusillade_damage_+%_final_per_ember_fired
+    unmapped: blazing_cluster_subsequent_targeting_radius, ember_fusillade_damage_+%_final_per_ember_fired
 Hollow Resonance             used by  1  sets: Hollow Resonance
     Attaches an ethereal bell to your back. Critical Hits with other Skills will cause the bell to ring out, damaging nearby enemies.
     unmapped: chance_to_trigger_carried_spectral_bell_shockwave_on_crit_%
@@ -811,7 +789,7 @@ Purple Flames of Chayula for a duration.
 Mist Raven                   used by  1  sets: Minion Info
     Summons a mysterious undamageable Mist Raven that can be Commanded to dive at target location, crashing through an otherworldly mirror and damaging enemies in an area. The raven grants you a Frenzy Charge for each enemy it Culls.
     types without a model: CommandableMinion, GeneratesCharges, MinionsAreUndamagable
-    not simulated: use_owners_culling_threshold_instead_of_your_own, kill_enemy_on_hit_if_under_10%_life, minion_base_resummon_time_ms
+    not simulated: use_owners_culling_threshold_instead_of_your_own, kill_enemy_on_hit_if_under_10%_life
 Molten Shower                used by  1  sets: Molten Shower
     Fires molten Projectiles from the enemy hit, which will explode when they land nearby, dealing Attack damage in an area.
     unmapped: skill_has_trigger_from_unique_item
@@ -829,22 +807,16 @@ Primal Strikes               used by  1  sets: Normal Strikes, Spirits, Final St
     types without a model: PerformsFinalStrike, SkillConsumesShock
     unmapped: perfect_strike_timing_window_base_ms, primal_strikes_stag_volley_spacing, primal_strikes_number_of_stags, base_consume_enemy_shock_on_hit
     not simulated: primal_strikes_stag_is_scaled_with_area_of_effect, all_exposure_on_hit_magnitude
-Raging Spirits               used by  1  sets: Raging Spirits
-    While active, Fire Spells you use yourself will also summon Raging Spirits, which are short-lived flaming skulls that rush at nearby enemies and rapidly Attack them, ignoring commands. Enemies will not directly engage these Minions, and can pass through them.
-    unmapped: base_number_of_raging_spirits_allowed, skill_raging_spirits_max_per_action
 Raise Zombie                 used by  1  sets: Minion Info
     Consume a Corpse or Power Charge to create a short-lived Zombie. Zombies created from Power Charges are Empowered and also create two additional non-empowered Zombies.
     types without a model: MinionsCanExplode, TargetsDestructibleCorpses
-    unmapped: base_number_of_zombies_allowed, zombie_base_decay_rate_permyriad
-Ravenous Swarm               used by  1  sets: Ravenous Swarm
-    While active and enemies are present, swarms of insects emerge from your body to pursue nearby enemies. The swarms are untargetable Minions that Attack and Poison enemies.
-    unmapped: ravenous_swarm_maximum_swarm_count
+    unmapped: zombie_base_decay_rate_permyriad
 Reap                         used by  1  sets: Reap
     Conjure a bloody scythe that sweeps across the targeted area, dealing Physical damage to enemies and applying Critical Weakness. Cannot be Triggered.
     not simulated: active_skill_life_gained_on_cull, kill_enemy_on_hit_if_under_10%_life
 Rite of Restoration          used by  1  sets: Rite of Restoration
     Place a Sigil on the ground, providing a powerful Buff to you and Allies standing in it which grants Life Regeneration and amplifies Armour, Evasion and Energy Shield. The Buff becomes more powerful the more mana you spend while standing in the Sigil. 
-    unmapped: base_number_of_sigil_of_power_allowed, circle_of_power_minimum_time_between_stage_increases_ms
+    unmapped: circle_of_power_minimum_time_between_stage_increases_ms
 Ritual Sacrifice             used by  1  sets: Ritual Sacrifice
     Sacrifice the Corpse of a Rare Monster to grant you its Modifiers for a duration, or gain a single random Modifier at the cost of your own life force.
     types without a model: TargetsDestructibleRareCorpses
@@ -869,7 +841,7 @@ Spiraling Conspiracy         used by  1  sets: Minion Info
     A flock of mist ravens circle you, dealing damage over time in an area. Their numbers are bolstered by slain foes, or in the Presence of dangerous enemies, but the flock as a whole is considered a single minion. You can Command some of them to take flight, leaving the flock to assail your enemies.
     types without a model: CommandableMinion, MinionsAreUndamagable
     unmapped: tangmazu_raven_added_to_your_flock_every_x_power_of_enemies_killed
-    not simulated: tangmazu_raven_added_to_your_flock_every_x_msec_a_rare_or_unique_enemy_is_in_your_presence, minion_base_resummon_time_ms
+    not simulated: tangmazu_raven_added_to_your_flock_every_x_msec_a_rare_or_unique_enemy_is_in_your_presence
 Stampede                     used by  1  sets: Footsteps, Slam, Explosion
     Charges forward, cracking the earth and leaving a patch of Jagged Ground with every footstep. At the end of your charge, a massive leaping Slam damages enemies and causes all nearby patches of Jagged Ground to explode, damaging enemies standing on them. Once you begin your charge, the use speed of this Skill is affected by movement speed instead of Attack speed.
     types without a model: CreatesGroundEffect, Jumping, Travel
@@ -903,8 +875,7 @@ Vaulting Impact              used by  1  sets: Vaulting Impact, Vs Dazed
 Wardbound Minions            used by  1  sets: Wardbound Minions
     Spend all your Runic Ward to summon Temporary Wardbound Casters. These Minions target nearby enemies with damaging Cold Spells.
     types without a model: MinionsCanExplode
-    unmapped: base_number_of_wardbound_minions_allowed
-    not simulated: wardbound_minions_summon_minion_for_every_X_runic_ward_spent, wardbound_minion_maximum_number_of_casts
+    not simulated: wardbound_minions_summon_minion_for_every_X_runic_ward_spent
 Abyssal Apparition           used by  0  sets: Abyssal Apparition
     Consume a Power Charge when you cast a damaging Spell to trigger an Abyssal Apparition who will also cast that same Spell for you. Does not work with Channelling Spells, Spells with a Cooldown, Triggered Spells, Spells granted by items, or Spells which already consume a Power Charge. This Skill is not directly Supportable.
     unmapped: damage_+%_final_from_lich_apparition_cloned_skill, skill_is_not_considered_a_skill
@@ -946,7 +917,6 @@ Blood Hunt                   used by  0  sets: Dash, Explosion
 Bone Offering                used by  0  sets: Buff
     Impale a Skeleton on a bone spike to shield your Minions while the spike remains, reducing the amount of damage taken from Hits. Taking a Hit that deals damage above a certain threshold will cause that Minion's shield to absorb all damage from that Hit, then explode.  The bone spike is itself a Minion, and shields itself. If it dies, shields on your other Minions disappear.
     types without a model: Offering
-    unmapped: base_number_of_bone_offerings_allowed
     not simulated: bone_offering_hit_threshold_%_of_maximum_life
 Briarpatch                   used by  0  sets: Briarpatch
     While active, a portion of the Physical Attack damage you deal is stored. Casting a Spell uses the stored damage to create a patch of Thorny Ground that deals Spell damage to moving enemies.
@@ -959,11 +929,10 @@ Companion: {0}               used by  0  sets: Minion Info
     Summon a Reviving Beast Companion to aid you in combat.
     types without a model: MinionsCanExplode
     unmapped: skill_desired_initial_amount
-    not simulated: minion_base_resummon_time_ms
 Conductive Runes             used by  0  sets: Conductive Runes, Explosion
     Spend Runic Ward to create a number of Hazardous Runes in a cone in front of you, which arm after a time. After arming, these Runes will activate when enemies step on them, exploding to deal Attack damage that is not based on your Weapon's damage and apply Electrocution buildup.
     types without a model: Hazard
-    unmapped: rune_hazard_cone_angle, rune_hazard_number_of_runes_to_create, rune_hazard_base_number_of_runes_allowed, rune_hazard_arming_time_ms, rune_hazard_detonate_time_ms
+    unmapped: rune_hazard_cone_angle, rune_hazard_number_of_runes_to_create, rune_hazard_arming_time_ms, rune_hazard_detonate_time_ms
     not simulated: cast_time_overrides_attack_duration
 Crackling Palm               used by  0  sets: Crackling Palm, Bolt
     When you Hit with Unarmed Melee Attacks, calls down lightning bolts which deal Unarmed Attack damage to all surrounding enemies.
@@ -971,9 +940,6 @@ Crackling Palm               used by  0  sets: Crackling Palm, Bolt
 Detonate Living              used by  0  sets: Detonate Living, Explosion
     Hit an enemy under the Culling Strike Threshold, causing them to violently explode, damaging surrounding enemies. Highlights enemies under the Culling Strike Threshold.
     not simulated: corpse_explosion_monster_life_permillage_physical
-Detonate Minion              used by  0  sets: Explosive Demise
-    Detonate an allied Minion whose current Life is below a threshold, dealing heavy Attack damage to nearby enemies.
-    not simulated: command_minion_target_ally_below_x_life
 Detonating Arrow             used by  0  sets: Arrow, Explosion
     Channel to charge up before firing off a burning arrow. At maximum stages, the arrow will create a Detonating explosion at the end of its flight.
     types without a model: Detonator
@@ -981,7 +947,7 @@ Detonating Arrow             used by  0  sets: Arrow, Explosion
 Earthquake                   used by  0  sets: Impact, Aftershock
     Smash the ground, dealing damage in an area and leaving behind Jagged Ground that slows enemies. The Jagged Ground erupts in a powerful Aftershock after a duration. Cannot create Jagged Ground on top of an existing patch, or if you already have the maximum number of active patches.
     types without a model: CreatesGroundEffect
-    unmapped: base_number_of_earthquakes_allowed, can_create_jagged_ground
+    unmapped: can_create_jagged_ground
     not simulated: active_skill_base_tertiary_area_of_effect_radius
 Electrocuting Arrow          used by  0  sets: Electrocuting Arrow
     Fire an electrifying arrow that explodes in an Area on Hit. Hitting an enemy will attach an Electrocuting Rod to them, causing all incoming Lightning damage to build up Electrocution. This rod is removed when the enemy is next Electrocuted.
@@ -990,7 +956,7 @@ Electrocuting Arrow          used by  0  sets: Electrocuting Arrow
 Elemental Sundering          used by  0  sets: Pulse, Cold, Fire, Lightning
     Plunge your Spear into the ground to emit a pulse that Consumes Freeze, Shock and Ignite on a number of nearby enemies, Allies and Corpses. The pulse itself deals no damage, but each Ailment Consumed causes an explosion of the corresponding elemental damage type.
     types without a model: SkillConsumesFreeze, SkillConsumesIgnite, SkillConsumesShock
-    unmapped: elemental_sundering_number_of_explosion_allowed, active_skill_never_freeze_shock_ignite, elemental_sundering_damage_+%_final_if_created_from_unique
+    unmapped: active_skill_never_freeze_shock_ignite, elemental_sundering_damage_+%_final_if_created_from_unique
 Elemental Surge              used by  0  sets: Cold Surge, Fire Surge, Lightning Surge
     Grants your weapon Surges. Non-Melee Projectile Attacks with that weapon Consume Surges to cause the Projectiles fired to explode at the end of their flight.
     types without a model: CannotConsumeCharges
@@ -1016,7 +982,7 @@ Feral Invocation             used by  0  sets: Feral Invocation
     not simulated: hide_minion_frame, feral_invocation_gain_1_energy_per_X_mana_spent
 Fragments Of The Past        used by  0  sets: Fragments of the Past
     Spend Runic Ward to create a Verisium volcano that deals damage on initial eruption and Triggers Ice Fragments.
-    unmapped: base_number_of_ice_volcanos_allowed, ice_volcano_eruption_additional_ice_fragment_projectiles
+    unmapped: ice_volcano_eruption_additional_ice_fragment_projectiles
 Freezing Salvo               used by  0  sets: Freezing Salvo
     Passively gains Seals over time. Using the skill fires a projectile, and breaks the Seals, Repeating for each of them, and for each additional projectile the skill is given. For each time it Repeats normally, it will also Repeat an additional time targeting a different Ice Fragment in its area of effect if able, Detonating those Ice Fragments immediately. 
     types without a model: HasSeals
@@ -1024,7 +990,7 @@ Freezing Salvo               used by  0  sets: Freezing Salvo
 Frozen Locus                 used by  0  sets: Crystal, Explosion
     Leap backward and crack the ground with your staff to call forth an Ice Crystal which can be damaged by you and enemies. If the Crystal is destroyed it causes an icy explosion. This skill can be used while using other skills.
     types without a model: CreatesGroundEffect, IceCrystal
-    unmapped: active_skill_is_ignored_by_staggering_palm, active_skill_is_ignored_by_charged_staff, frozen_locus_stat_suppression, active_skill_is_ignored_by_mantra_of_destruction, base_number_of_frozen_locus_allowed
+    unmapped: active_skill_is_ignored_by_staggering_palm, active_skill_is_ignored_by_charged_staff, frozen_locus_stat_suppression, active_skill_is_ignored_by_mantra_of_destruction
     not simulated: frost_wall_damage_taken_+%_final_from_enemies
 Fulminating Concoction       used by  0  sets: Fulminating Concoction
     Consume charges from your Mana Flask to throw a flask that explodes, dealing Lightning Attack damage in an area with high chance to Shock. This damage is not based on your unarmed damage, so this is not considered an Unarmed Attack
@@ -1090,7 +1056,6 @@ Incinerate                   used by  0  sets: Incinerate, Ignited Ground
 Kelari's Malediction         used by  0  sets: Kelari's Malediction
     Harness Kelari's power to passively Consume Corpses in your Presence, causing Corpse Beetle Minions to burst forth. The Beetles passively follow you until Commanded. On your Command, they rush the target and explode.
     types without a model: MinionsAreUndamagable, TargetsDestructibleCorpses, TargetsDestructibleRareCorpses
-    unmapped: maximum_corpse_beetles_allowed
 Leylines                     used by  0  sets: Leylines
     While active, areas of intense runic energy are revealed to you. Standing over them grants you a powerful Spell damage boost but constantly drains your Runic Ward. Running out of Runic Ward causes the energy to temporarily dissipate.
     unmapped: skill_leylines_ward_degeneration_per_minute, skill_leylines_respawn_time_ms, skill_leylines_density_per_myriad, skill_leylines_reveal_radius
@@ -1122,9 +1087,6 @@ Primal Bounty                used by  0  sets: Primal Bounty
     Empowers the next Projectile Skill you use, causing it to create additional Projectiles and fly faster.
     types without a model: EmpowersOtherSkill, ModifiesNextSkill
     unmapped: skill_triggered_by_owl_feathers, owl_feather_buff_timer_ms
-Rain of Arrows               used by  0  sets: Rain of Arrows
-    Fire a hail of arrows into the air, causing them to rain from above. Consumes a Frenzy Charge to fire more arrows.
-    unmapped: base_number_of_arrow_rains_allowed
 Rain of Blades               used by  0  sets: Rain of Blades
     Pour your Runic Ward into conjuring blades. For the duration of the Buff, these blades fall on enemies Hit by your Projectile Attacks.
     types without a model: EmpowersOtherSkill, IndeterminateEmpowermentAmount
@@ -1163,7 +1125,7 @@ Shattering Concoction        used by  0  sets: Shattering Concoction
 Shockchain Arrow             used by  0  sets: Projectile, Shockwave
     Fire a Lightning-charged arrow that homes in on enemies afflicted by Lightning Ailments. Hitting such an enemy will cause your arrow to release a damaging shockwave and Chain towards nearby targets, with those Chaining Hits also releasing a shockwave. After the final Chain, the arrow lodges into the ground as a Lightning Rod. Consumes Shock from enemies it Hits, but not Electrocution.
     types without a model: CanBecomeArrowRain, ObjectDurability, SkillConsumesShock
-    unmapped: shockchain_arrow_X_additional_chains_on_first_hitting_shocked_or_electrocuted_enemy, number_of_lightning_rods_allowed, lightning_rod_number_of_chains_allowed
+    unmapped: shockchain_arrow_X_additional_chains_on_first_hitting_shocked_or_electrocuted_enemy
     not simulated: always_pierce_non_shocked_enemies_if_targeting_shocked_enemy
 Smash to Smithereens         used by  0  sets: Smash to Smithereens
     Blows strong enough to Heavy Stun an enemy reverberate in an area around the enemy and heavily Break Armour.
@@ -1175,7 +1137,6 @@ Solar Orb                    used by  0  sets: Pulse, Ignite
 Soul Offering                used by  0  sets: Soul Offering
     Skewer a Skeleton on a bone spike, granting you a powerful Spell damage Buff as long as the spike remains. Does not affect your Minions.  The bone spike is itself a Minion. If it dies, the effect ends immediately.
     types without a model: Offering
-    unmapped: base_number_of_power_offerings_allowed
 Spear of Solaris             used by  0  sets: Impact, Pulse, Ignited Ground
     Build Glory by inflicting Freeze, Shock or Ignite on enemies. When you have maximum Glory you may call forth the Azmeri goddess Solaris, jumping backwards and throwing your Spear in the air. On landing the spear deals heavy damage in an area, then calls a divine skybeam that pulses periodically and creates expanding Ignited Ground. Modifiers to number of Projectiles fired do not apply to this skill.
     types without a model: CreatesGroundEffect
@@ -1183,7 +1144,6 @@ Spectre: {0}                 used by  0  sets: Minion Info
     Summon the spirit of the bound monster as a Reviving Minion.
     types without a model: CreatesUndeadMinion, MinionsCanExplode
     unmapped: spectre_warp_start_distance, spectre_warp_end_distance, spectre_warp_speed_override
-    not simulated: minion_base_resummon_time_ms
 Spiral Volley                used by  0  sets: Spiral Volley
     Load your Bow with a volley of enchanted arrows and fire them in a circle as you spin forward, firing directly at targets if possible. Consumes Frenzy Charges to cause the arrows to deal more damage and Chain to other targets. Each target can only be Hit once.
     not simulated: active_skill_enable_movement_cancelling, spiral_volley_damage_+%_final_when_frenzy_charges_consumed, spiral_volley_damage_+%_final_per_frenzy_charge_consumed, spiral_volley_X_chains_per_frenzy_charge_consumed
@@ -1194,7 +1154,7 @@ Staggering Palm              used by  0  sets: Staggering Palm
 Starborn Onslaught           used by  0  sets: Impact, Star Fall
     Build up Glory by Freezing or Chilling enemies. When you have maximum Glory you may jump backwards loosing your Mace with the force of a falling comet onto your target. The impact releases Fissures and causes stars to fall in the area for a brief period.
     types without a model: CreatesFissure
-    unmapped: fissures_nova, empyrean_descent_number_of_explosions, volcanic_fissure_base_maximum_number_of_fissures, base_number_of_fissures, empyrean_descent_secondary_explosions_initial_delay_ms, empyrean_descent_secondary_explosions_delay_ms, empyrean_descent_secondary_explosions_inner_radius, empyrean_descent_secondary_explosions_outer_radius, number_of_branching_fissures
+    unmapped: fissures_nova, empyrean_descent_number_of_explosions, volcanic_fissure_base_maximum_number_of_fissures, empyrean_descent_secondary_explosions_initial_delay_ms, empyrean_descent_secondary_explosions_delay_ms, empyrean_descent_secondary_explosions_inner_radius, empyrean_descent_secondary_explosions_outer_radius, number_of_branching_fissures
     not simulated: leap_slam_animation_distance_threshold
 Tempest Flurry               used by  0  sets: Normal Strikes, Third Strike, Fourth Strike
     Perform a series of aggressive Strikes. When used in quick succession, the third use Strikes three times, and the fourth use performs a Final Strike that calls down a powerful Shocking bolt.
@@ -1229,7 +1189,7 @@ Valako's Charge              used by  0  sets: Buff, Bolt
     not simulated: cast_on_damage_taken_threshold, cast_on_damage_taken_only_tracks_lightning, should_have_cast_when_damage_taken_charge_buff, cast_on_damage_taken_%, arc_chain_distance
 Vine Arrow                   used by  0  sets: Impact, Vines
     Fire an arrow into the air that lands after a short delay, damaging enemies and causing a plant to spring up at the impact location. The plant sprouts vines that latch onto nearby enemies, Slowing their movement speed and dealing Chaos damage over time. The plant can be Poisoned, causing it to deal more damage.
-    unmapped: number_of_vine_arrow_pod_allowed, plant_skill_damage_+%_final_when_wet
+    unmapped: plant_skill_damage_+%_final_when_wet
     not simulated: vine_arrow_area_of_effect_+%_final_when_wet
 Vivid Stampede               used by  0  sets: Vivid Stampede
     Call upon Spirits of the Stag, sending them leaping forward. Each Stag releases a damaging shockwave each time it lands, and any Stags that travel the maximum possible distance also leave behind Shocked Ground.
@@ -1271,4 +1231,4 @@ Wither                       used by  0  sets: Wither
     not simulated: active_skill_withered_base_duration_ms, wither_channeled_move_targeting_area_X_units_per_second
 
 == nothing unread
-Apocalypse, Arc, Archmage, Armour Breaker, Armour Piercing Rounds, Berserk, Bow Shot, Cast on Block, Cast on Charm Use, Cast on Critical, Cast on Dodge, Cast on Elemental Ailment, Cast on Melee Kill, Cast on Melee Stun, Charge Regulation, Comet, Convalescence, Crossbow Shot, Curse on Block, Despair, Elemental Conflux, Elemental Invocation, Elemental Weakness, Enervating Nova, Enfeeble, Essence Drain, Eternal Rage, Explosive Transmutation, Fire Spell on Hit, Freezing Shards, Frostbolt, Galvanic Shards, Ghost Dance, Hammer of the Gods, Hand of Chayula, Herald of Thunder, Incendiary Shot, Inevitable Agony, Iron Ward, Lightning Bolt, Lunar Assault, Mace Strike, Magnetic Salvo, Mana Remnants, Meditate, Mirage Archer, Mirage Deadeye, Mirror of Refraction, Permafrost Bolts, Plasma Blast, Powered by Verisium, Quarterstaff Strike, Rapid Shot, Reaper's Invocation, Remnants of Kalguur, Sacrifice, Scavenged Plating, Shard Scavenger, Shockburst Rounds, Siege Cascade, Siphon Elements, Soulrend, Spear Stab, Spear Throw, Spellslinger, Stormblast Bolts, Thundergod's Wrath, Time Snap, Time of Need, Trinity, Verisium Manifestations, Virtuous Barrier, Void Illusion, Vulnerability, Wild Protector, Wind Blast, Wind Dancer
+Apocalypse, Arc, Archmage, Armour Breaker, Armour Piercing Rounds, Berserk, Bow Shot, Cast on Block, Cast on Charm Use, Cast on Critical, Cast on Dodge, Cast on Elemental Ailment, Cast on Melee Kill, Cast on Melee Stun, Charge Regulation, Comet, Convalescence, Crossbow Shot, Curse on Block, Despair, Detonate Minion, Elemental Conflux, Elemental Invocation, Elemental Weakness, Enervating Nova, Enfeeble, Essence Drain, Eternal Rage, Explosive Transmutation, Fire Spell on Hit, Freezing Shards, Frostbolt, Galvanic Shards, Ghost Dance, Hammer of the Gods, Hand of Chayula, Herald of Thunder, Incendiary Shot, Inevitable Agony, Iron Ward, Lightning Bolt, Living Bomb, Lunar Assault, Mace Strike, Magnetic Salvo, Mana Remnants, Meditate, Mirage Archer, Mirage Deadeye, Mirror of Refraction, Permafrost Bolts, Plasma Blast, Powered by Verisium, Quarterstaff Strike, Raging Spirits, Rain of Arrows, Rapid Shot, Ravenous Swarm, Reaper's Invocation, Remnants of Kalguur, Rhoa Mount, Sacrifice, Scavenged Plating, Shard Scavenger, Shockburst Rounds, Siege Cascade, Sigil of Power, Siphon Elements, Soulrend, Spear Stab, Spear Throw, Spellslinger, Stormblast Bolts, Thundergod's Wrath, Time Snap, Time of Need, Trinity, Verisium Manifestations, Virtuous Barrier, Void Illusion, Vulnerability, Wild Protector, Wind Blast, Wind Dancer
