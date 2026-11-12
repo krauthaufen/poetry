@@ -325,6 +325,9 @@ module Setup =
                         if o.Infused then None
                         else Behaviours.infusedCopy db charMods (Gems.chooseWeapon db setup.Gem sheet.Weapons) setup |> Option.map (fun (el, cp) -> s.Name, el, { (Behaviours.applyObserved cp) with Name = s.Name + " infused" })
                     let curse = Behaviours.curseOf db charMods setup s
+                    // "Curse zones erupt after a delay": the curse lands that much after the cast
+                    let curseDelay = if curse.IsSome then Behaviours.curseDelay db charMods setup s else 0.0
+                    let s = if curseDelay > 0.0 then { s with HitDelay = s.HitDelay + curseDelay } else s
                     // a curse that explodes when replaced: the check comes before the new curse lands
                     let doom = curse |> Option.bind (fun (name, _, _, _) -> Behaviours.impendingDoom db charMods setup s name)
                     let curseRules =
@@ -332,6 +335,8 @@ module Setup =
                         | Some (name, duration, monster, _) ->
                             (doom |> Option.map snd |> Option.toList)
                             @ [ { Hook = OnHit; Filter = Called s.Name; Chance = 100.0; Reaction = ApplyCurse(name, duration, monster) } ]
+                            // on its way: not cast again before it lands
+                            @ (if curseDelay > 0.0 then [ { Hook = OnUse; Filter = Called s.Name; Chance = 100.0; Reaction = ApplyDebuff("Pending " + name, s.BaseTime + curseDelay, 1, []) } ] else [])
                         | None -> []
                     let lasting = Behaviours.sustained db charMods setup s
                     let cryRules, cryGrants = Behaviours.warcry db charMods setup s
@@ -506,7 +511,7 @@ module Setup =
                     | None -> []
                 | KeepCurse g ->
                     match byGem g with
-                    | Some { Curse = Some name; Skill = sk } -> [ { Use = sk.Name; When = fun v -> not (v.EnemyStatus.ContainsKey name) } ]
+                    | Some { Curse = Some name; Skill = sk } -> [ { Use = sk.Name; When = fun v -> not (v.EnemyStatus.ContainsKey name || v.EnemyStatus.ContainsKey("Pending " + name)) } ]
                     | _ -> []
                 | WhileBelow (r, n, g) -> [ { Use = nameOf g; When = fun v -> (Map.tryFind r v.Buffs |> Option.defaultValue 0) < n } ]
                 | When (cond, g) -> [ { Use = nameOf g; When = cond } ])

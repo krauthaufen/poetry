@@ -732,6 +732,24 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         | other -> failwithf "unexpected auras %A" other
         // and Blasphemy is not a trigger gem
         equal (box 0) (box (Behaviours.metas db.Value sheet b false).Length))
+
+    test "curses land after their activation delay and are not cast again meanwhile" (fun () ->
+        let setup = { Gem = "Despair"; Level = 20; Quality = 0; StatSet = 1; Supports = [] }
+        match Gems.skill db.Value ModDb.empty None setup with
+        | Ok (s, _) ->
+            // curse_delay_duration_ms = 1500
+            near 1.5 (Behaviours.curseDelay db.Value ModDb.empty setup s)
+            near 1.2 (Behaviours.curseDelay db.Value (ModDb.ofList (match StatMap.meaning "curse_delay_+%" -20.0 with Mods ms -> ms | _ -> [])) setup s)
+            near 0.0 (Behaviours.curseDelay db.Value (ModDb.ofList (match StatMap.meaning "unique_no_curse_delay" 1.0 with Mods ms -> ms | _ -> [])) setup s)
+        | Error e -> failwith e
+        let gem name = { Name = name; Level = 20; Quality = 0; Enabled = true; IsSupport = false; StatSet = 1 }
+        let b = { blank with Groups = [ { Label = ""; Slot = ""; Enabled = true; Gems = [ gem "Despair" ] } ]; ExtraLines = [ "+5000 to maximum Mana" ] }
+        let o = { Options.defaults with MaxTime = 3.0; Immortal = true }
+        let c = Setup.loadWith db.Value treeJson b o
+        let out = Sim.run (Setup.fight c o (Setup.player c o [ KeepCurse "Despair" ] None) (Encounter.boss 83 Rarity.defaults 30.0 |> List.map (fun e -> { e with Life = 1e13 }))) 1u
+        // one cast (0.7 s) and 1.5 s later the curse is on; nothing is cast in between
+        equal (box 1) (box out.Counts.["uses:Despair"])
+        equal (box 1) (box out.Counts.["apply:Curse:Despair"]))
 #else
 let run (_: string -> (unit -> unit) -> unit) (_: float -> float -> unit) (_: obj -> obj -> unit) = ()
 #endif

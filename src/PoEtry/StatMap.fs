@@ -917,6 +917,8 @@ module StatMap =
             one (Mod.more (AilmentMagnitude(Some Bleed)) ((Constants.bleedMovingMultiplier - 1.0) * 100.0) |> Mod.whenever (Not(EnemyHas "Moving")))
         | "number_of_additional_curses_allowed" -> one (Mod.base' (Named "MaxCurses") v)
         | "curse_effect_+%" -> one (Mod.inc (Named "CurseEffect") v)
+        | "curse_delay_+%" | "base_curse_delay_+%" -> one (Mod.inc (Named "CurseDelay") v)
+        | "unique_no_curse_delay" -> one (Mod.flag (Named "NoCurseDelay"))
         | "base_curse_duration_+%" | "curse_skill_effect_duration_+%" -> one (Mod.inc (Named "CurseDuration") v)
         | "mark_effect_+%" -> one (Mod.inc (Named "MarkEffect") v)
         | "mark_skill_duration_+%" | "mark_duration_+%" -> one (Mod.inc (Named "MarkDuration") v)

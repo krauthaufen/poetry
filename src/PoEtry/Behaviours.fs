@@ -516,6 +516,17 @@ module Behaviours =
             let effect = Mods.mult ctx [ Named(if isCurse then "CurseEffect" else "MarkEffect") ] all
             Some(name, duration, monster |> List.map (Mod.scaled effect), player |> List.map (Mod.scaled effect >> Mod.from skill.Name))
 
+    /// "Curse zones erupt after a delay" (`curse_delay_duration_ms`), slower or faster with
+    /// "Curse Activation"; none with "Curses have no Activation Delay". Marks have none.
+    let curseDelay (db: GameDb) (charMods: ModDb) (setup: GemSetup) (skill: Skill) : float =
+        let raw = Gems.rawStats db charMods { setup with Supports = [] }
+        let ctx = { Ctx.empty with SkillTags = skill.Tags; SkillName = skill.Name }
+        let all = ModDb.ofList (ModDb.toList charMods @ skill.Mods)
+        if Mods.flag ctx (Named "NoCurseDelay") all then 0.0
+        else
+            (raw |> List.sumBy (fun (k, v) -> if k = "curse_delay_duration_ms" then v / 1000.0 else 0.0))
+            * max 0.0 (Mods.mult ctx [ Named "CurseDelay" ] all)
+
     /// Impending Doom: "trigger an explosion when the curse ends". Recasting a curse on an enemy
     /// that has it ends the old one, so every cast onto a cursed enemy triggers Doom Blast (the
     /// support's granted skill, at the curse gem's level, with the group's supports). A curse
