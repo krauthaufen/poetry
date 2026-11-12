@@ -96,6 +96,14 @@
         "FloatStats",
         "FloatStatsValues"
       ]
+    },
+    {
+      "name": "GameConstants",
+      "columns": [
+        "Id",
+        "Value",
+        "Divisor"
+      ]
     }
   ]
 }
