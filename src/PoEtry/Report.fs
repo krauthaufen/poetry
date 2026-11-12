@@ -42,7 +42,12 @@ module Report =
         let cov = c.Sheet.Coverage
         obj
             [ "class", JStr c.Sheet.ClassName
+              "ascendancy", JStr c.Build.Ascendancy
               "level", num (float c.Sheet.Level)
+              // the passives allocated (those bound to a weapon set apart)
+              "passives", JArr(c.Build.TreeNodes |> List.map (fun i -> num (float i)))
+              "passivesSet1", JArr(c.Build.TreeNodesSet1 |> List.map (fun i -> num (float i)))
+              "passivesSet2", JArr(c.Build.TreeNodesSet2 |> List.map (fun i -> num (float i)))
               "attributes", obj [ "str", num v.Str; "dex", num v.Dex; "int", num v.Int ]
               "pools", obj [ "life", num v.Life; "mana", num v.Mana; "energyShield", num v.EnergyShield; "ward", num v.Ward; "spirit", num c.Spirit ]
               "defences",
@@ -108,30 +113,51 @@ module Report =
 
 /// The simulator for a front end: the game data read once, the last character kept.
 /// Requests and answers are JSON text:
-///   { "op": "character", "build": "<character JSON or PoB XML>" }
+///   { "op": "character", "build": "<character JSON or PoB XML>", "passives": "id,id,..." }
 ///   { "op": "fight", "build": "...", "scenario": ..., "time": ..., "runs": ..., "gem": ... }
 /// An answer is the report, or { "error": "..." }.
 type Session(read: string -> string) =
     let db = lazy (GameDb.load read)
     let tree = lazy (read "tree.json")
+    let mutable parsed: (string * PobBuild) option = None
     let mutable last: (string * Loaded) option = None
 
-    member _.Load(build: string) : Loaded =
+    /// The character of a build text; `passives` ("" or ids separated by commas) replaces
+    /// the passives allocated in it.
+    member _.Load(build: string, passives: string) : Loaded =
+        let key = passives + "|" + build
         match last with
-        | Some (text, c) when text = build -> c
+        | Some (k, c) when k = key -> c
         | _ ->
-            let parsed, _ = Setup.parseBuild build
-            let c = Setup.loadWith db.Value tree.Value parsed Options.defaults
-            last <- Some(build, c)
+            let b =
+                match parsed with
+                | Some (text, b) when text = build -> b
+                | _ ->
+                    let b, _ = Setup.parseBuild build
+                    parsed <- Some(build, b)
+                    b
+            let b =
+                if passives = "" then b
+                else
+                    let ids = passives.Split(',') |> Array.choose (fun s -> match System.Int32.TryParse(s.Trim()) with | true, v -> Some v | _ -> None) |> List.ofArray
+                    { b with TreeNodes = ids }
+            let c = Setup.loadWith db.Value tree.Value b Options.defaults
+            last <- Some(key, c)
             c
 
     member this.Handle(request: string) : string =
         try
             let j = Json.parse request
             let build = Json.strField "build" j |> Option.defaultValue ""
+            // (a single id arrives as a number)
+            let passives =
+                match Json.field "passives" j with
+                | Some (JStr s) -> s
+                | Some (JNum n) -> sprintf "%.0f" n
+                | _ -> ""
             match Json.strField "op" j with
-            | Some "character" -> Report.write (Report.character (this.Load build))
-            | Some "fight" -> Report.write (Report.fight (this.Load build) j)
+            | Some "character" -> Report.write (Report.character (this.Load(build, passives)))
+            | Some "fight" -> Report.write (Report.fight (this.Load(build, passives)) j)
             | other -> Report.write (JObj(Map.ofList [ "error", JStr(sprintf "unknown op %A" other) ]))
         with e ->
             Report.write (JObj(Map.ofList [ "error", JStr e.Message ]))
