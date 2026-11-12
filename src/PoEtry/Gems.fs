@@ -376,6 +376,13 @@ module Gems =
               ("Shred", ""), [ "Seq:0,1/6" ]
               ("Shred", "Fast Strikes"), [ "Seq:2,3,4/6" ]
               ("Shred", "Final Strike"), [ "Seq:5/6"; "Hits:2" ]
+              // "Consumes Power Charges if possible to instead Channel a sustained barrage of
+              // electrified Oil": the Empowered set in place of the plain one while a charge lasts
+              ("Oil Barrage", ""), [ "NotWithCharge" ]
+              ("Oil Barrage", "Empowered"), [ "Part"; "Charge" ]
+              // the pustule's burst happens when the pustule does (see Behaviours.toxicDomain)
+              ("Toxic Domain", ""), [ "NoHit" ]
+              ("Toxic Domain", "Pustule Explosion"), [ "Part"; "OnKill" ]
               // "Simultaneously fires a Physical Projectile and a Chaos Projectile"
               ("Coiling Bolts", "Chaos"), [ "Part" ]
               // what springs from the enemy hit and goes for others: beams "at nearby enemies",
@@ -790,9 +797,11 @@ module Gems =
                          | _ -> (match System.Double.TryParse n with | true, v -> Some v | _ -> None))
                     | _ :: rest -> find rest
                     | [] -> None
-                match find words with
-                | Some n -> [ Mod.base' (Named "ConsumeChargeCount") n ]
-                | None -> [])
+                // "..._consume_power_charge_per_X_ms": one charge for so long of the channel
+                match ownStats |> List.tryPick (fun (k, v) -> if k.EndsWith "_consume_power_charge_per_X_ms" && v > 0.0 then Some v else None), find words with
+                | Some ms, _ -> [ Mod.base' (Named "ConsumeChargeCount") 1.0; Mod.base' (Named "ConsumeChargeEveryMs") ms ]
+                | None, Some n -> [ Mod.base' (Named "ConsumeChargeCount") n ]
+                | None, None -> [])
              // a stat set for one state of the enemy ("Vs Frozen", "Vs Armour Broken", "Vs Dazed")
              @ (if set.Label.StartsWith "Vs " then
                     let state = match set.Label.Substring 3 with "Armour Broken" -> "FullyBrokenArmour" | other -> other.Replace(" ", "")

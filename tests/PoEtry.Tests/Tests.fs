@@ -969,6 +969,18 @@ let main _ =
         // Triskelion at 0 s, novas land at 2 .. 5 s: the first for half, the rest in full
         near (50.0 + 3.0 * 100.0) o.DamageBy.["Nova (hit)"])
 
+    test "Toxic Domain: a projectile attack attaches a pustule that bursts when its time is up" (fun () ->
+        let shot = { Skill.make "Shot" [ Attack; Projectile ] with BaseDamage = Map.ofList [ Physical, Range.fixedAt 10.0 ]; BaseCrit = 0.0 }
+        let burst = { Skill.make "Shot: Burst" [ Attack; Area ] with BaseDamage = Map.ofList [ Physical, Range.fixedAt 1000.0 ]; BaseCrit = 0.0; Mods = [ Mod.flag (Named "OnlyTriggered") ] }
+        let player =
+            { Actor.make "Player" [ noIgnite; sure ] [ { shot with Parts = [ burst ] } ] with
+                Rules = [ { Hook = OnHit; Filter = WithTags([ Attack; Projectile ], [ Triggered ]); Chance = 100.0; Reaction = AttachPustule("Shot: Burst", 3.0, 0.0, 0.0) } ] }
+        let o = Sim.run { Fight.single (boss 1e12) player 10.5 with MaxTime = 10.5 } 1u
+        // shots land at 1 .. 10 s; a pustule from 1 s bursts at 4 s, the next from 4 s (or the shot
+        // after) at 7 or 8 s, a third at 10 or more: two or three bursts, one pustule at a time
+        let bursts = o.Counts.["hits:Shot: Burst"]
+        if bursts < 2 || bursts > 3 then failwithf "bursts %d" bursts)
+
     test "minions: temporary ones are out until summoned, last their duration, and are summoned anew when all are out" (fun () ->
         let call cd = { Skill.make "Call" [ Spell ] with Hits = []; Cooldown = Some cd }
         let spirits n = [ for i in 1 .. n -> { Actor.make (sprintf "Spirit %d" i) [ noIgnite; sure ] [ strike "Bite" 100.0 ] with Pool = Some "Spirits" } ]

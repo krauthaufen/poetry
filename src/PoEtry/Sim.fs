@@ -75,6 +75,10 @@ type Reaction =
     /// One of these buffs, picked at random, for `duration`; the others are taken away
     /// (which Ancestral Spirit a totem calls).
     | GrantOneOf of names: string list * duration: float
+    /// A pustule on the enemy hit, if it has none (Toxic Domain): it stores the Poison damage
+    /// dealt from then on, and bursts with the part after `seconds`, or as soon as it holds
+    /// enough for its most: 1% more damage per `poisonPerPercent` stored, up to `capPercent`.
+    | AttachPustule of part: string * seconds: float * poisonPerPercent: float * capPercent: float
     | NoReaction
     /// Take a debuff off the enemy concerned (a mark that has been activated).
     | RemoveDebuff of name: string
@@ -594,7 +598,10 @@ module Sim =
           /// Killed minions are revived at this time; how many have died since the last revival.
           Revival: (float * int) option
           /// Killed minions whose bones have been used (Unearth) since they died.
-          Boned: Set<string> }
+          Boned: Set<string>
+          /// Pustules on enemies: owner, part, enemy, the Poison damage dealt when it was attached,
+          /// Poison per 1% more damage, the most (%), when it bursts at the latest.
+          Pustules: (string * string * string * float * float * float * float) list }
 
     /// Fixed for the whole fight: mod dbs built once, buffs layered on per event.
     type private Env =
@@ -1271,6 +1278,15 @@ module Sim =
                              { st with Buffs = Map.add pick { Name = pick; Mods = []; Stacks = 1; Expires = w.Time + duration } buffs }) w
                          |> schedule (w.Time + duration) Expire
                      | GrantOneOf _ -> w
+                     | AttachPustule (part, seconds, per, cap) ->
+                         onTarget (fun target ->
+                             if w.Pustules |> List.exists (fun (_, _, e, _, _, _, _) -> e = target) then w
+                             else
+                                 let dealt = Map.tryFind "Poison" w.DamageBy |> Option.defaultValue 0.0
+                                 { w with
+                                     Pustules = (actor.Name, part, target, dealt, per, cap, w.Time + seconds) :: w.Pustules
+                                     Counts = bump "pustule" w.Counts }
+                                 |> schedule (w.Time + seconds) Expire)
                      | SummonPerWard (pool, wardEach, duration) ->
                          match w.Player with
                          | Some p when wardEach > 0.0 && p.Ward >= wardEach ->
@@ -3113,6 +3129,18 @@ module Sim =
                             match aimed env w with
                             | Some other -> drop w |> schedule w.Time (Strike(owner, skill, 1.0, other.Def.Name))
                             | None -> drop w) w
+            // pustules: burst when their time is up or they hold all the Poison they can use
+            let w =
+                if w.Pustules.IsEmpty then w
+                else
+                    w.Pustules |> List.fold (fun w ((owner, part, enemy, mark, per, cap, until) as pustule) ->
+                        let drop w = { w with Pustules = w.Pustules |> List.filter (fun x -> x <> pustule) }
+                        match Map.tryFind enemy w.Enemies with
+                        | Some e when e.Life > 0.0 ->
+                            let stored = (Map.tryFind "Poison" w.DamageBy |> Option.defaultValue 0.0) - mark
+                            let more = if per > 0.0 then min cap (stored / per) else 0.0
+                            if w.Time >= until || (cap > 0.0 && more >= cap) then drop w |> schedule w.Time (Strike(owner, part, 1.0 + more / 100.0, enemy)) else w
+                        | _ -> drop w) w
             // Ice Crystals: destroyed once the enemy beside them has lost as much life as one
             // withstands (the damage dealt there since they appeared); each then explodes
             let w =
@@ -3274,7 +3302,11 @@ module Sim =
                 let st = Map.find name w.Actors
                 // character + skill (gem quality, supports): the skill's own db
                 let skip = Mods.sumBase Ctx.empty [ Named "ChargeSkipConsume" ] (skillDb env actor (skillOf actor skillName) st)
-                if not (Map.containsKey charge st.Buffs) then w
+                // a channel that takes a charge for so long of it: each use takes one with the
+                // chance its own time is of that (the same charges per second, at random moments)
+                let every = Mods.sumBase Ctx.empty [ Named "ConsumeChargeEveryMs" ] (skillDb env actor (skillOf actor skillName) st) / 1000.0
+                let spared = every > 0.0 && not (rng.Chance(100.0 * min 1.0 (useTime env actor (skillOf actor skillName) w / every)))
+                if not (Map.containsKey charge st.Buffs) || spared then w
                 else
                     // "still count as consuming": the consumed-recently status starts either way
                     let recent = "Consumed" + charge + "Recently"
@@ -3491,7 +3523,8 @@ module Sim =
               Crystals = []
               Entropy = Map.empty
               Revival = None
-              Boned = Set.empty }
+              Boned = Set.empty
+              Pustules = [] }
             // (a temporary minion starts acting when it is summoned)
             |> fun w -> actors |> List.fold (fun w a -> if a.Pool.IsSome then w else schedule 0.0 (Ready a.Name) w) w
             |> fun w -> actors |> List.fold (fun w a -> a.Cycles |> List.fold (fun w c -> schedule 0.0 (CycleTick(a.Name, c.Name)) w) w) w

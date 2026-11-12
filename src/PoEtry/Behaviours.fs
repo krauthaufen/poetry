@@ -647,6 +647,31 @@ module Behaviours =
                     Reaction = IfEnemyHas("Mark:" + skill.Name, IfEnemyHas(state, GrantBuff(skill.Name + " activated", duration, 1, mods))) } ]
             | _ -> []))
 
+    /// Toxic Domain: "While in the Bloom, you have increased Skill costs ... and your Projectile
+    /// Attacks attach a Toxic Pustule, which can be Poisoned. Pustules will Detonate after a
+    /// duration or when enough Poison has been applied, dealing more damage based on the stored
+    /// Poison damage": the bloom is a buff for its duration (the player is taken to stay in it);
+    /// a projectile attack hit attaches a pustule (one per enemy) that bursts with the gem's
+    /// second stat set after the detonation time, or once it holds the Poison for its most.
+    /// What it stores is the Poison damage dealt in the fight since it was attached.
+    let toxicDomain (db: GameDb) (charMods: ModDb) (setup: GemSetup) (skill: Skill) : Rule list =
+        let all = Gems.data db setup.Gem |> Option.map (fun d -> d.StatSets) |> Option.defaultValue []
+        match all |> List.tryFind (fun s -> s.Stats |> List.contains "toxic_pustule_burst_1%_more_damage_per_x_stored_poison") with
+        | None -> []
+        | Some _ ->
+            let raw = Gems.rawStats db charMods { setup with Supports = []; StatSet = 2 }
+            let stat id = raw |> List.filter (fun (k, _) -> k = id) |> List.sumBy snd
+            let ctx = { Ctx.empty with SkillTags = skill.Tags; SkillName = skill.Name }
+            let duration = stat "base_skill_effect_duration" / 1000.0 * Mods.mult ctx [ SkillDuration ] (ModDb.ofList (ModDb.toList charMods @ skill.Mods))
+            let buff = skill.Name + " buff"
+            let part = skill.Name + ": Pustule Explosion"
+            [ { Hook = OnUse; Filter = Called skill.Name; Chance = 100.0
+                Reaction = GrantBuff(buff, duration, 1, [ Mod.inc ManaCost (stat "toxic_domain_mana_cost_+%") |> Mod.from skill.Name ]) }
+              { Hook = OnHit; Filter = WithTags([ Attack; Projectile ], [ Triggered ]); Chance = stat "toxic_domain_pustule_chance_%"
+                Reaction =
+                    IfBuff(buff, AttachPustule(part, stat "base_skill_detonation_time" / 1000.0, stat "toxic_pustule_burst_1%_more_damage_per_x_stored_poison",
+                                               stat "toxic_pustule_max_burst_damage_+%_final_from_stored_poison")) } ]
+
     /// Triskelion Cascade: "Empower the next Cascadable Spell you cast. The Empowered Spell
     /// becomes centred on your location, and Cascades to six areas around you": a buff for the
     /// gem's duration that the next such spell uses up (see the engine), with the gem's less

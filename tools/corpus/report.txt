@@ -577,7 +577,7 @@
 048-oracle-thrashing-vines                           Thrashing Vines                                 81872 dps (theirs      65936)  1 unknown, 8 unmapped, 16 unsimulated  energy shield 9984/10475  armour 735/855
 049-pathfinder-pounce                                Pounce (pressed Ice Shot)                        6614 dps (theirs        346)  0 unknown, 11 unmapped, 16 unsimulated  evasion 1225/1036  deflection 552/467
 050-ranger-ice-shot                                  Ice Shot (pressed Snipe)                       100428 dps (theirs      27389)  0 unknown, 9 unmapped, 12 unsimulated
-051-ritualist-oil-barrage                            Oil Barrage                                    217971 dps (theirs     538987)  0 unknown, 13 unmapped, 22 unsimulated  intelligence 124/127  chaos res 58/54
+051-ritualist-oil-barrage                            Oil Barrage                                    211986 dps (theirs     538987)  0 unknown, 13 unmapped, 22 unsimulated  intelligence 124/127  chaos res 58/54
 052-shaman-comet                                     Comet (pressed Spark)                           72882 dps (theirs     903048)  0 unknown, 5 unmapped, 21 unsimulated
 053-smith-of-kitava-molten-shower                    Molten Shower                                  227593 dps (theirs     954112)  0 unknown, 7 unmapped, 18 unsimulated  strength 1837/1886  fire res 197/242  cold res 90/115  lightning res 94/119
 054-sorceress-comet                                  Comet (pressed Spark)                           13272 dps (theirs    3140573)  0 unknown, 3 unmapped, 14 unsimulated  life 702/757  strength 114/118  dexterity 87/90  fire res 114/71  cold res 71/75  lightning res 69/74  chaos res 26/22
@@ -590,7 +590,7 @@
 061-witch-frostbolt                                  Frostbolt (pressed Bone Blast)                   1569 dps (theirs        207)  0 unknown, 3 unmapped, 10 unsimulated  spirit 329/170  cold res 105/93
 062-witchhunter-crossbow-shot                        Crossbow Shot                                  301364 dps (theirs     258140)  2 unknown, 10 unmapped, 41 unsimulated  armour 12089/14260  evasion 15318/16071  deflection 5561/5833
 063-abyssal-lich-essence-drain                       Essence Drain                                  179896 dps (theirs     305095)  0 unknown, 1 unmapped, 24 unsimulated  mana 900/872  energy shield 16797/16441
-064-acolyte-of-chayula-poisonburst-arrow             Poisonburst Arrow                             2460236 dps (theirs   18038360)  0 unknown, 18 unmapped, 19 unsimulated  evasion 17670/13706  deflection 18465/14473
+064-acolyte-of-chayula-poisonburst-arrow             Poisonburst Arrow                             2438779 dps (theirs   18038360)  0 unknown, 18 unmapped, 19 unsimulated  evasion 17670/13706  deflection 18465/14473
 065-amazon-glacial-bolt                              Glacial Bolt                                   368497 dps (theirs    1563943)  0 unknown, 5 unmapped, 17 unsimulated
 066-blood-mage-spear-throw                           Spear Throw                                    269881 dps (theirs     191772)  0 unknown, 16 unmapped, 30 unsimulated
 067-chronomancer-raise-zombie                        Raise Zombie                                   377243 dps (theirs      23805)  0 unknown, 7 unmapped, 18 unsimulated  energy shield 10147/10909

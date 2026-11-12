@@ -465,6 +465,18 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         equal (Some 10) (Behaviours.summonLimit (raw "Raise Zombie"))
         equal None (Behaviours.summonLimit (raw "Skeletal Warrior")))
 
+    test "Oil Barrage: with a power charge the Empowered barrage in place of the plain one, a charge per 1.5 s" (fun () ->
+        match Gems.skill db.Value ModDb.empty None { Gem = "Oil Barrage"; Level = 20; Quality = 0; StatSet = 1; Supports = [] } with
+        | Ok (s, _) ->
+            let flag (x: Skill) name = x.Mods |> List.exists (fun m -> m.Stat = Named name)
+            equal (Some "PowerCharge") s.Consumes
+            equal true (flag s "NotWithCharge")
+            let empowered = s.Parts |> List.find (fun p -> p.Name.EndsWith "Empowered")
+            equal true (flag empowered "OnlyWithCharge")
+            near 3.12 empowered.BaseMultiplier
+            near 1500.0 (s.Mods |> List.sumBy (fun m -> if m.Stat = Named "ConsumeChargeEveryMs" then m.Value else 0.0))
+        | Error e -> failwith e)
+
     test "Frost Wall: a row of Ice Crystals; the cast itself hits nothing" (fun () ->
         match Gems.skill db.Value ModDb.empty None { Gem = "Frost Wall"; Level = 20; Quality = 0; StatSet = 1; Supports = [] } with
         | Ok (s, _) ->
