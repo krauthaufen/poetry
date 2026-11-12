@@ -1403,6 +1403,8 @@ module Behaviours =
                         |> List.tryPick (fun (k, v) -> if k.EndsWith "_pack_size" then Some(int v) else None)
                         |> Option.defaultValue 1
                         |> fun pack -> pack * (Map.tryFind gem.Name counts |> Option.defaultValue 1)
+                    // what the minions do on a hit ("Minions have x% chance to inflict Withered on Hit")
+                    let rules = keywordRules { sheet with Mods = minionMods } ordered
                     // a minion without any damaging skill (a healer) simply doesn't fight
                     if ordered.IsEmpty then [], []
                     else
@@ -1415,7 +1417,7 @@ module Behaviours =
                                 d.Types.Contains "MinionsAreUndamagable" || d.Description.Contains "untargetable" || d.Description.Contains "not directly engage")
                         let body = if untouchable then None else Some(minionBody bodyCtx m level minionMods None)
                         let most = most + int (Mods.sumBase Ctx.empty [ Named "TemporaryMinionLimit" ] (ModDb.ofList minionMods))
-                        [ for i in 1 .. most -> { Actor.make (sprintf "%s %d" m.Name i) minionMods ordered with Body = body; Pool = Some gem.Name } ],
+                        [ for i in 1 .. most -> { Actor.make (sprintf "%s %d" m.Name i) minionMods ordered with Body = body; Pool = Some gem.Name; Rules = rules } ],
                         (if summonedBy raw then [] else [ sprintf "%s: what summons its minions is not simulated" gem.Name ])
                     | None ->
                         // killed, it is revived after the gem's revive time
@@ -1426,11 +1428,12 @@ module Behaviours =
                         let body = minionBody bodyCtx m level minionMods (Some revive)
                         [ for i in 1 .. count ->
                             let name = if count > 1 then sprintf "%s %d" m.Name i else m.Name
-                            { Actor.make name minionMods ordered with Body = Some body } ],
+                            { Actor.make name minionMods ordered with Body = Some body; Rules = rules } ],
                         []))
         |> List.concat
         |> List.unzip
-        |> fun (actors, notes) -> List.concat actors, List.concat notes
+        // (the same minion gem twice, as in both weapon sets: the first one counts)
+        |> fun (actors, notes) -> List.concat actors |> List.distinctBy (fun a -> a.Name), List.concat notes
 
     /// What summons a build's temporary minions (the pools `minions` makes), as rules and
     /// periodic actions of the player. A minion lasts the gem's duration.

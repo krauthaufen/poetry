@@ -670,6 +670,19 @@ module Setup =
                              | _ -> k, 0)
                         | "Rage" when lone && not rageRegen -> k, 0
                         | _ -> k, n) }
+        // how many persistent minions there are, and of how many different kinds ("per Minion",
+        // "for each different type of Persistent Minion in your Presence"); a dead one still counts
+        let persistent = c.Minions |> List.filter (fun m -> m.Pool.IsNone && m.ActiveWhile.IsNone)
+        let kind (m: Actor) = m.Name.TrimEnd([| '0'; '1'; '2'; '3'; '4'; '5'; '6'; '7'; '8'; '9' |]).TrimEnd()
+        let isCompanion (m: Actor) = m.Skills |> List.exists (fun s -> s.Tags.Contains(Tag "Companion"))
+        let minionCounts =
+            [ "ActiveMinions", persistent.Length
+              "PersistentMinionTypes", persistent |> List.map kind |> List.distinct |> List.length
+              "CompanionTypes", persistent |> List.filter isCompanion |> List.map kind |> List.distinct |> List.length ]
+            |> List.filter (fun (_, n) -> n > 0)
+        let counted (a: Actor) =
+            { a with Resources = a.Resources @ minionCounts; MaxResources = minionCounts |> List.fold (fun acc (k, n) -> Map.add k n acc) a.MaxResources }
+        let player = counted player
         { Enemies = enemies
           EnemyAuras = curses @ Behaviours.criticalWeaknessAura c.Sheet @ Behaviours.witheringPresence c.Db c.Sheet c.Build
           Player = player
@@ -683,7 +696,7 @@ module Setup =
              c.Minions |> List.map (fun m ->
                  if m.ActiveWhile.IsSome && m.Resources.IsEmpty then
                      { m with Resources = carried; MaxResources = carried |> List.fold (fun acc (k, n) -> Map.add k n acc) m.MaxResources }
-                 else m))
+                 else counted m))
           Targeting = o.Targeting
           Reach = (if o.CastOnSelf then 0.0 else o.Reach)
           CascadeSpacing = o.CascadeSpacing

@@ -742,6 +742,16 @@ module StatMap =
         | "minion_commanded_skill_damage_+%" -> one (Mod.inc (ForMinions(Damage AllDamage)) v |> Mod.whenever (SkillIs(Tag "Command")))
         | "minion_command_skill_skill_speed_+%" -> one (Mod.inc (ForMinions Speed) v |> Mod.whenever (SkillIs(Tag "Command")))
         | "companion_%_damage_as_chaos" -> Some(Mods [ for t in DamageType.all -> Mod.base' (ForMinions(GainAs(t, Chaos))) v |> Mod.whenever (SkillIs(Tag "Companion")) ])
+        // per different type of persistent minion, per minion: counted when the fight is set up
+        | "minion_commanded_skill_damage_+%_per_different_persistent_minion_in_presence" ->
+            one (Mod.inc (ForMinions(Damage AllDamage)) v |> Mod.whenever (SkillIs(Tag "Command")) |> Mod.whenever (PerStack("PersistentMinionTypes", 1.0)))
+        | "support_varied_troops_damage_+%_final_per_different_persistent_ominion" -> one (Mod.more (Damage AllDamage) v |> Mod.whenever (PerStack("PersistentMinionTypes", 1.0)))
+        | "damage_+%_per_active_minion" -> one (Mod.inc (Damage AllDamage) v |> Mod.whenever (PerStack("ActiveMinions", 1.0)))
+        | "damage_+%_per_different_companion_in_presence" -> one (Mod.inc (Damage AllDamage) v |> Mod.whenever (PerStack("CompanionTypes", 1.0)))
+        | "companions_you_control_gain_damage_+%_against_enemies_marked_by_you" ->
+            one (Mod.inc (ForMinions(Damage AllDamage)) v |> Mod.whenever (SkillIs(Tag "Companion")) |> Mod.whenever (EnemyHas "Marked"))
+        // (how long a minion's Withered lasts is not in the stat: 4 s as for the player's)
+        | "minions_have_%_chance_to_inflict_wither_on_hit" -> one (Mod.base' (ForMinions(Named "Rule:OnHit:Withered:4")) v)
         | "minion_resummon_speed_+%" -> one (Mod.inc (ForMinions(Named "MinionReviveSpeed")) v)
         | "minion_maximum_life_%_to_gain_as_maximum_energy_shield" -> one (Mod.base' (ForMinions(Named "LifeAsExtraEnergyShield")) v)
         | "minion_attack_speed_+%" -> one (Mod.inc (ForMinions Speed) v |> Mod.whenever (SkillIs Attack))
