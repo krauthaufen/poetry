@@ -637,7 +637,7 @@ module Behaviours =
             [],
             [ { Hook = OnUse; Filter = Called skill.Name; Chance = 100.0; Reaction = SetStacks(buff, max 1 (int (sum "skill_empowers_next_x_melee_attacks"))) } ],
             [ for t in DamageType.all do
-                if t <> Chaos then yield Mod.base' (GainAs(t, Chaos)) chaos |> Mod.whenever (SkillIs Attack) |> Mod.whenever (WhileBuff buff) |> Mod.from skill.Name ]
+                yield Mod.base' (GainAs(t, Chaos)) chaos |> Mod.whenever (SkillIs Attack) |> Mod.whenever (WhileBuff buff) |> Mod.from skill.Name ]
         elif perStrike > 0.0 then
             let combust =
                 Map.tryFind setup.Gem db.Gems |> Option.map (fun g -> g.AdditionalEffects) |> Option.defaultValue []

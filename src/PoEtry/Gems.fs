@@ -517,6 +517,8 @@ module Gems =
         // the skill's internal name, from all its stat sets
         let prefix = skillPrefix (data.StatSets |> List.collect (fun st -> st.Stats @ (st.ConstantStats |> List.map fst)))
         let ownMods, ownCov = interpret prefix ownStats
+        // the skill's own conversion is the first of the two conversion steps
+        let ownMods = ownMods |> List.map (fun m -> match m.Stat with Convert (a, b) -> { m with Stat = SkillConvert(a, b) } | _ -> m)
         let supportMods, supportCov = interpret None supportStats
         let mods, cov = ownMods @ supportMods, Coverage.merge ownCov supportCov
         let isAttack = data.Types.Contains "Attack"
@@ -620,7 +622,7 @@ module Gems =
                 [ if more <> 0.0 then yield Mod.more (Damage AllDamage) more |> Mod.from "stages"
                   if gainFire > 0.0 then
                       for t in DamageType.all do
-                          if t <> Fire then yield Mod.base' (GainAs(t, Fire)) gainFire |> Mod.from "stages" ]
+                          yield Mod.base' (GainAs(t, Fire)) gainFire |> Mod.from "stages" ]
         let mods = mods @ stageMods
         let time =
             if staged then time * stages + (statOf "channel_skill_end_animation_duration_override_ms" |> Option.defaultValue 0.0) / 1000.0 else time

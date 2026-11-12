@@ -772,7 +772,7 @@ module StatMap =
             Some(Mods(Ailment.damaging |> List.map (fun a -> Mod.inc (AilmentMagnitude(Some a)) v |> Mod.whenever IsCrit)))
         | "damaging_ailments_deal_damage_+%_faster" | "faster_burn_%" -> Some(Unsimulated "faster ailments")
         | "non_skill_base_all_damage_%_to_gain_as_cold_fire_lightning" ->
-            Some(Mods [ for into in DamageType.elemental do for from in DamageType.all do if from <> into then yield Mod.base' (GainAs(from, into)) v ])
+            Some(Mods [ for into in DamageType.elemental do for from in DamageType.all do yield Mod.base' (GainAs(from, into)) v ])
         | "attack_additional_critical_strike_chance_permyriad" -> one (Mod.base' CritChance (v / 100.0) |> Mod.whenever (SkillIs Attack))
         | "additional_critical_strike_chance_permyriad" -> one (Mod.base' CritChance (v / 100.0))
         | "all_attributes_+%" -> Some(Mods([ "Str"; "Dex"; "Int" ] |> List.map (fun a -> Mod.inc (Attribute a) v)))
@@ -1026,7 +1026,7 @@ module StatMap =
                 | "elemental" -> Some DamageType.elemental
                 | s -> typeWord s |> Option.map List.singleton
             match sources, scopes (List.rev scope) with
-            | Some srcs, Some sc -> Some(srcs |> List.filter ((<>) into) |> List.map (fun s -> apply sc (Mod.base' (GainAs(s, into)) v)))
+            | Some srcs, Some sc -> Some(srcs |> List.map (fun s -> apply sc (Mod.base' (GainAs(s, into)) v)))
             | _ -> None
         | _ -> None
 

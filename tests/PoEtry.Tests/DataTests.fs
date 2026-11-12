@@ -377,6 +377,20 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
             | d -> failwithf "%A" d
         | Error e -> failwith e)
 
+    test "gain as extra counts the type itself; a gem's own conversion is the first step" (fun () ->
+        // wiki: "Gain 20% of Damage as extra Fire Damage causes a base damage of 50 phys, 50 fire to become 50 phys, 70 fire"
+        match StatMap.meaning "non_skill_base_all_damage_%_to_gain_as_fire" 20.0 with
+        | Mods ms ->
+            let r = Hit.gain Ctx.empty (ModDb.ofList ms) (Map.ofList [ Physical, Range.fixedAt 50.0; Fire, Range.fixedAt 50.0 ])
+            equal (50.0, 70.0) (r.[Physical].Max, r.[Fire].Max)
+        | m -> failwithf "%A" m
+        let bow = (Items.parse db.Value "Rarity: Normal\nWarmonger Bow\n--------\n").Weapon
+        match Gems.skill db.Value ModDb.empty bow { Gem = "Ice Shot"; Level = 20; Quality = 0; StatSet = 1; Supports = [] } with
+        | Ok (s, _) ->
+            equal true (s.Mods |> List.exists (fun m -> m.Stat = SkillConvert(Physical, Cold) && m.Value = 80.0))
+            equal false (s.Mods |> List.exists (fun m -> match m.Stat with Convert _ -> true | _ -> false))
+        | Error e -> failwith e)
+
     test "Ice Shot: the shards spring from the enemy hit and cannot hit it" (fun () ->
         let bow = (Items.parse db.Value "Rarity: Normal\nWarmonger Bow\n--------\n").Weapon
         match Gems.skill db.Value ModDb.empty bow { Gem = "Ice Shot"; Level = 20; Quality = 0; StatSet = 1; Supports = [] } with
