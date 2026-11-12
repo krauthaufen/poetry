@@ -389,6 +389,8 @@ module Gems =
               ("Starborn Onslaught", "Star Fall"), [ "Part" ]
               ("Wind Serpent's Fury", "Serpent"), [ "Part"; "Charge" ]
               ("Earthshatter", "Explosion"), [ "Part"; "DetonatedBy:Warcry" ]
+              // "destroying all Bloodstone Lances on each enemy ... to cause a damaging explosion"
+              ("Shattering Spite", ""), [ "Vs:BloodstoneLance!"; "NeedsStacks:BloodstoneLance:30" ]
               // the pillars stay as Ice Crystals and explode when destroyed
               ("Grim Pillars", "Explosion"), [ "Part"; "Crystals" ]
               ("Frozen Locus", "Explosion"), [ "Crystals" ]
@@ -475,6 +477,9 @@ module Gems =
             elif c = "Charge" then [ Mod.flag (Named "OnlyWithCharge") ]
             elif c.StartsWith "Infused:" then [ Mod.flag (Named("OnlyInfused:" + c.Substring 8)) ]
             elif c.StartsWith "DetonatedBy:" then [ Mod.flag (Named c) ]
+            elif c.StartsWith "NeedsStacks:" then
+                let parts = c.Split ':'
+                [ Mod.base' (Named("NeedsEnemyStacks:" + parts.[1])) (float parts.[2]) ]
             elif c = "Crystals" then [ Mod.flag (Named "DetonatedBy:CrystalBreak"); Mod.flag (Named "Crystals") ]
             elif c = "NoHit" then [ Mod.flag (Named "NoHitDamage") ]
             elif c = "Ignites" then [ Mod.base' (AilmentChance Ignite) 100.0 ]

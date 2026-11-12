@@ -1078,6 +1078,7 @@ module Sim =
                                  updateActor m.Name (fun st -> { st with Buffs = Map.add name { Name = name; Mods = mods; Stacks = 1; Expires = w.Time + duration } st.Buffs }) w
                              else w) w
                          |> schedule (w.Time + duration) Expire
+                     | ApplyDebuff (name, _, _, _) when partFlag skill ("CannotInflict:" + name) -> w
                      | ApplyDebuff (name, duration, maxStacks, mods) ->
                          onTarget (fun t -> addDebuff t name duration maxStacks mods w)
                      | ApplyCurse (name, duration, mods) ->
@@ -1520,6 +1521,12 @@ module Sim =
                     && (match warpsInto s with
                         | Some gem -> ballInFlight actor.Name gem w || (aimed env w |> Option.exists (fun e -> (status e).ContainsKey "Cullable"))
                         | None -> true)
+                    // a skill that spends what has piled up on the enemy waits for the pile to be full
+                    && (s.Mods |> List.forall (fun m ->
+                            match m.Stat with
+                            | Named n when n.StartsWith "NeedsEnemyStacks:" ->
+                                aimed env w |> Option.exists (fun e -> (Map.tryFind (n.Substring 17) (status e) |> Option.defaultValue 0) >= int m.Value)
+                            | _ -> true))
                     // Hexblast waits for a curse that can be detonated
                     && (not (partFlag s "DetonatesCurse") || (aimed env w |> Option.exists (fun e -> not (ripeCurses actor e w.Time).IsEmpty)))
                     // a recording debuff is left to run out
@@ -1863,7 +1870,8 @@ module Sim =
                 let dead = life <= 1e-9
                 let w =
                     { w with
-                        Enemies = Map.add target { e with Life = (if dead then 0.0 else life) } w.Enemies
+                        // the enemy as it is now: what the hit consumed stays consumed
+                        Enemies = Map.add target { (Map.find target w.Enemies) with Life = (if dead then 0.0 else life) } w.Enemies
                         DamageBy = addf (skill.Name + " (hit)") (min dealt e.Life) w.DamageBy
                         Counts = w.Counts |> bump ("hits:" + skill.Name) |> (if hit.Crit then bump ("crits:" + skill.Name) else id)
                         Kills = if dead then (target, e.Def.Rarity, w.Time) :: w.Kills else w.Kills }

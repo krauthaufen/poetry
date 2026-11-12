@@ -905,7 +905,9 @@ module Behaviours =
                             if effect.StartsWith "-" then RemoveBuff(effect.Substring 1)
                             else
                                 let maxStacks, mods = keywordEffect db effect
-                                if effect = "Withered" then ApplyDebuff(effect, secs, maxStacks, mods) else GrantBuff(effect, secs, maxStacks, mods)
+                                // "up to a maximum of 30 on each target" (stat text)
+                                if effect = "BloodstoneLance" then ApplyDebuff(effect, secs, 30, [])
+                                elif effect = "Withered" then ApplyDebuff(effect, secs, maxStacks, mods) else GrantBuff(effect, secs, maxStacks, mods)
                         { Hook = h; Filter = filter; Chance = min 100.0 m.Value; Reaction = reaction })
                 | _ -> None
             | _ -> None

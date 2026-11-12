@@ -419,7 +419,7 @@ module Setup =
                     let empowers = p.Rules |> List.exists (fun r -> match r.Reaction with Empower _ -> true | _ -> false)
                     let grantsBuff = p.Rules |> List.exists (fun r -> match r.Reaction with ChargeBuff _ | GrantBuff _ -> true | _ -> false)
                     let cooldown = p.Skill.Cooldown |> Option.defaultValue 0.0
-                    let needsBuilding = p.Skill.Mods |> List.exists (fun m -> match m.Stat with Named n -> n.StartsWith "Requires:" && m.Value > 0.0 | _ -> false)
+                    let needsBuilding = p.Skill.Mods |> List.exists (fun m -> match m.Stat with Named n -> (n.StartsWith "Requires:" || n.StartsWith "NeedsEnemyStacks:") && m.Value > 0.0 | _ -> false)
                     // Barrage is readied whenever it can be, for a main skill it can repeat
                     let barrage = p.Skill.Mods |> List.exists (fun m -> m.Stat = Named "BarrageRepeats" && m.Value > 0.0)
                     let mainRepeats = Gems.data c.Db mainGem |> Option.exists (fun m -> m.Types.Contains "Barrageable")

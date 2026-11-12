@@ -784,6 +784,37 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         let shattered = count strong "shattered:Grim Pillars: Explosion"
         if shattered = 0 then failwith "nothing shattered"
         equal (box (2 * shattered)) (box (count strong "hits:Grim Pillars: Explosion")))
+
+    test "Shattering Spite: spear hits pile up Bloodstone Lances, thirty are shattered at once" (fun () ->
+        let gem name = { Name = name; Level = 20; Quality = 0; Enabled = true; IsSupport = false; StatSet = 1 }
+        let run lines =
+            let b = { blank with
+                        Items = [ "Weapon 1", "Rarity: Normal\nHardwood Spear\n--------\n" ]
+                        Groups = [ { Label = ""; Slot = ""; Enabled = true; Gems = [ gem "Shattering Spite" ] }; { Label = ""; Slot = ""; Enabled = true; Gems = [ gem "Spear Stab" ] } ]
+                        ExtraLines = [ "+5000 to Accuracy Rating" ] @ lines }
+            let o = { Options.defaults with MaxTime = 30.0; Immortal = true }
+            let c = Setup.loadWith db.Value treeJson b o
+            Sim.run (Setup.fight c o (Setup.player c o [ OnCooldown "Shattering Spite"; Spam "Spear Stab" ] None) (Encounter.boss 83 Rarity.defaults 30.0 |> List.map (fun e -> { e with Life = 1e13 }))) 1u
+        let count (out: Outcome) k = Map.tryFind k out.Counts |> Option.defaultValue 0
+        // without the lances there is nothing to shatter: it is never used
+        equal (box 0) (box (count (run []) "uses:Shattering Spite"))
+        let out = run [ "Spear Skills inflict a Bloodstone Lance on Hit, up to a maximum of 30 on each target" ]
+        let spite, stabs = count out "uses:Shattering Spite", count out "hits:Spear Stab"
+        if spite = 0 then failwith "never used"
+        // thirty stabs for every use, and the lances are gone after it
+        equal (box spite) (box (count out "consumed:BloodstoneLance"))
+        equal (box spite) (box (stabs / 30))
+        // "20% more Damage per Bloodstone Lance" on the explosion
+        match Gems.skill db.Value ModDb.empty (Items.parse db.Value "Rarity: Normal\nHardwood Spear\n--------\n").Weapon { Gem = "Shattering Spite"; Level = 20; Quality = 0; StatSet = 1; Supports = [] } with
+        | Ok (s, _) ->
+            match s.Mods |> List.tryFind (fun m -> m.Conds |> List.contains (PerEnemyStack("BloodstoneLance", 1.0))) with
+            | Some m -> near 20.0 m.Value
+            | None -> failwith "no damage per lance"
+            // so with thirty it is far above a stab (x4.53 x 7 against the stab's multiplier)
+            let perSpite = out.DamageBy.["Shattering Spite (hit)"] / float spite
+            let perStab = out.DamageBy.["Spear Stab (hit)"] / float stabs
+            if perSpite < perStab * 4.53 * 7.0 * 0.5 then failwithf "Spite %.0f, stab %.0f" perSpite perStab
+        | Error e -> failwith e)
 #else
 let run (_: string -> (unit -> unit) -> unit) (_: float -> float -> unit) (_: obj -> obj -> unit) = ()
 #endif
