@@ -789,7 +789,7 @@ let rec update (msg : Msg) (m : Model) : Model =
                     Fighting = true }
         | s, _ -> { m with Status = "the simulator did not answer (status " + string s + ")" }
     | Tick t ->
-        if m.Happened.IsEmpty then m
+        if m.Happened.IsEmpty || m.Tab = "tree" then m
         else
             let began = if m.Began < 0.0 then t else m.Began
             // the fight, a breath, and again
@@ -895,13 +895,13 @@ let frame (m : Model) (p : Passive) : Scene<Msg> =
 /// The fight's picture: a small field seen from above, the player in the middle.
 let arena (m : Model) : Node<Msg> =
     renderControl {
-        Dom.Style [ Css.Position "fixed"; Css.Prop ("right", "12px"); Css.Prop ("bottom", "12px"); Css.Width "min(260px, 38vw)"; Css.Height "min(260px, 38vw)"
+        Dom.Style [ Css.Position "fixed"; Css.Prop ("right", "12px"); Css.Prop ("bottom", "12px"); Css.Width "min(180px, 34vw)"; Css.Height "min(180px, 34vw)"
                     Css.Prop ("border", "1px solid #3b3024"); Css.Prop ("z-index", "4"); Css.Prop ("pointer-events", "none")
-                    Css.Prop ("visibility", (if m.Happened.IsEmpty then "hidden" else "visible")) ]
+                    Css.Prop ("visibility", (if m.Happened.IsEmpty || m.Tab = "tree" then "hidden" else "visible")) ]
         RenderControl.Orthographic (m.Field, 1.0, 400.0)
         RenderControl.Camera { Sky = V3d (0.0, 1.0, 0.0); Location = V3d (0.0, 0.0, 200.0); Forward = V3d (0.0, 0.0, -1.0); Up = V3d (0.0, 1.0, 0.0); Right = V3d (1.0, 0.0, 0.0) }
         RenderControl.OnRendered Tick
-        RenderControl.Animating (not m.Happened.IsEmpty)
+        RenderControl.Animating (not m.Happened.IsEmpty && m.Tab <> "tree")
         sg {
             Sg.Shader { Shaders.flat }
             Sg.NoEvents true
