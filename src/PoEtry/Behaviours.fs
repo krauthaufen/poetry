@@ -72,6 +72,21 @@ module Behaviours =
         // a source that needs no kill wins over one that does
         fromSheet @ fromGems |> List.groupBy fst |> List.map (fun (c, l) -> c, l |> List.exists snd) |> Map.ofList
 
+    /// Ghost Dance: "When Hit, lose a Ghost Shroud. Regenerate Energy Shield equal to N% of
+    /// your Evasion Rating per second if you have lost a Ghost Shroud Recently". Returns the
+    /// most shrouds and the percent of evasion per second.
+    let ghostDance (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) : (int * float) option =
+        let mods = ModDb.ofList sheet.Mods
+        build.Groups |> List.filter (fun g -> g.Enabled) |> List.collect (fun g -> g.Gems)
+        |> List.filter (fun x -> x.Enabled && not x.IsSupport && (Gems.data db x.Name).IsSome)
+        |> List.tryPick (fun gem ->
+            let raw = Gems.rawStats db mods { Gem = gem.Name; Level = gem.Level; Quality = gem.Quality; StatSet = 1; Supports = [] }
+            let stat id = raw |> List.filter (fun (k, _) -> k = id) |> List.sumBy snd
+            let shrouds = stat "ghost_dance_max_stacks"
+            if shrouds > 0.0 then
+                Some(int shrouds, stat "skill_base_ghost_dance_grants_%_evasion_as_es_regeneration_per_minute_if_have_lost_ghost_dance_shroud_recently" / 60.0)
+            else None)
+
     let periodics (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) (chargeGenSeconds: float) =
         let mods = ModDb.ofList sheet.Mods
         let sum stat = Mods.sumBase Ctx.empty [ Named stat ] mods
@@ -89,6 +104,9 @@ module Behaviours =
                   let heal, healEvery = stat "skill_time_of_need_gain_x_life", stat "base_cooldown_modifiable_repeat_interval_ms" / 1000.0
                   if heal > 0.0 && healEvery > 0.0 then
                       yield { Name = gem.Name; Every = healEvery / Mods.mult Ctx.empty [ CooldownRecovery ] mods; Action = HealLife heal }
+                  // Ghost Dance: "Gain a Ghost Shroud every N seconds"
+                  if stat "ghost_dance_max_stacks" > 0.0 && healEvery > 0.0 then
+                      yield { Name = gem.Name; Every = healEvery / Mods.mult Ctx.empty [ CooldownRecovery ] mods; Action = GainRandom [ "GhostShroud" ] }
                   let every = stat "breach_flame_spawn_rate_ms" / 1000.0
                   let perFlame = stat "breach_flame_chaos_addition_%"
                   if every > 0.0 && perFlame > 0.0 then

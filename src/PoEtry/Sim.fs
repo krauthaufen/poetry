@@ -77,6 +77,9 @@ type Reaction =
     | IfEnemyHas of status: string * then': Reaction
     /// Only while the actor has a stack of the buff: do this.
     | IfBuff of buff: string * then': Reaction
+    /// The player regenerates this much energy shield per second for the duration; a new one
+    /// replaces the old ("if you have lost a Ghost Shroud Recently").
+    | RegenES of perSecond: float * duration: float
     /// A warcry: empowers one attack per `perPower` monster power among the living enemies,
     /// counting up to `cap` power, at least one. The buff's stacks are the attacks left.
     | Empower of buff: string * perPower: float * cap: float
@@ -766,7 +769,7 @@ module Sim =
             let mana = min v.Mana (p.Mana + regen + leech)
             let es =
                 (if w.Time - p.LastHit >= v.ESRechargeDelay then p.EnergyShield + v.EnergyShieldRecharge * dt else p.EnergyShield)
-                + v.ESRegen * dt + stream "ES"
+                + v.ESRegen * dt + stream "ES" + stream "ShroudES"
                 |> min (max p.EnergyShield v.EnergyShield)
             let flask = p.FlaskRate * overlap p.FlaskUntil
             let recouped = stream "Mana"
@@ -1025,6 +1028,12 @@ module Sim =
                           | Some e when e.Stacks > 0 && e.Expires > w.Time ->
                               let st' = if e.Stacks = 1 then { st with Buffs = Map.remove buff st.Buffs } else { st with Buffs = Map.add buff { e with Stacks = e.Stacks - 1 } st.Buffs }
                               perform next { w with Actors = Map.add actor.Name st' w.Actors }
+                          | _ -> w
+                      | RegenES (rate, duration) ->
+                          match w.Player with
+                          | Some p when p.Died.IsNone ->
+                              { w with Player = Some { p with Recoups = (w.Time + duration, rate, "ShroudES") :: (p.Recoups |> List.filter (fun (_, _, pool) -> pool <> "ShroudES")) }
+                                       Counts = bump "regen:ES" w.Counts }
                           | _ -> w
                       | SetStacks (buff, n) ->
                           updateActor actor.Name (fun st -> { st with Buffs = Map.add buff { Name = buff; Mods = []; Stacks = n; Expires = infinity } st.Buffs }) w

@@ -750,6 +750,22 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         // one cast (0.7 s) and 1.5 s later the curse is on; nothing is cast in between
         equal (box 1) (box out.Counts.["uses:Despair"])
         equal (box 1) (box out.Counts.["apply:Curse:Despair"]))
+
+    test "Ghost Dance: a shroud is lost when hit and energy shield regenerates from evasion" (fun () ->
+        let gem name = { Name = name; Level = 20; Quality = 0; Enabled = true; IsSupport = false; StatSet = 1 }
+        let b = { blank with Groups = [ { Label = ""; Slot = ""; Enabled = true; Gems = [ gem "Ghost Dance" ] } ]; ExtraLines = [ "+1000 to Evasion Rating"; "+100 to Spirit" ] }
+        let c = Setup.loadWith db.Value treeJson b Options.defaults
+        // three shrouds at most, all there at the start; one every 10.1 s at level 20
+        equal (box 3) (box c.MaxResources.["GhostShroud"])
+        equal (box true) (box (c.Resources |> List.contains ("GhostShroud", 3)))
+        near 10.1 (c.Periodics |> List.find (fun p -> p.Name = "Ghost Dance")).Every
+        // 120% of evasion per minute = 2% per second, for 4 s after losing a shroud
+        let player = Setup.player c Options.defaults [] None
+        match player.Rules |> List.tryPick (fun r -> match r.Hook, r.Reaction with WhenHit, SpendStack ("GhostShroud", RegenES (rate, d)) -> Some(rate, d) | _ -> None) with
+        | Some (rate, d) ->
+            near (c.Vitals.Evasion * 0.02) rate
+            near 4.0 d
+        | None -> failwith "no Ghost Dance rule")
 #else
 let run (_: string -> (unit -> unit) -> unit) (_: float -> float -> unit) (_: obj -> obj -> unit) = ()
 #endif

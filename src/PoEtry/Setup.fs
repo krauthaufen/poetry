@@ -241,6 +241,12 @@ module Setup =
                     // "Gain Accuracy Rating equal to your Intelligence"
                     @ (if Mods.flag Ctx.empty (Named "AccuracyFromIntelligence") (ModDb.ofList sheet.Mods) then [ Mod.base' (Named "Accuracy") vitals.Int |> Mod.from "Intelligence" ] else []) }
         let periodics = Behaviours.periodics db sheet build o.ChargeGen
+        // Ghost Dance: shrouds as stacks (full at the start), spent when hit
+        let ghost = Behaviours.ghostDance db sheet build
+        let maxResources, startResources =
+            match ghost with
+            | Some (n, _) -> Map.add "GhostShroud" n maxResources, Map.add "GhostShroud" n startResources
+            | None -> maxResources, startResources
         let sheet =
             match o.ChargeSkip with
             | Some p -> { sheet with Mods = (sheet.Mods |> List.filter (fun m -> m.Stat <> Named "ChargeSkipConsume")) @ [ Mod.base' (Named "ChargeSkipConsume") p ] }
@@ -544,7 +550,13 @@ module Setup =
             Rotation = steps
             OverkillBurns = overkillBurns
             HitPattern = used |> List.choose (fun (_, p) -> p.Pattern |> Option.map (fun pat -> p.Skill.Name, pat)) |> Map.ofList
-            Rules = grantRules @ (used |> List.collect (fun (_, p) -> p.Rules)) @ heraldRules @ Behaviours.keywordRules sheet pressedSkills
+            Rules =
+                grantRules @ (used |> List.collect (fun (_, p) -> p.Rules)) @ heraldRules @ Behaviours.keywordRules sheet pressedSkills
+                @ (match Behaviours.ghostDance db sheet c.Build with
+                   | Some (_, percent) when percent > 0.0 ->
+                       let rate = c.Vitals.Evasion * percent / 100.0 * Mods.mult Ctx.empty [ Named "ESRecoveryRate" ] (ModDb.ofList sheet.Mods)
+                       [ { Hook = WhenHit; Filter = AnySkill; Chance = 100.0; Reaction = SpendStack("GhostShroud", RegenES(rate, 4.0)) } ]
+                   | _ -> [])
             Metas = metas |> List.map (fun (m, _, _) -> m)
             Infusions = infusionSetup
             // infusions start full (kept up while clearing), scaled like invocations
