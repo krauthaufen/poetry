@@ -62,7 +62,7 @@ Setup.fight character options player (Encounter.boss 83 Rarity.defaults 30.0)
 
 ```bash
 dotnet run -c Release --project tests/PoEtry.Tests                       # engine and data tests
-dotnet fable tests/PoEtry.Tests -o out/js && node out/js/Tests.js        # the engine tests in JavaScript
+dotnet fable tests/PoEtry.Tests -o out/js && node out/js/Tests.js        # the same tests in JavaScript
 dotnet fsi tools/census/census.fsx                                       # what of ALL game data is simulated
 python3 tools/corpus/fetch.py && dotnet fsi --optimize+ tools/corpus/run.fsx   # 131 public characters
 ```

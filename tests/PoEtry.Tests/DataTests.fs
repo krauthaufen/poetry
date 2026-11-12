@@ -4,11 +4,10 @@ module PoEtry.DataTests
 
 open PoEtry
 
-#if !FABLE_COMPILER
 let private db =
     lazy
-        (let dir = System.IO.Path.Combine(__SOURCE_DIRECTORY__, "..", "..", "data", "game")
-         GameDb.load (fun f -> System.IO.File.ReadAllText(System.IO.Path.Combine(dir, f))))
+        (let dir = __SOURCE_DIRECTORY__ + "/../../data/game/"
+         GameDb.load (fun f -> System.IO.File.ReadAllText(dir + f)))
 
 let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) (equal: obj -> obj -> unit) =
     let parse line = StatText.parse db.Value.Text line
@@ -65,8 +64,8 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         equal (box [ Mod.inc (Damage(OfType Fire)) 30.0 ]) (box p.Mods))
 
     // ---- the character sheet ----
-    let dir = System.IO.Path.Combine(__SOURCE_DIRECTORY__, "..", "..", "data", "game")
-    let treeJson = System.IO.File.ReadAllText(System.IO.Path.Combine(dir, "tree.json"))
+    let dir = __SOURCE_DIRECTORY__ + "/../../data/game/"
+    let treeJson = System.IO.File.ReadAllText(dir + "tree.json")
     let tree = Tree.parseNodes treeJson
     let bases = Defence.classBases treeJson
     let blank : PobBuild =
@@ -1001,6 +1000,3 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         if uses < 5 || uses > 7 then failwithf "%d uses %A" uses out.Counts
         equal (box uses) (box (count out "hits:Righteous Descent: Empowered" + (if count out "hits:Righteous Descent: Empowered" < uses then 1 else 0)))
         equal (box 0) (box (count out "hits:Righteous Descent")))
-#else
-let run (_: string -> (unit -> unit) -> unit) (_: float -> float -> unit) (_: obj -> obj -> unit) = ()
-#endif
