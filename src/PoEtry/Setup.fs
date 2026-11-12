@@ -274,7 +274,8 @@ module Setup =
         let minionActors =
             let ms, mNotes = Behaviours.minions db sheet build
             let ts, tNotes = Behaviours.totems db sheet build
-            ms @ ts, mNotes @ tNotes
+            let spirits, _ = Behaviours.ancestralSpirits db sheet build vitals.Str vitals.Dex ts
+            ms @ ts @ spirits, mNotes @ tNotes
         { Db = db
           Build = build
           Sheet = sheet
@@ -363,7 +364,7 @@ module Setup =
                         match Behaviours.demonForm db charMods setup s with
                         | Some (s', rs, ms) -> s', cryRules @ rs, cryGrants @ ms
                         | None -> s, cryRules, cryGrants
-                    let cryRules = cryRules @ Behaviours.sigilOfPower db charMods setup s @ Behaviours.markBuff db charMods setup s @ Behaviours.offering db charMods setup s @ Behaviours.summoner db charMods setup s
+                    let cryRules = cryRules @ Behaviours.sigilOfPower db charMods setup s @ Behaviours.markBuff db charMods setup s @ Behaviours.offering db charMods setup s @ Behaviours.summoner db charMods setup s @ Behaviours.triskelion db charMods setup s
                     // parts that happen when the skill kills (Crushing Fear's shockwave)
                     let cryRules =
                         cryRules
@@ -567,6 +568,8 @@ module Setup =
             let known = pressedSkills |> List.map (fun s -> s.Name) |> Set.ofList
             steps |> List.filter (fun st -> known.Contains st.Use)
         let heraldSkills, heraldRules = Behaviours.heralds db sheet c.Build
+        let starSkills, starPeriodics = Behaviours.starsAnswer db sheet c.Build c.Vitals.Mana
+        let heraldSkills = heraldSkills @ starSkills
         let ashSkills, overkillBurns = Behaviours.heraldOfAsh db sheet c.Build
         let heraldSkills = heraldSkills @ ashSkills
         // skills an item triggers on hit: built like a pressed gem, used only by their rule
@@ -593,6 +596,7 @@ module Setup =
             Rules =
                 grantRules @ (used |> List.collect (fun (_, p) -> p.Rules)) @ heraldRules @ Behaviours.keywordRules sheet pressedSkills
                 @ fst (Behaviours.summons db sheet c.Build pressedSkills)
+                @ snd (Behaviours.ancestralSpirits db sheet c.Build c.Vitals.Str c.Vitals.Dex (c.Minions |> List.filter (fun m -> m.ActiveWhile |> Option.exists (fun b -> b.EndsWith " buff"))))
                 @ (match Behaviours.ghostDance db sheet c.Build with
                    | Some (_, percent) when percent > 0.0 ->
                        let rate = c.Vitals.Evasion * percent / 100.0 * Mods.mult Ctx.empty [ Named "ESRecoveryRate" ] (ModDb.ofList sheet.Mods)
@@ -624,7 +628,7 @@ module Setup =
             Cycles = c.Cycles
             Vitals = (if o.Immortal then None else Some c.Vitals)
             VitalsAt = Some(fun current -> Defence.computeWith current c.Bases sheet)
-            Periodics = c.Periodics @ snd (Behaviours.summons db sheet c.Build pressedSkills)
+            Periodics = c.Periodics @ snd (Behaviours.summons db sheet c.Build pressedSkills) @ starPeriodics
             MaxResources = Map.fold (fun m k v -> Map.add k v m) c.MaxResources infusionMaxima
             ResourceDurations = Map.fold (fun m k v -> Map.add k v m) (Behaviours.chargeDurations sheet) (Behaviours.infusionDurations db sheet c.Build)
             KeptChargesPause = o.KeptChargesPause

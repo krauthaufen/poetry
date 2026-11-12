@@ -18,7 +18,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
    whose description or behaviour changed.
 5. Go through the lists below; the wiki's version history of a skill says what changed.
 
-## Rules (94)
+## Rules (97)
 
 ### Hit damage
 
@@ -90,6 +90,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | Playing summoning skills | beside the main skill, a skill that raises temporary minions is used while fewer than its limit are out (Unearth: and there is a corpse or dead minion) | | guess |
 | Taking hits for the owner | stat text. Which of several takes it, and that it takes the damage as the player mitigated it, are guesses | data; guess |
 | Minion Instability | support text. The radius is not in its stats: 2 m | data; radius guess |
+| Kelari's Malediction | game data; "Summons 2 Beetles per Corpse consumed" from the wiki. That the player commands them at once is a guess | data; guess |
 | Totems | gem data | data; the simplifications are guesses |
 | Trinity | gem data | guess |
 | Aftershock | stat text | guess (same damage and area) |
@@ -112,6 +113,8 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | Forms that spend something | `bear_slam_spend_X_rage_for_stronger_slam`, stat sets, descriptions | data / guess |
 | Crushing Fear | description | guess |
 | Frost Bomb's exposure | "Initially applies {0}% Elemental Exposure and {1}% Exposure per pulse, up to a maximum of {2}%" (`active_skill_all_elemental_exposure_compounding_magnitude`, `_cap`) | data / guess |
+| The Stars Answer | game data, wiki. Active for the whole fight (it has no duration in the data, the cast is taken to be before the fight) is a guess; more stars per enemy in its radius after the first are not counted | data; guess |
+| Triskelion Cascade | game data. The pattern's measures are not in the data: impacts spaced like Spell Cascade's (1.5 radii), the arms turned at random. The share of the spell's cast time added to the cooldown is not counted | data; pattern guess |
 | Ice Crystals (Grim Pillars) | gem stats (`wall_maximum_length`, `frost_wall_maximum_life`); wiki Ice Crystal ("larger enemies can walk through them and destroy them", 80% less within 0.5 s); user (no explosion on expiry); placement, one crystal per 0.8 m, and enemy life lost standing for damage to the crystal, are guesses | guess |
 | What a fight starts with | user: buffs that last may be up when the fight starts, what comes from the last kill is not, bosses have introductions far longer than 4 s | guess |
 | Weapon for a skill | - | guess |

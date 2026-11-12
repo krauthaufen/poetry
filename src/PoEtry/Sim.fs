@@ -72,6 +72,9 @@ type Reaction =
     | SummonPerCorpse of pool: string * duration: float * deadMinions: bool
     /// Spends all of the player's Runic Ward: one minion of the pool per `wardEach` spent.
     | SummonPerWard of pool: string * wardEach: float * duration: float
+    /// One of these buffs, picked at random, for `duration`; the others are taken away
+    /// (which Ancestral Spirit a totem calls).
+    | GrantOneOf of names: string list * duration: float
     | NoReaction
     /// Take a debuff off the enemy concerned (a mark that has been activated).
     | RemoveDebuff of name: string
@@ -230,6 +233,10 @@ type PeriodicAction =
     | HealLife of amount: float
     /// Temporary minions of a pool appear (see Reaction.Summon).
     | SummonMinions of pool: string * count: int * duration: float
+    /// Takes a corpse, if there is one, and summons minions of a pool from it.
+    | SummonFromCorpse of pool: string * count: int * duration: float
+    /// Triggers one of the actor's skills.
+    | TriggerNamed of skill: string
 
 /// Mana Remnants: a remnant on a critical hit against an enemy with an elemental ailment (at
 /// most one per `CritCooldown` seconds) and by chance on killing one; collected, each gives
@@ -1257,6 +1264,13 @@ module Sim =
                          else
                              summon env pool (corpses + bones.Length) duration
                                  { w with CorpsesUsed = w.CorpsesUsed + corpses; Boned = bones |> List.fold (fun s n -> Set.add n s) w.Boned }
+                     | GrantOneOf (names, duration) when not names.IsEmpty ->
+                         let pick = names.[min (names.Length - 1) (int (rng.Float() * float names.Length))]
+                         updateActor actor.Name (fun st ->
+                             let buffs = names |> List.fold (fun b n -> Map.remove n b) st.Buffs
+                             { st with Buffs = Map.add pick { Name = pick; Mods = []; Stacks = 1; Expires = w.Time + duration } buffs }) w
+                         |> schedule (w.Time + duration) Expire
+                     | GrantOneOf _ -> w
                      | SummonPerWard (pool, wardEach, duration) ->
                          match w.Player with
                          | Some p when wardEach > 0.0 && p.Ward >= wardEach ->
@@ -2601,7 +2615,32 @@ module Sim =
             // axis"; side impacts have their own less area; spacing: user observation
             let ctx0, mods0, _, _ = shape skill
             let cascades = int (Mods.sumBase ctx0 [ Named "CascadesPerSide" ] mods0)
+            // Triskelion Cascade: the empowered spell "becomes centred on your location, and
+            // Cascades to six areas around you in a Triskelion pattern": three arms a third of a
+            // turn apart, so many impacts along each, spaced like Spell Cascade's (the pattern's
+            // measures are not in the data). The empowerment is used up.
+            let arms = int (Mods.sumBase ctx0 [ Named "TriskelionArms" ] mods0)
             match skill.Delivery with
+            | AreaAtTarget _ | AreaAroundSelf _ when arms > 0 ->
+                let sk, w = variant w
+                let _, _, areaMult, delivery = shape sk
+                let r = match delivery with AreaAtTarget r | AreaAroundSelf r -> Geometry.radius r areaMult | _ -> 0.0
+                let turn = rng.Float() * 2.0 * System.Math.PI
+                let centres =
+                    Vec.make 0.0 0.0
+                    :: [ for a in 0 .. 2 do
+                            for k in 1 .. arms ->
+                                Vec.scale (float k * r * env.Fight.CascadeSpacing) (Vec.ofAngle (turn + float a * 2.0 * System.Math.PI / 3.0)) ]
+                let w =
+                    centres
+                    |> List.fold
+                        (fun w centre ->
+                            living
+                            |> List.filter (fun e -> Vec.dist centre e.Position <= r + e.Size)
+                            |> List.fold (fun w e -> hitEnemy env rng actor sk mult e.Name w) w)
+                        w
+                updateActor actor.Name (fun st ->
+                    { st with Buffs = st.Buffs |> Map.filter (fun _ e -> not (e.Mods |> List.exists (fun m -> m.Stat = Named "TriskelionArms"))) }) w
             | AreaAtTarget _ when cascades > 0 ->
                 let axis = Vec.ofAngle (rng.Float() * 2.0 * System.Math.PI)
                 // the centre impact first (it takes the first infusion); its radius sets the spacing
@@ -3016,6 +3055,9 @@ module Sim =
                 |> markStatus actorName ("Gained" + r + "Recently")
                 |> fun w -> { w with Counts = bump ("gained:" + r) w.Counts }
             | SummonMinions (pool, count, duration) -> summon env pool count duration w
+            | SummonFromCorpse (pool, count, duration) ->
+                if w.Kills.Length > w.CorpsesUsed then summon env pool count duration { w with CorpsesUsed = w.CorpsesUsed + 1 } else w
+            | TriggerNamed skill -> trigger env rng (actorDef env actorName) skill w
             | HealLife amount ->
                 match env.Fight.Player.Vitals, w.Player with
                 | Some v, Some p when p.Died.IsNone && v.Life > 1.0 ->

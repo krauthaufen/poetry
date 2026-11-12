@@ -647,6 +647,25 @@ module Behaviours =
                     Reaction = IfEnemyHas("Mark:" + skill.Name, IfEnemyHas(state, GrantBuff(skill.Name + " activated", duration, 1, mods))) } ]
             | _ -> []))
 
+    /// Triskelion Cascade: "Empower the next Cascadable Spell you cast. The Empowered Spell
+    /// becomes centred on your location, and Cascades to six areas around you": a buff for the
+    /// gem's duration that the next such spell uses up (see the engine), with the gem's less
+    /// damage and less area for that spell. The share of the spell's cast time added to this
+    /// skill's cooldown is not counted.
+    let triskelion (db: GameDb) (charMods: ModDb) (setup: GemSetup) (skill: Skill) : Rule list =
+        let raw = Gems.rawStats db charMods { setup with Supports = [] }
+        let stat id = raw |> List.filter (fun (k, _) -> k = id) |> List.sumBy snd
+        match stat "number_of_triskelion_cascades_for_next_skill" with
+        | n when n > 0.0 ->
+            let cascadable = Mod.whenever (SkillIs(Tag "Type:Cascadable")) >> Mod.from skill.Name
+            let mods =
+                [ Mod.base' (Named "TriskelionArms") n
+                  Mod.more (Damage AllDamage) (stat "triskelion_cascade_next_skill_damage_+%_final")
+                  Mod.more AreaOfEffect (stat "triskelion_cascade_next_skill_area_of_effect_+%_final") ]
+                |> List.map cascadable
+            [ { Hook = OnUse; Filter = Called skill.Name; Chance = 100.0; Reaction = GrantBuff(skill.Name + " buff", stat "base_skill_effect_duration" / 1000.0, 1, mods) } ]
+        | _ -> []
+
     /// Skills that empower the attacks that follow:
     /// - Mantra of Destruction: the next attack gains a share of all damage as extra chaos;
     /// - Temper Weapon: every strike of the hammer empowers 3 attacks (12 at most) to Combust
@@ -1292,7 +1311,7 @@ module Behaviours =
     let summonLimit (raw: (string * float) list) : int option =
         raw
         |> List.tryPick (fun (k, v) ->
-            if (k.StartsWith "base_number_of_" && k.EndsWith "_allowed") || k = "ravenous_swarm_maximum_swarm_count" || k = "max_azmerian_swarms" || k = "maximum_corpse_beetles_allowed"
+            if (k.StartsWith "base_number_of_" && k.EndsWith "_allowed" && k <> "base_number_of_totems_allowed") || k = "ravenous_swarm_maximum_swarm_count" || k = "max_azmerian_swarms" || k = "maximum_corpse_beetles_allowed"
             then Some(int v) else None)
 
     /// The stats that say what summons a gem's temporary minions, for the gems whose
@@ -1302,6 +1321,7 @@ module Behaviours =
         has "skill_raging_spirits_max_per_action"
         || has "base_cooldown_modifiable_repeat_interval_ms"
         || has "skill_grants_%_chance_to_summon_azmerian_swarm_on_hitting_unique_or_rare_enemy_affected_by_elemental_ailment"
+        || has "maximum_corpse_beetles_allowed"
         || has "base_number_of_zombies_allowed"
         || has "base_number_of_skeletal_constructs_allowed"
         || has "wardbound_minions_summon_minion_for_every_X_runic_ward_spent"
@@ -1383,6 +1403,8 @@ module Behaviours =
                 match monsters with
                 | [] ->
                     [], (if byName.IsSome || (data |> Option.exists (fun d -> not d.MinionList.IsEmpty)) then [ sprintf "%s: no monster data" gem.Name ] else [])
+                // (Ancestral Spirits come with the totems, see `ancestralSpirits`)
+                | _ when not persistent && (data |> Option.exists (fun d -> d.Types.Contains "Triggered" && d.MinionList.Length > 1)) -> [], []
                 | _ when not persistent && (summonLimit (gemRaw gem)).IsNone -> [], [ sprintf "%s: temporary minions are not simulated" gem.Name ]
                 | m :: _ ->
                     let raw = gemRaw gem
@@ -1533,7 +1555,17 @@ module Behaviours =
                 let perCast = int (stat "skill_raging_spirits_max_per_action")
                 let interval = stat "base_cooldown_modifiable_repeat_interval_ms"
                 let onHit = stat "skill_grants_%_chance_to_summon_azmerian_swarm_on_hitting_unique_or_rare_enemy_affected_by_elemental_ailment"
-                if perCast > 0 then
+                if stat "maximum_corpse_beetles_allowed" > 0.0 then
+                    // Kelari's Malediction: every so often a corpse is consumed and two beetles burst
+                    // forth ("Summons 2 Beetles per Corpse consumed", wiki; not among the gem's stats);
+                    // commanded, a beetle rushes the target and explodes: it lasts one use of its skill
+                    let every = stat "base_secondary_skill_effect_duration" / 1000.0
+                    let once =
+                        Gems.data db gem.Name |> Option.bind (fun d -> d.MinionList |> List.tryHead) |> Option.bind (fun id -> Map.tryFind id db.Minions)
+                        |> Option.bind (fun m -> m.SkillList |> List.tryPick (fun sid -> Map.tryFind sid db.Skills))
+                        |> Option.map (fun s -> s.CastTime) |> Option.defaultValue 1.0
+                    [], (if every > 0.0 then [ { Name = "summon " + gem.Name; Every = every; Action = SummonFromCorpse(gem.Name, 2, once + 0.01) } ] else [])
+                elif perCast > 0 then
                     let perRadius = stat "skill_raging_spirit_per_x_radius"
                     pressed
                     |> List.filter (fun s -> s.Tags.Contains Spell && s.Tags.Contains(Tag "Fire") && not (s.Tags.Contains Triggered))
@@ -1557,6 +1589,99 @@ module Behaviours =
                 else [], [])
         |> List.unzip
         |> fun (rules, periodics) -> List.concat rules, List.concat periodics
+
+    /// Ancestral Spirits: "Triggered each time you summon a Totem, summoning an Ancestral Spirit
+    /// Minion to fight for you. If the Totem dies then the Ancestral Spirit ... will die too":
+    /// each totem calls one of the gem's four spirits at random (wiki). For every totem there is
+    /// an actor per spirit, which acts while the totem stands and the roll named it. The spirits
+    /// have increased damage per Strength and attack speed per Dexterity of the player, by the
+    /// gem's stats. They can't be hurt (they go with their totem).
+    /// Returns the spirit actors and the rules that roll a spirit when a totem gem is used.
+    let ancestralSpirits (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) (str: float) (dex: float) (totemActors: Actor list) : Actor list * Rule list =
+        let charMods = ModDb.ofList sheet.Mods
+        let gem =
+            build.Groups |> List.filter (fun g -> g.Enabled)
+            |> List.collect (fun g -> g.Gems |> List.filter (fun x -> x.Enabled && not x.IsSupport))
+            |> List.tryFind (fun x -> Gems.data db x.Name |> Option.exists (fun d -> d.Types.Contains "Minion" && d.Types.Contains "Triggered" && d.MinionList.Length > 1))
+        match gem with
+        | None -> [], []
+        | Some gem when totemActors.IsEmpty -> [], []
+        | Some gem ->
+            let raw = Gems.rawStats db charMods { Gem = gem.Name; Level = gem.Level; Quality = gem.Quality; StatSet = 1; Supports = [] }
+            let stat id = raw |> List.filter (fun (k, _) -> k = id) |> List.sumBy snd
+            let perStr, perDex = stat "minion_1%_damage_+%_per_X_player_strength", stat "active_skill_minion_1%_attack_speed_+%_per_X_player_dexterity"
+            let minionMods =
+                Mods.forMinions sheet.Mods
+                @ (if perStr > 0.0 then [ Mod.inc (Damage AllDamage) (floor (str / perStr)) |> Mod.from gem.Name ] else [])
+                @ (if perDex > 0.0 then [ Mod.inc Speed (floor (dex / perDex)) |> Mod.whenever (SkillIs Attack) |> Mod.from gem.Name ] else [])
+            let level = minionLevel db charMods (Mods.forMinions sheet.Mods) gem.Name gem.Level
+            let spirits =
+                Gems.data db gem.Name |> Option.map (fun d -> d.MinionList) |> Option.defaultValue []
+                |> List.choose (fun id -> Map.tryFind id db.Minions)
+                |> List.map (fun m ->
+                    let weapon, _ = minionWeapon m level false
+                    let skills =
+                        m.SkillList
+                        |> List.choose (fun sid ->
+                            match Gems.minionSkill db charMods (Some weapon) sid (float level) [] with
+                            | Ok (s, _) when not s.BaseDamage.IsEmpty -> Some { s with Name = m.Name + ": " + s.Name; Cost = 0.0 }
+                            | _ -> None)
+                    let estimate (s: Skill) = (s.BaseDamage |> Map.toList |> List.sumBy (fun (_, r) -> (r.Min + r.Max) / 2.0)) * s.BaseMultiplier / max 0.05 s.BaseTime
+                    m, (skills |> List.filter (fun s -> s.Cooldown.IsSome)) @ (skills |> List.filter (fun s -> s.Cooldown.IsNone) |> List.sortByDescending estimate |> List.truncate 1))
+            let key (totem: Actor) (m: MinionData) = sprintf "%s: %s" totem.Name m.Name
+            let actors =
+                [ for totem in totemActors do
+                    for (m, skills) in spirits do
+                        if not skills.IsEmpty then
+                            yield { Actor.make (sprintf "%s (%s)" m.Name totem.Name) minionMods skills with ActiveWhile = Some(key totem m) } ]
+            // using a totem gem places its totems: each rolls its spirit, for as long as it stands
+            let rules =
+                totemActors
+                |> List.choose (fun totem ->
+                    match totem.ActiveWhile with
+                    | Some buff when buff.EndsWith " buff" ->
+                        let gemName = buff.Substring(0, buff.Length - 5)
+                        let seconds =
+                            (Gems.rawStats db charMods { Gem = gemName; Level = 20; Quality = 0; StatSet = 1; Supports = [] } |> List.filter (fun (k, _) -> k = "base_totem_duration") |> List.sumBy snd) / 1000.0
+                        let duration = (if seconds > 0.0 then seconds else 8.0) * Mods.mult (Gems.ctxOf db gemName) [ SkillDuration ] charMods
+                        Some { Hook = OnUse; Filter = Called gemName; Chance = 100.0; Reaction = GrantOneOf(spirits |> List.map (fun (m, _) -> key totem m), duration) }
+                    | _ -> None)
+            actors, rules
+
+    /// The Stars Answer: "Cannot be cast if you have less than 10000 Mana"; active, it triggers
+    /// Starfall every 0.3 s, every 15th a large star. For a character with that much mana it
+    /// is taken to be active for the whole fight (cast before it; it has no duration in the
+    /// data). More stars per enemy in its radius after the first are not counted.
+    /// Returns the two Starfall skills and what triggers them.
+    let starsAnswer (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) (maxMana: float) : Skill list * Periodic list =
+        let charMods = ModDb.ofList sheet.Mods
+        build.Groups |> List.filter (fun g -> g.Enabled)
+        |> List.tryPick (fun g ->
+            let enabled = g.Gems |> List.filter (fun x -> x.Enabled)
+            let supports = enabled |> List.filter (fun x -> x.IsSupport) |> List.map (fun x -> x.Name, x.Level)
+            enabled |> List.filter (fun x -> not x.IsSupport)
+            |> List.tryPick (fun gem ->
+                let raw = Gems.rawStats db charMods { Gem = gem.Name; Level = gem.Level; Quality = gem.Quality; StatSet = 1; Supports = [] }
+                let stat id = raw |> List.filter (fun (k, _) -> k = id) |> List.sumBy snd
+                let needs, every, large = stat "mana_required_to_activate_skill", stat "walking_calamity_spawn_meteor_every_ms" / 1000.0, stat "walking_calamity_large_meteor_every"
+                let effect =
+                    Map.tryFind gem.Name db.Gems
+                    |> Option.bind (fun gd -> gd.AdditionalEffects |> List.tryFind (fun id -> Map.containsKey id db.Skills && not (id.StartsWith "Support")))
+                match effect with
+                | Some id when needs > 0.0 && every > 0.0 && maxMana >= needs ->
+                    let star set name =
+                        match Gems.skill db charMods (Gems.chooseWeapon db gem.Name sheet.Weapons) { Gem = id; Level = gem.Level; Quality = gem.Quality; StatSet = set; Supports = supports } with
+                        | Ok (s, _) -> Some { s with Name = name; Tags = s.Tags.Add Triggered; Cost = 0.0; Cooldown = None; Parts = s.Parts |> List.map (fun p -> { p with Name = name + ": " + p.Name; Tags = p.Tags.Add Triggered }) }
+                        | Error _ -> None
+                    match star 1 "Starfall", star 2 "Starfall: Large Star" with
+                    | Some small, Some big when large > 1.0 ->
+                        Some([ small; big ],
+                             [ { Name = "starfall"; Every = every * large / (large - 1.0); Action = TriggerNamed small.Name }
+                               { Name = "large star"; Every = every * large; Action = TriggerNamed big.Name } ])
+                    | Some small, _ -> Some([ small ], [ { Name = "starfall"; Every = every; Action = TriggerNamed small.Name } ])
+                    | _ -> None
+                | _ -> None))
+        |> Option.defaultValue ([], [])
 
     /// Totems of a build as actors. A totem gem ("SummonsTotem") grants a second skill, the
     /// totem's own attack or spell (gems.json additionalGrantedEffectId); the totem uses it

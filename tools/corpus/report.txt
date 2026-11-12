@@ -61,7 +61,6 @@
    2  main skill type not modelled: ConsumesFullyBrokenArmour
    2  main skill type not modelled: CanBecomeArrowRain
    2  main skill type not modelled: CausesBurning
-   2  minion: temporary minions are not simulated
    2  main skill type not modelled: PerformsFinalStrike
    2  main skill type not modelled: ConsumesRage
    1  main skill type not modelled: Hazard
@@ -524,8 +523,8 @@
    7  1% to 10%
   22  10% to 50%
   48  50% to 200%
-  30  2x to 10x
-  10  over 10x
+  29  2x to 10x
+  11  over 10x
 
 == per build
 001-abyssal-lich-comet                               Comet (pressed Entangle)                     19877779 dps (theirs    7132055)  0 unknown, 6 unmapped, 18 unsimulated  energy shield 11001/11515
@@ -586,7 +585,7 @@
 056-stormweaver-frost-bomb                           Frost Bomb                                         33 dps (theirs         47)  0 unknown, 9 unmapped, 23 unsimulated  armour 10401/8740  evasion 3069/2579  deflection 368/309  spirit 348/200
 057-tactician-maul                                   Maul                                             5015 dps (theirs       4533)  0 unknown, 4 unmapped, 24 unsimulated  energy shield 11088/5869  armour 11146/24964  evasion 4175/6714  deflection 3398/8215
 058-titan-seismic-cry                                Seismic Cry                                        19 dps (theirs         16)  0 unknown, 8 unmapped, 22 unsimulated  chaos res 70/66
-059-warbringer-rapid-shot                            Rapid Shot                                     125719 dps (theirs      84171)  0 unknown, 10 unmapped, 26 unsimulated  armour 22445/23712
+059-warbringer-rapid-shot                            Rapid Shot                                     132161 dps (theirs      84171)  0 unknown, 10 unmapped, 26 unsimulated  armour 22445/23712
 060-warrior-earthshatter                             Earthshatter                                    19532 dps (theirs       2881)  0 unknown, 9 unmapped, 18 unsimulated  dexterity 47/79
 061-witch-frostbolt                                  Frostbolt (pressed Bone Blast)                   1569 dps (theirs        207)  0 unknown, 3 unmapped, 10 unsimulated  spirit 329/170  cold res 105/93
 062-witchhunter-crossbow-shot                        Crossbow Shot                                  301364 dps (theirs     258140)  2 unknown, 10 unmapped, 41 unsimulated  armour 12089/14260  evasion 15318/16071  deflection 5561/5833
@@ -651,11 +650,11 @@
 121-oracle-entangle                                  Entangle                                      1512557 dps (theirs    1114083)  0 unknown, 11 unmapped, 21 unsimulated  fire res 84/73
 122-pathfinder-companion-plague-harvester            Volcano                                           498 dps (theirs         77)  0 unknown, 16 unmapped, 24 unsimulated  life 8614/9336
 123-ritualist-azmerian-wolf                          Azmerian Wolf                                  329640 dps (theirs     142047)  0 unknown, 8 unmapped, 23 unsimulated
-124-shaman-grim-pillars                              Grim Pillars (pressed Entangle)               1136859 dps (theirs     424914)  0 unknown, 12 unmapped, 22 unsimulated
+124-shaman-grim-pillars                              Grim Pillars (pressed Entangle)               5135254 dps (theirs     424914)  0 unknown, 12 unmapped, 22 unsimulated
 125-smith-of-kitava-flame-breath                     Flame Breath                                    29369 dps (theirs     185078)  0 unknown, 5 unmapped, 32 unsimulated  cold res 81/77  lightning res 81/77  chaos res 62/56
 126-spirit-walker-wild-protector                     Wild Protector                                  68450 dps (theirs       3334)  0 unknown, 9 unmapped, 30 unsimulated  energy shield 2059/1470  fire res 136/104  cold res 125/93  lightning res 77/45  chaos res 71/67
 127-stormweaver-lightning-warp                       Lightning Warp (pressed Spark)                2046559 dps (theirs    5024700)  0 unknown, 5 unmapped, 13 unsimulated  mana 5292/4529
 128-tactician-supporting-fire                        Supporting Fire                                198179 dps (theirs     848800)  0 unknown, 9 unmapped, 17 unsimulated  fire res 71/68
 129-titan-cull-the-weak                              Cull The Weak                                     264 dps (theirs        684)  0 unknown, 8 unmapped, 21 unsimulated
-130-warbringer-rapid-shot                            Rapid Shot                                      54150 dps (theirs      56520)  0 unknown, 11 unmapped, 25 unsimulated  armour 23740/23020
+130-warbringer-rapid-shot                            Rapid Shot                                      63322 dps (theirs      56520)  0 unknown, 11 unmapped, 25 unsimulated  armour 23740/23020
 131-witchhunter-shockburst-rounds                    Shockburst Rounds                              727536 dps (theirs     651297)  0 unknown, 7 unmapped, 16 unsimulated  strength 166/170  intelligence 100/104  evasion 20163/21005  deflection 15526/16173

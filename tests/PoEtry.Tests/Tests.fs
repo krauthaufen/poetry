@@ -929,6 +929,46 @@ let main _ =
         equal 1 o.Counts.["minion:died"]
         near 150.0 o.DamageBy.["Skeleton: Minion Instability (hit)"])
 
+    test "minions: a totem calls one spirit at random; beetles burst from corpses; a periodic trigger" (fun () ->
+        // one of the two spirits acts while the totem stands, never both
+        let place = { Skill.make "Totem" [ Spell ] with Hits = []; Cooldown = Some 100.0 }
+        let spirit n = { Actor.make n [ noIgnite; sure ] [ strike ("Bite " + n) 100.0 ] with ActiveWhile = Some n }
+        let player =
+            { Actor.make "Player" [ noIgnite ] [ place ] with
+                Rules = [ { Hook = OnUse; Filter = Called "Totem"; Chance = 100.0; Reaction = GrantOneOf([ "A"; "B" ], 3.5) } ] }
+        let o = Sim.run { Fight.single (boss 1e12) player 6.0 with MaxTime = 6.0; Minions = [ spirit "A"; spirit "B" ] } 1u
+        equal 1 ([ "Bite A (hit)"; "Bite B (hit)" ] |> List.filter o.DamageBy.ContainsKey |> List.length)
+        // a weak monster dies to the first nova; every second after, a corpse (there is one) gives two beetles
+        let nova = { fireSpell 100.0 with Delivery = AreaAtTarget 200.0 }
+        let beetles = [ for i in 1 .. 4 -> { Actor.make (sprintf "Beetle %d" i) [ noIgnite; sure ] [ strike "Burst" 100.0 ] with Pool = Some "Beetles" } ]
+        let player = { Actor.make "Player" [ noIgnite ] [ nova ] with Periodics = [ { Name = "beetles"; Every = 1.0; Action = SummonFromCorpse("Beetles", 2, 1.01) } ] }
+        let weak = { dummy "weak" 20.0 0.0 with Life = 50.0 }
+        let o = Sim.run { Fight.single (boss 1e12) player 6.0 with MaxTime = 6.0; Enemies = [ { boss 1e12 with Name = "boss"; Position = Vec.make 30.0 0.0 }; weak ] } 1u
+        let o = Sim.run { Fight.single (boss 1e12) player 6.0 with MaxTime = 6.0; Enemies = [ { boss 1e12 with Name = "boss"; Position = Vec.make 30.0 0.0 }; weak ]; Minions = beetles } 1u
+        equal 2 o.Counts.["summoned:Beetles"]
+        near 200.0 o.DamageBy.["Burst (hit)"]
+        // a skill triggered every second
+        let star = { fireSpell 50.0 with Name = "Star"; Tags = Set.ofList [ Spell; Triggered ] }
+        let player = { Actor.make "Player" [ noIgnite ] [ idle; star ] with Rotation = [ Actor.always idle.Name ]; Periodics = [ { Name = "stars"; Every = 1.0; Action = TriggerNamed "Star" } ] }
+        let o = Sim.run { Fight.single (boss 1e12) player 10.5 with MaxTime = 10.5 } 1u
+        let n = o.Counts.["trigger:Star"]
+        if n < 10 || n > 11 then failwithf "stars %d" n)
+
+    test "Triskelion Cascade: the next cascadable spell is centred on the player, with its less damage, once" (fun () ->
+        let cascadable = Mod.whenever (SkillIs(Tag "Type:Cascadable"))
+        let tri = { Skill.make "Triskelion" [ Spell ] with Hits = []; Cooldown = Some 100.0 }
+        let nova = { fireSpell 100.0 with Name = "Nova"; Tags = Set.ofList [ Spell; Tag "Type:Cascadable" ]; Delivery = AreaAtTarget 10.0 }
+        let player =
+            { Actor.make "Player" [ noIgnite ] [ tri; nova ] with
+                Rules = [ { Hook = OnUse; Filter = Called "Triskelion"; Chance = 100.0
+                            Reaction = GrantBuff("Triskelion buff", 4.0, 1, [ Mod.base' (Named "TriskelionArms") 2.0 |> cascadable; Mod.more (Damage AllDamage) -50.0 |> cascadable ]) } ] }
+        // the enemy stands 5 from the player: inside the impact at the player's feet, though the
+        // spell was aimed at it; the arms land far off (spacing 100 radii)
+        let near' = { dummy "near" 5.0 0.0 with Life = 1e12 }
+        let o = Sim.run { Fight.single near' player 5.5 with MaxTime = 5.5; CascadeSpacing = 100.0 } 1u
+        // Triskelion at 0 s, novas land at 2 .. 5 s: the first for half, the rest in full
+        near (50.0 + 3.0 * 100.0) o.DamageBy.["Nova (hit)"])
+
     test "minions: temporary ones are out until summoned, last their duration, and are summoned anew when all are out" (fun () ->
         let call cd = { Skill.make "Call" [ Spell ] with Hits = []; Cooldown = Some cd }
         let spirits n = [ for i in 1 .. n -> { Actor.make (sprintf "Spirit %d" i) [ noIgnite; sure ] [ strike "Bite" 100.0 ] with Pool = Some "Spirits" } ]
