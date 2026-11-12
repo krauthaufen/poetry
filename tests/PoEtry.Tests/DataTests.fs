@@ -766,6 +766,24 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
             near (c.Vitals.Evasion * 0.02) rate
             near 4.0 d
         | None -> failwith "no Ghost Dance rule")
+
+    test "Grim Pillars: the pillars stay as Ice Crystals and explode once enough damage is dealt beside them" (fun () ->
+        let gem name = { Name = name; Level = 20; Quality = 0; Enabled = true; IsSupport = false; StatSet = 1 }
+        let run lines =
+            let b = { blank with Groups = [ { Label = ""; Slot = ""; Enabled = true; Gems = [ gem "Grim Pillars" ] } ]; ExtraLines = lines }
+            let o = { Options.defaults with MaxTime = 10.0; Immortal = true }
+            let c = Setup.loadWith db.Value treeJson b o
+            Sim.run (Setup.fight c o (Setup.player c o [ Spam "Grim Pillars" ] None) (Encounter.boss 83 Rarity.defaults 30.0 |> List.map (fun e -> { e with Life = 1e13 }))) 1u
+        let count (out: Outcome) k = Map.tryFind k out.Counts |> Option.defaultValue 0
+        // a crystal withstands 9536 damage (level 20): a bare character never breaks one in its 10 s
+        let weak = run []
+        equal (box 0) (box (count weak "hits:Grim Pillars: Explosion"))
+        if count weak "crystals:Grim Pillars: Explosion" = 0 then failwith "no crystals"
+        // 8 pillars over a radius of 4 m, explosions of 2 m: two of them reach the enemy
+        let strong = run [ "20000% increased Spell Damage" ]
+        let shattered = count strong "shattered:Grim Pillars: Explosion"
+        if shattered = 0 then failwith "nothing shattered"
+        equal (box (2 * shattered)) (box (count strong "hits:Grim Pillars: Explosion")))
 #else
 let run (_: string -> (unit -> unit) -> unit) (_: float -> float -> unit) (_: obj -> obj -> unit) = ()
 #endif

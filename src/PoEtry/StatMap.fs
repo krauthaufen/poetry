@@ -341,6 +341,10 @@ module StatMap =
         | "support_combo_finisher_damage_+%_final" -> one (Mod.more (Damage AllDamage) v)
         | "additional_combo_gain_chance_%" -> one (Mod.base' (Named "ComboExtraChance") v)
         | "living_bomb_damage_threshold_%_of_ailment_threshold" -> one (Mod.base' (Named "DetonatedByDamage") v)
+        // Ice Crystals: what one withstands, how many a use makes, how many there can be
+        | "frost_wall_maximum_life" -> one (Mod.base' (Named "CrystalLife") v)
+        | "grim_pillars_number_of_pillars_to_create" -> one (Mod.base' (Named "CrystalsCreated") v)
+        | "base_number_of_grim_pillars_allowed" -> one (Mod.base' (Named "CrystalLimit") v)
         | "empower_barrage_base_number_of_barrage_repeats" -> one (Mod.base' (Named "BarrageRepeats") v)
         | "empower_barrage_number_of_barrage_repeats_per_frenzy_charge" -> one (Mod.base' (Named "BarrageRepeatsPerFrenzy") v)
         | "empower_barrage_damage_-%_final_with_repeated_projectiles" -> one (Mod.base' (Named "BarrageRepeatLess") v)

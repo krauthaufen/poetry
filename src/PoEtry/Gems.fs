@@ -389,6 +389,8 @@ module Gems =
               ("Starborn Onslaught", "Star Fall"), [ "Part" ]
               ("Wind Serpent's Fury", "Serpent"), [ "Part"; "Charge" ]
               ("Earthshatter", "Explosion"), [ "Part"; "DetonatedBy:Warcry" ]
+              // the pillars stay as Ice Crystals and explode when destroyed
+              ("Grim Pillars", "Explosion"), [ "Part"; "Crystals" ]
               ("Detonate Living", "Explosion"), [ "Part"; "Vs:Cullable" ]
               // an explosion for each ailment consumed
               ("Elemental Sundering", "Cold"), [ "Part"; "Vs:Frozen!" ]
@@ -471,6 +473,7 @@ module Gems =
             elif c = "Charge" then [ Mod.flag (Named "OnlyWithCharge") ]
             elif c.StartsWith "Infused:" then [ Mod.flag (Named("OnlyInfused:" + c.Substring 8)) ]
             elif c.StartsWith "DetonatedBy:" then [ Mod.flag (Named c) ]
+            elif c = "Crystals" then [ Mod.flag (Named "DetonatedBy:CrystalBreak"); Mod.flag (Named "Crystals") ]
             elif c = "NoHit" then [ Mod.flag (Named "NoHitDamage") ]
             elif c = "Ignites" then [ Mod.base' (AilmentChance Ignite) 100.0 ]
             else [])

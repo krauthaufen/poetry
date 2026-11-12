@@ -410,6 +410,8 @@ module Sim =
         /// Stacks of a resource arrive (picked-up infusion remnants, Verisium).
         | GainStacks of actor: string * resource: string * count: int
         | Expose of actor: string * target: string * damageType: DamageType * amount: float * duration: float
+        /// Ice Crystals appear beside an enemy: (owner, explosion part, enemy, how many, life of one, most at once, seconds they last).
+        | PlantCrystals of actor: string * part: string * enemy: string * count: int * life: float * limit: int * lasts: float
         /// One stack of a buff is used up (an empowered attack has landed).
         | SpendBuff of actor: string * buff: string
         /// A meta gem gains energy (at the end of a dodge roll).
@@ -501,7 +503,10 @@ module Sim =
           /// Debuffs that record a share of the damage an enemy takes and take it again as life
           /// at the end (Inevitable Agony): owner, skill, enemy, the enemy's life when applied,
           /// the share, when it ends.
-          Agonies: (string * string * string * float * float * float) list }
+          Agonies: (string * string * string * float * float * float) list
+          /// Ice Crystals beside an enemy: (owner, explosion part, enemy, the enemy's life when
+          /// they appeared, life of one crystal, how many, gone at). Newest first.
+          Crystals: (string * string * string * float * float * int * float) list }
 
     /// Fixed for the whole fight: mod dbs built once, buffs layered on per event.
     type private Env =
@@ -1337,6 +1342,21 @@ module Sim =
                             [ 1 .. n ] |> List.fold (fun w i ->
                                 schedule (if n = 1 then at else w.Time + (at - w.Time) * float i / float n) (Strike(actor.Name, part.Name, mult, target.Def.Name)) w) w) w)
                     w
+            // Ice Crystals the use leaves behind (Grim Pillars): they are spread over the skill's
+            // area, and those whose explosion reaches the target count, at least one. They
+            // appear after the use's own hits, which do not damage them.
+            let w =
+                skill.Parts |> List.filter (fun p -> partFlag p "Crystals") |> List.fold (fun w p ->
+                    let sum (q: Skill) name = q.Mods |> List.sumBy (fun m -> if m.Stat = Named name then m.Value else 0.0)
+                    let radius (q: Skill) = match q.Delivery with AreaAroundSelf r | AreaAtTarget r -> r | _ -> 0.0
+                    let share = if radius skill > 0.0 && radius p > 0.0 then min 1.0 ((radius p / radius skill) ** 2.0) else 1.0
+                    let near n = max 1 (int (System.Math.Round(n * share)))
+                    let life, created = sum p "CrystalLife", sum p "CrystalsCreated"
+                    if life > 0.0 && created > 0.0 then
+                        let last = times |> List.map fst |> List.fold max w.Time
+                        let lasts = if p.Duration > 0.0 then p.Duration * Mods.mult ctx [ SkillDuration ] mods else 1e9
+                        schedule (last + 1e-6) (PlantCrystals(actor.Name, p.Name, target.Def.Name, near created, life, near (max created (sum p "CrystalLimit")), lasts)) w
+                    else w) w
             // a seed planted in the target (Living Bomb): it explodes once the enemy has taken
             // enough damage from then on; a new seed replaces the old one
             let w =
@@ -2549,6 +2569,19 @@ module Sim =
                             match aimed env w with
                             | Some other -> drop w |> schedule w.Time (Strike(owner, skill, 1.0, other.Def.Name))
                             | None -> drop w) w
+            // Ice Crystals: destroyed once the enemy beside them has lost as much life as one
+            // withstands (the damage dealt there since they appeared); each then explodes
+            let w =
+                if w.Crystals.IsEmpty then w
+                else
+                    w.Crystals |> List.fold (fun w ((owner, part, enemy, mark, life, count, until) as c) ->
+                        let drop w = { w with Crystals = w.Crystals |> List.filter (fun x -> x <> c) }
+                        match Map.tryFind enemy w.Enemies with
+                        | Some e when e.Life > 0.0 && mark - e.Life >= life ->
+                            [ 1 .. count ] |> List.fold (fun w _ -> schedule w.Time (Strike(owner, part, 1.0, enemy)) w) (drop w)
+                            |> fun w -> { w with Counts = bump ("shattered:" + part) w.Counts }
+                        | Some e when e.Life > 0.0 && w.Time < until -> w
+                        | _ -> drop w) w
             // recorded damage is taken again as life when the debuff ends, or as soon as that kills
             let w =
                 if w.Agonies.IsEmpty then w
@@ -2719,6 +2752,16 @@ module Sim =
                             | Some e when count > 0 && e.Stacks > count -> { st with Buffs = Map.add charge { e with Stacks = e.Stacks - count } st.Buffs }
                             | _ -> { st with Buffs = Map.remove charge st.Buffs }) w
                         |> fun w -> { w with Counts = bump ("consumed:" + charge) w.Counts }
+            | PlantCrystals (owner, part, enemy, count, life, limit, lasts) ->
+                match Map.tryFind enemy w.Enemies with
+                | Some e when e.Life > 0.0 ->
+                    // more than the limit: the oldest go (without exploding)
+                    let all = (owner, part, enemy, e.Life, life, count, w.Time + lasts) :: w.Crystals
+                    let kept, _ =
+                        all |> List.fold (fun (kept, n) ((o, p, _, _, _, c, _) as x) ->
+                            if o = owner && p = part then (if n + c <= max count limit then x :: kept, n + c else kept, n + c) else x :: kept, n) ([], 0)
+                    { w with Crystals = List.rev kept; Counts = bump ("crystals:" + part) w.Counts }
+                | _ -> w
             | Expose (name, target, dt, amount, duration) -> expose (actorDef env name) target dt amount duration w
             | GainStacks (name, r, n) ->
                 let actor = actorDef env name
@@ -2882,7 +2925,8 @@ module Sim =
               Kills = []
               CorpsesUsed = 0
               Bombs = []
-              Agonies = [] }
+              Agonies = []
+              Crystals = [] }
             |> fun w -> actors |> List.fold (fun w a -> schedule 0.0 (Ready a.Name) w) w
             |> fun w -> actors |> List.fold (fun w a -> a.Cycles |> List.fold (fun w c -> schedule 0.0 (CycleTick(a.Name, c.Name)) w) w) w
             |> fun w -> actors |> List.fold scheduleResourceTimers w
