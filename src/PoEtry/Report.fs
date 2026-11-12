@@ -52,7 +52,35 @@ module Report =
                         let head = parts |> List.tryHead |> Option.defaultValue []
                         let rarity = head |> List.tryHead |> Option.map (fun (l: string) -> l.Replace("Rarity: ", "")) |> Option.defaultValue ""
                         let rest = parts |> List.skip (min 1 parts.Length) |> List.concat |> List.filter (fun l -> l <> "")
+                        // its radius in tree units (PoB data.jewelRadii x PassiveTreeJewelDistanceMultiplier):
+                        // a disc by its "Radius:" size, or the ring "Only affects Passives in ... Ring" names
+                        let scale = Map.find "PassiveTreeJewelDistanceMultiplier" Tables.gameConstants
+                        let ring =
+                            rest |> List.tryPick (fun l ->
+                                match l.Trim() with
+                                | "Only affects Passives in Very Small Ring" -> Some(650.0, 950.0)
+                                | "Only affects Passives in Small Ring" -> Some(800.0, 1100.0)
+                                | "Only affects Passives in Medium-Small Ring" -> Some(950.0, 1250.0)
+                                | "Only affects Passives in Medium Ring" -> Some(1100.0, 1400.0)
+                                | "Only affects Passives in Medium-Large Ring" -> Some(1250.0, 1550.0)
+                                | "Only affects Passives in Large Ring" -> Some(1400.0, 1700.0)
+                                | "Only affects Passives in Very Large Ring" -> Some(1650.0, 1950.0)
+                                | _ -> None)
+                        let disc = rest |> List.tryPick (fun l -> if l.StartsWith "Radius:" then Tree.jewelRadius (l.Substring 7) else None)
+                        let inner, outer =
+                            match ring, disc with
+                            | Some(i, o), _ -> i * scale, o * scale
+                            | None, Some o -> 0.0, o
+                            | None, None -> 0.0, 0.0
+                        // "Passives in Radius [of <Keystone>] can be Allocated without being connected to your tree"
+                        let leap = rest |> List.exists (fun l -> l.Contains "can be Allocated")
+                        let centres =
+                            rest |> List.choose (fun l ->
+                                let a = l.IndexOf "Passives in Radius of "
+                                let b = l.IndexOf " can be Allocated"
+                                if a >= 0 && b > a then Some(JStr(l.Substring(a + 22, b - a - 22).Trim())) else None)
                         obj [ "node", num (float node); "rarity", JStr rarity
+                              "inner", num inner; "outer", num outer; "leap", JBool leap; "centres", JArr centres
                               "name", JStr (head |> List.tryItem 1 |> Option.defaultValue "")
                               "base", JStr (head |> List.tryItem 2 |> Option.defaultValue "")
                               "mods", JArr(rest |> List.map JStr) ])

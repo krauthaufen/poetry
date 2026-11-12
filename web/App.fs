@@ -35,7 +35,13 @@ type Passive =
       FrameOff : V4d }
 
 /// A jewel in a socket of the tree, and its picture in the jewel sheet.
-type Jewel = { Called : string; Base : string; Rarity : string; Mods : string list; Sprite : string; SpriteRect : V4d }
+/// (`Inner`, `Outer`: its radius in tree units, 0 for none; `Leap`: passives in it can be
+/// allocated without being connected; `Centres`: the keystones it lies around, not its socket.)
+type Jewel = { Called : string; Base : string; Rarity : string; Mods : string list; Sprite : string; SpriteRect : V4d; Inner : float; Outer : float; Leap : bool; Centres : string list }
+
+/// An area of the tree: around a point, from `Near` to `Far`; `Free`: passives in it can be
+/// allocated without being connected (`Keystones`: keystones too).
+type Area = { Middle : V2d; Near : float; Far : float; Free : bool; Keystones : bool }
 
 /// A connection: its two passives and its ribbon (triangles); an ascendancy's own are laid
 /// out for the middle of the tree.
@@ -151,6 +157,9 @@ type Model =
       Unlocks : Map<int, int list>
       Opened : Buffer<V3f>
       OpenedUv : Buffer<V2f>
+      /// The radii of the jewels in allocated sockets, as a mesh.
+      Rings : Buffer<V3f>
+      RingsUv : Buffer<V2f>
       Selected : int option
       Hovered : int option
       Level : int }
@@ -165,7 +174,7 @@ let init : Model =
       Centre = V2d (0.0, 0.0); Height = 9000.0
       Camera = { Sky = V3d (0.0, 1.0, 0.0); Location = V3d (0.0, 0.0, 7794.2); Forward = V3d (0.0, 0.0, -1.0); Up = V3d (0.0, 1.0, 0.0); Right = V3d (1.0, 0.0, 0.0) }
       Near = 7000.0; Far = 8600.0
-      Touches = []; Travel = 0.0; Page = V2d (0.0, 0.0); Pending = None; Choices = Map.empty; JewelSprites = Map.empty; Jewels = Map.empty; Unlocks = Map.empty; Opened = Data.pack (Data.ofList ([] : V3f list)); OpenedUv = Data.pack (Data.ofList ([] : V2f list)); Selected = None; Hovered = None; Level = 0 }
+      Touches = []; Travel = 0.0; Page = V2d (0.0, 0.0); Pending = None; Choices = Map.empty; JewelSprites = Map.empty; Jewels = Map.empty; Unlocks = Map.empty; Opened = Data.pack (Data.ofList ([] : V3f list)); OpenedUv = Data.pack (Data.ofList ([] : V2f list)); Rings = Data.pack (Data.ofList ([] : V3f list)); RingsUv = Data.pack (Data.ofList ([] : V2f list)); Selected = None; Hovered = None; Level = 0 }
 
 /// The camera straight above the centre, so far up that `Height` of the tree is seen through
 /// its 60 degree lens; the depth range close around the tree's plane (its layers are a unit
@@ -308,6 +317,41 @@ let private readTree (j : Json) (m : Model) : Model =
         // (room for some 400 connections; a character has 150 passives at most)
         Capacity = 24000 }
 
+/// The areas of the tree that jewels in allocated sockets lie over, and the one passive that
+/// frees what is around allocated keystones ("Non-Keystone Passive Skills in Medium Radius of
+/// allocated Keystone Passive Skills can be allocated without being connected to your tree").
+let private areas (m : Model) (allocated : Set<int>) : Area list =
+    let at = m.Passives |> Array.map (fun p -> p.Id, p) |> Map.ofArray
+    let jewels =
+        m.Jewels |> Map.toList
+        |> List.filter (fun (node, j) -> allocated.Contains node && j.Outer > 0.0)
+        |> List.collect (fun (node, j) ->
+            let middles =
+                if j.Centres.IsEmpty then Map.tryFind node at |> Option.map (fun p -> V2d (p.X, p.Y)) |> Option.toList
+                else j.Centres |> List.choose (fun name -> m.Passives |> Array.tryFind (fun p -> p.Kind = "keystone" && p.Name = name) |> Option.map (fun p -> V2d (p.X, p.Y)))
+            middles |> List.map (fun c -> { Middle = c; Near = j.Inner; Far = j.Outer; Free = j.Leap; Keystones = true }))
+    let around =
+        if m.Passives |> Array.exists (fun p -> allocated.Contains p.Id && p.Stats |> List.exists (fun s -> s.Contains "Radius of allocated Keystone")) then
+            m.Passives |> Array.filter (fun p -> p.Kind = "keystone" && allocated.Contains p.Id) |> List.ofArray
+            |> List.map (fun p -> { Middle = V2d (p.X, p.Y); Near = 0.0; Far = 1150.0 * 1.2; Free = true; Keystones = false })
+        else []
+    jewels @ around
+
+/// Whether a passive can be allocated without a way to it: it lies in such an area.
+let private free (areas : Area list) (p : Passive) : bool =
+    p.Ascendancy = "" && p.Kind <> "start"
+    && areas |> List.exists (fun a ->
+        let d = sqrt ((p.X - a.Middle.X) * (p.X - a.Middle.X) + (p.Y - a.Middle.Y) * (p.Y - a.Middle.Y))
+        a.Free && d >= a.Near && d <= a.Far && (a.Keystones || p.Kind <> "keystone"))
+
+/// A circle as a thin band of triangles.
+let private circle (c : V2d) (r : float) (width : float) (z : float) : V3f list =
+    let n = 96
+    let pt (i : int) (rad : float) = let a = 6.283185307 * float i / float n in V3f (float32 (c.X + rad * cos a), float32 (-(c.Y + rad * sin a)), float32 z)
+    [ for i in 0 .. n - 1 do
+        let a0, a1, b0, b1 = pt i (r - width / 2.0), pt (i + 1) (r - width / 2.0), pt i (r + width / 2.0), pt (i + 1) (r + width / 2.0)
+        yield! [ a0; b0; a1; a1; b0; b1 ] ]
+
 /// The connections between allocated passives, as one mesh.
 let private paths (m : Model) : Model =
     let ribbons =
@@ -315,7 +359,8 @@ let private paths (m : Model) : Model =
         |> List.filter (fun l -> (l.Of = "" || l.Of = m.Ascendancy) && m.Allocated.Contains l.A && m.Allocated.Contains l.B && l.Needs |> List.forall m.Allocated.Contains)
         |> List.collect (fun l -> l.Ribbon)
     let opened = List.ofArray m.Links |> List.filter (fun l -> not l.Needs.IsEmpty && l.Needs |> List.forall m.Allocated.Contains) |> List.collect (fun l -> l.Thin)
-    { m with Path = Data.pack (Data.ofList ribbons); PathUv = noUv ribbons; Opened = Data.pack (Data.ofList opened); OpenedUv = noUv opened }
+    let rings = areas m m.Allocated |> List.collect (fun a -> circle a.Middle a.Far 14.0 0.5 @ (if a.Near > 0.0 then circle a.Middle a.Near 14.0 0.5 else []))
+    { m with Rings = Data.pack (Data.ofList rings); RingsUv = noUv rings; Path = Data.pack (Data.ofList ribbons); PathUv = noUv ribbons; Opened = Data.pack (Data.ofList opened); OpenedUv = noUv opened }
 
 /// The character's ascendancy, once the tree and the character are both there: the game's
 /// character data names it as the class ("Spirit Walker"); else the one its allocated
@@ -377,9 +422,16 @@ let private toggle (id : int) (m : Model) : Model =
     let next (i : int) = Map.tryFind i m.Neighbours |> Option.defaultValue [] |> List.filter (fun n -> open' m asc n && not (starts.Contains n))
     if m.Allocated.Contains id then
         let hanging = hanging m
-        // what was loose before stays (passives a jewel or an item allocates without a way to them)
-        let loose = Set.difference m.Allocated (hanging m.Allocated) |> Set.remove id
+        // what was loose before stays (passives a jewel or an item allocates without a way to
+        // them), but not what was only there for an area that goes with this one
+        let left = m.Allocated.Remove id
+        let before, after = areas m m.Allocated, areas m left
+        let lost (i : int) = m.Passives |> Array.tryFind (fun p -> p.Id = i) |> Option.exists (fun p -> free before p && not (free after p))
+        let loose = Set.difference m.Allocated (hanging m.Allocated) |> Set.remove id |> Set.filter (fun i -> not (lost i))
         { m with Allocated = Set.union (hanging (m.Allocated.Remove id)) loose; Edited = true }
+    elif m.Passives |> Array.exists (fun p -> p.Id = id && free (areas m m.Allocated) p) then
+        // in a jewel's radius that lets it be allocated without a way to it
+        { m with Allocated = m.Allocated.Add id; Edited = true }
     else
         // breadth first from the passive towards anything allocated (or a start to begin from)
         let rec search (seen : Map<int, int>) (front : int list) =
@@ -543,7 +595,9 @@ let rec update (msg : Msg) (m : Model) : Model =
                         |> List.map (fun x ->
                             let s k = Json.string (Json.field k x)
                             let pic = Map.tryFind (s "name") m.JewelSprites |> Option.orElse (Map.tryFind (s "base") m.JewelSprites) |> Option.defaultValue ("", V4d (0.0, 0.0, 0.0, 0.0))
-                            Json.int (Json.field "node" x), { Called = s "name"; Base = s "base"; Rarity = s "rarity"; Mods = Json.field "mods" x |> Json.list |> List.map Json.string; Sprite = fst pic; SpriteRect = snd pic })
+                            Json.int (Json.field "node" x), { Called = s "name"; Base = s "base"; Rarity = s "rarity"; Mods = Json.field "mods" x |> Json.list |> List.map Json.string; Sprite = fst pic; SpriteRect = snd pic
+                                                              Inner = Json.number (Json.field "inner" x); Outer = Json.number (Json.field "outer" x); Leap = Json.bool (Json.field "leap" x)
+                                                              Centres = Json.field "centres" x |> Json.list |> List.map Json.string })
                         |> Map.ofList
                     Pools = [ row "Life" (n [ "pools"; "life" ]); row "Mana" (n [ "pools"; "mana" ]); row "Energy Shield" (n [ "pools"; "energyShield" ]); row "Spirit" (n [ "pools"; "spirit" ]) ]
                     Defences = [ row "Armour" (n [ "defences"; "armour" ]); row "Evasion" (n [ "defences"; "evasion" ]); row "Deflection" (n [ "defences"; "deflection" ]); row "Block" (n [ "defences"; "block" ]) ]
@@ -673,6 +727,11 @@ let tree (m : Model) : Node<Msg> =
                     Sg.Uniform ("Color", V4d (0.227, 0.227, 0.306, 1.0))
                     mesh Topology.Triangles { Mesh.Attribute ("Positions", m.Web); Mesh.Attribute ("DiffuseColorCoordinates", m.WebUv) }
                 }
+                // the radii of jewels
+                sg {
+                    Sg.Uniform ("Color", V4d (0.45, 0.68, 1.0, 1.0))
+                    mesh Topology.Triangles { Mesh.Attribute ("Positions", m.Rings); Mesh.Attribute ("DiffuseColorCoordinates", m.RingsUv) }
+                }
                 // (the connections of passives that are only there for some: the Oracle's)
                 sg {
                     Sg.Uniform ("Color", V4d (0.227, 0.227, 0.306, 1.0))
@@ -737,8 +796,11 @@ let private points (m : Model) : string =
     let spent = hanging m m.Allocated
     let asc = m.Passives |> Array.filter (fun p -> p.Ascendancy <> "" && p.Kind <> "ascstart" && spent.Contains p.Id) |> Array.length
     let starts = m.Passives |> Array.filter (fun p -> p.Kind = "ascstart" && spent.Contains p.Id) |> Array.length
-    let free = m.Allocated.Count - spent.Count
-    sprintf "%d of %d points, %d ascendancy%s" (spent.Count - asc - starts) (m.Level - 1 + 24) asc (if free > 0 then sprintf ", %d granted" free else "")
+    // (a passive allocated without a way to it in a jewel's radius costs its point all the same)
+    let zones = areas m m.Allocated
+    let leapt = m.Passives |> Array.filter (fun p -> m.Allocated.Contains p.Id && not (spent.Contains p.Id) && free zones p) |> Array.length
+    let granted = m.Allocated.Count - spent.Count - leapt
+    sprintf "%d of %d points, %d ascendancy%s" (spent.Count - asc - starts + leapt) (m.Level - 1 + 24) asc (if granted > 0 then sprintf ", %d granted" granted else "")
 
 /// The tooltip of the pinned passive (with what can be done to it) or the one under the mouse.
 let private tooltip (m : Model) : Node<Msg> =
