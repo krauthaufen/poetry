@@ -217,10 +217,16 @@ let main argv =
         let chosen =
             if Map.containsKey "group" o || Map.containsKey "rotation" o then None
             else Setup.strongest c options (Encounter.boss (int (get "level" 83.0)) Rarity.defaults 30.0 |> List.map (fun e -> { e with Life = 1e12 }))
+        // nothing to press, and minions: they fight alone
+        let chosen =
+            match chosen with
+            | None when not (Map.containsKey "group" o || Map.containsKey "rotation" o) && not c.Minions.IsEmpty -> Some ""
+            | x -> x
         let o = if chosen.IsSome then Map.add "auto" "1" o else o
         let chosenGroup =
             chosen |> Option.bind (fun gem -> build.Groups |> List.tryFindIndex (fun g -> g.Gems |> List.exists (fun x -> x.Name = gem && not x.IsSupport && x.Enabled)))
         match chosen, chosenGroup with
+        | Some "", _ -> printfn "\n-- nothing to press: the minions fight on their own"
         | Some gem, None -> printfn "\n-- pressing %s" gem
         | _ -> ()
         let groupIdx = match chosenGroup with Some i -> i + 1 | None -> int (get "group" (float build.MainGroup))
@@ -231,7 +237,7 @@ let main argv =
             | None -> printfn "group %d has no active gem" groupIdx; 1
             | Some (Error e) -> printfn "group %d: %s" groupIdx e; 1
             | Some (Ok (skill, skillCov)) ->
-                printfn "\n-- simulating %s (group %d)" skill.Name groupIdx
+                if chosen <> Some "" then printfn "\n-- simulating %s (group %d)" skill.Name groupIdx
                 match group.Gems |> List.tryFind (fun x -> not x.IsSupport && x.Enabled) |> Option.map (fun x -> Gems.unmodelledTypes db x.Name) with
                 | Some (_ :: _ as ts) -> printfn "  NOT MODELLED for this skill: %s" (String.concat ", " ts)
                 | _ -> ()

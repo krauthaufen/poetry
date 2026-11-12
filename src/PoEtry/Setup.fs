@@ -713,6 +713,10 @@ module Setup =
         |> List.collect (fun g -> g.Gems |> List.filter (fun x -> x.Enabled && not x.IsSupport && not (Gems.isPersistentBuff c.Db x.Name)))
         // a skill that is only ever triggered (by an item, a support, another skill) can't be pressed
         |> List.filter (fun x -> not (Gems.data c.Db x.Name |> Option.exists (fun d -> d.Types.Contains "Triggered")))
+        // nor can a persistent minion gem: its minions are simply there
+        |> List.filter (fun x ->
+            not (x.Name.StartsWith "Spectre: " || x.Name.StartsWith "Companion: ")
+            && not (Gems.data c.Db x.Name |> Option.exists (fun d -> d.Types.Contains "Persistent" && d.Types.Contains "Minion")))
         |> List.map (fun x -> x.Name)
         // and totems that use socketed skills: pressing them places the totem
         |> fun own ->
