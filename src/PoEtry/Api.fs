@@ -187,7 +187,8 @@ module Api =
                       Quality = gemQuality g
                       Enabled = true
                       IsSupport = false
-                      StatSet = 1 }
+                      StatSet = 1
+                      Minion = None }
                 let supports =
                     // socketed gems: supports, and active spells socketed into meta gems
                     Json.list (Json.field "socketedItems" g)
@@ -198,7 +199,8 @@ module Api =
                           Quality = if support then 0 else gemQuality s
                           Enabled = true
                           IsSupport = support
-                          StatSet = 1 })
+                          StatSet = 1
+                          Minion = None })
                 // a skill an item grants has no place in the skill panel: no inventory id
                 let granted = match Json.field "inventoryId" g with | Some (JStr _) -> false | _ -> true
                 { Label = active.Name

@@ -7,7 +7,9 @@ type PobGem =
       Quality: int
       Enabled: bool
       IsSupport: bool
-      StatSet: int }
+      StatSet: int
+      /// The monster a spectre or companion gem summons (PoB skillMinion), if the source says.
+      Minion: string option }
 
 type PobGroup =
     { Label: string
@@ -116,7 +118,11 @@ module Pob =
             |> List.map (fun g ->
                 { Label = Xml.attr "label" g |> Option.defaultValue ""
                   // PoB marks a group an item grants with source="Item:..."
-                  Slot = (match Xml.attr "source" g with | Some src when src.StartsWith "Item" -> "granted" | _ -> Xml.attr "slot" g |> Option.defaultValue "")
+                  // (and one the passive tree grants with source="Tree:...")
+                  Slot = (match Xml.attr "source" g with
+                          | Some src when src.StartsWith "Item" -> "granted"
+                          | Some src when src.StartsWith "Tree" -> "tree"
+                          | _ -> Xml.attr "slot" g |> Option.defaultValue "")
                   Enabled = Xml.attr "enabled" g <> Some "false"
                   Gems =
                     Xml.children "Gem" g
@@ -128,7 +134,8 @@ module Pob =
                           Quality = int' (Xml.attr "quality" gem) 20
                           Enabled = Xml.attr "enabled" gem <> Some "false"
                           IsSupport = gemId.Contains "SupportGem" || skillId.StartsWith "Support" || skillId.Contains "SupportPlayer"
-                          StatSet = int' (Xml.attr "statSetIndex" gem) 1 }) })
+                          StatSet = int' (Xml.attr "statSetIndex" gem) 1
+                          Minion = Xml.attr "skillMinion" gem |> Option.filter (fun s -> s <> "") }) })
         let config =
             Xml.descendants "Input" root
             |> List.choose (fun i ->

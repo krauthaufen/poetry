@@ -1163,8 +1163,13 @@ module Behaviours =
 
     let spiritUses (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) : SpiritUse list =
         let charMods = ModDb.ofList sheet.Mods
+        // (a skill the passive tree grants is the same skill as its gem, if that is socketed too)
+        let socketed =
+            build.Groups |> List.filter (fun g -> g.Enabled && g.Slot <> "tree")
+            |> List.collect (fun g -> g.Gems |> List.filter (fun x -> x.Enabled && not x.IsSupport) |> List.map (fun x -> x.Name)) |> Set.ofList
         build.Groups
         |> List.filter (fun g -> g.Enabled && g.Slot <> "granted")
+        |> List.filter (fun g -> not (g.Slot = "tree" && g.Gems |> List.exists (fun x -> socketed.Contains x.Name)))
         |> List.collect (fun g ->
             let enabled = g.Gems |> List.filter (fun x -> x.Enabled)
             let reservation (name: string) (level: int) =
@@ -1345,8 +1350,13 @@ module Behaviours =
         let minionMods = Mods.forMinions sheet.Mods
         let levelOf = minionLevel db charMods minionMods
         let gemRaw (gem: PobGem) = Gems.rawStats db charMods { Gem = gem.Name; Level = gem.Level; Quality = gem.Quality; StatSet = 1; Supports = [] }
+        // a minion skill the passive tree grants is the same skill as its gem, if that is socketed too
+        let socketed =
+            build.Groups |> List.filter (fun g -> g.Enabled && g.Slot <> "tree")
+            |> List.collect (fun g -> g.Gems |> List.filter (fun x -> x.Enabled && not x.IsSupport) |> List.map (fun x -> x.Name)) |> Set.ofList
         build.Groups
         |> List.filter (fun g -> g.Enabled)
+        |> List.filter (fun g -> not (g.Slot = "tree" && g.Gems |> List.exists (fun x -> socketed.Contains x.Name)))
         |> List.map (fun g ->
             let enabled = g.Gems |> List.filter (fun x -> x.Enabled)
             let supports = enabled |> List.filter (fun x -> x.IsSupport) |> List.map (fun x -> x.Name, x.Level)
@@ -1359,7 +1369,12 @@ module Behaviours =
                 let persistent = byName.IsSome || (data |> Option.exists (fun d -> d.Types.Contains "Persistent"))
                 let monsters =
                     match byName with
-                    | Some n -> db.Minions |> Map.toList |> List.map snd |> List.filter (fun m -> m.Name = n) |> List.truncate 1
+                    // the monster the source names; by name alone, of several monsters called
+                    // the same the one that can do the most (the others are plainer variants)
+                    | Some n ->
+                        match gem.Minion |> Option.bind (fun id -> Map.tryFind id db.Minions) with
+                        | Some m -> [ m ]
+                        | None -> db.Minions |> Map.toList |> List.map snd |> List.filter (fun m -> m.Name = n) |> List.sortByDescending (fun m -> m.SkillList.Length) |> List.truncate 1
                     | None -> data |> Option.map (fun d -> d.MinionList) |> Option.defaultValue [] |> List.truncate 1 |> List.choose (fun id -> Map.tryFind id db.Minions)
                 match monsters with
                 | [] ->
@@ -1374,6 +1389,15 @@ module Behaviours =
                     let level = levelOf gem.Name gem.Level
                     let weapon, fixup = minionWeapon m level byName.IsSome
                     let minionMods = if fixup = 1.0 then minionMods else Mod.more (Damage AllDamage) ((fixup - 1.0) * 100.0) :: minionMods
+                    // "Companions gain added Attack damage equal to x% of your main hand Weapon's damage"
+                    let minionMods =
+                        match Mods.sumBase Ctx.empty [ Named "CompanionWeaponDamage" ] charMods, sheet.Weapons with
+                        | pct, main :: _ when companion && pct > 0.0 ->
+                            (main.Damage |> Map.toList |> List.collect (fun (t, r) ->
+                                [ Mod.base' (AddedMin t) (r.Min * pct / 100.0); Mod.base' (AddedMax t) (r.Max * pct / 100.0) ]
+                                |> List.map (Mod.whenever (SkillIs Attack) >> Mod.from "your weapon")))
+                            @ minionMods
+                        | _ -> minionMods
                     let targetsAlly sid =
                         Map.tryFind sid db.Skills
                         |> Option.exists (fun d -> d.StatSets |> List.exists (fun set -> set.Stats |> List.contains "command_minion_target_ally_below_x_life"))
@@ -1402,7 +1426,10 @@ module Behaviours =
                         raw
                         |> List.tryPick (fun (k, v) -> if k.EndsWith "_pack_size" then Some(int v) else None)
                         |> Option.defaultValue 1
-                        |> fun pack -> pack * (Map.tryFind gem.Name counts |> Option.defaultValue 1)
+                        |> fun pack ->
+                            // a gem an item grants reserves nothing: its free minions and no more
+                            let free = raw |> List.tryPick (fun (k, v) -> if k = "first_X_minions_have_0_base_spirit_reservation" then Some(int v) else None) |> Option.defaultValue 1
+                            pack * (if g.Slot = "granted" then max 1 free else Map.tryFind gem.Name counts |> Option.defaultValue 1)
                     // what the minions do on a hit ("Minions have x% chance to inflict Withered on Hit")
                     let rules = keywordRules { sheet with Mods = minionMods } ordered
                     // a minion without any damaging skill (a healer) simply doesn't fight
@@ -1432,8 +1459,19 @@ module Behaviours =
                         []))
         |> List.concat
         |> List.unzip
-        // (the same minion gem twice, as in both weapon sets: the first one counts)
-        |> fun (actors, notes) -> List.concat actors |> List.distinctBy (fun a -> a.Name), List.concat notes
+        // the same minion gem twice (one of them granted by a sceptre): two sets of minions
+        |> fun (actors, notes) ->
+            let named =
+                actors
+                |> List.fold
+                    (fun (seen: Set<string>, acc) (group: Actor list) ->
+                        let rec free k = if group |> List.exists (fun a -> seen.Contains(if k = 1 then a.Name else sprintf "%s (%d)" a.Name k)) then free (k + 1) else k
+                        let k = free 1
+                        let group = if k = 1 then group else group |> List.map (fun a -> { a with Name = sprintf "%s (%d)" a.Name k })
+                        group |> List.fold (fun s a -> Set.add a.Name s) seen, acc @ group)
+                    (Set.empty, [])
+                |> snd
+            named, List.concat notes
 
     /// What summons a build's temporary minions (the pools `minions` makes), as rules and
     /// periodic actions of the player. A minion lasts the gem's duration.

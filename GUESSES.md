@@ -18,7 +18,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
    whose description or behaviour changed.
 5. Go through the lists below; the wiki's version history of a skill says what changed.
 
-## Rules (91)
+## Rules (92)
 
 ### Hit damage
 
@@ -79,9 +79,10 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | Life flask | player behaviour | guess |
 | Ailments on the player | GameConstants "...Player" | data; using unmitigated damage is a guess |
 | Light stun on the player | game constants; formula a guess | guess |
+| Which monster | game data (PoB Minions / Spectres export); which variant a name means is not in the API | data; the variant by name is a guess |
 | Skills | game data | data; that the player commands whenever the cooldown allows is a guess |
 | Minions inflict Withered | stat text | data; 4 s is a guess |
-| The same minion gem twice | one set of minions (the first gem), as with a gem in both weapon sets | | guess |
+| The same minion gem twice | PoB lists both; that the tree's and the gem's are one is a guess | guess |
 | Count | 1 per gem, or the gem's pack size; how many a build reserves spirit for is unknown from the API | | guess, usually too low |
 | Who a monster attacks | monster tags are data; who is attacked is not known | guess |
 | Death and revival | time: game data (the wiki says 7.5 s); the rule for further deaths: wiki Minion | data; 12 s for gems without the stat is a guess |
