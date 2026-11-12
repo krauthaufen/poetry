@@ -1351,8 +1351,9 @@ module Sim =
                     let radius (q: Skill) = match q.Delivery with AreaAroundSelf r | AreaAtTarget r -> r | _ -> 0.0
                     let share = if radius skill > 0.0 && radius p > 0.0 then min 1.0 ((radius p / radius skill) ** 2.0) else 1.0
                     let near n = max 1 (int (System.Math.Round(n * share)))
-                    let life, created = sum p "CrystalLife", sum p "CrystalsCreated"
-                    if life > 0.0 && created > 0.0 then
+                    // one crystal where the skill does not say how many
+                    let life, created = sum p "CrystalLife", max 1.0 (sum p "CrystalsCreated")
+                    if life > 0.0 then
                         let last = times |> List.map fst |> List.fold max w.Time
                         let lasts = if p.Duration > 0.0 then p.Duration * Mods.mult ctx [ SkillDuration ] mods else 1e9
                         schedule (last + 1e-6) (PlantCrystals(actor.Name, p.Name, target.Def.Name, near created, life, near (max created (sum p "CrystalLimit")), lasts)) w

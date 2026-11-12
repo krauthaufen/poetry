@@ -391,6 +391,8 @@ module Gems =
               ("Earthshatter", "Explosion"), [ "Part"; "DetonatedBy:Warcry" ]
               // the pillars stay as Ice Crystals and explode when destroyed
               ("Grim Pillars", "Explosion"), [ "Part"; "Crystals" ]
+              ("Frozen Locus", "Explosion"), [ "Crystals" ]
+              ("Glacial Bolt", "Wall"), [ "Crystals" ]
               ("Detonate Living", "Explosion"), [ "Part"; "Vs:Cullable" ]
               // an explosion for each ailment consumed
               ("Elemental Sundering", "Cold"), [ "Part"; "Vs:Frozen!" ]
