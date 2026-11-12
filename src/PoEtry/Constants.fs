@@ -114,10 +114,11 @@ module Constants =
     /// brought up to a minion's and then 25% more ("server side mod added in 0.3", PoB
     /// SpectreBeastDamageFixup; not in the data).
     let spectreDamageFixup = 1.25
-    /// Seconds until killed minions are revived: every reviving minion gem in the data has
-    /// minion_base_resummon_time_ms = 12000; taken for the ones without the stat as well
-    /// (a guess for those). The wiki's Minion page says 7.5 s.
-    let minionReviveSeconds = 12.0
+    /// Seconds until killed minions are revived when the gem does not say: Character.ot
+    /// global_resummon_time_ms = 7500 (PoB Misc.lua characterConstants; the 7.5 s of the
+    /// 0.2.0e patch notes). The minion gems carry their own minion_base_resummon_time_ms
+    /// (12000 on every one that has it), which takes its place.
+    let minionReviveSeconds = 7.5
 
     // ---- charges and rage ----
     /// GameConstants BaseMaximumRage; Character.ot max_*_charges.

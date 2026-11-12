@@ -869,11 +869,14 @@ let main _ =
         let o = run (attacker Fire 60.0 2.0) { body 100.0 None with Resist = Map.ofList [ Fire, 75.0 ] }
         equal false (o.Counts.ContainsKey "minion:died"))
 
-    test "minions: the revive timer starts anew for all of them with every death" (fun () ->
+    test "minions: the revive timer; a later death adds a n-th of it, at most the full time from now" (fun () ->
         equal (6.0, 1) (Sim.nextRevival 0.0 6.0 None)
+        // a second death right away: the full time from now is less than 6 + 6/2
         equal (6.1, 2) (Sim.nextRevival 0.1 6.0 (Some(6.0, 1)))
-        // a second death just before they would be back: the full time again
-        equal (11.0, 2) (Sim.nextRevival 5.0 6.0 (Some(6.0, 1)))
+        // a second death just before they would be back: 6 + 6/2
+        equal (9.0, 2) (Sim.nextRevival 5.0 6.0 (Some(6.0, 1)))
+        // a third: + 6/3
+        equal (11.0, 3) (Sim.nextRevival 8.9 6.0 (Some(9.0, 2)))
         // after they are back the count starts again
         equal (26.0, 1) (Sim.nextRevival 20.0 6.0 (Some(9.0, 2))))
 
