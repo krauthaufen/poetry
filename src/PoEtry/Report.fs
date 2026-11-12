@@ -128,6 +128,40 @@ module Report =
     /// A fight as asked for: { scenario: "boss" | "pinnacle" | "pack" | "surrounded", level,
     /// time, runs, seed (the first run's, 1), life (0: the enemies' own), gem ("": the strongest to press) }.
     /// Missing fields take the defaults (a level 83 boss, 30 s, 20 runs).
+    /// One run for showing: who is there at the start (the player in the middle), and what
+    /// happened in order, as short arrays:
+    ///   ["u", time, actor, skill, marks]   a use; a mark is ["r", x, y, radius, delay] (an area),
+    ///                                      ["f", x1, y1, x2, y2, ...] (a projectile's way) or ["l", x1, y1, x2, y2]
+    ///   ["s", time, enemy, damage, crit]   a hit on an enemy
+    ///   ["m", time, enemy, x, y]           an enemy is here now
+    ///   ["h", time, enemy, damage]         an enemy's hit on the player
+    ///   ["k", time, enemy]                 an enemy dies
+    let private replay (f: Fight) (o: Outcome) : Json =
+        let r (v: float) = num (System.Math.Round(v, 1))
+        let mark (m: Mark) =
+            match m with
+            | Ring (c, radius, delay) -> JArr [ JStr "r"; r c.X; r c.Y; r radius; num (System.Math.Round(delay, 3)) ]
+            | Flight points -> JArr(JStr "f" :: (points |> List.collect (fun p -> [ r p.X; r p.Y ])))
+            | Line (a, b) -> JArr [ JStr "l"; r a.X; r a.Y; r b.X; r b.Y ]
+        let t (v: float) = num (System.Math.Round(v, 3))
+        let happened =
+            o.Shown |> List.map (fun s ->
+                match s with
+                | Used (time, actor, skill, marks) -> time, JArr [ JStr "u"; t time; JStr actor; JStr skill; JArr(marks |> List.map mark) ]
+                | Struck (time, enemy, damage, crit) -> time, JArr [ JStr "s"; t time; JStr enemy; num (System.Math.Round damage); JBool crit ]
+                | Moved (time, enemy, p) -> time, JArr [ JStr "m"; t time; JStr enemy; r p.X; r p.Y ]
+                | Hurt (time, enemy, damage) -> time, JArr [ JStr "h"; t time; JStr enemy; num (System.Math.Round damage) ])
+        let kills = o.Kills |> List.map (fun (enemy, _, time) -> time, JArr [ JStr "k"; t time; JStr enemy ])
+        obj
+            [ "duration", num o.Duration
+              "enemies", JArr(f.Enemies |> List.map (fun e ->
+                  obj [ "name", JStr e.Name; "x", r e.Position.X; "y", r e.Position.Y; "size", r e.Size; "rarity", JStr(Rarity.name e.Rarity); "life", num e.Life ]))
+              "actors", JArr((f.Player :: f.Minions) |> List.map (fun a ->
+                  obj [ "name", JStr a.Name; "minion", JBool(a.Name <> f.Player.Name)
+                        "melee", JBool(a.Body |> Option.exists (fun b -> b.Melee)); "size", num (a.Body |> Option.map (fun b -> b.Size) |> Option.defaultValue 0.0) ]))
+              // (a stable sort: what happened at the same time stays in its order)
+              "events", JArr(happened @ kills |> List.sortBy fst |> List.map snd) ]
+
     let fight (c: Loaded) (request: Json) : Json =
         let n key d = Json.numField key request |> Option.defaultValue d
         let s key d = Json.strField key request |> Option.defaultValue d
@@ -150,7 +184,10 @@ module Report =
         let f = Setup.fight c o (Setup.player c o play None) enemies
         // (`seed`: the first of the runs' consecutive seeds, so that several askers each run their own)
         let first = max 1 (int (n "seed" 1.0))
-        let summary = [ for seed in first .. first + runs - 1 -> Sim.run f (uint32 seed) ] |> Summary.ofOutcomes
+        // (`trace`: the first run is kept for showing, see `replay`)
+        let tracing = n "trace" 0.0 > 0.0
+        let outcomes = [ for seed in first .. first + runs - 1 -> (if tracing && seed = first then Sim.shown else Sim.run) f (uint32 seed) ]
+        let summary = outcomes |> Summary.ofOutcomes
         obj
             [ "gem", JStr gem
               "scenario", JStr scenario
@@ -164,7 +201,8 @@ module Report =
               "deathRate", num summary.DeathRate
               "damageTakenPerSecond", num summary.DamageTakenPerSecond
               "lowestLife", obj [ "mean", num (fst summary.MinLife); "worst", num (snd summary.MinLife) ]
-              "waitingForMana", num summary.Starved ]
+              "waitingForMana", num summary.Starved
+              "replay", (if tracing then replay f outcomes.Head else JNull) ]
 
 /// The simulator for a front end: the game data read once, the last character kept.
 /// Requests and answers are JSON text:

@@ -433,8 +433,18 @@ type DotInstance =
       MaxStacks: int
       Owner: string }
 
+/// What happened in a fight, for showing it: a skill use and what it looked like, a hit on
+/// an enemy, where an enemy went, a hit on the player.
+type Shown =
+    | Used of time: float * actor: string * skill: string * marks: Mark list
+    | Struck of time: float * enemy: string * damage: float * crit: bool
+    | Moved of time: float * enemy: string * position: Vec
+    | Hurt of time: float * enemy: string * damage: float
+
 type Outcome =
-    { /// Time every enemy was dead, None if some survived MaxTime.
+    { /// What happened, in order (only of a run that was asked to keep it: `Sim.shown`).
+      Shown: Shown list
+      /// Time every enemy was dead, None if some survived MaxTime.
       Ttk: float option
       Duration: float
       /// Kill time per enemy (name, rarity, time).
@@ -576,6 +586,11 @@ module Sim =
           Enemies: Map<string, EnemyState>
           Actors: Map<string, ActorState>
           Queue: Map<float * int, Event>
+          /// Whether what happens is kept for showing (`Shown`, newest first), and where the
+          /// enemies were when that was last noted.
+          Tracing: bool
+          Shown: Shown list
+          ShownAt: Map<string, Vec>
           Seq: int
           DamageBy: Map<string, float>
           Counts: Map<string, int>
@@ -2265,6 +2280,7 @@ module Sim =
                         // "25% of Hit Damage dealt to them while Debuffed": hits are what is recorded
                         Agonies = w.Agonies |> List.map (fun ((o, s, en, recorded, share, until) as a) -> if en = target && until > w.Time then (o, s, en, recorded + min dealt e.Life, share, until) else a)
                         Counts = w.Counts |> bump ("hits:" + skill.Name) |> (if hit.Crit then bump ("crits:" + skill.Name) else id)
+                        Shown = (if w.Tracing then Struck(w.Time, target, min dealt e.Life, hit.Crit) :: w.Shown else w.Shown)
                         Kills = if dead then (target, e.Def.Rarity, w.Time) :: w.Kills else w.Kills }
                 // overkill explosions: nearby enemies are ignited for a share of the overkill
                 let w =
@@ -2745,6 +2761,9 @@ module Sim =
                         let at = Vec.scale (p.Speed * t) (Vec.ofAngle (Vec.angle primary.Position))
                         living |> List.filter (Geometry.within at (Geometry.radius p.Passing areaMult)) |> List.map (fun e -> e.Name)
                         |> List.fold (fun w target -> hitEnemy env rng actor sk mult target w) w
+                    | _ when w.Tracing ->
+                        let hit, marks = Geometry.targetsShown rng env.Fight.Walls env.Fight.Reach delivery areaMult primary living
+                        hit |> List.fold (fun w target -> hitEnemy env rng actor sk mult target w) { w with Shown = Used(w.Time, name, sk.Name, marks) :: w.Shown }
                     | _ ->
                         Geometry.targetsFrom rng env.Fight.Walls env.Fight.Reach delivery areaMult primary living
                         |> List.fold (fun w target -> hitEnemy env rng actor sk mult target w) w
@@ -2925,6 +2944,7 @@ module Sim =
                             hurtMinion env rng m (taken |> Map.map (fun _ d -> d * k)) { w with Counts = bump "minion:took for owner" w.Counts }
                         | None -> taken, w
                     let p = w.Player |> Option.defaultValue p
+                    let w = if w.Tracing then { w with Shown = Hurt(w.Time, name, taken |> Map.fold (fun s _ v -> s + v) 0.0) :: w.Shown } else w
                     let w = takeDamage pools taken { w with Player = Some p } |> fun w -> { w with Player = w.Player |> Option.map (fun p -> { p with LastHit = w.Time }) }
                     let w = (let _, _, _, whenHit, _ = env.Rage in gainRage env whenHit w)
                     let w = (match env.Fight.Player.Skills |> List.tryHead with Some any -> react env rng env.Fight.Player WhenHit any (Some name) w | None -> w)
@@ -3441,7 +3461,7 @@ module Sim =
                       for s in allSkills a -> (a.Name, s.Name), ModDb.ofList (a.Mods @ s.Mods) ] }
 
     /// Simulate one fight with the given seed.
-    let run (fight: Fight) (seed: uint32) : Outcome =
+    let private runWith (tracing: bool) (fight: Fight) (seed: uint32) : Outcome =
         let env = envOf fight
         let rng = Rng(seed)
         /// Expiry events for the resources an actor starts with.
@@ -3563,6 +3583,9 @@ module Sim =
                     a.Name, { empty with Buffs = res; Energy = banked; Life = life; Shield = shield; Gone = a.Pool.IsSome })
                 |> Map.ofList
               Queue = Map.empty
+              Tracing = tracing
+              Shown = []
+              ShownAt = Map.empty
               Seq = 0
               DamageBy = Map.empty
               Counts = Map.empty
@@ -3596,10 +3619,21 @@ module Sim =
             let died = w.Player |> Option.exists (fun p -> p.Died.IsSome)
             if died || allDead w || Map.isEmpty w.Queue || fst (Seq.head w.Queue).Key > fight.MaxTime then w
             elif n >= maxEvents then { w with Counts = bump "aborted: too many events" w.Counts }
-            else loop (n + 1) (step env rng w)
+            else
+                let w = step env rng w
+                // where the enemies are now, for showing: those that moved since last noted
+                let w =
+                    if not w.Tracing then w
+                    else
+                        alive w |> List.fold (fun (w: World) e ->
+                            match Map.tryFind e.Def.Name w.ShownAt with
+                            | Some at when Vec.dist at e.Def.Position < 1.0 -> w
+                            | _ -> { w with Shown = Moved(w.Time, e.Def.Name, e.Def.Position) :: w.Shown; ShownAt = Map.add e.Def.Name e.Def.Position w.ShownAt }) w
+                loop (n + 1) w
         let w = loop 0 w0
         let cleared = if allDead w then w.Kills |> List.map (fun (_, _, t) -> t) |> List.fold max 0.0 |> Some else None
-        { Ttk = cleared
+        { Shown = List.rev w.Shown
+          Ttk = cleared
           Duration = (match cleared with Some t -> t | None -> min w.Time fight.MaxTime)
           Kills = List.rev w.Kills
           DamageBy = w.DamageBy
@@ -3610,3 +3644,9 @@ module Sim =
           ManaStarved = w.Player |> Option.map (fun p -> p.Starved) |> Option.defaultValue 0.0
           MinLife = w.Player |> Option.map (fun p -> p.MinLife) |> Option.defaultValue 1.0
           ManaGained = w.Player |> Option.map (fun p -> p.ManaGained) |> Option.defaultValue Map.empty }
+
+    /// Simulate one fight with the given seed.
+    let run (fight: Fight) (seed: uint32) : Outcome = runWith false fight seed
+
+    /// The same fight (the same numbers), with what happened kept for showing it.
+    let shown (fight: Fight) (seed: uint32) : Outcome = runWith true fight seed

@@ -17,6 +17,14 @@ module Vec =
     let angle a = atan2 a.Y a.X
     let ofAngle r = { X = cos r; Y = sin r }
 
+/// What a skill use looks like on the ground, for showing a fight: an area (so long after
+/// the use), a projectile's way (start, bounces, end), a line between two places (a chain, a
+/// strike).
+type Mark =
+    | Ring of centre: Vec * radius: float * delay: float
+    | Flight of points: Vec list
+    | Line of from: Vec * towards: Vec
+
 type Rarity =
     | Normal
     | Magic
@@ -448,14 +456,21 @@ module Geometry =
         |> List.rev
 
     /// Enemies hit by one use: names, each once per hit it receives.
-    let targetsFrom (rng: Rng) (walls: Wall list) (reach: float) (delivery: Delivery) (areaMult: float) (primary: EnemyDef) (alive: EnemyDef list) : string list =
+    /// Whom a use hits. `marks`, if given, is told what the use looks like (the very places
+    /// and ways rolled here), for showing the fight.
+    let private targetsWith (marks: ResizeArray<Mark> option) (rng: Rng) (walls: Wall list) (reach: float) (delivery: Delivery) (areaMult: float) (primary: EnemyDef) (alive: EnemyDef list) : string list =
+        let mark (m: Mark) = match marks with Some ms -> ms.Add m | None -> ()
         match delivery with
-        | Single -> [ primary.Name ]
+        | Single ->
+            mark (Line(Vec.zero, primary.Position))
+            [ primary.Name ]
         | AreaAtTarget r ->
             let r = radius r areaMult
+            mark (Ring(primary.Position, r, 0.0))
             alive |> List.filter (within primary.Position r) |> List.map (fun e -> e.Name)
         | AreaAroundSelf r ->
             let r = radius r areaMult
+            mark (Ring(Vec.zero, r, 0.0))
             alive |> List.filter (within Vec.zero r) |> List.map (fun e -> e.Name)
         | Projectiles ({ Rain = Some (area, impact) } as p) ->
             // every projectile lands at a random point of the area and hits what is in reach
@@ -470,6 +485,7 @@ module Geometry =
                         Vec.scale r (Vec.ofAngle (Vec.angle primary.Position + (a / (2.0 * System.Math.PI) - 0.5) * p.RainCone * System.Math.PI / 180.0))
                     else Vec.add primary.Position (Vec.scale r (Vec.ofAngle a))
                 let now = float k * p.Every
+                mark (Ring(at, impact, now))
                 if not p.TouchTriggered || alive |> List.exists (within at 0.0) then
                     for e in alive |> List.filter (within at impact) do
                         let ok = p.HitInterval <= 0.0 || p.Every <= 0.0 || not (last.ContainsKey e.Name) || now - last.[e.Name] >= p.HitInterval - 1e-9
@@ -483,6 +499,7 @@ module Geometry =
                 let a = away + (rng.Float() - 0.5) * cone * System.Math.PI / 180.0
                 let d = near + (far - near) * rng.Float()
                 let at = Vec.add primary.Position (Vec.scale d (Vec.ofAngle a))
+                mark (Ring(at, impact, 0.0))
                 yield! alive |> List.filter (within at impact) |> List.map (fun e -> e.Name) ]
         | Projectiles p when p.HitInterval > 0.0 && p.Speed > 0.0 ->
             // every crossing of every projectile, in the order they happen: a target takes a
@@ -490,6 +507,7 @@ module Geometry =
             // may not hit passes through, one that hits is spent (pierce: so many more)
             let crossings =
                 paths rng walls { p with Pierce = 1000 } reach primary alive
+                |> List.map (fun path -> mark (Flight path.Points); path)
                 |> List.mapi (fun i path -> List.zip path.Hit path.Dist |> List.map (fun (n, d) -> d / p.Speed, i, n))
                 |> List.concat
                 |> List.sortBy (fun (t, _, _) -> t)
@@ -507,6 +525,7 @@ module Geometry =
                 match p.Explosion with
                 | Some r ->
                     let r = radius r areaMult
+                    mark (Ring(at, r, 0.0))
                     alive |> List.filter (within at r) |> List.map (fun e -> e.Name)
                 | None -> []
             let byName n = alive |> List.find (fun e -> e.Name = n)
@@ -526,15 +545,28 @@ module Geometry =
                     // without shotgun, a later projectile ignores enemies an earlier one hit
                     let hits = if p.CanShotgun then path.Hit else path.Hit |> List.filter (fun n -> not (hitByUse.Contains n))
                     let struck = hits |> List.map byName
+                    mark (Flight path.Points)
                     let chained =
                         match List.tryLast struck with
                         | Some last -> chain last p.Chains (hits |> Set.ofList)
                         | None -> []
+                    (match List.tryLast struck with
+                     | Some last -> chained |> List.fold (fun (from: EnemyDef) next -> mark (Line(from.Position, next.Position)); next) last |> ignore
+                     | None -> ())
                     let all = struck @ chained
                     let names = (all |> List.map (fun e -> e.Name)) @ (all |> List.collect (fun e -> explode e.Position))
                     acc @ names, names |> List.fold (fun s n -> s.Add n) hitByUse)
                 ([], Set.empty)
             |> fst
+
+    let targetsFrom (rng: Rng) (walls: Wall list) (reach: float) (delivery: Delivery) (areaMult: float) (primary: EnemyDef) (alive: EnemyDef list) : string list =
+        targetsWith None rng walls reach delivery areaMult primary alive
+
+    /// `targetsFrom`, and what the use looks like.
+    let targetsShown (rng: Rng) (walls: Wall list) (reach: float) (delivery: Delivery) (areaMult: float) (primary: EnemyDef) (alive: EnemyDef list) : string list * Mark list =
+        let marks = ResizeArray<Mark>()
+        let hit = targetsWith (Some marks) rng walls reach delivery areaMult primary alive
+        hit, List.ofSeq marks
 
     /// `targetsFrom` with the slam landing on the aimed enemy.
     let targets delivery areaMult primary alive = targetsFrom (Rng 1u) [] infinity delivery areaMult primary alive
