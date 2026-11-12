@@ -556,8 +556,16 @@ let private status (m : Model) = if m.Fighting then "fighting ..." else m.Status
 let view (m : Model) : Node<Msg> =
     body {
         Dom.OnLocation Located
-        if m.Build <> "" then span { Dom.Fetch (sheetUrl m, Sheet) }
-        if m.Title <> "" then span { Dom.Fetch (fightUrl m, Fought) }
+        // The tree comes first among the page's children, and the conditional ones after it
+        // sit in an element of their own: a conditional child makes the list dynamic from
+        // there on, and FableCube then builds everything after it as one plain value, made
+        // anew on every change (for a render control: a new canvas and every draw again).
+        // Being fixed in FableCube; see its dogfood/poetry.md.
+        tree m
+        div {
+            if m.Build <> "" then span { Dom.Fetch (sheetUrl m, Sheet) }
+            if m.Title <> "" then span { Dom.Fetch (fightUrl m, Fought) }
+        }
         span { Dom.Fetch ("tree.json", TreeData) }
         header {
             h1 { "PoEtry" }
@@ -572,11 +580,6 @@ let view (m : Model) : Node<Msg> =
                 div { Dom.Class "headline"; Dom.Attr ("data-check", "dps"); m.Dps.Head.Value + " DPS" }
             div { Dom.Class "status"; Dom.Attr ("data-check", "status"); status m }
         }
-        // The tree is always there and only hidden under the other tab, and it is a child of
-        // the page itself: under an `if`, or inside another element, the render control is
-        // one value to FableCube and made anew, canvas and every draw, whenever anything in
-        // it changes (its dogfood/poetry.md).
-        tree m
         if m.Tab = "character" then
             div {
                 Dom.Class "main"
