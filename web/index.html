@@ -149,7 +149,23 @@
     #app > div { position: relative; min-height: 100%; }
     body { background: radial-gradient(ellipse at top, #1c1814 0%, var(--stone) 60%) fixed !important; color: var(--ink) !important;
            font: 15px/1.45 "Fontin", "Palatino Linotype", "Book Antiqua", Georgia, serif !important; }
-    #app header { padding: 18px 28px 10px; border-bottom: 1px solid var(--edge); display: flex; align-items: baseline; gap: 24px; flex-wrap: wrap; }
+    /* one row, 64px high, over the tree (which begins at 64px): the tabs keep their size,
+       the texts beside them give way */
+    #app header { box-sizing: border-box; height: 64px; padding: 0 28px; border-bottom: 1px solid var(--edge); display: flex; align-items: center; gap: 24px;
+      flex-wrap: nowrap; overflow: hidden; position: relative; z-index: 3; background: var(--stone); }
+    #app header > * { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; }
+    #app header > nav, #app header > h1 { flex-shrink: 0; overflow: visible; }
+    @media (max-width: 760px) {
+      #app header { padding: 0 10px; gap: 10px; }
+      #app header > h1 { display: none; }
+      #app header .title { font-size: 14px; }
+      #app header .status { display: none; }
+      #app header .headline { font-size: 15px; }
+      #app button.tab { padding: 7px 10px; letter-spacing: 0; }
+    }
+    @media (max-width: 460px) {
+      #app header .title { display: none; }
+    }
     #app h1 { margin: 0; font-size: 28px; letter-spacing: 3px; color: var(--unique); font-variant: small-caps; text-shadow: 0 0 12px rgba(175,96,37,.35); }
     #app .title { font-size: 18px; color: var(--rare); }
     #app .status { color: var(--dim); font-style: italic; }
