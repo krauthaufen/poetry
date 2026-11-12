@@ -16,7 +16,9 @@
     // and is answered once there is more. A question about other passives drops the runs
     // still waiting for the one before.
     (() => {
-      const count = Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 2) - 1));
+      // (a phone gets two: each worker holds the game data, and a page that takes too much is closed)
+      const small = (navigator.maxTouchPoints || 0) > 1 && Math.min(screen.width, screen.height) < 900;
+      const count = Math.max(1, Math.min(small ? 2 : 4, (navigator.hardwareConcurrency || 2) - 1));
       const workers = [];
       const jobs = [];          // { request, done, fight } waiting for a worker
       const feed = (w) => {
@@ -28,12 +30,20 @@
         w.busy = job;
         w.worker.postMessage({ id: 0, request: JSON.stringify(job.request) });
       };
-      for (let i = 0; i < count; i++) {
-        const w = { index: i, busy: null, worker: new Worker(new URL("./sim-worker.js", document.baseURI), { type: "module" }) };
-        w.worker.onmessage = (e) => { const job = w.busy; w.busy = null; if (job) job.done(e.data.answer); feed(w); };
+      // the first worker at once (it reads the character); the others when fights are asked
+      const start = () => {
+        const w = { index: workers.length, busy: null, worker: new Worker(new URL("./sim-worker.js", document.baseURI), { type: "module" }) };
+        const finish = (text) => { const job = w.busy; w.busy = null; if (job) job.done(text); feed(w); };
+        w.worker.onmessage = (e) => finish(e.data.answer);
+        w.worker.onerror = (e) => finish(JSON.stringify({ error: "the simulator stopped: " + (e && e.message || "unknown") }));
         workers.push(w);
-      }
-      const ask = (request, fight) => new Promise((done) => { jobs.push({ request, done, fight }); workers.forEach(feed); });
+      };
+      start();
+      const ask = (request, fight) => new Promise((done) => {
+        jobs.push({ request, done, fight });
+        if (fight && workers.length < count && workers.every((w) => w.busy)) start();
+        workers.forEach(feed);
+      });
 
       const mean = (xs) => xs.reduce((a, b) => a + b, 0) / Math.max(1, xs.length);
       const stats = (xs) => {
@@ -159,7 +169,10 @@
       #app header { padding: 0 10px; gap: 10px; }
       #app header > h1 { display: none; }
       #app header .title { font-size: 14px; }
-      #app header .status { display: none; }
+      #app header .status { font-size: 12px; }
+      #app .main { padding: 14px 10px; gap: 14px; }
+      #app .column, #app .column.wide { flex: 1 1 100%; max-width: 100%; min-width: 0; }
+      #app .main nav { flex-wrap: wrap; }
       #app header .headline { font-size: 15px; }
       #app button.tab { padding: 7px 10px; letter-spacing: 0; }
     }

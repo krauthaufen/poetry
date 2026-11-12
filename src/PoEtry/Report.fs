@@ -158,7 +158,9 @@ module Report =
                   obj [ "name", JStr e.Name; "x", r e.Position.X; "y", r e.Position.Y; "size", r e.Size; "rarity", JStr(Rarity.name e.Rarity); "life", num e.Life ]))
               "actors", JArr((f.Player :: f.Minions) |> List.map (fun a ->
                   obj [ "name", JStr a.Name; "minion", JBool(a.Name <> f.Player.Name)
-                        "melee", JBool(a.Body |> Option.exists (fun b -> b.Melee)); "size", num (a.Body |> Option.map (fun b -> b.Size) |> Option.defaultValue 0.0) ]))
+                        "melee", JBool(a.Body |> Option.exists (fun b -> b.Melee)); "size", num (a.Body |> Option.map (fun b -> b.Size) |> Option.defaultValue 0.0)
+                        // a companion (a tamed monster): shown apart from the summoned ones
+                        "companion", JBool(a.Skills |> List.exists (fun sk -> sk.Tags.Contains(Tag "Companion"))) ]))
               // (a stable sort: what happened at the same time stays in its order)
               "events", JArr(happened @ kills |> List.sortBy fst |> List.map snd) ]
 
@@ -171,17 +173,22 @@ module Report =
         let profile r =
             let p = Rarity.defaults r
             if scenario = "pinnacle" && r = Unique then { p with ElementalResist = 50.0 } else p
-        let enemies =
-            match scenario with
-            | "pack" | "surrounded" -> Encounter.pack level profile [ Normal, 8; Magic, 3; Rare, 1 ] 30.0 25.0 (scenario = "surrounded") 1u
-            | _ -> Encounter.boss level profile 30.0
-        let enemies = match n "life" 0.0 with l when l > 0.0 -> enemies |> List.map (fun e -> { e with Life = l }) | _ -> enemies
         let gem =
             match s "gem" "" with
             | "" -> Setup.strongest c o (Encounter.boss level Rarity.defaults 30.0 |> List.map (fun e -> { e with Life = 1e12 })) |> Option.defaultValue ""
             | g -> g
         let play = Setup.auto c o gem
-        let f = Setup.fight c o (Setup.player c o play None) enemies
+        let player = Setup.player c o play None
+        // where the enemies begin: in a melee player's face; one who presses something else (or
+        // lets minions fight) stands back twice as far (the distances are this page's choice)
+        let melee = player.Skills |> List.exists (fun sk -> sk.Name = gem && sk.Tags.Contains Melee)
+        let distance = if melee then 30.0 else 60.0
+        let enemies =
+            match scenario with
+            | "pack" | "surrounded" -> Encounter.pack level profile [ Normal, 8; Magic, 3; Rare, 1 ] distance 25.0 (scenario = "surrounded") 1u
+            | _ -> Encounter.boss level profile distance
+        let enemies = match n "life" 0.0 with l when l > 0.0 -> enemies |> List.map (fun e -> { e with Life = l }) | _ -> enemies
+        let f = Setup.fight c o player enemies
         // (`seed`: the first of the runs' consecutive seeds, so that several askers each run their own)
         let first = max 1 (int (n "seed" 1.0))
         // (`trace`: the first run is kept for showing, see `replay`)

@@ -62,6 +62,9 @@ type Shape = { Sort : string; Nums : float list }
 type Happening = { Kind : string; T : float; Who : string; Shapes : Shape list; X : float; Y : float }
 type Foe = { Called : string; Start : V2d; Radius : float; Rank : string }
 type Layer = { Color : V4d; Points : Buffer<V3f>; Uvs : Buffer<V2f> }
+/// Who fights the enemies: the player, or a minion (one that fights in melee stands at the
+/// enemy; a companion is a monster of its own size).
+type Ally = { Named : string; Minion : bool; Melee : bool; Body : float; Companion : bool }
 
 type Msg =
     | Located of string
@@ -182,10 +185,12 @@ type Model =
       /// showing began (-1: with the next frame), the picture now; and the scenarios whose
       /// fights were asked ahead.
       Foes : Foe list
-      Allies : (string * bool) list
+      Allies : Ally list
       Happened : Happening list
       Lasts : float
       Field : float
+      /// (the middle of what is shown: between the player and the enemies)
+      Middle : V2d
       Began : float
       Stage : Layer list
       Warm : string list
@@ -208,7 +213,7 @@ let init : Model =
       Centre = V2d (0.0, 0.0); Height = 9000.0
       Camera = { Sky = V3d (0.0, 1.0, 0.0); Location = V3d (0.0, 0.0, 7794.2); Forward = V3d (0.0, 0.0, -1.0); Up = V3d (0.0, 1.0, 0.0); Right = V3d (1.0, 0.0, 0.0) }
       Near = 7000.0; Far = 8600.0
-      Touches = []; Travel = 0.0; Page = V2d (0.0, 0.0); Pending = None; Choices = Map.empty; JewelSprites = Map.empty; Jewels = Map.empty; Unlocks = Map.empty; Opened = Data.pack (Data.ofList ([] : V3f list)); OpenedUv = Data.pack (Data.ofList ([] : V2f list)); Rings = Data.pack (Data.ofList ([] : V3f list)); RingsUv = Data.pack (Data.ofList ([] : V2f list)); Pressing = ""; Foes = []; Allies = []; Happened = []; Lasts = 0.0; Field = 100.0; Began = -1.0; Stage = []; Warm = []; Round = 0; Runs = 0; More = false; Selected = None; Hovered = None; Level = 0 }
+      Touches = []; Travel = 0.0; Page = V2d (0.0, 0.0); Pending = None; Choices = Map.empty; JewelSprites = Map.empty; Jewels = Map.empty; Unlocks = Map.empty; Opened = Data.pack (Data.ofList ([] : V3f list)); OpenedUv = Data.pack (Data.ofList ([] : V2f list)); Rings = Data.pack (Data.ofList ([] : V3f list)); RingsUv = Data.pack (Data.ofList ([] : V2f list)); Pressing = ""; Foes = []; Allies = []; Happened = []; Lasts = 0.0; Field = 100.0; Middle = V2d (0.0, 0.0); Began = -1.0; Stage = []; Warm = []; Round = 0; Runs = 0; More = false; Selected = None; Hovered = None; Level = 0 }
 
 /// The camera straight above the centre, so far up that `Height` of the tree is seen through
 /// its 60 degree lens; the depth range close around the tree's plane (its layers are a unit
@@ -306,13 +311,45 @@ let private stage (m : Model) (c : float) : Layer list =
     let struck = m.Happened |> List.filter (fun h -> h.Kind = "s" && h.T <= c && h.T > c - w * 0.3) |> List.map (fun h -> h.Who) |> Set.ofList
     let foes (rank : string) = m.Foes |> List.filter (fun f -> f.Rank = rank && not (gone.Contains f.Called)) |> List.collect (fun f -> disc (place f.Called) f.Radius 1.0)
     let flashes = m.Foes |> List.filter (fun f -> struck.Contains f.Called) |> List.collect (fun f -> disc (place f.Called) (f.Radius * 0.55) 9.0)
-    let minions = m.Allies |> List.filter snd
-    let allies =
-        disc (V2d (0.0, 0.0)) (u * 2.2) 2.0
-        @ (minions |> List.indexed |> List.collect (fun (i, _) ->
-            let a = 6.283185307 * float i / float (max 1 minions.Length)
-            disc (V2d (u * 9.0 * cos a, u * 9.0 * sin a)) (u * 1.1) 2.0))
-    let player = m.Allies |> List.tryFind (fun (_, minion) -> not minion) |> Option.map fst |> Option.defaultValue ""
+    // The simulation gives minions no place. Shown where they would be: those that fight in
+    // melee around the enemy nearest to the player (ring after ring, as many as fit), the
+    // others in an arc beside the player.
+    let alive = m.Foes |> List.filter (fun f -> not (gone.Contains f.Called))
+    let focus = alive |> List.sortBy (fun f -> let p = place f.Called in p.X * p.X + p.Y * p.Y) |> List.tryHead
+    let body (a : Ally) = if a.Body > 0.0 then max (u * 0.9) (a.Body * 0.7) else u * 1.1
+    let melee, ranged = m.Allies |> List.filter (fun a -> a.Minion) |> List.partition (fun a -> a.Melee && focus.IsSome)
+    let around =
+        match focus with
+        | None -> []
+        | Some f ->
+            let c = place f.Called
+            let towards = atan2 (-c.Y) (-c.X)
+            let widest = melee |> List.fold (fun w a -> max w (body a)) (u * 1.1)
+            let rec rings (left : Ally list) (k : int) =
+                if left.IsEmpty then []
+                else
+                    let r = f.Radius + widest * (1.2 + 2.2 * float k)
+                    let fits = max 1 (int (6.283185307 * r / (widest * 2.2)))
+                    let here = List.truncate fits left
+                    (here |> List.mapi (fun i a ->
+                        // (the first faces the player, the next ones to both sides of it)
+                        let step = 6.283185307 / float (max fits here.Length)
+                        let side = if i % 2 = 0 then 1.0 else -1.0
+                        let ang = towards + side * step * float ((i + 1) / 2)
+                        a, V2d (c.X + r * cos ang, c.Y + r * sin ang)))
+                    @ rings (List.skip here.Length left) (k + 1)
+            rings melee 0
+    let beside =
+        let facing = match focus with Some f -> (let c = place f.Called in atan2 c.Y c.X) | None -> 0.0
+        ranged |> List.mapi (fun i a ->
+            let side = if i % 2 = 0 then 1.0 else -1.0
+            let ang = facing + side * (1.2 + 0.35 * float (i / 2))
+            a, V2d (u * 7.0 * cos ang, u * 7.0 * sin ang))
+    let placed = around @ beside
+    let stand (name : string) = placed |> List.tryFind (fun (a, _) -> a.Named = name) |> Option.map snd |> Option.defaultValue (V2d (0.0, 0.0))
+    let allies = disc (V2d (0.0, 0.0)) (u * 2.2) 2.0 @ (placed |> List.filter (fun (a, _) -> not a.Companion) |> List.collect (fun (a, p) -> disc p (body a) 2.0))
+    let companions = placed |> List.filter (fun (a, _) -> a.Companion) |> List.collect (fun (a, p) -> disc p (body a) 2.0)
+    let player = m.Allies |> List.tryFind (fun a -> not a.Minion) |> Option.map (fun a -> a.Named) |> Option.defaultValue ""
     let marks (own : bool) =
         m.Happened
         |> List.filter (fun h -> h.Kind = "u" && h.T <= c && h.T > c - w - 2.0 && (h.Who = player) = own)
@@ -332,7 +369,9 @@ let private stage (m : Model) (c : float) : Layer list =
                         trail @ disc head (u * 0.9) 5.0
                 | "l", [ x1; y1; x2; y2 ] ->
                     let p = (c - h.T) / (w * 0.5)
-                    if p < 0.0 || p > 1.0 then [] else stroke (V2d (x1, y1)) (V2d (x2, y2)) (u * 0.5) 5.0
+                    // (a minion's strike begins where the minion is shown, not at the player)
+                    let from = if not own && x1 = 0.0 && y1 = 0.0 then stand h.Who else V2d (x1, y1)
+                    if p < 0.0 || p > 1.0 then [] else stroke from (V2d (x2, y2)) (u * 0.5) 5.0
                 | _ -> []))
     let hurts =
         m.Happened |> List.filter (fun h -> h.Kind = "h" && h.T <= c && h.T > c - w * 0.5)
@@ -343,6 +382,7 @@ let private stage (m : Model) (c : float) : Layer list =
       layer 0.95 0.95 0.4 (foes "rare")
       layer 0.8 0.42 0.14 (foes "unique")
       layer 0.9 0.86 0.62 allies
+      layer 0.35 0.8 0.75 companions
       layer 0.4 0.78 1.0 (marks true)
       layer 0.45 0.85 0.5 (marks false)
       layer 1.0 0.22 0.18 hurts
@@ -369,13 +409,21 @@ let private readReplay (j : Json) (m : Model) : Model =
                     let x, y = (match kind, rest with | "m", [ x; y ] -> Json.number x, Json.number y | _ -> 0.0, 0.0)
                     { Kind = kind; T = Json.number t; Who = Json.string who; Shapes = shapes; X = x; Y = y }
                 | _ -> { Kind = ""; T = 0.0; Who = ""; Shapes = []; X = 0.0; Y = 0.0 })
-        let far = foes |> List.fold (fun d f -> max d (sqrt (f.Start.X * f.Start.X + f.Start.Y * f.Start.Y) + f.Radius)) 30.0
+        // the field: the player (with room for the minions beside) and the enemies, a margin around
+        let low (pick : V2d -> float) = foes |> List.fold (fun d f -> min d (pick f.Start - f.Radius)) -14.0
+        let high (pick : V2d -> float) = foes |> List.fold (fun d f -> max d (pick f.Start + f.Radius)) 14.0
+        let x0, x1, y0, y1 = low (fun p -> p.X), high (fun p -> p.X), low (fun p -> p.Y), high (fun p -> p.Y)
         { m with
             Foes = foes
-            Allies = Json.field "actors" r |> Json.list |> List.map (fun a -> Json.string (Json.field "name" a), Json.bool (Json.field "minion" a))
+            Allies =
+                Json.field "actors" r |> Json.list
+                |> List.map (fun a ->
+                    { Named = Json.string (Json.field "name" a); Minion = Json.bool (Json.field "minion" a); Melee = Json.bool (Json.field "melee" a)
+                      Body = Json.number (Json.field "size" a); Companion = Json.bool (Json.field "companion" a) })
             Happened = happened
             Lasts = max 0.5 (Json.number (Json.field "duration" r))
-            Field = far * 2.3
+            Field = max 60.0 (max (x1 - x0) (y1 - y0) * 1.5)
+            Middle = V2d ((x0 + x1) / 2.0, (y0 + y1) / 2.0)
             Began = -1.0 }
 
 // ---- the passive tree ----
@@ -899,7 +947,7 @@ let arena (m : Model) : Node<Msg> =
                     Css.Prop ("border", "1px solid #3b3024"); Css.Prop ("z-index", "4"); Css.Prop ("pointer-events", "none")
                     Css.Prop ("visibility", (if m.Happened.IsEmpty || m.Tab = "tree" then "hidden" else "visible")) ]
         RenderControl.Orthographic (m.Field, 1.0, 400.0)
-        RenderControl.Camera { Sky = V3d (0.0, 1.0, 0.0); Location = V3d (0.0, 0.0, 200.0); Forward = V3d (0.0, 0.0, -1.0); Up = V3d (0.0, 1.0, 0.0); Right = V3d (1.0, 0.0, 0.0) }
+        RenderControl.Camera { Sky = V3d (0.0, 1.0, 0.0); Location = V3d (m.Middle.X, m.Middle.Y, 200.0); Forward = V3d (0.0, 0.0, -1.0); Up = V3d (0.0, 1.0, 0.0); Right = V3d (1.0, 0.0, 0.0) }
         RenderControl.OnRendered Tick
         RenderControl.Animating (not m.Happened.IsEmpty && m.Tab <> "tree")
         sg {
