@@ -290,7 +290,10 @@ Checked against PoB's defensive numbers for 131 public characters (`tools/corpus
 | Unearth | a use raises a Bone Construct from every corpse and from every dead reviving minion (once per death), up to the limit, for 15 s; its own hit needs no corpse | gem description ("The bones of Corpses and dead Reviving Minions"). "Larger Corpses create more than one" is not modelled | data; partial |
 | Wardbound Minions | a use spends all Runic Ward: one caster per wardbound_minions_summon_minion_for_every_X_runic_ward_spent, for the gem's duration, but no longer than its 6 casts take (casts x the caster's cast time, speed not counted) | game data | data; the cast limit as a duration is an approximation |
 | Playing summoning skills | beside the main skill, a skill that raises temporary minions is used while fewer than its limit are out (Unearth: and there is a corpse or dead minion) | | guess |
-| Not modelled | Ancestral Spirit minions, corpse beetles; auras from minions, minions taking damage for the player, what a minion's death does besides energy | | todo |
+| Taking hits for the owner | "x% of Damage from Hits is taken from your Companion's Life before you" (the owner's own, for companions; Loyalty's, for the supported gem's minions): the first such minion that is alive takes that share of each hit on the player, after the player's mitigation, as much as it has left | stat text. Which of several takes it, and that it takes the damage as the player mitigated it, are guesses | data; guess |
+| Supports on the minions themselves | "minion_life_+%_final" of the gem's supports (Loyalty 30% less, Meat Shield) multiplies their life | game data | data |
+| Minion Instability | a minion of a supported gem explodes when reduced to low life (35%): the support's share of its maximum life (15%) as fire damage around it, scaled like its other damage, and it is dead (a reviving one revives; Cast on Minion Death gains its energy) | support text. The radius is not in its stats: 2 m | data; radius guess |
+| Not modelled | Ancestral Spirit minions (which of the four spirits a totem calls is not in the data), corpse beetles (Kelari's Malediction), auras from minions | | todo |
 
 ### Totems, curses, buffs, damage over time
 

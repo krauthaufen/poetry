@@ -18,7 +18,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
    whose description or behaviour changed.
 5. Go through the lists below; the wiki's version history of a skill says what changed.
 
-## Rules (92)
+## Rules (94)
 
 ### Hit damage
 
@@ -88,6 +88,8 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | Room for melee minions | sizes and ranges: game data (the wolves' collision size was lowered to the other minions' in 0.4.0c). The rings, measuring the range from the minion's centre, and the order are a guess. Getting stuck on the way (terrain, other monsters) is not modelled | data; guess |
 | Temporary minions | game data; renewing the oldest is a guess | data; guess |
 | Playing summoning skills | beside the main skill, a skill that raises temporary minions is used while fewer than its limit are out (Unearth: and there is a corpse or dead minion) | | guess |
+| Taking hits for the owner | stat text. Which of several takes it, and that it takes the damage as the player mitigated it, are guesses | data; guess |
+| Minion Instability | support text. The radius is not in its stats: 2 m | data; radius guess |
 | Totems | gem data | data; the simplifications are guesses |
 | Trinity | gem data | guess |
 | Aftershock | stat text | guess (same damage and area) |

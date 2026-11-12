@@ -842,7 +842,7 @@ let main _ =
 
     // ---- minions that can be killed ----
     let body life revive =
-        { Life = life; EnergyShield = 0.0; Armour = 0.0; Evasion = 0.0; Resist = Map.empty; Melee = true; Size = 1.0; Reach = 12.0; Revive = revive; Power = 0.55; LifeRegen = 0.0 }
+        { Life = life; EnergyShield = 0.0; Armour = 0.0; Evasion = 0.0; Resist = Map.empty; Melee = true; Size = 1.0; Reach = 12.0; Revive = revive; Power = 0.55; LifeRegen = 0.0; TakesForOwner = 0.0; Explodes = None }
 
     test "minions: a monster kills a minion, it is revived after its revive time and killed again" (fun () ->
         // the player can't be hurt, so every attack (60 a second) goes at the skeleton with 100
@@ -903,6 +903,31 @@ let main _ =
         let small = { boss 1e12 with Size = 4.0 }
         let o = Sim.run { Fight.single small (Actor.make "Player" [ noIgnite ] [ idle ]) 5.5 with MaxTime = 5.5; Minions = [ for i in 1 .. 6 -> beast i ] } 1u
         near (4.0 * 5.0 * 100.0) o.DamageBy.["Bite (hit)"])
+
+    test "minions: a companion takes its share of the hits on its owner while it lives" (fun () ->
+        // 100 a second at the player (the wolf is out of the monster's reach: it stands with the
+        // player, who is the one attacked... so make it ranged and the attacks the player's)
+        let wolf share = { Actor.make "Wolf" [ noIgnite; sure ] [ strike "Bite" 1.0 ] with Body = Some { body 1e9 None with Melee = false; TakesForOwner = share } }
+        let run share =
+            let player = { Actor.make "Player" [ noIgnite ] [ idle ] with Vitals = Some(PlayerStats.basic 1e6 0.0) }
+            Sim.run { Fight.single (attacker Physical 100.0 1.0) player 20.5 with MaxTime = 20.5; Minions = [ wolf share ] } 1u
+        let plain, shared = run 0.0, run 40.0
+        // the attacks that go at the player cost it 40% less
+        let perHit (o: Outcome) = o.DamageTaken / float (o.Counts.["enemy:hit"])
+        near 100.0 (perHit plain)
+        near 60.0 (perHit shared))
+
+    test "minions: Minion Instability; at low life it explodes for a share of its life and is dead" (fun () ->
+        let blast = { Skill.make "Skeleton: Minion Instability" [ Area; Tag "Fire" ] with BaseDamage = Map.ofList [ Fire, Range.fixedAt 150.0 ]; BaseCrit = 0.0 }
+        let skeleton =
+            { Actor.make "Skeleton" [ noIgnite; sure ] [ strike "Bite" 1.0; blast ] with
+                Rotation = [ Actor.always "Bite" ]
+                Body = Some { body 1000.0 None with Explodes = Some blast.Name } }
+        let o = Sim.run { Fight.single (attacker Physical 400.0 1.0) (Actor.make "Player" [ noIgnite ] [ idle ]) 10.0 with MaxTime = 10.0; Minions = [ skeleton ] } 1u
+        // 1000 life, 400 a hit: at 200 (under 35%) after the second hit
+        equal 1 o.Counts.["minion:exploded"]
+        equal 1 o.Counts.["minion:died"]
+        near 150.0 o.DamageBy.["Skeleton: Minion Instability (hit)"])
 
     test "minions: temporary ones are out until summoned, last their duration, and are summoned anew when all are out" (fun () ->
         let call cd = { Skill.make "Call" [ Spell ] with Hits = []; Cooldown = Some cd }

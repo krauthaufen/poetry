@@ -1284,7 +1284,9 @@ module Behaviours =
           Reach = m.AttackRange
           Revive = revive |> Option.map (fun s -> s / Mods.inc ctx [ Named "MinionReviveSpeed" ] db)
           Power = m.Life
-          LifeRegen = life * Mods.sumBase ctx [ LifeRegenPercent ] db / 100.0 }
+          LifeRegen = life * Mods.sumBase ctx [ LifeRegenPercent ] db / 100.0
+          TakesForOwner = 0.0
+          Explodes = None }
 
     /// How many of a gem's temporary minions can be out at once (its limit stat).
     let summonLimit (raw: (string * float) list) : int option =
@@ -1432,6 +1434,31 @@ module Behaviours =
                             // a gem an item grants reserves nothing: its free minions and no more
                             let free = raw |> List.tryPick (fun (k, v) -> if k = "first_X_minions_have_0_base_spirit_reservation" then Some(int v) else None) |> Option.defaultValue 1
                             pack * (if g.Slot = "granted" then max 1 free else Map.tryFind gem.Name counts |> Option.defaultValue 1)
+                    // what the gem's supports give the minions themselves: less or more life (Loyalty,
+                    // Meat Shield), a share of the owner's hit damage taken (Loyalty; and the owner's own
+                    // "taken from your Companion's Life before you"), exploding at low life (Minion Instability)
+                    let supportRaw =
+                        Gems.rawStats db charMods { Gem = gem.Name; Level = gem.Level; Quality = gem.Quality; StatSet = 1; Supports = supports }
+                        |> List.filter (fun kv -> not (List.contains kv raw))
+                    let supportStat (ending: string) = supportRaw |> List.filter (fun (k, _) -> k.EndsWith ending) |> List.sumBy snd
+                    let lifeMore = supportRaw |> List.filter (fun (k, _) -> k.EndsWith "minion_life_+%_final") |> List.fold (fun acc (_, v) -> acc * (1.0 + v / 100.0)) 1.0
+                    let takes =
+                        supportStat "companion_takes_%_damage_before_you_from_support"
+                        + (if companion then Mods.sumBase Ctx.empty [ Named "CompanionTakesDamage" ] charMods else 0.0)
+                    let explodePct = supportStat "explode_on_low_life_%_maximum_life_to_deal"
+                    let withSupports (b: MinionBody) =
+                        let b = { b with Life = b.Life * lifeMore; TakesForOwner = takes }
+                        if explodePct > 0.0 then { b with Explodes = Some(m.Name + ": Minion Instability") } else b
+                    // the explosion: that share of its maximum life as fire damage around it (the
+                    // radius is not in the support's stats: 2 m, a guess)
+                    let explosion (b: MinionBody) =
+                        if explodePct <= 0.0 then []
+                        else
+                            let dmg = b.Life * explodePct / 100.0
+                            [ { Skill.make (m.Name + ": Minion Instability") [ Area; Tag "Fire" ] with
+                                  BaseDamage = Map.ofList [ Fire, { Min = dmg; Max = dmg } ]
+                                  BaseCrit = 0.0
+                                  Delivery = AreaAtTarget 20.0 } ]
                     // what the minions do on a hit ("Minions have x% chance to inflict Withered on Hit")
                     let rules = keywordRules { sheet with Mods = minionMods } ordered
                     // a minion without any damaging skill (a healer) simply doesn't fight
@@ -1444,9 +1471,11 @@ module Behaviours =
                         let untouchable =
                             data |> Option.exists (fun d ->
                                 d.Types.Contains "MinionsAreUndamagable" || d.Description.Contains "untargetable" || d.Description.Contains "not directly engage")
-                        let body = if untouchable then None else Some(minionBody bodyCtx m level minionMods None)
+                        let body = if untouchable then None else Some(minionBody bodyCtx m level minionMods None |> withSupports)
+                        let extra = match body with Some b -> explosion b | None -> []
+                        let acts = ordered |> List.map (fun s -> Actor.always s.Name)
                         let most = most + int (Mods.sumBase Ctx.empty [ Named "TemporaryMinionLimit" ] (ModDb.ofList minionMods))
-                        [ for i in 1 .. most -> { Actor.make (sprintf "%s %d" m.Name i) minionMods ordered with Body = body; Pool = Some gem.Name; Rules = rules } ],
+                        [ for i in 1 .. most -> { Actor.make (sprintf "%s %d" m.Name i) minionMods (ordered @ extra) with Body = body; Pool = Some gem.Name; Rules = rules; Rotation = acts } ],
                         (if summonedBy raw then [] else [ sprintf "%s: what summons its minions is not simulated" gem.Name ])
                     | None ->
                         // killed, it is revived after the gem's revive time
@@ -1454,10 +1483,12 @@ module Behaviours =
                             raw
                             |> List.tryPick (fun (k, v) -> if k = "minion_base_resummon_time_ms" then Some(v / 1000.0) else None)
                             |> Option.defaultValue Constants.minionReviveSeconds
-                        let body = minionBody bodyCtx m level minionMods (Some revive)
+                        let body = minionBody bodyCtx m level minionMods (Some revive) |> withSupports
+                        let extra = explosion body
+                        let acts = ordered |> List.map (fun s -> Actor.always s.Name)
                         [ for i in 1 .. count ->
                             let name = if count > 1 then sprintf "%s %d" m.Name i else m.Name
-                            { Actor.make name minionMods ordered with Body = Some body; Rules = rules } ],
+                            { Actor.make name minionMods (ordered @ extra) with Body = Some body; Rules = rules; Rotation = acts } ],
                         []))
         |> List.concat
         |> List.unzip

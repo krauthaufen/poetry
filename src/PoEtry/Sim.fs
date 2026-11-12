@@ -287,7 +287,11 @@ type MinionBody =
       /// Its power for effects that count it (its life as a multiple of a monster's).
       Power: float
       /// Life regenerated per second.
-      LifeRegen: float }
+      LifeRegen: float
+      /// Percent of the damage of hits on its owner it takes in the owner's place.
+      TakesForOwner: float
+      /// It explodes when reduced to low life, with this skill of its own (Minion Instability).
+      Explodes: string option }
 
 /// The player or a minion.
 type Actor =
@@ -2646,6 +2650,81 @@ module Sim =
                     { again with Counts = bump ("aftershock:" + sk.Name) again.Counts }
                 else w
 
+    /// When killed minions come back: all together, `seconds` after the first death. Each
+    /// further death while they wait adds less: the n-th adds a n-th of the time, and the wait
+    /// is never more than the full time from now ("each successive minion that dies increases
+    /// it by less and less (still capped to a max of 7.5 seconds)", 0.2.0e patch notes; the
+    /// n-th share is the wiki's). Before 0.2.0e every death started the full wait anew.
+    /// `waiting`: the time set so far and the deaths counted.
+    let nextRevival (now: float) (seconds: float) (waiting: (float * int) option) : float * int =
+        match waiting with
+        | Some (at, n) when at > now -> min (now + seconds) (at + seconds / float (n + 1)), n + 1
+        | _ -> now + seconds, 1
+
+    /// A minion is killed: it leaves the fight; a reviving one comes back with the others
+    /// once none has died for its revive time.
+    let private killMinion env (rng: Rng) (minion: Actor) (w: World) =
+        let body = minion.Body.Value
+        let player = env.Fight.Player
+        let w = leave minion.Name w
+        let w = { w with Counts = bump "minion:died" w.Counts } |> markStatus player.Name "MinionDiedRecently"
+        match body.Revive with
+        | None -> w
+        | Some seconds ->
+            // "gains Energy when one of your Persistent Minions is Killed"
+            let w =
+                player.Metas
+                |> List.fold
+                    (fun w meta ->
+                        let amount = meta.Sources |> List.sumBy (fun src -> match src with MinionDeaths per -> per * body.Power | _ -> 0.0)
+                        if amount > 0.0 then gainEnergy env rng player meta.Name (amount * meta.EnergyMult) w else w)
+                    w
+            let at, n = nextRevival w.Time seconds w.Revival
+            { w with Revival = Some(at, n) } |> schedule at (ReviveMinions at)
+
+    let private reviveMinions env (at: float) (w: World) =
+        match w.Revival with
+        | Some (t, _) when abs (t - at) < 1e-9 ->
+            env.Fight.Minions
+            |> List.fold
+                (fun w m ->
+                    match m.Body with
+                    | Some b when b.Revive.IsSome && (Map.find m.Name w.Actors).Gone ->
+                        updateActor m.Name (fun st -> { st with Gone = false; Life = b.Life; Shield = b.EnergyShield; HitAt = w.Time }) w
+                        |> schedule w.Time (Ready m.Name)
+                        |> fun w -> { w with Counts = bump "minion:revived" w.Counts }
+                    | _ -> w)
+                { w with Revival = None; Boned = Set.empty }
+        | _ -> w
+
+    /// Mitigated damage onto a minion: energy shield first (chaos removes twice as much),
+    /// then life. Before that it has recovered since it was last hit: its life regeneration,
+    /// and its energy shield recharge once the delay has passed.
+    let private hurtMinion env (rng: Rng) (minion: Actor) (damage: Map<DamageType, float>) (w: World) =
+        let body = minion.Body.Value
+        let st = Map.find minion.Name w.Actors
+        let since = w.Time - max 0.0 st.HitAt
+        let life = min body.Life (st.Life + body.LifeRegen * since)
+        let shield =
+            let recharging = since - Constants.energyShieldRechargeDelay
+            if recharging > 0.0 then min body.EnergyShield (st.Shield + body.EnergyShield * Constants.energyShieldRechargePercent / 100.0 * recharging) else st.Shield
+        let shield, rest =
+            damage
+            |> Map.fold
+                (fun (es, rest) t d ->
+                    let k = if t = Chaos then 2.0 else 1.0
+                    let absorbed = min d (es / k)
+                    es - absorbed * k, rest + d - absorbed)
+                (shield, 0.0)
+        let life = life - rest
+        let w = updateActor minion.Name (fun st -> { st with Life = life; Shield = shield; HitAt = w.Time }) w
+        match body.Explodes, aimed env w with
+        // "explode when reduced to Low Life" (35%): its explosion strikes, and it is dead
+        | Some skill, Some enemy when life <= 0.35 * body.Life ->
+            onStrike env rng minion.Name skill 1.0 enemy.Def.Name None false { w with Counts = bump "minion:exploded" w.Counts }
+            |> killMinion env rng minion
+        | _ -> if life <= 0.0 then killMinion env rng minion w else w
+
     /// A monster's hit at the player: evasion, deflection, armour, resistances, then
     /// energy shield and life. Frozen / stunned / electrocuted monsters don't act; chill
     /// slows them; blind lowers their accuracy.
@@ -2725,6 +2804,22 @@ module Sim =
                                     | None -> d
                             d * (Map.tryFind t v.TakenMult |> Option.defaultValue 1.0) * (1.0 + shocked / 100.0)
                               * (if blocked then v.BlockedDamageTaken / 100.0 else 1.0))
+                    // "x% of Damage from Hits is taken from your Companion's Life before you": the
+                    // first minion that does so and is alive takes its share, as much as it has
+                    let taken, w =
+                        let guard =
+                            env.Fight.Minions |> List.tryFind (fun m ->
+                                (m.Body |> Option.exists (fun b -> b.TakesForOwner > 0.0)) && not (Map.find m.Name w.Actors).Gone)
+                        match guard with
+                        | Some m ->
+                            let share = m.Body.Value.TakesForOwner / 100.0
+                            let its = Map.find m.Name w.Actors
+                            let total = taken |> Map.toList |> List.sumBy snd
+                            let k = if total <= 0.0 then 0.0 else min share ((its.Life + its.Shield) / total)
+                            taken |> Map.map (fun _ d -> d * (1.0 - k)),
+                            hurtMinion env rng m (taken |> Map.map (fun _ d -> d * k)) { w with Counts = bump "minion:took for owner" w.Counts }
+                        | None -> taken, w
+                    let p = w.Player |> Option.defaultValue p
                     let w = takeDamage pools taken { w with Player = Some p } |> fun w -> { w with Player = w.Player |> Option.map (fun p -> { p with LastHit = w.Time }) }
                     let w = (let _, _, _, whenHit, _ = env.Rage in gainRage env whenHit w)
                     let w = (match env.Fight.Player.Skills |> List.tryHead with Some any -> react env rng env.Fight.Player WhenHit any (Some name) w | None -> w)
@@ -2837,76 +2932,6 @@ module Sim =
         | _ -> w
 
     /// Mark "<what>Recently" for 4 s (gained / consumed charges...).
-    /// When killed minions come back: all together, `seconds` after the first death. Each
-    /// further death while they wait adds less: the n-th adds a n-th of the time, and the wait
-    /// is never more than the full time from now ("each successive minion that dies increases
-    /// it by less and less (still capped to a max of 7.5 seconds)", 0.2.0e patch notes; the
-    /// n-th share is the wiki's). Before 0.2.0e every death started the full wait anew.
-    /// `waiting`: the time set so far and the deaths counted.
-    let nextRevival (now: float) (seconds: float) (waiting: (float * int) option) : float * int =
-        match waiting with
-        | Some (at, n) when at > now -> min (now + seconds) (at + seconds / float (n + 1)), n + 1
-        | _ -> now + seconds, 1
-
-    /// A minion is killed: it leaves the fight; a reviving one comes back with the others
-    /// once none has died for its revive time.
-    let private killMinion env (rng: Rng) (minion: Actor) (w: World) =
-        let body = minion.Body.Value
-        let player = env.Fight.Player
-        let w = leave minion.Name w
-        let w = { w with Counts = bump "minion:died" w.Counts } |> markStatus player.Name "MinionDiedRecently"
-        match body.Revive with
-        | None -> w
-        | Some seconds ->
-            // "gains Energy when one of your Persistent Minions is Killed"
-            let w =
-                player.Metas
-                |> List.fold
-                    (fun w meta ->
-                        let amount = meta.Sources |> List.sumBy (fun src -> match src with MinionDeaths per -> per * body.Power | _ -> 0.0)
-                        if amount > 0.0 then gainEnergy env rng player meta.Name (amount * meta.EnergyMult) w else w)
-                    w
-            let at, n = nextRevival w.Time seconds w.Revival
-            { w with Revival = Some(at, n) } |> schedule at (ReviveMinions at)
-
-    let private reviveMinions env (at: float) (w: World) =
-        match w.Revival with
-        | Some (t, _) when abs (t - at) < 1e-9 ->
-            env.Fight.Minions
-            |> List.fold
-                (fun w m ->
-                    match m.Body with
-                    | Some b when b.Revive.IsSome && (Map.find m.Name w.Actors).Gone ->
-                        updateActor m.Name (fun st -> { st with Gone = false; Life = b.Life; Shield = b.EnergyShield; HitAt = w.Time }) w
-                        |> schedule w.Time (Ready m.Name)
-                        |> fun w -> { w with Counts = bump "minion:revived" w.Counts }
-                    | _ -> w)
-                { w with Revival = None; Boned = Set.empty }
-        | _ -> w
-
-    /// Mitigated damage onto a minion: energy shield first (chaos removes twice as much),
-    /// then life. Before that it has recovered since it was last hit: its life regeneration,
-    /// and its energy shield recharge once the delay has passed.
-    let private hurtMinion env (rng: Rng) (minion: Actor) (damage: Map<DamageType, float>) (w: World) =
-        let body = minion.Body.Value
-        let st = Map.find minion.Name w.Actors
-        let since = w.Time - max 0.0 st.HitAt
-        let life = min body.Life (st.Life + body.LifeRegen * since)
-        let shield =
-            let recharging = since - Constants.energyShieldRechargeDelay
-            if recharging > 0.0 then min body.EnergyShield (st.Shield + body.EnergyShield * Constants.energyShieldRechargePercent / 100.0 * recharging) else st.Shield
-        let shield, rest =
-            damage
-            |> Map.fold
-                (fun (es, rest) t d ->
-                    let k = if t = Chaos then 2.0 else 1.0
-                    let absorbed = min d (es / k)
-                    es - absorbed * k, rest + d - absorbed)
-                (shield, 0.0)
-        let life = life - rest
-        let w = updateActor minion.Name (fun st -> { st with Life = life; Shield = shield; HitAt = w.Time }) w
-        if life <= 0.0 then killMinion env rng minion w else w
-
     /// A monster's hit at a minion: evasion, armour against physical damage, resistances.
     let private attackMinion env (rng: Rng) name (minion: Actor) (w: World) =
         let e = w.Enemies.[name]

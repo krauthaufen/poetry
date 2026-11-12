@@ -327,7 +327,9 @@ module Gems =
               "CreatesMinion"; "Minion"; "Companion"; "CreatesCompanion"; "SummonsTotem"; "SummonsAttackTotem"; "Totem"
               "GeneratesInfusion"; "GeneratesRemnants"; "DamageOverTime"; "Grenade"; "Plant"; "Storm"
               "SkillConsumesFrenzyChargesOnUse"; "SkillConsumesEnduranceChargesOnUse"; "Sustained"; "Shapeshift"; "Channel"; "Rain"
-              "CrossbowAmmoSkill"; "GainsStages"; "RequiresShield"; "Warcry" ]
+              "CrossbowAmmoSkill"; "GainsStages"; "RequiresShield"; "Warcry"
+              "CommandableMinion"; "MinionsAreUndamagable"; "TargetsDestructibleCorpses"; "IceCrystal"; "Wall"; "Detonator"
+              "GeneratesCharges"; "ComboStacking" ]
 
     /// What a gem's skill does that the simulator has no model for: its skill types that are
     /// neither descriptive nor modelled ("Channel", "GainsStages", "Shapeshift", "Rain"...).

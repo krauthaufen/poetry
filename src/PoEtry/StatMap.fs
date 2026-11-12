@@ -754,6 +754,8 @@ module StatMap =
         | "minions_have_%_chance_to_inflict_wither_on_hit" -> one (Mod.base' (ForMinions(Named "Rule:OnHit:Withered:4")) v)
         // "Companions gain added Attack damage equal to x% of your main hand Weapon's damage"
         | "weapon_damage_%_granted_to_companions" -> one (Mod.base' (Named "CompanionWeaponDamage") v)
+        // "x% of Damage from Hits is taken from your Damageable Companion's Life before you"
+        | "companion_takes_%_damage_before_you" -> one (Mod.base' (Named "CompanionTakesDamage") v)
         | "minion_resummon_speed_+%" -> one (Mod.inc (ForMinions(Named "MinionReviveSpeed")) v)
         | "minion_maximum_life_%_to_gain_as_maximum_energy_shield" -> one (Mod.base' (ForMinions(Named "LifeAsExtraEnergyShield")) v)
         | "minion_attack_speed_+%" -> one (Mod.inc (ForMinions Speed) v |> Mod.whenever (SkillIs Attack))

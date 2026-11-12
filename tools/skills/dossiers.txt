@@ -195,7 +195,6 @@
   minion Azmerian Wolf: Azmerian Wolf: Dash, Azmerian Wolf: Bite, Azmerian Wolf: Eternal Hunt, Azmerian Wolf: Basic Attack
   fight: 1949 dps; Azmerian Wolf: Basic Attack (hit) 28%, Azmerian Wolf: Dash (hit) 23%, Azmerian Wolf: Eternal Hunt (hit) 21%, Azmerian Wolf: Bite (hit) 16%, Bleed 12%
          crits:Azmerian Wolf: Basic Attack 1, hits:Azmerian Wolf: Basic Attack 10, hits:Azmerian Wolf: Bite 5, hits:Azmerian Wolf: Dash 3, hits:Azmerian Wolf: Eternal Hunt 2, inflict:Bleed 5, inflict:Maim 10, minion:hit 5, uses:Azmerian Wolf: Basic Attack 11, uses:Azmerian Wolf: Bite 5, uses:Azmerian Wolf: Dash 3, uses:Azmerian Wolf: Eternal Hunt 2
-  types without a model: CommandableMinion
 
 #### Ball Lightning   [Area AreaSpell CreatesGroundEffect Damage Duration Lightning Projectile ProjectilesFromUser Spell Sustained]
   Fire a slow-moving Projectile that moves through enemies. The Projectile itself does not Hit enemies, but repeatedly discharges bolts of Lightning at nearby enemies. Consumes a Fire Infusion if possible to slow down over time, create Ignited Ground as it travels, and explode dealing Fire damage in an Area after it dissipates.
@@ -255,7 +254,6 @@
   built Bitter Dead                        x1.00, 0.75s, cd None x1, cost 0 +0/s, hits [], area 35
   fight: 0 dps; 
          
-  types without a model: TargetsDestructibleCorpses
 
 #### Black Powder Blitz   [AttackInPlace Buff Detonator DodgeReplacement HasReservation OngoingSkill Persistent]
   Replaces your dodge roll with an explosive-assisted leap, firing off a round from your prosthetic cannon leg that Blinds and Ignites enemies in the area you escape from. The explosion will cause any Grenades in its area of effect to also explode.
@@ -264,7 +262,7 @@
   play: (cannot be pressed)
   fight: 0 dps; 
          
-  types without a model: Detonator, DodgeReplacement
+  types without a model: DodgeReplacement
 
 #### Blasphemy   [Area AreaSpell AttackInPlace Aura Buff CanHaveMultipleOngoingSkillInstances HasReservation IsBlasphemy Meta OngoingSkill Persistent]
   Turn socketed Curse skills into vile Auras, applying their effects to all nearby enemies.
@@ -545,7 +543,6 @@
   play: (cannot be pressed)
   fight: 0 dps; 
          
-  types without a model: GeneratesCharges
 
 #### Comet   [Area AreaSpell Cold Damage Spell]
   Call down a mass of ice from the sky, dealing high damage at the targeted location. Targeting close to you will cause you to jump back as you cast. Consumes a Fire Infusion if possible to cause a devastating blast of ice and fire.
@@ -646,7 +643,6 @@
         part Crushing Fear: Shockwave     x14.49, hits [(1.0, 1.0)]
   fight: 131 dps; Crushing Fear (hit) 100%
          crits:Crushing Fear 1, hits:Crushing Fear 15, uses:Crushing Fear 16
-  types without a model: GeneratesCharges
 
 #### Cull The Weak   [Area Attack GeneratesCharges Melee MeleeSingleTarget]   needs: Spear
   Dash to an enemy and run them through, Culling enemies if their life is low enough. If this Attack kills at least one enemy, it grants you a Frenzy Charge, with higher Rarity monsters granting additional Charges. Enemies around you that can be Culled will be highlighted.
@@ -656,7 +652,6 @@
   built Cull the Weak                      x2.81, 0.83s, cd None x1, cost 42 +0/s, hits [(1.0, 1.0)], single
   fight: 32 dps; Cull the Weak (hit) 100%
          hits:Cull the Weak 17, uses:Cull the Weak 18
-  types without a model: GeneratesCharges
 
 #### Curse on Block   [AttackInPlace Buff CanHaveMultipleOngoingSkillInstances GeneratesEnergy HasReservation Meta OngoingSkill Persistent Triggers]
   While active, gains Energy when you Block and triggers socketed Curses on reaching maximum Energy.
@@ -685,7 +680,7 @@
   built Decompose                          x1.00, 0.80s, cd None x1, cost 0 +0/s, hits [], area 16
   fight: 0 dps; 
          
-  types without a model: CreatesGroundEffect, TargetsDestructibleCorpses
+  types without a model: CreatesGroundEffect
 
 #### Defiance Banner   [Area Banner Buff CanHaveMultipleOngoingSkillInstances Duration HasReservation OngoingSkill Persistent]
   While active, Attacking enemies builds Glory. When you have maximum Glory, you can place an inspiring Banner for a duration with an Aura that grants you and nearby Allies Armour, Evasion and movement speed.
@@ -723,7 +718,6 @@
   built Detonate Dead                      x1.00, 0.80s, cd None x1, cost 99 +0/s, hits [(1.0, 1.0)], area 26
   fight: 0 dps; 
          
-  types without a model: Detonator, TargetsDestructibleCorpses
 
 #### Detonate Living   [Area AreaSpell Damage Physical Spell]
   Hit an enemy under the Culling Strike Threshold, causing them to violently explode, damaging surrounding enemies. Highlights enemies under the Culling Strike Threshold.
@@ -755,7 +749,6 @@
         part Detonating Arrow: Explosion  x1.92, hits [(1.0, 1.0)]
   fight: 58 dps; Detonating Arrow (hit) 87%, Detonating Arrow: Explosion (hit) 13%
          hits:Detonating Arrow 2, hits:Detonating Arrow: Explosion 2, uses:Detonating Arrow 3
-  types without a model: Detonator
 
 #### Devour   [Area Attack GamepadDoNotForceSkillAtLocation GeneratesCharges Jumping Melee Movement Shapeshift Slam TargetsDestructibleCorpses Wyvern]   needs: Talisman
   Shapeshift into a Wyvern and devour a Corpse or Cullable enemy, and additional nearby Corpses. For each enemy or corpse devoured, you regenerate life and gain a Power Charge. If the target is far enough away, you will leap to them and damage nearby enemies where you land. Targeting nearby enemies or corpses will not perform a leap or a Slam.
@@ -765,7 +758,7 @@
   built Devour                             x2.35, 0.45s, cd None x1, cost 55 +0/s, hits [(1.0, 1.0)], area 18
   fight: 0 dps; 
          
-  types without a model: GeneratesCharges, Jumping, Movement, TargetsDestructibleCorpses
+  types without a model: Jumping, Movement
 
 #### Discipline   [AffectsPresence AttackInPlace Aura Buff HasReservation OngoingSkill Persistent]
   Emit an Aura that grants you and Allies in your Presence additional Total Energy Shield.
@@ -786,7 +779,7 @@
         part Disengage: Shockwave         x4.90, hits [(1.0, 1.0)]
   fight: 33 dps; Disengage (hit) 100%
          crits:Disengage 1, hits:Disengage 13, uses:Disengage 14
-  types without a model: GeneratesCharges, Jumping, Movement, SkillConsumesParried, Travel
+  types without a model: Jumping, Movement, SkillConsumesParried, Travel
 
 #### Dread Banner   [Area Banner Buff CanHaveMultipleOngoingSkillInstances Duration HasReservation OngoingSkill Persistent]
   While active, Attacking enemies builds Glory. When you have maximum Glory, you can place an inspiring Banner for a duration with an Aura that grants you and nearby Allies Elemental Ailment Threshold, Maximum Elemental Resistances and Flask charges.
@@ -1023,7 +1016,7 @@
   built Explosive Grenade                  x8.78, 0.78s, cd Some 5.0 x3, cost 68 +0/s, hits [(1.0, 1.0)], 1 projectiles, pierce 0, chain 0
   fight: 114 dps; Explosive Grenade (hit) 100%
          crits:Explosive Grenade 1, hits:Explosive Grenade 12, uses:Explosive Grenade 13
-  types without a model: DetonatesAfterTime, Detonator
+  types without a model: DetonatesAfterTime
 
 #### Explosive Shot   [Attack CrossbowAmmoSkill MirageArcherCanUse ReservesManually]   needs: Crossbow
   Load your Crossbow with flaming bolts that explode on impact. The explosion will cause any Grenades in its area of effect to also explode.
@@ -1034,7 +1027,6 @@
         part Explosive Shot: Explosion    x4.05, hits [(1.0, 1.0)]
   fight: 52 dps; Explosive Shot: Explosion (hit) 60%, Explosive Shot (hit) 40%
          hits:Explosive Shot 9, hits:Explosive Shot: Explosion 9, reload:Explosive Shot 10, uses:Explosive Shot 10
-  types without a model: Detonator
 
 #### Explosive Spear   [Area Attack CannotChain ConsumesCharges CreatesGroundEffect DetonatesAfterTime Detonator Duration Fire Limit MirageArcherCanUse Projectile ProjectilesFromUser ProjectilesNumberModifiersNotApplied RangedAttack SkillConsumesFrenzyChargesOnUse Spear]   needs: Spear
   Hurl a single payload Spear that pierces through enemies and lodges in terrain where it lands. The Spear will explode at the end of its Detonation Time or if Detonated. Consumes a Frenzy Charge if you have one to explode immediately, dealing more damage in a cross-shaped area and creating Ignited Ground.
@@ -1048,7 +1040,7 @@
         part Explosive Spear: Frenzy-Charged x7.24, hits [(1.0, 1.0)]
   fight: 219 dps; Explosive Spear: Explosion (hit) 80%, Explosive Spear (hit) 20%
          crits:Explosive Spear 1, crits:Explosive Spear: Explosion 1, hits:Explosive Spear 18, hits:Explosive Spear: Explosion 18, uses:Explosive Spear 19
-  types without a model: CreatesGroundEffect, DetonatesAfterTime, Detonator
+  types without a model: CreatesGroundEffect, DetonatesAfterTime
 
 #### Explosive Transmutation   [Buff HasReservation OngoingSkill Persistent]
   While active, picking up Remnants Triggers a deadly explosion, dealing damage at the location of the Remnant based on the type of Remnant picked up.
@@ -1110,7 +1102,6 @@
   built Feast of Flesh                     x1.00, 1.30s, cd None x1, cost 0 +0/s, hits [], around self 40
   fight: 0 dps; 
          
-  types without a model: TargetsDestructibleCorpses
 
 #### Feral Invocation   [AttackInPlace Buff CanHaveMultipleOngoingSkillInstances Cooldown GeneratesEnergy HasReservation Invocation Meta OngoingSkill Persistent Triggers]   needs: Talisman
   While active, gains Energy when you spend Mana. Using the Invocation once sufficient Energy is gathered will consume the Energy to create visages which attack once with a socketed Shapeshifting Attack, creating multiple visages if it has enough Energy.
@@ -1189,7 +1180,7 @@
  (0.9032258065, 1.0); (0.935483871, 1.0); (0.9677419355, 1.0); (1.0, 1.0)], area 70
   fight: 198 dps; Flame Breath (hit) 99%, Ignite 1%
          crits:Flame Breath 4, hits:Flame Breath 62, inflict:Ignite 1, uses:Flame Breath 3
-  types without a model: ConsumesRage, CreatesGroundEffect, Detonator, ManualCooldownConsumption
+  types without a model: ConsumesRage, CreatesGroundEffect, ManualCooldownConsumption
 
 #### Flame Wall   [Area AreaSpell CausesBurning Damage DamageOverTime Duration Fire Spell Wall]
   Create a wall of Fire in front of you, which Ignites everything within its area. Any Projectiles fired through the wall by you and Allies deal added Fire damage. Consumes a Lightning Infusion if possible to also add Lightning damage to the Projectiles.
@@ -1200,7 +1191,7 @@
   built Flame Wall                         x1.00, 1.00s, cd None x1, cost 111 +0/s, hits [(1.0, 1.0)], single
   fight: 178 dps; Flame Wall (hit) 78%, Flame Wall (fire over time) 22%
          crits:Flame Wall 3, hits:Flame Wall 14, uses:Flame Wall 15
-  types without a model: CausesBurning, Wall
+  types without a model: CausesBurning
 
 #### Flameblast   [Area AreaSpell Channel Cooldown Damage Fire GainsStages Nova Spell]
   Channel to build destructive energy around you. Releasing the energy causes a devastating explosion that is larger and more intense the longer you Channelled for.
@@ -1333,7 +1324,6 @@
   built Frost Wall infused                 x1.00, 0.80s, cd Some 5.0 x3, cost 79 +0/s, hits [(1.0, 1.0)], area 20
   fight: 80 dps; Frost Wall (hit) 83%, Frost Wall infused (hit) 17%
          crits:Frost Wall 9, crystals:Frost Wall 12, hits:Frost Wall 30, hits:Frost Wall infused 6, infused:Frost Wall 6, uninfused:Frost Wall 30, uses:Frost Wall 12
-  types without a model: IceCrystal, Wall
 
 #### Frostbolt   [Area Cold Damage Projectile ProjectilesFromUser Spell]
   Fire a slow-moving Piercing Projectile that is effective at Chilling enemies and explodes on colliding with terrain.
@@ -1366,7 +1356,7 @@
         part Frozen Locus: Explosion      x6.12, hits [(1.0, 1.0)]
   fight: 0 dps; Frozen Locus (hit) 0%
          crits:Frozen Locus 1, crystals:Frozen Locus: Explosion 14, hits:Frozen Locus 14, uses:Frozen Locus 15
-  types without a model: CreatesGroundEffect, IceCrystal
+  types without a model: CreatesGroundEffect
 
 #### Fulminating Concoction   [Area Attack GroundTargetedProjectile Lightning Projectile ProjectileNoCollision ProjectilesFromUser]   needs: Unarmed
   Consume charges from your Mana Flask to throw a flask that explodes, dealing Lightning Attack damage in an area with high chance to Shock. This damage is not based on your unarmed damage, so this is not considered an Unarmed Attack
@@ -1517,7 +1507,6 @@
         part Glacial Bolt: Wall           x2.45, hits [(1.0, 1.0)]
   fight: 13 dps; Glacial Bolt (hit) 100%
          crits:Glacial Bolt 1, crystals:Glacial Bolt: Wall 11, hits:Glacial Bolt 11, reload:Glacial Bolt 12, uses:Glacial Bolt 12
-  types without a model: IceCrystal, Wall
 
 #### Glacial Cascade   [Area Attack Cold CreatesFissure Melee SkillConsumesFreeze]   needs: Quarterstaff
   Sweep your Quarterstaff upwards, releasing an icy fissure which deals damage in a series of bursts culminating in a large spike. Frozen enemies hit by the final spike are dealt heavy damage but the Freeze is Consumed. Ice Crystals hit by the final spike explode.
@@ -1571,7 +1560,7 @@
         part Grim Pillars: Explosion      x1.00, hits [(1.0, 1.0)]
   fight: 94 dps; Grim Pillars (hit) 100%
          crits:Grim Pillars 2, crystals:Grim Pillars: Explosion 20, hits:Grim Pillars 20, uses:Grim Pillars 21
-  types without a model: CreatesGroundEffect, IceCrystal
+  types without a model: CreatesGroundEffect
 
 #### Hailstorm Rounds   [Attack CrossbowAmmoSkill MirageArcherCanUse ReservesManually]   needs: Crossbow
   Passively generate bolts of ice at a frequency equal to reload time, up to a cap. Activate to Load the accumulated bolts into your Crossbow. All loaded bolts are fired at once, causing them to rain down over the target area.
@@ -1928,7 +1917,7 @@
   note: Kelari's Malediction: what summons its minions is not simulated
   fight: 0 dps; 
          
-  types without a model: MinionsAreUndamagable, TargetsDestructibleCorpses, TargetsDestructibleRareCorpses
+  types without a model: TargetsDestructibleRareCorpses
 
 #### Kelari, the Tainted Sands   [CommandableMinion CreatesMinion HasReservation Minion Persistent Physical ReserveInAllSets]
   Summon Kelari, an invulnerable Sand Djinn Minion, to do your bidding. Kelari will only act when you Command him to do so. Kelari delivers swift Hits with massive Critical Hit potential.
@@ -1938,7 +1927,6 @@
   minion Kelari, the Tainted Sands: Kelari, the Tainted Sands: Kelari's Brutality, Kelari, the Tainted Sands: Kelari's Deception, Kelari, the Tainted Sands: Kelari's Judgment
   fight: 937 dps; Kelari, the Tainted Sands: Kelari's Judgment (hit) 46%, Kelari, the Tainted Sands: Kelari's Deception (hit) 22%, Kelari's Brutality: Eruption (hit) 14%, Kelari's Deception: Hidden (hit) 10%, Kelari, the Tainted Sands: Kelari's Brutality (hit) 9%
          crits:Kelari's Brutality: Eruption 1, crits:Kelari, the Tainted Sands: Kelari's Brutality 2, hits:Kelari's Brutality: Eruption 5, hits:Kelari's Deception: Hidden 6, hits:Kelari, the Tainted Sands: Kelari's Brutality 10, hits:Kelari, the Tainted Sands: Kelari's Deception 6, hits:Kelari, the Tainted Sands: Kelari's Judgment 2, inflict:Maim 5, minion:hit 4, uses:Kelari, the Tainted Sands: Kelari's Brutality 6, uses:Kelari, the Tainted Sands: Kelari's Deception 6, uses:Kelari, the Tainted Sands: Kelari's Judgment 2
-  types without a model: CommandableMinion, MinionsAreUndamagable
 
 #### Killing Palm   [Area Attack GeneratesCharges Melee MeleeSingleTarget Palm Physical]   needs: Quarterstaff
   Dash to an enemy and Strike them, Culling enemies if their life is low enough and performing additional dashing Strikes to other Cullable targets in range if your target was Culled. Each enemy killed by this strike grants a Power Charge, with higher Rarity monsters granting additional Charges. Enemies around you that can be Culled will be highlighted.
@@ -1948,7 +1936,6 @@
   built Killing Palm                       x2.81, 0.95s, cd None x1, cost 42 +0/s, hits [(1.0, 1.0)], single
   fight: 48 dps; Killing Palm (hit) 100%
          hits:Killing Palm 15, uses:Killing Palm 16
-  types without a model: GeneratesCharges
 
 #### Leap Slam   [Area Attack ConsumesFullyBrokenArmour Jumping Melee Slam Travel]   needs: One Hand Mace / Two Hand Mace
   Jump into the air, damaging and Knocking Back enemies with your mace where you land. Enemies you would land on are
@@ -2045,7 +2032,6 @@ pushed out of the way.
   play: (cannot be pressed)
   fight: 0 dps; 
          
-  types without a model: GeneratesCharges
 
 #### Living Bomb   [Area AreaSpell Damage Duration Fire GeneratesInfusion GeneratesRemnants Limit Spell]
   Plant a seed of Fire inside an enemy. Dealing enough damage to the enemy, or killing it outright, causes the seed to explode, dealing damage in an area and leaving behind a Fire Infusion Remnant.
@@ -2090,7 +2076,6 @@ pushed out of the way.
   play: (cannot be pressed)
   fight: 0 dps; 
          
-  types without a model: GeneratesCharges
 
 #### Magnetic Salvo   [Area Attack Bow Damage GroundTargetedProjectile Lightning MirageArcherCanUse Projectile ProjectileNoCollision ProjectilesFromUser RangedAttack]   needs: Bow
   Aim skyward and fire energy missiles at lingering bolts or arrows created by other Lightning Attacks in front of you. The missiles explode if they land close to a lingering bolt or arrow, dealing more damage in a larger area but destroying that bolt or arrow in the process.
@@ -2146,7 +2131,6 @@ pushed out of the way.
   minion Animated Weapon: Animated Weapon: Mace Slam, Animated Weapon: Quarterstaff Sweep, Animated Weapon: Spear Dash
   fight: 101 dps; Animated Weapon: Spear Dash (hit) 64%, Animated Weapon: Mace Slam (hit) 29%, Animated Weapon: Quarterstaff Sweep (hit) 7%
          hits:Animated Weapon: Mace Slam 4, hits:Animated Weapon: Quarterstaff Sweep 3, hits:Animated Weapon: Spear Dash 9, minion:hit 4, uses:Animated Weapon: Mace Slam 4, uses:Animated Weapon: Quarterstaff Sweep 4, uses:Animated Weapon: Spear Dash 9
-  types without a model: MinionsAreUndamagable
 
 #### Mantra of Destruction   [Buff Chaos ComboStacking Duration EmpowersOtherSkill HasUsageCondition]   needs: Quarterstaff
   Build Combo by successfully Striking Enemies with other skills. After reaching maximum Combo, use this skill to Empower your next Quarterstaff Attack, causing it to deal additional Chaos damage. Each kill with the Empowered Attack grants
@@ -2157,7 +2141,7 @@ Purple Flames of Chayula for a duration.
   built Mantra of Destruction              x1.00, 0.60s, cd None x1, cost 0 +0/s, hits [], single
   fight: 0 dps; 
          
-  types without a model: ComboStacking, EmpowersOtherSkill
+  types without a model: EmpowersOtherSkill
 
 #### Maul   [Area Attack AttackInPlace Bear Melee MeleeSingleTarget Shapeshift]   needs: Talisman
   Shapeshift into a Bear and rake enemies with your claws, generating Rage on Hit.
@@ -2185,7 +2169,6 @@ Purple Flames of Chayula for a duration.
   play: (cannot be pressed)
   fight: 0 dps; 
          
-  types without a model: IceCrystal
 
 #### Mirage Archer   [AttackInPlace Buff HasReservation Meta OngoingSkill Persistent]   needs: Spear / Bow / Crossbow
   While active, dodge rolling will create a Mirage that uses socketed ranged Attacks for a short duration, then vanish.
@@ -2218,7 +2201,6 @@ Purple Flames of Chayula for a duration.
   play: (cannot be pressed)
   fight: 0 dps; 
          
-  types without a model: CommandableMinion, GeneratesCharges, MinionsAreUndamagable
 
 #### Molten Blast   [Area Attack AttackInPlace Damage Fire Projectile ProjectilesFromUser RangedAttack]   needs: One Hand Mace / Two Hand Mace
   Gouge molten rock from the ground and fling it at the target. The Projectile explodes on collision, damaging enemies and scattering shrapnel in a cone behind it.
@@ -2279,7 +2261,6 @@ Purple Flames of Chayula for a duration.
   minion Navira, the Last Mirage: Navira, the Last Mirage: Navira's Fracturing
   fight: 363 dps; Navira, the Last Mirage: Navira's Fracturing (hit) 100%
          hits:Navira, the Last Mirage: Navira's Fracturing 4, inflict:Chill 4, minion:hit 3, uses:Navira, the Last Mirage: Navira's Fracturing 5
-  types without a model: CommandableMinion, MinionsAreUndamagable
 
 #### Oil Barrage   [Area Attack Channel ConsumesCharges CreatesGroundEffect Damage Projectile ProjectilesFromUser RangedAttack Shapeshift SkillConsumesPowerChargesOnUse Sustained Wyvern]   needs: Talisman
   Shapeshift into a Wyvern and spit Oil at enemies, creating Oil Ground where the Projectiles land. Consumes Power Charges if possible to instead Channel a sustained barrage of electrified Oil that does not create Oil Ground. Projectiles are fired in sequence, allowing multiple Projectiles to Hit the same target.
@@ -2432,7 +2413,6 @@ Purple Flames of Chayula for a duration.
   built Power Siphon                       x1.00, 0.70s, cd None x1, cost 0 +0/s, hits [(1.0, 1.0)], single
   fight: 0 dps; 
          uses:Power Siphon 21
-  types without a model: GeneratesCharges
 
 #### Powered by Verisium   [Cooldown GeneratesInfusion Spell]
   Spends Ward to generate Verisium Infusions, which can be used in place of any Elemental Infusions.
@@ -2474,7 +2454,7 @@ Purple Flames of Chayula for a duration.
   built Profane Ritual                     x1.00, 1.00s, cd None x1, cost 65 +0/s, hits [(1.0, 1.0)], area 22
   fight: 0 dps; 
          
-  types without a model: CreatesGroundRune, DegenOnlySpellDamage, GeneratesCharges, TargetsDestructibleCorpses
+  types without a model: CreatesGroundRune, DegenOnlySpellDamage
 
 #### Purity of Fire   [AffectsPresence AttackInPlace Aura Buff Fire HasReservation OngoingSkill Persistent]
   Emit an Aura that boosts the Fire Resistance of you and Allies in your Presence.
@@ -2577,7 +2557,7 @@ Purple Flames of Chayula for a duration.
   minion Raised Zombie 10: Raised Zombie: Basic Attack
   fight: 0 dps; 
          
-  types without a model: MinionsCanExplode, TargetsDestructibleCorpses
+  types without a model: MinionsCanExplode
 
 #### Rake   [Area Attack Melee MeleeSingleTarget Movement Physical Spear]   needs: Spear
   Dash towards an enemy and perform a lacerating slash, inflicting Bleeding on all enemies struck.
@@ -2755,7 +2735,6 @@ Purple Flames of Chayula for a duration.
   built Rolling Magma                      x2.18, 0.90s, cd None x1, cost 83 +0/s, hits [(1.0, 1.0)], 1 projectiles, pierce 0, chain 5
   fight: 106 dps; Rolling Magma (hit) 100%
          crits:Rolling Magma 2, hits:Rolling Magma 16, uses:Rolling Magma 17
-  types without a model: Detonator
 
 #### Rolling Slam   [Area Attack Melee Slam]   needs: One Hand Mace / Two Hand Mace
   Slam the ground to Stun enemies and knock them away, then continue forward and perform a devastating second Slam.
@@ -2797,7 +2776,6 @@ Purple Flames of Chayula for a duration.
   minion Ruzhan, the Blazing Sword: Ruzhan, the Blazing Sword: Ruzhan's Trap, Ruzhan, the Blazing Sword: Ruzhan's Reckoning, Ruzhan, the Blazing Sword: Ruzhan's Fury, Ruzhan, the Blazing Sword: Ruzhan's Zealotry, Ruzhan, the Blazing Sword: Ruzhan's Brand
   fight: 1043 dps; Ruzhan, the Blazing Sword: Ruzhan's Fury (hit) 22%, Ruzhan's Reckoning: Fire Wave (hit) 21%, Ruzhan, the Blazing Sword: Ruzhan's Brand (hit) 21%, Ruzhan, the Blazing Sword: Ruzhan's Zealotry (hit) 12%, Ruzhan's Trap: Tornado (hit) 8%, Ruzhan, the Blazing Sword: Ruzhan's Trap (hit) 6%, Ignite 5%, Ruzhan, the Blazing Sword: Ruzhan's Reckoning (hit) 4%, Ruzhan's Fury: Explosion (hit) 1%, Ruzhan's Trap: Rune (hit) 0%
          crits:Ruzhan's Trap: Rune 1, crits:Ruzhan's Trap: Tornado 1, crits:Ruzhan, the Blazing Sword: Ruzhan's Trap 2, hits:Ruzhan's Fury: Explosion 2, hits:Ruzhan's Reckoning: Fire Wave 2, hits:Ruzhan's Trap: Rune 3, hits:Ruzhan's Trap: Tornado 3, hits:Ruzhan, the Blazing Sword: Ruzhan's Brand 10, hits:Ruzhan, the Blazing Sword: Ruzhan's Fury 40, hits:Ruzhan, the Blazing Sword: Ruzhan's Reckoning 2, hits:Ruzhan, the Blazing Sword: Ruzhan's Trap 6, hits:Ruzhan, the Blazing Sword: Ruzhan's Zealotry 3, inflict:Ignite 2, minion:hit 5, uses:Ruzhan, the Blazing Sword: Ruzhan's Brand 10, uses:Ruzhan, the Blazing Sword: Ruzhan's Fury 3, uses:Ruzhan, the Blazing Sword: Ruzhan's Reckoning 2, uses:Ruzhan, the Blazing Sword: Ruzhan's Trap 3, uses:Ruzhan, the Blazing Sword: Ruzhan's Zealotry 3
-  types without a model: CommandableMinion, MinionsAreUndamagable
 
 #### Sacrifice   [AttackInPlace Buff HasReservation Minion OngoingSkill Persistent ReserveInAllSets]
   While active, your undead Reviving Minions can be used in place of Corpses by your skills, but your Minions Revive more slowly.
@@ -2896,7 +2874,7 @@ Purple Flames of Chayula for a duration.
   built Shield Wall                        x2.35, 1.25s, cd None x1, cost 92 +0/s, hits [(1.0, 1.0)], area 40
   fight: 181 dps; Shield Wall (hit) 100%
          hits:Shield Wall 12, uses:Shield Wall 13
-  types without a model: CanCreateStoneElementals, Wall
+  types without a model: CanCreateStoneElementals
 
 #### Shockburst Rounds   [Attack CrossbowAmmoSkill ReservesManually]   needs: Crossbow
   Load your Crossbow with a clip of charged bolts which release damaging pulses upon Hitting an enemy affected by a Lightning Ailment. Using this Skill again reloads the clip.
@@ -2992,7 +2970,7 @@ Purple Flames of Chayula for a duration.
         part Siphoning Strike: Shockwave  x6.24, hits [(1.0, 1.0)]
   fight: 55 dps; Siphoning Strike (hit) 100%
          crits:Siphoning Strike 2, hits:Siphoning Strike 20, uses:Siphoning Strike 21
-  types without a model: GeneratesCharges, SkillConsumesShock
+  types without a model: SkillConsumesShock
 
 #### Skeletal Arsonist   [CommandableMinion CreatesMinion CreatesSkeletonMinion CreatesUndeadMinion Detonator Fire HasReservation Minion MinionsCanExplode MultipleReservation Persistent]
   Activate to summon bomb-throwing, Reviving Skeletal Arsonists that can detonate other Minions on Command.
@@ -3008,7 +2986,7 @@ Purple Flames of Chayula for a duration.
   minion Skeletal Arsonist 7: Skeletal Arsonist: Fire Bomb
   fight: 587 dps; Skeletal Arsonist: Fire Bomb (hit) 100%, Ignite 0%
          crits:Skeletal Arsonist: Fire Bomb 4, hits:Skeletal Arsonist: Fire Bomb 140, inflict:Ignite 1, minion:hit 11, uses:Skeletal Arsonist: Fire Bomb 147
-  types without a model: CommandableMinion, CreatesSkeletonMinion, CreatesUndeadMinion, Detonator, MinionsCanExplode
+  types without a model: CreatesSkeletonMinion, CreatesUndeadMinion, MinionsCanExplode
 
 #### Skeletal Brute   [CommandableMinion CreatesMinion CreatesSkeletonMinion CreatesUndeadMinion HasReservation Minion MinionsCanExplode MultipleReservation Persistent Physical]
   Activate to summon hard-hitting, Reviving Skeletal Brutes that can Stun Primed enemies and Warcry on Command. This Warcry Intimidates nearby enemies and Consumes Freeze on enemies and allies to deal damage in an Area around them.
@@ -3023,7 +3001,7 @@ Purple Flames of Chayula for a duration.
   minion Skeletal Brute 6: Skeletal Brute: Bonebreaker, Skeletal Brute: Shattering Roar, Skeletal Brute: Basic Attack
   fight: 1050 dps; Skeletal Brute: Bonebreaker (hit) 68%, Skeletal Brute: Basic Attack (hit) 32%, Skeletal Brute: Shattering Roar (hit) 0%
          crits:Skeletal Brute: Basic Attack 3, crits:Skeletal Brute: Bonebreaker 3, crits:Skeletal Brute: Shattering Roar 2, hits:Skeletal Brute: Basic Attack 36, hits:Skeletal Brute: Bonebreaker 30, hits:Skeletal Brute: Shattering Roar 12, minion:hit 7, uses:Skeletal Brute: Basic Attack 36, uses:Skeletal Brute: Bonebreaker 30, uses:Skeletal Brute: Shattering Roar 18
-  types without a model: CommandableMinion, CreatesSkeletonMinion, CreatesUndeadMinion, MinionsCanExplode
+  types without a model: CreatesSkeletonMinion, CreatesUndeadMinion, MinionsCanExplode
 
 #### Skeletal Cleric   [CreatesMinion CreatesSkeletonMinion CreatesUndeadMinion HasReservation Minion MinionsCanExplode MultipleReservation Persistent]
   Activate to summon Reviving Skeletal Clerics that heal other minions and revive fallen Skeletons.
@@ -3048,7 +3026,7 @@ Purple Flames of Chayula for a duration.
   minion Skeletal Frost Mage 7: Skeletal Frost Mage: Ice Shard
   fight: 1379 dps; Skeletal Frost Mage: Ice Shard (hit) 53%, Ice Shard: Explosion (hit) 47%
          crits:Ice Shard: Explosion 27, crits:Skeletal Frost Mage: Ice Shard 15, hits:Ice Shard: Explosion 112, hits:Skeletal Frost Mage: Ice Shard 112, minion:evaded 2, minion:hit 10, uses:Skeletal Frost Mage: Ice Shard 119
-  types without a model: CommandableMinion, CreatesSkeletonMinion, CreatesUndeadMinion, MinionsCanExplode
+  types without a model: CreatesSkeletonMinion, CreatesUndeadMinion, MinionsCanExplode
 
 #### Skeletal Reaver   [CommandableMinion CreatesMinion CreatesSkeletonMinion CreatesUndeadMinion HasReservation Minion MinionsCanExplode MultipleReservation Persistent Physical]
   Activate to summon aggressive, Reviving Skeletal Reavers that can enrage on Command. Skeletal Reavers do more Attack Damage and gain increased Attack speed based on their Rage
@@ -3067,7 +3045,7 @@ Purple Flames of Chayula for a duration.
   minion Skeletal Reaver 10: Skeletal Reaver: Basic Attack
   fight: 289 dps; Skeletal Reaver: Basic Attack (hit) 100%
          crits:Skeletal Reaver: Basic Attack 8, hits:Skeletal Reaver: Basic Attack 240, minion:hit 12, uses:Skeletal Reaver: Basic Attack 250
-  types without a model: CommandableMinion, CreatesSkeletonMinion, CreatesUndeadMinion, MinionsCanExplode
+  types without a model: CreatesSkeletonMinion, CreatesUndeadMinion, MinionsCanExplode
 
 #### Skeletal Sniper   [Chaos CommandableMinion CreatesMinion CreatesSkeletonMinion CreatesUndeadMinion Fire HasReservation Minion MinionsCanExplode MultipleReservation Persistent Physical]
   Activate to summon long-ranged, Reviving Skeletal Snipers that can fire a gas arrow on Command.
@@ -3086,7 +3064,7 @@ Purple Flames of Chayula for a duration.
   minion Skeletal Sniper 10: Skeletal Sniper: Gas Arrow, Skeletal Sniper: Basic Attack
   fight: 536 dps; Skeletal Sniper: Basic Attack (hit) 69%, Skeletal Sniper: Gas Arrow (hit) 20%, Poison 12%, Gas Arrow: Poison Cloud (hit) 0%
          crits:Gas Arrow: Poison Cloud 4, crits:Skeletal Sniper: Basic Attack 4, crits:Skeletal Sniper: Gas Arrow 4, hits:Gas Arrow: Poison Cloud 30, hits:Skeletal Sniper: Basic Attack 99, hits:Skeletal Sniper: Gas Arrow 30, inflict:Poison 30, minion:died 1, minion:hit 13, uses:Skeletal Sniper: Basic Attack 109, uses:Skeletal Sniper: Gas Arrow 30
-  types without a model: CommandableMinion, CreatesSkeletonMinion, CreatesUndeadMinion, MinionsCanExplode
+  types without a model: CreatesSkeletonMinion, CreatesUndeadMinion, MinionsCanExplode
 
 #### Skeletal Storm Mage   [CommandableMinion CreatesMinion CreatesSkeletonMinion CreatesUndeadMinion HasReservation Lightning Minion MinionsCanExplode MultipleReservation Persistent]
   Activate to summon Reviving Skeletal Storm Mages that can call down a lightning strike on dead Skeletons on Command.
@@ -3102,7 +3080,7 @@ Purple Flames of Chayula for a duration.
   minion Skeletal Storm Mage 7: Skeletal Storm Mage: Death Storm, Skeletal Storm Mage: Arc
   fight: 2531 dps; Skeletal Storm Mage: Death Storm (hit) 80%, Skeletal Storm Mage: Arc (hit) 20%
          crits:Skeletal Storm Mage: Arc 5, crits:Skeletal Storm Mage: Death Storm 4, hits:Skeletal Storm Mage: Arc 63, hits:Skeletal Storm Mage: Death Storm 28, minion:hit 13, uses:Skeletal Storm Mage: Arc 70, uses:Skeletal Storm Mage: Death Storm 28
-  types without a model: CommandableMinion, CreatesSkeletonMinion, CreatesUndeadMinion, MinionsCanExplode
+  types without a model: CreatesSkeletonMinion, CreatesUndeadMinion, MinionsCanExplode
 
 #### Skeletal Warrior   [CreatesMinion CreatesSkeletonMinion CreatesUndeadMinion HasReservation Minion MinionsCanExplode MultipleReservation Persistent Physical]
   Activate to summon Reviving Skeletal Warriors.
@@ -3185,7 +3163,6 @@ Purple Flames of Chayula for a duration.
   built Sniper's Mark                      x1.00, 0.50s, cd Some 6.0 x1, cost 79 +0/s, hits [(1.0, 1.0)], single
   fight: 0 dps; Sniper's Mark (hit) 0%
          apply:Mark:Sniper's Mark 4, hits:Sniper's Mark 4, uses:Sniper's Mark 4
-  types without a model: GeneratesCharges
 
 #### Soaring Midnight   [Area Attack Cold Cooldown ManualCooldownConsumption NonWeaponAttack Physical Projectile RequiresShield Travel]   needs: Any Shield
   Hurl your Shield as a Projectile which Returns to you at the end of its flight. While the Shield is in flight, this skill is replaced with Embrace the Fall. This skill's cooldown is skipped if you catch the Shield as it Returns, or destroy an Ice Crystal with the Embrace the Fall.
@@ -3340,7 +3317,6 @@ Purple Flames of Chayula for a duration.
   minion Raven Conspiracy: Raven Conspiracy: Mad Flight
   fight: 55 dps; Raven Conspiracy: Mad Flight (hit) 100%
          hits:Raven Conspiracy: Mad Flight 2, minion:evaded 1, minion:hit 5, uses:Raven Conspiracy: Mad Flight 3
-  types without a model: CommandableMinion, MinionsAreUndamagable
 
 #### Spirit Vessel   [AttackInPlace Companion CreatesCompanion CreatesMinion HasReservation Meta Minion Persistent]
   Summons a Shapeshifting Spirit Vessel Companion that uses copies of socketed Bear, Werewolf, and Wyvern Skills.
@@ -3475,7 +3451,6 @@ Purple Flames of Chayula for a duration.
   minion Artillery Squad: Artillery Squad: Death From Above
   fight: 394 dps; Artillery Squad: Death From Above (hit) 100%
          hits:Artillery Squad: Death From Above 12, minion:hit 2, uses:Artillery Squad: Death From Above 3
-  types without a model: CommandableMinion, MinionsAreUndamagable
 
 #### Tame Beast   [Companion Duration Minion]
   Conjure Azmeri wisps to engulf a Rare Beast for a duration, Hindering them. If you defeat the Beast while it is engulfed in wisps, it will be captured by this gem, transforming the gem to instead allow you to summon the Beast as a Reviving Companion.
@@ -3509,7 +3484,7 @@ Purple Flames of Chayula for a duration.
         part Tempest Bell: Shockwave      x1.19, hits [(1.0, 1.0)]
   fight: 0 dps; 
          
-  types without a model: ComboStacking, ManualCooldownConsumption, ObjectDurability, SpecialAncestralBoost
+  types without a model: ManualCooldownConsumption, ObjectDurability, SpecialAncestralBoost
 
 #### Tempest Flurry   [Area Attack Lightning Melee MeleeSingleTarget PerformsFinalStrike]   needs: Quarterstaff
   Perform a series of aggressive Strikes. When used in quick succession, the third use Strikes three times, and the fourth use performs a Final Strike that calls down a powerful Shocking bolt.
@@ -3577,7 +3552,7 @@ Purple Flames of Chayula for a duration.
   built Thunderous Leap                    x4.49, 0.62s, cd None x1, cost 76 +0/s, hits [(1.0, 1.0)], area 25
   fight: 69 dps; Thunderous Leap (hit) 100%
          hits:Thunderous Leap 10, uses:Thunderous Leap 11
-  types without a model: Detonator, Jumping, Travel
+  types without a model: Jumping, Travel
 
 #### Thunderstorm   [Area AreaSpell Damage Duration Lightning Limit Spell Storm Sustained]
   Conjure a thunderstorm which causes lightning strikes and torrential rain in an area. Enemies in the area are Drenched, causing them to become Shocked or Frozen more easily. Plants in the area become Overgrown.
@@ -3732,7 +3707,6 @@ Purple Flames of Chayula for a duration.
   minion Bone Crawler 20: Bone Crawler: Basic Attack
   fight: 31 dps; Unearth (hit) 100%
          crits:Unearth 1, hits:Unearth 15, uses:Unearth 16
-  types without a model: TargetsDestructibleCorpses
 
 #### Unleash   [Buff Cooldown Duration EmpowersOtherSkill ModifiesNextSkill Spell]
   Augment yourself with temporal magic for a short duration, Empowering the next Repeatable Spell you cast to Repeat multiple times. Cannot Empower Skills with a Cooldown.
@@ -3819,7 +3793,6 @@ Purple Flames of Chayula for a duration.
   built Volatile Dead                      x1.00, 0.80s, cd None x1, cost 0 +0/s, hits [], single
   fight: 0 dps; 
          
-  types without a model: TargetsDestructibleCorpses
 
 #### Volcanic Fissure   [Area Attack AttackInPlace CreatesFissure Duration Fire Limit Melee Slam Sustained]   needs: One Hand Mace / Two Hand Mace
   Slam the ground, creating a branching Molten Fissure that deals damage as it travels and remains for a duration. Using a different Slam on a Molten Fissure creates a spreading Aftershock.
@@ -3851,7 +3824,6 @@ Purple Flames of Chayula for a duration.
   built Voltaic Barrier                    x0.62, 0.75s, cd None x1, cost 0 +0/s, hits [(1.0, 1.0)], area 60
   fight: 40 dps; Voltaic Barrier (hit) 100%
          crits:Voltaic Barrier 4, hits:Voltaic Barrier 19, uses:Voltaic Barrier 20
-  types without a model: Wall
 
 #### Voltaic Grenade   [Area Attack Cooldown DetonatesAfterTime Duration Grenade Lightning MirageArcherCanUse Projectile ProjectileNumber ProjectileSpeed RangedAttack]   needs: Crossbow
   Fire a bouncing Grenade that discharges an Electrocuting Lightning blast when its fuse expires, causing all Lightning Hits against enemies to contribute to Electrocution buildup for a duration.
@@ -4031,7 +4003,6 @@ Purple Flames of Chayula for a duration.
         part Wing Blast: Shockwave        x6.34, hits [(1.0, 1.0)]
   fight: 53 dps; Wing Blast (hit) 100%
          crits:Wing Blast 2, hits:Wing Blast 14, uses:Wing Blast 15
-  types without a model: GeneratesCharges
 
 #### Wither   [Area AreaSpell Channel Chaos Duration Spell]
   Channel a debilitating hex that Withers enemies in the area.
