@@ -63,6 +63,8 @@ for key, n in src["nodes"].items():
     node = {"id": i, "x": round(x, 1), "y": round(y, 1), "kind": kind(n), "name": n.get("name", ""), "stats": n.get("stats", []),
             "to": sorted(neighbours.get(i, []))}
     if n.get("ascendancyName"): node["ascendancy"] = n["ascendancyName"]
+    # a Sinister Jewel Socket (the Voices jewel's): only there once something is in it
+    if n.get("sinister"): node["hidden"] = True
     if n.get("classesStart"): node["classes"] = n["classesStart"]
     if n.get("options"):
         # an attribute node: what it can be made
@@ -106,6 +108,18 @@ pad = 600
 box = [math.floor(min(xs) - pad), math.floor(min(ys) - pad), math.ceil(max(xs) - min(xs) + 2 * pad), math.ceil(max(ys) - min(ys) + 2 * pad)]
 
 classes = [{"name": c["name"], "ascendancies": [a["name"] for a in c.get("ascendancies", [])]} for c in src["classes"]]
+# an ascendancy is laid out far from the tree, around the middle of its background; the page
+# moves the character's own to the middle of the tree, over its class art (the small sheet)
+ascendancies = []
+if len(sys.argv) > 2:
+    small = json.load(open(os.path.join(os.path.dirname(sys.argv[2]), "ascendancy-background_250_250_BC7.json")))
+    for c in src["classes"]:
+        for a in c.get("ascendancies", []):
+            bg = a.get("background")
+            art = small["sprites"].get("Classes" + a["name"])
+            if bg:
+                ascendancies.append({"name": a["name"], "x": round(bg["x"], 1), "y": round(bg["y"], 1), "width": bg["width"],
+                                     "art": [art["x"] / small["width"], art["y"] / small["height"], art["w"] / small["width"], art["h"] / small["height"]] if art else None})
 out = os.path.join(root, "web", "public")
 os.makedirs(out, exist_ok=True)
 
@@ -158,7 +172,7 @@ for (a, b, orbit) in edges.values():
     else:
         paths.append("M%.0f %.0fL%.0f %.0f" % (x1, y1, x2, y2))
         drawn.append([a, b])
-json.dump({"box": box, "classes": classes, "nodes": nodes, "edges": drawn, "sheets": sheets, "frames": frames}, open(os.path.join(out, "tree.json"), "w"), separators=(",", ":"))
+json.dump({"box": box, "classes": classes, "nodes": nodes, "edges": drawn, "sheets": sheets, "frames": frames, "ascendancies": ascendancies}, open(os.path.join(out, "tree.json"), "w"), separators=(",", ":"))
 svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="%d %d %d %d">'
        '<path d="%s" fill="none" stroke="#4a4136" stroke-width="14" stroke-linecap="round"/></svg>') % (box[0], box[1], box[2], box[3], "".join(paths))
 open(os.path.join(out, "tree.svg"), "w").write(svg)

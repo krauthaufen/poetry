@@ -31,14 +31,18 @@ let spriteVertex (v : Vertex) =
                  Uv = V2f (r.X + v.Uv.X * r.Z, r.Y + v.Uv.Y * r.W) }
     }
 
-/// The sprite's colour, dimmed by Tint; what is transparent in the art is not drawn.
+/// The sprite's colour, dimmed by Tint; what is more transparent in the art than Tint's
+/// fourth part says is not drawn. With a low cut (a background picture) the colour fades
+/// with the art's transparency towards the ground's colour, in place of blending.
 [<ShaderEffect>]
 let spriteFragment (f : Textured) =
     fragment {
         let c = atlas.Sample f.Uv
         let t : V4f = uniform?Tint
-        if c.W < 0.35f then discard ()
-        return { Color = V4f (c.X * t.X, c.Y * t.Y, c.Z * t.Z, 1.0f) }
+        if c.W < t.W then discard ()
+        // (towards the ground's own colour: there is no blending to do it properly)
+        let fade = if t.W < 0.1f then c.W else 1.0f
+        return { Color = V4f (0.047f + (c.X * t.X - 0.047f) * fade, 0.047f + (c.Y * t.Y - 0.047f) * fade, 0.055f + (c.Z * t.Z - 0.055f) * fade, 1.0f) }
     }
 
 [<ShaderEffect>]

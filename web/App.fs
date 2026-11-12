@@ -19,6 +19,8 @@ type Passive =
       Size : float
       IconSize : float
       Kind : string
+      /// Not shown until it is allocated (a Sinister Jewel Socket).
+      Hidden : bool
       Name : string
       Ascendancy : string
       Icon : string
@@ -28,8 +30,13 @@ type Passive =
       FrameOn : V4d
       FrameOff : V4d }
 
-/// A connection: its two passives and its ribbon (triangles).
-type Link = { A : int; B : int; Ribbon : Buffer<V3f> }
+/// A connection: its two passives and its ribbon (triangles); an ascendancy's own are laid
+/// out for the middle of the tree.
+type Link = { A : int; B : int; Of : string; Ribbon : Buffer<V3f> }
+
+/// An ascendancy: where its part of the tree is laid out (the middle of its background), and
+/// its class art in the small background sheet.
+type Ascendancy = { Called : string; Middle : V2d; Art : V4d }
 
 type Msg =
     | Located of string
@@ -66,6 +73,10 @@ type Model =
       /// The passive tree: its passives and connections, who neighbours whom, the ribbons of
       /// all connections as one mesh, what is allocated (and whether that was changed here).
       Passives : Passive list
+      Ascendancies : Ascendancy list
+      /// The ascendancies' passives and connections (drawn for the character's own only).
+      Ascended : Passive list
+      AscendedLinks : Link list
       /// The same by the sheet their icon, and their frame, is in.
       IconsSmall : Passive list
       IconsLarge : Passive list
@@ -73,6 +84,8 @@ type Model =
       FramesMedium : Passive list
       FramesLarge : Passive list
       FramesAscendancy : Passive list
+      /// Sockets that are only there while something is in them (the Voices jewel's).
+      Sinister : Passive list
       Links : Link list
       Neighbours : Map<int, int list>
       Web : Buffer<V3f>
@@ -89,7 +102,7 @@ let init : Model =
     { Build = ""; Scenario = "boss"; Status = "locating"; Title = ""; Class = ""; Ascendancy = ""; Tab = "character"
       Pools = []; Defences = []; Resistances = []; Minions = []
       NotUnderstood = 0; Fighting = false; Gem = ""; Dps = []; Shares = []
-      Passives = []; IconsSmall = []; IconsLarge = []; FramesSmall = []; FramesMedium = []; FramesLarge = []; FramesAscendancy = []; Links = []; Neighbours = Map.empty; Web = Data.pack (Data.ofList ([] : V3f list)); Allocated = Set.empty; Edited = false
+      Passives = []; Ascendancies = []; Ascended = []; AscendedLinks = []; IconsSmall = []; IconsLarge = []; FramesSmall = []; FramesMedium = []; FramesLarge = []; FramesAscendancy = []; Sinister = []; Links = []; Neighbours = Map.empty; Web = Data.pack (Data.ofList ([] : V3f list)); Allocated = Set.empty; Edited = false
       Centre = V2d (0.0, 0.0); Height = 5000.0; Held = None; Moved = false }
 
 /// The passives as the simulator is told them (only once they were changed here).
@@ -103,7 +116,10 @@ let private fightUrl (m : Model) = "__sim?op=fight&runs=20&time=30&scenario=" + 
 
 /// The ribbon of a connection, as triangles: a straight one between its passives, or along
 /// its arc ([a, b, cx, cy, r, from, sweep]: degrees clockwise from the top).
-let private ribbon (width : float) (at : Map<int, V2d>) (edge : float list) : V3f list =
+let private ribbonAt (width : float) (at : Map<int, V2d>) (middle : V2d) (scale : float) (edge : float list) : V3f list =
+    // (an ascendancy's connections are drawn around the middle of the tree: `middle` is
+    // where they are laid out, `scale` how much smaller they are drawn)
+    let at = at |> Map.map (fun _ p -> (p - middle) * scale)
     let quad (p0 : V2d) (p1 : V2d) (q0 : V2d) (q1 : V2d) =
         let v (p : V2d) = V3f (float32 p.X, float32 -p.Y, 0.0f)
         [ v p0; v p1; v q0; v q0; v p1; v q1 ]
@@ -117,6 +133,7 @@ let private ribbon (width : float) (at : Map<int, V2d>) (edge : float list) : V3
             let n = V2d (-d.Y / len, d.X / len) * (width / 2.0)
             quad (p - n) (p + n) (q - n) (q + n)
     | [ _; _; cx; cy; r; from; sweep ] ->
+        let cx, cy, r = (cx - middle.X) * scale, (cy - middle.Y) * scale, r * scale
         let steps = max 2 (int (ceil (sweep / 8.0)))
         let point (radius : float) (i : int) =
             let a = (from + sweep * float i / float steps) * System.Math.PI / 180.0
@@ -124,6 +141,15 @@ let private ribbon (width : float) (at : Map<int, V2d>) (edge : float list) : V3
         [ for i in 0 .. steps - 1 do
             yield! quad (point (r - width / 2.0) i) (point (r + width / 2.0) i) (point (r - width / 2.0) (i + 1)) (point (r + width / 2.0) (i + 1)) ]
     | _ -> []
+
+let private ribbon (width : float) (at : Map<int, V2d>) (edge : float list) : V3f list =
+    ribbonAt width at (V2d (0.0, 0.0)) 1.0 edge
+
+/// How much smaller an ascendancy is drawn than it is laid out, and how big its class art
+/// and the ring around it are, in widths of its background (pob-web's PassiveTree).
+let private ascendancyScale = 0.8025
+let private artSize = 1500.0 * 2.14
+let private ringSize = 1500.0 * 2.675
 
 /// The tree as fetched (web/public/tree.json, see tools/export/tree_ui.py).
 let private readTree (j : Json) (m : Model) : Model =
@@ -150,6 +176,7 @@ let private readTree (j : Json) (m : Model) : Model =
               Size = (match kind with "keystone" -> 240.0 | "notable" -> 160.0 | "jewel" -> 152.0 | "start" -> 0.0 | "ascstart" -> 100.0 | _ -> 108.0)
               IconSize = (match kind with "keystone" -> 164.0 | "notable" -> 108.0 | "jewel" -> 152.0 | "ascstart" -> 32.0 | _ -> 74.0)
               Kind = kind
+              Hidden = Json.bool (Json.field "hidden" n)
               Name = Json.string (Json.field "name" n)
               Ascendancy = Json.string (Json.field "ascendancy" n)
               Icon = icon
@@ -159,26 +186,57 @@ let private readTree (j : Json) (m : Model) : Model =
               FrameOn = on
               FrameOff = off })
     let at = passives |> List.map (fun p -> p.Id, V2d (p.X, p.Y)) |> Map.ofList
+    let ascendancies =
+        Json.field "ascendancies" j |> Json.list
+        |> List.map (fun a ->
+            let art = match Json.field "art" a |> Json.list |> List.map Json.number with [ u; v; w; h ] -> V4d (u, v, w, h) | _ -> V4d (0.0, 0.0, 0.0, 0.0)
+            { Called = Json.string (Json.field "name" a); Middle = V2d (Json.number (Json.field "x" a), Json.number (Json.field "y" a)); Art = art })
+    let middleOf = ascendancies |> List.map (fun a -> a.Called, a.Middle) |> Map.ofList
+    let ascendancyOf = passives |> List.map (fun p -> p.Id, p.Ascendancy) |> Map.ofList
     let edges = Json.field "edges" j |> Json.list |> List.map (fun e -> Json.list e |> List.map Json.number)
-    let links = edges |> List.map (fun e -> { A = int e.[0]; B = int e.[1]; Ribbon = Data.pack (Data.ofList (ribbon 26.0 at e)) })
+    let own (e : float list) = ascendancyOf.[int e.[0]]
+    let links = edges |> List.filter (fun e -> own e = "") |> List.map (fun e -> { A = int e.[0]; B = int e.[1]; Of = ""; Ribbon = Data.pack (Data.ofList (ribbon 26.0 at e)) })
+    let ascendedLinks =
+        edges |> List.filter (fun e -> own e <> "" && middleOf.ContainsKey (own e))
+        |> List.map (fun e -> { A = int e.[0]; B = int e.[1]; Of = own e; Ribbon = Data.pack (Data.ofList (ribbonAt 22.0 at middleOf.[own e] ascendancyScale e)) })
+    // an ascendancy's passives, where they are drawn: around the middle of the tree
+    let ascended =
+        passives |> List.filter (fun p -> p.Ascendancy <> "" && middleOf.ContainsKey p.Ascendancy)
+        |> List.map (fun p ->
+            let q = (V2d (p.X, p.Y) - middleOf.[p.Ascendancy]) * ascendancyScale
+            { p with X = q.X; Y = q.Y })
     // TEMPORARY (FableCube dogfood/poetry.md, "a texture per draw"): only the passives nearest
     // the middle of the tree are drawn, as every textured draw uploads its sheet again
     let shown =
-        passives |> List.filter (fun p -> p.Kind <> "start")
+        passives |> List.filter (fun p -> p.Kind <> "start" && not p.Hidden && p.Ascendancy = "")
         |> List.sortBy (fun p -> p.X * p.X + p.Y * p.Y)
         |> List.truncate 260
     { m with
         Passives = passives
+        Ascendancies = ascendancies
+        Ascended = ascended
+        AscendedLinks = ascendedLinks
         IconsSmall = shown |> List.filter (fun p -> p.Icon.Contains "skills_64")
         IconsLarge = shown |> List.filter (fun p -> p.Icon.Contains "skills_128")
         FramesSmall = shown |> List.filter (fun p -> p.Frame.Contains "_104_104")
         FramesMedium = shown |> List.filter (fun p -> p.Frame.Contains "_152_156")
         FramesLarge = shown |> List.filter (fun p -> p.Frame.Contains "_220_224")
-        FramesAscendancy = shown |> List.filter (fun p -> p.Frame.Contains "_92_92")
+        FramesAscendancy = []
+        Sinister = passives |> List.filter (fun p -> p.Hidden)
         Links = links
         Neighbours = nodes |> List.map (fun n -> Json.int (Json.field "id" n), (Json.field "to" n |> Json.list |> List.map Json.int)) |> Map.ofList
         // (packed here: a buffer is one value to the view, where a list would be followed element by element)
-        Web = Data.pack (Data.ofList (edges |> List.collect (ribbon 14.0 at))) }
+        Web = Data.pack (Data.ofList (edges |> List.filter (fun e -> own e = "") |> List.collect (ribbon 14.0 at))) }
+
+/// The character's ascendancy, once the tree and the character are both there: the game's
+/// character data names it as the class ("Spirit Walker"); else the one its allocated
+/// passives belong to; none for a character that has not ascended.
+let private settle (m : Model) : Model =
+    if m.Ascendancies |> List.exists (fun a -> a.Called = m.Class) then { m with Ascendancy = m.Class }
+    else
+        match m.Passives |> List.tryFind (fun p -> p.Ascendancy <> "" && m.Allocated.Contains p.Id) with
+        | Some p -> { m with Ascendancy = p.Ascendancy }
+        | None -> m
 
 /// Where a character's passives start: its class' start and its ascendancy's.
 let private roots (m : Model) : Set<int> =
@@ -247,7 +305,7 @@ let update (msg : Msg) (m : Model) : Model =
     | Tab t -> { m with Tab = t }
     | TreeData r ->
         match r.Status, Native.parseJson r.Text with
-        | 200, Ok j -> readTree j m
+        | 200, Ok j -> settle (readTree j m)
         | s, _ -> { m with Status = "the passive tree could not be read (status " + string s + ")" }
     // (the click that ends a drag allocates nothing)
     | Toggle _ when m.Moved -> m
@@ -274,19 +332,20 @@ let update (msg : Msg) (m : Model) : Model =
             let n (path : string list) = path |> List.fold (fun x k -> Json.field k x) j |> Json.number
             let named key = Json.field key j |> Json.list |> List.map (fun x -> { Label = Json.string (Json.field "name" x); Value = sprintf "%.0f" (Json.number (Json.field (if key = "minions" then "count" else "value") x)) })
             let missing = [ "unmapped"; "unsimulated"; "unknown"; "minions" ] |> List.sumBy (fun k -> Json.field "notUnderstood" j |> Json.field k |> Json.list |> List.length)
-            { m with
-                Status = ""
-                Title = sprintf "Level %.0f %s" (n [ "level" ]) (Json.string (Json.field "class" j))
-                Class = Json.string (Json.field "class" j)
-                Ascendancy = Json.string (Json.field "ascendancy" j)
-                // what the character has allocated, until it is changed here
-                Allocated = (if m.Edited then m.Allocated else Json.field "passives" j |> Json.list |> List.map Json.int |> Set.ofList)
-                Pools = [ row "Life" (n [ "pools"; "life" ]); row "Mana" (n [ "pools"; "mana" ]); row "Energy Shield" (n [ "pools"; "energyShield" ]); row "Spirit" (n [ "pools"; "spirit" ]) ]
-                Defences = [ row "Armour" (n [ "defences"; "armour" ]); row "Evasion" (n [ "defences"; "evasion" ]); row "Deflection" (n [ "defences"; "deflection" ]); row "Block" (n [ "defences"; "block" ]) ]
-                Resistances = named "resistances"
-                Minions = named "minions"
-                NotUnderstood = missing
-                Fighting = true }
+            settle
+                { m with
+                    Status = ""
+                    Title = sprintf "Level %.0f %s" (n [ "level" ]) (Json.string (Json.field "class" j))
+                    Class = Json.string (Json.field "class" j)
+                    Ascendancy = Json.string (Json.field "ascendancy" j)
+                    // what the character has allocated, until it is changed here
+                    Allocated = (if m.Edited then m.Allocated else Json.field "passives" j |> Json.list |> List.map Json.int |> Set.ofList)
+                    Pools = [ row "Life" (n [ "pools"; "life" ]); row "Mana" (n [ "pools"; "mana" ]); row "Energy Shield" (n [ "pools"; "energyShield" ]); row "Spirit" (n [ "pools"; "spirit" ]) ]
+                    Defences = [ row "Armour" (n [ "defences"; "armour" ]); row "Evasion" (n [ "defences"; "evasion" ]); row "Deflection" (n [ "defences"; "deflection" ]); row "Block" (n [ "defences"; "block" ]) ]
+                    Resistances = named "resistances"
+                    Minions = named "minions"
+                    NotUnderstood = missing
+                    Fighting = true }
         | s, _ -> { m with Status = "the simulator did not answer (status " + string s + ")" }
     | Fought r when r.Url <> fightUrl m -> m
     | Fought r ->
@@ -335,9 +394,10 @@ let private quad<'m> : Scene<'m> =
         Mesh.Attribute ("DiffuseColorCoordinates", Data.pack (Data.ofList [ V2f (0.0f, 1.0f); V2f (1.0f, 1.0f); V2f (0.0f, 0.0f); V2f (0.0f, 0.0f); V2f (1.0f, 1.0f); V2f (1.0f, 0.0f) ]))
     }
 
-let private white = V4d (1.0, 1.0, 1.0, 1.0)
+/// (A tint's fourth part is how transparent the art may be before it is cut away.)
+let private white = V4d (1.0, 1.0, 1.0, 0.35)
 
-let private dim = V4d (0.42, 0.42, 0.45, 1.0)
+let private dim = V4d (0.42, 0.42, 0.45, 0.35)
 
 /// A passive's icon: out of the sheet bound above, dim until it is allocated.
 let private icon (m : Model) (p : Passive) : Scene<Msg> =
@@ -401,6 +461,41 @@ let private tree (m : Model) : Node<Msg> =
                             mesh Topology.Triangles { Mesh.Attribute ("Positions", l.Ribbon) }
                 }
             }
+            // the character's ascendancy in the middle: its class art, the ring around it, and its
+            // connections (dim, or the game's orange once both ends are allocated)
+            sg {
+                Sg.Shader { Shaders.sprite }
+                Sg.NoEvents true
+                for a in m.Ascendancies do
+                    if a.Called = m.Ascendancy then
+                        sg {
+                            Sg.Translate (0.0, 0.0, 0.2)
+                            Sg.Scale (artSize)
+                            Sg.Texture ("Atlas", "sprites/ascendancy-background_250_250_BC7.png")
+                            Sg.Uniform ("Rect", a.Art)
+                            Sg.Uniform ("Tint", V4d (0.6, 0.6, 0.6, 0.02))
+                            quad
+                        }
+                        sg {
+                            Sg.Translate (0.0, 0.0, 0.3)
+                            Sg.Scale (ringSize)
+                            Sg.Texture ("Atlas", "sprites/ascendancy-background_1000_1000_BC7.png")
+                            Sg.Uniform ("Rect", V4d (0.0, 0.0, 0.5, 1.0))
+                            Sg.Uniform ("Tint", V4d (0.8, 0.8, 0.8, 0.02))
+                            quad
+                        }
+            }
+            sg {
+                Sg.Shader { Shaders.flat }
+                Sg.NoEvents true
+                Sg.Translate (0.0, 0.0, 0.6)
+                for l in m.AscendedLinks do
+                    if l.Of = m.Ascendancy then
+                        sg {
+                            Sg.Uniform ("Color", (if m.Allocated.Contains l.A && m.Allocated.Contains l.B then V4d (0.686, 0.376, 0.145, 1.0) else V4d (0.227, 0.227, 0.306, 1.0)))
+                            mesh Topology.Triangles { Mesh.Attribute ("Positions", l.Ribbon) }
+                        }
+            }
             // the passives, sheet by sheet: a sheet is bound once for all that are drawn from it
             sg {
                 Sg.Shader { Shaders.sprite }
@@ -410,21 +505,31 @@ let private tree (m : Model) : Node<Msg> =
                     Sg.Texture ("Atlas", "sprites/skills_64_64_BC1.png")
                     for p in m.IconsSmall do
                         icon m p
+                    for p in m.Ascended do
+                        if p.Ascendancy = m.Ascendancy && p.Icon.Contains "skills_64" then icon m p
                 }
                 sg {
                     Sg.Texture ("Atlas", "sprites/skills_128_128_BC1.png")
                     for p in m.IconsLarge do
                         icon m p
+                    for p in m.Ascended do
+                        if p.Ascendancy = m.Ascendancy && p.Icon.Contains "skills_128" then icon m p
                 }
                 sg {
                     Sg.Texture ("Atlas", "sprites/group-background_104_104_BC7.png")
                     for p in m.FramesSmall do
                         frame m p
+                    for p in m.Ascended do
+                        if p.Ascendancy = m.Ascendancy && p.Frame.Contains "_104_104" then frame m p
                 }
                 sg {
                     Sg.Texture ("Atlas", "sprites/group-background_152_156_BC7.png")
                     for p in m.FramesMedium do
                         frame m p
+                    for p in m.Ascended do
+                        if p.Ascendancy = m.Ascendancy && p.Frame.Contains "_152_156" then frame m p
+                    for p in m.Sinister do
+                        if m.Allocated.Contains p.Id then frame m p
                 }
                 sg {
                     Sg.Texture ("Atlas", "sprites/group-background_220_224_BC7.png")
@@ -433,8 +538,8 @@ let private tree (m : Model) : Node<Msg> =
                 }
                 sg {
                     Sg.Texture ("Atlas", "sprites/group-background_92_92_BC7.png")
-                    for p in m.FramesAscendancy do
-                        frame m p
+                    for p in m.Ascended do
+                        if p.Ascendancy = m.Ascendancy && p.Frame.Contains "_92_92" then frame m p
                 }
             }
         }
