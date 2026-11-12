@@ -383,6 +383,7 @@ module Geometry =
         angles p (Vec.angle primary.Position + turn)
         |> List.map (fun a ->
             let dir = Vec.ofAngle a
+            let p = if p.RangeVariation > 0.0 then { p with Range = p.Range * (1.0 + p.RangeVariation * (2.0 * rng.Float() - 1.0)) } else p
             trace rng walls p (Vec.add origin (Vec.scale p.StartOffset dir)) dir alive)
 
     /// Enemies hit by one use: names, each once per hit it receives.

@@ -186,6 +186,15 @@ module Constants =
     /// `passingProjectileSpeed`): Spark 1000.
     let erraticProjectileSpeed = Map.ofList [ "Spark", 100.0 ]
 
+    /// Projectiles that live for a fixed time: speed (units per second, game table Projectiles:
+    /// IceShotShard 2100 tenths) and lifetime in seconds ("Shards last 200ms", wiki Ice Shot).
+    let timedProjectiles = Map.ofList [ "Ice Shot", (210.0, 0.2) ]
+
+    /// Degrees per unit of `total_projectile_spread_angle_override`: Ice Shot's shards have 300
+    /// and spray "within a roughly 135 degree cone" (wiki); the patch that raised the cone
+    /// "by approximately 50%" started from "a 90 Degree Cone", so 200 was 90 degrees.
+    let spreadOverrideDegrees = 0.45
+
     /// Degrees between neighbouring erratic projectiles (Spark's spray widens with every
     /// spark; the angle is not in the data). A guess.
     let erraticFanStep = 15.0

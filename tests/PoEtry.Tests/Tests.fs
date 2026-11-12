@@ -94,9 +94,26 @@ let main _ =
         near 80.0 r.[Fire].Max
         near 40.0 r.[Cold].Max)
 
-    test "conversion never goes backwards" (fun () ->
-        let r = Hit.convert ctx (ModDb.ofList [ Mod.base' (Convert(Fire, Physical)) 100.0 ]) (Map.ofList [ Fire, Range.fixedAt 10.0 ])
-        near 10.0 r.[Fire].Max)
+    test "conversion goes in any direction" (fun () ->
+        // Blueflame Bracers: fire to cold
+        let r = Hit.convert ctx (ModDb.ofList [ Mod.base' (Convert(Fire, Cold)) 100.0 ]) (Map.ofList [ Fire, Range.fixedAt 10.0 ])
+        near 10.0 r.[Cold].Max
+        equal false (r.ContainsKey Fire))
+
+    test "conversion is not recursive within a step, but the second step converts what the first made" (fun () ->
+        // physical to lightning and lightning to cold from items: the lightning stays lightning
+        let items = [ Mod.base' (Convert(Physical, Lightning)) 100.0; Mod.base' (Convert(Lightning, Cold)) 100.0 ]
+        let r = Hit.convert ctx (ModDb.ofList items) (Map.ofList [ Physical, Range.fixedAt 100.0 ])
+        near 100.0 r.[Lightning].Max
+        // wiki: the skill converts 60% to lightning, Call of the Brotherhood lightning to cold: 40 physical, 60 cold
+        let mods = [ Mod.base' (SkillConvert(Physical, Lightning)) 60.0; Mod.base' (Convert(Lightning, Cold)) 100.0 ]
+        let r = Hit.convert ctx (ModDb.ofList mods) (Map.ofList [ Physical, Range.fixedAt 100.0 ])
+        near 40.0 r.[Physical].Max
+        near 60.0 r.[Cold].Max
+        // wiki: the skill converts 80% to fire, Avatar of Fire 75% of the rest: 95 fire
+        let mods = [ Mod.base' (SkillConvert(Physical, Fire)) 80.0; Mod.base' (Convert(Physical, Fire)) 75.0 ]
+        let r = Hit.convert ctx (ModDb.ofList mods) (Map.ofList [ Physical, Range.fixedAt 100.0 ])
+        near 95.0 r.[Fire].Max)
 
     test "converted damage only uses the final type's modifiers" (fun () ->
         let skill = { Skill.make "Strike" [ Attack ] with BaseDamage = Map.ofList [ Physical, Range.fixedAt 100.0 ]; BaseCrit = 0.0 }

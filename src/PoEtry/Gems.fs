@@ -674,13 +674,18 @@ module Gems =
                         Range =
                             (match statOf "spark_pathing_width_bounds", Map.tryFind data.Name Constants.erraticProjectileSpeed, statOf "base_skill_effect_duration" with
                              | Some _, Some speed, Some ms -> speed * ms / 1000.0
-                             | _ -> (ProjectileShape.make 1).Range)
+                             | _ ->
+                                 // shards that live for a fixed time fly as far as their speed takes them
+                                 match (if behind then Map.tryFind data.Name Constants.timedProjectiles else None) with
+                                 | Some (speed, life) -> speed * life
+                                 | None -> (ProjectileShape.make 1).Range)
+                        RangeVariation = (if behind then (statOf "active_skill_projectile_speed_+%_variation_final" |> Option.defaultValue 0.0) / 100.0 else 0.0)
                         SpreadPerProjectile = (if (statOf "spark_pathing_width_bounds").IsSome then Constants.erraticFanStep else 0.0)
                         // "can Hit the same target no more than once every N seconds"; a rain: "Can Hit
                         // each enemy only once every N seconds", one arrow every so often
                         HitInterval = ((statOf "spark_min_time_between_target_clearing_ms" |> Option.defaultValue 0.0) + (statOf "rain_hit_delay_ms" |> Option.defaultValue 0.0)) / 1000.0
                         Every = (statOf "rain_of_arrows_delay_per_arrow" |> Option.defaultValue 0.0) / 1000.0
-                        Spread = (if flagAny "projectiles_nova" then 360.0 elif flagOf "projectiles_barrage" then 0.0 else statOf "total_projectile_spread_angle_override" |> Option.defaultValue 30.0)
+                        Spread = (if flagAny "projectiles_nova" then 360.0 elif flagOf "projectiles_barrage" then 0.0 else (statOf "total_projectile_spread_angle_override" |> Option.map (fun v -> v * Constants.spreadOverrideDegrees) |> Option.defaultValue 30.0))
                         Pierce = (if flagOf "always_pierce" then 100 else int (statOf "projectile_base_number_of_targets_to_pierce" |> Option.defaultValue 0.0))
                         Chains = int (statOf "number_of_chains" |> Option.defaultValue 0.0)
                         // projectiles that drop on their targets, one each, in a number the skill

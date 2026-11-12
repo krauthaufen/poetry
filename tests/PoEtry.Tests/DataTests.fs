@@ -381,6 +381,8 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
             match shards.Delivery with
             | Projectiles p ->
                 equal (box true) (box (p.SkipPrimary && p.FromImpact))
+                // 300 in the data is the wiki's 135 degrees; 210 units/s for 0.2 s, speed varying by half
+                equal (135.0, 42.0, 0.5) (p.Spread, p.Range, p.RangeVariation)
                 // a lone enemy is hit by the arrow only; one standing behind it gets shards
                 let at x = { EnemyDef.atLevel 83 1e6 with Name = sprintf "e%.0f" x; Position = Vec.make x 0.0; Size = 4.0 }
                 let hit alive = Geometry.targetsFrom (Rng 1u) [] 100.0 shards.Delivery 1.0 (at 30.0) alive

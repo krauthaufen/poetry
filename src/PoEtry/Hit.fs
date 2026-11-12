@@ -20,6 +20,8 @@ type ProjectileShape =
       PerCharge: (string * int) option
       /// Projectiles start where the skill lands (on the aimed enemy), not at the player.
       FromImpact: bool
+      /// Each projectile's reach varies by up to this share either way (its speed varies).
+      RangeVariation: float
       /// Shards that spring from the enemy that was hit and fly on: they cannot hit it.
       SkipPrimary: bool
       /// Projectiles that rain down at random over an area around the target (its radius),
@@ -76,6 +78,7 @@ module ProjectileShape =
           Explosion = None
           PerCharge = None
           FromImpact = false
+          RangeVariation = 0.0
           SkipPrimary = false
           Rain = None
           TouchTriggered = false
@@ -189,38 +192,31 @@ module Hit =
     let private conversionShares ctx mods stat from =
         let raw =
             DamageType.all
-            |> List.filter (fun into -> into > from)
+            |> List.filter (fun into -> into <> from)
             |> List.map (fun into -> into, max 0.0 (Mods.sumBase ctx [ stat (from, into) ] mods) / 100.0)
         let total = raw |> List.sumBy snd
         if total > 1.0 then raw |> List.map (fun (t, v) -> t, v / total) else raw
 
-    /// Push base damage through conversion (skill first, then global on what is left),
-    /// type by type in conversion order, so converted damage can convert again further down.
     let private hasAny pred (db: ModDb) = db |> Map.exists (fun stat _ -> pred stat)
 
+    /// Push base damage through conversion: the skill's own first, then everything else on
+    /// the result. Within a step every type converts at once, in any direction, and what
+    /// arrives at a type is not converted again in that step. More than 100% from one type in
+    /// a step is scaled down to 100%.
     let convert ctx (mods: ModDb) (initial: Map<DamageType, Range>) : Map<DamageType, Range> =
         if not (mods |> hasAny (function SkillConvert _ | Convert _ -> true | _ -> false)) then initial else
-        let get t (m: Map<DamageType, Range>) = Map.tryFind t m |> Option.defaultValue Range.zero
-        let addTo t r m = Map.add t (Range.add (get t m) r) m
-        DamageType.all
-        |> List.fold
-            (fun (acc: Map<DamageType, Range>) from ->
-                let pool = get from acc
-                let skillShares = conversionShares ctx mods SkillConvert from
-                let skillTotal = skillShares |> List.sumBy snd
-                let globalShares = conversionShares ctx mods Convert from
-                let globalTotal = globalShares |> List.sumBy snd
-                let kept = (1.0 - skillTotal) * (1.0 - globalTotal)
-                let moved =
-                    DamageType.all
-                    |> List.filter (fun into -> into > from)
-                    |> List.map (fun into ->
-                        let share t xs = xs |> List.tryFind (fst >> (=) t) |> Option.map snd |> Option.defaultValue 0.0
-                        into, share into skillShares + (1.0 - skillTotal) * share into globalShares)
-                let acc = Map.add from (Range.scale kept pool) acc
-                moved |> List.fold (fun a (into, k) -> if k > 0.0 then addTo into (Range.scale k pool) a else a) acc)
-            initial
-        |> Map.filter (fun _ r -> r.Max > 0.0)
+        let step stat (pools: Map<DamageType, Range>) =
+            pools
+            |> Map.fold
+                (fun (acc: Map<DamageType, Range>) from pool ->
+                    let shares = conversionShares ctx mods stat from |> List.filter (fun (_, k) -> k > 0.0)
+                    let kept = 1.0 - (shares |> List.sumBy snd)
+                    (from, kept) :: shares
+                    |> List.fold (fun a (into, k) ->
+                        if k <= 0.0 then a
+                        else Map.add into (Range.add (Map.tryFind into a |> Option.defaultValue Range.zero) (Range.scale k pool)) a) acc)
+                Map.empty
+        initial |> step SkillConvert |> step Convert |> Map.filter (fun _ r -> r.Max > 0.0)
 
     /// "Gain X% of A damage as extra B", taken from post-conversion damage.
     let gain ctx (mods: ModDb) (converted: Map<DamageType, Range>) =
