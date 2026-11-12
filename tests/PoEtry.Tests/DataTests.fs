@@ -445,6 +445,21 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
             | d -> failwithf "%A" d
         | Error e -> failwith e)
 
+    test "Hailstorm Rounds: no clip; the bolts that have built up (50 at most) all rain down at once" (fun () ->
+        let crossbow = (Items.parse db.Value "Rarity: Normal\nMakeshift Crossbow\n--------\n").Weapon
+        match Gems.skill db.Value ModDb.empty crossbow { Gem = "Hailstorm Rounds"; Level = 20; Quality = 0; StatSet = 1; Supports = [] } with
+        | Ok (s, _) ->
+            let value name = s.Mods |> List.sumBy (fun m -> if m.Stat = Named name then m.Value else 0.0)
+            equal 50.0 (value "StoredBoltsMax")
+            equal crossbow.Value.ReloadTime (value "StoredBoltEvery")
+            equal (0, Some "StoredBolts") (s.Clip, s.Consumes)
+            match s.Delivery with
+            | Projectiles p ->
+                // one projectile per stored bolt, each landing within 4 m of the target with an impact of 1 m
+                equal (0, Some("StoredBolts", 1), Some(40.0, 10.0)) (p.Count, p.PerCharge, p.Rain)
+            | d -> failwithf "%A" d
+        | Error e -> failwith e)
+
     test "Ice Shot: the shards spring from the enemy hit and cannot hit it" (fun () ->
         let bow = (Items.parse db.Value "Rarity: Normal\nWarmonger Bow\n--------\n").Weapon
         match Gems.skill db.Value ModDb.empty bow { Gem = "Ice Shot"; Level = 20; Quality = 0; StatSet = 1; Supports = [] } with

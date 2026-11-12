@@ -245,6 +245,11 @@ module Setup =
         let maxResources, startResources =
             if Mods.sumBase Ctx.empty [ Named "DivineFragmentEvery" ] (ModDb.ofList sheet.Mods) > 0.0 then Map.add "DivineFragment" 1 maxResources, Map.add "DivineFragment" 1 startResources
             else maxResources, startResources
+        // bolts that build up by themselves: full at the start
+        let maxResources, startResources =
+            match Behaviours.storedBolts db sheet build with
+            | Some (n, _) -> Map.add "StoredBolts" n maxResources, Map.add "StoredBolts" n startResources
+            | None -> maxResources, startResources
         // Ghost Dance: shrouds as stacks (full at the start), spent when hit
         let ghost = Behaviours.ghostDance db sheet build
         let maxResources, startResources =

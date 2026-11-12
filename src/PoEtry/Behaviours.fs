@@ -87,12 +87,35 @@ module Behaviours =
                 Some(int shrouds, stat "skill_base_ghost_dance_grants_%_evasion_as_es_regeneration_per_minute_if_have_lost_ghost_dance_shroud_recently" / 60.0)
             else None)
 
+    /// Bolts that build up by themselves (Hailstorm Rounds: "Passively generate bolts of ice at
+    /// a frequency equal to reload time, up to a cap"): the most that are kept, and the seconds
+    /// one takes (the weapon's reload time over reload and attack speed, as a reload would be).
+    let storedBolts (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) : (int * float) option =
+        let mods = ModDb.ofList sheet.Mods
+        build.Groups |> List.filter (fun g -> g.Enabled) |> List.collect (fun g -> g.Gems)
+        |> List.filter (fun x -> x.Enabled && not x.IsSupport && (Gems.data db x.Name).IsSome)
+        |> List.tryPick (fun gem ->
+            match Gems.skill db mods (Gems.chooseWeapon db gem.Name sheet.Weapons) { Gem = gem.Name; Level = gem.Level; Quality = gem.Quality; StatSet = 1; Supports = [] } with
+            | Ok (s, _) ->
+                let own name = s.Mods |> List.sumBy (fun m -> if m.Stat = Named name && m.Kind = Base then m.Value else 0.0)
+                let cap, every = own "StoredBoltsMax", own "StoredBoltEvery"
+                if cap > 0.0 && every > 0.0 then
+                    let db' = ModDb.ofList (sheet.Mods @ s.Mods)
+                    let ctx = { Ctx.empty with SkillTags = s.Tags; SkillName = s.Name }
+                    let speed = (1.0 + (Mods.sumInc ctx [ Speed ] db' + Mods.sumInc ctx [ Named "ReloadSpeed" ] db') / 100.0) * Mods.more ctx [ Speed ] db' * Mods.more ctx [ Named "ReloadSpeed" ] db'
+                    Some(int cap, every / max 0.1 speed)
+                else None
+            | Error _ -> None)
+
     let periodics (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) (chargeGenSeconds: float) =
         let mods = ModDb.ofList sheet.Mods
         let sum stat = Mods.sumBase Ctx.empty [ Named stat ] mods
         [ let consume = sum "ConsumeEachChargeEveryMs"
           if consume > 0.0 then
               yield { Name = "consume charges"; Every = consume / 1000.0; Action = ConsumeEach charges }
+          match storedBolts db sheet build with
+          | Some (_, every) -> yield { Name = "stored bolts"; Every = every; Action = GainRandom [ "StoredBolts" ] }
+          | None -> ()
           let fragment = sum "DivineFragmentEvery"
           if fragment > 0.0 then
               yield { Name = "fragment of divinity"; Every = fragment; Action = GainRandom [ "DivineFragment" ] }

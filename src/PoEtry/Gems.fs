@@ -432,6 +432,9 @@ module Gems =
               // "Anguish impacts within a 2.4 metre radius of the target", each with its own impact radius
               ("Requiem", "Requiem"), [ "Rain" ]
               ("Requiem", ""), [ "Rain" ]
+              // "All loaded bolts are fired at once, causing them to rain down over the target area"
+              ("Hailstorm Rounds", "Impact"), [ "Rain" ]
+              ("Hailstorm Rounds", ""), [ "Rain" ]
               // "sprays a cone of ice shards when it hits a target": on from that target
               ("Ice Shot", "Shards"), [ "Behind" ]
               // one use, several strikes: five stabs before the final one; both gouges hit
@@ -855,6 +858,19 @@ module Gems =
                             Clip = 0
                             ReloadTime = 0.0
                             Mods = Mod.base' (Named "WindowSeconds") (ms / 1000.0) :: Mod.base' (Named "WindowRecharge") (needed / (perMinute / 60.0)) :: s.Mods }, cov
+                    | _ when ammoStats |> List.exists (fun (id, v) -> id = "crossbow_ammo_skill_has_passive_reloading" && v <> 0.0) ->
+                        // "Passively generate bolts ... at a frequency equal to reload time, up to a cap.
+                        // ... All loaded bolts are fired at once": no clip; what has built up is the
+                        // number of projectiles, and all of it is spent
+                        { s with
+                            Clip = 0
+                            ReloadTime = 0.0
+                            Consumes = Some "StoredBolts"
+                            Delivery = (match s.Delivery with Projectiles p -> Projectiles { p with Count = 0; PerCharge = Some("StoredBolts", 1) } | d -> d)
+                            Mods =
+                                Mod.base' (Named "StoredBoltsMax") (bolts + supportBolts)
+                                :: Mod.base' (Named "StoredBoltEvery") (weapon |> Option.map (fun w -> w.ReloadTime) |> Option.defaultValue 0.0)
+                                :: Mod.flag (Named "NeedsCharge") :: s.Mods }, cov
                     | _ ->
                     { s with Clip = max 1 (int (bolts + supportBolts)); ReloadTime = weapon |> Option.map (fun w -> w.ReloadTime) |> Option.defaultValue 0.0 }, cov)
         | Some data -> skillFromData db characterMods weapon setup data

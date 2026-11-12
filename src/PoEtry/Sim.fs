@@ -1602,6 +1602,8 @@ module Sim =
                     step.When v && ready st w.Time s && (corpses > 0 || not (needsCorpse s)) && built st s
                     // a form one is in is not pressed again (that would end it)
                     && (match partNamed s "ToggleBuff:" with Some buff -> not (st.Buffs.ContainsKey buff) | None -> true)
+                    // a skill that fires what has built up needs some of it
+                    && (not (partFlag s "NeedsCharge") || (match s.Consumes with Some charge -> (Map.tryFind charge st.Buffs |> Option.exists (fun e -> e.Stacks > 0 && e.Expires > w.Time)) | None -> true))
                     // a skill with a window waits until it is charged again
                     && windowOk st w.Time s
                     // a warp needs something to warp into: an enemy that can be culled, or a projectile
