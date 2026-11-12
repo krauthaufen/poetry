@@ -260,7 +260,7 @@ per row keyed by the stacks it reads.
   | Oracle, no minions | 1 | 1,033 | 190 | 864 | 337 | 100 | 37 |
   | Spirit Walker, 35 minions | 36 | 7,107 | 1,841 | 11,188 | 2,102 | 414 | 323 |
   | Infernalist | 2 | 797 | 157 | 709 | 225 | 99 | 43 |
-  | Monk, 16 minions | 17 | 3,360 (est.) | 642 | 3,365 | 719 | 128 | 90 |
+  | Monk, 16 minions | 17 | not counted | 642 | 3,365 | 719 | 128 | 90 |
 
   So a skill's mods are asked for 7 to 27 times per real change of the stacks they could
   depend on, and hits outnumber an actor's stack changes about 5 to 1. The hand-made
