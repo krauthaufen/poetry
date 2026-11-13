@@ -35,14 +35,14 @@ module Ailments =
         | Bleed -> Physical
         | _ -> Chaos
 
-    let private percentPerSecond a =
+    let percentPerSecond a =
         match a with
         | Ignite -> Constants.ignitePercentPerSecond
         | Bleed -> Constants.bleedPercentPerSecond
         | Poison -> Constants.poisonPercentPerSecond
         | _ -> 0.0
 
-    let private baseDuration a =
+    let baseDuration a =
         match a with
         | Ignite -> Constants.igniteDuration
         | Bleed -> Constants.bleedDuration

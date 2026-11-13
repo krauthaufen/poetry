@@ -100,6 +100,367 @@ module Flat =
         | Fire -> 3
         | Chaos -> 4
 
+    // ---- modifiers, resolved ahead of the fight ----
+    //
+    // The reference asks a ModDb with a Ctx at every hit: it walks the mods of a stat, newest
+    // first, and tests each one's conditions against maps of names. Here a question (a kind of
+    // mod, a list of stats) is worked out once per skill into the values of the mods that
+    // answer it, in the reference's order: those whose conditions the skill alone decides are
+    // kept or dropped for good, a run of unconditional ones at the start is folded into one
+    // number, and what is left carries conditions on numbered buffs and statuses. The mods of
+    // buffs come first in that order (they are the newest); they are kept apart, per stat,
+    // and made anew when a buff with mods comes or goes.
+
+    /// A condition of a mod, its names as numbers (-1: a name nothing in the fight has).
+    type private CC =
+        | CTrue
+        | CFalse
+        | CCrit
+        | CTag of SkillTag
+        | CNamed of string
+        | CBuff of int
+        | CStatus of int
+        | CPerStack of int * float
+        | CPerEnemy of int * float
+        | CNot of CC
+
+    /// One mod's part in an answer (`Slot` < 0), or the place where the buffs' mods of a
+    /// stat go (`Slot`: which).
+    type private Item =
+        { V: float
+          Conds: CC[]
+          Stacky: bool
+          Slot: int }
+
+    /// A question, ready: the answer so far (`Init`, of the items before `Start`) and the items to go through.
+    type private Query =
+        { Items: Item[]
+          Start: int
+          Init: float }
+
+    /// What the conditions are tested against: the buffs and statuses as they were when the
+    /// hit (or the use) began, whatever it has changed since.
+    type private Ev() =
+        member val Q : Query[] = [||] with get, set
+        member val Crit = false with get, set
+        member val Tags : Set<SkillTag> = Set.empty with get, set
+        member val Name = "" with get, set
+        member val BOn = false with get, set
+        member val BHas : bool[] = [||] with get, set
+        member val BStacks : int[] = [||] with get, set
+        /// The charge the skill counts more stacks of, and how many more.
+        member val Extra = -1 with get, set
+        member val ExtraN = 0 with get, set
+        member val SOn = false with get, set
+        member val SHas : bool[] = [||] with get, set
+        member val SStacks : int[] = [||] with get, set
+        member val Iso = false with get, set
+        member val Close = false with get, set
+        member val Open = false with get, set
+        member val IsoId = -1 with get, set
+        member val CloseId = -1 with get, set
+        member val OpenId = -1 with get, set
+        member val Dyn : Item[][] = [||] with get, set
+        member val RageSlot = -1 with get, set
+        /// Rage's more attack damage for the skill (NaN: none).
+        member val RageMore = nan with get, set
+        member val Found = false with get, set
+        // a hit's numbers, by damage type
+        member val RMin : float[] = Array.zeroCreate 5 with get
+        member val RMax : float[] = Array.zeroCreate 5 with get
+        member val RHas : bool[] = Array.zeroCreate 5 with get
+        member val OMin : float[] = Array.zeroCreate 5 with get
+        member val OMax : float[] = Array.zeroCreate 5 with get
+        member val OHas : bool[] = Array.zeroCreate 5 with get
+        member val Has : bool[] = Array.zeroCreate 5 with get
+        member val Un : float[] = Array.zeroCreate 5 with get
+        member val De : float[] = Array.zeroCreate 5 with get
+        member val Has2 : bool[] = Array.zeroCreate 5 with get
+        member val Un2 : float[] = Array.zeroCreate 5 with get
+        member val De2 : float[] = Array.zeroCreate 5 with get
+
+    let private hasStatus (ev: Ev) (i: int) =
+        i >= 0 && ((ev.SOn && ev.SHas.[i]) || (ev.Iso && i = ev.IsoId) || (ev.Close && i = ev.CloseId) || (ev.Open && i = ev.OpenId))
+
+    let private statusStacks (ev: Ev) (i: int) =
+        if i < 0 then 0
+        elif (ev.Open && i = ev.OpenId) || (ev.Close && i = ev.CloseId) || (ev.Iso && i = ev.IsoId) then 1
+        elif ev.SOn && ev.SHas.[i] then ev.SStacks.[i]
+        else 0
+
+    let private buffStacksOf (ev: Ev) (b: int) =
+        if ev.BOn && b >= 0 && ev.BHas.[b] then
+            let n = ev.BStacks.[b]
+            if b = ev.Extra && n > 0 then n + ev.ExtraN else n
+        else 0
+
+    let rec private holds (ev: Ev) (c: CC) : bool =
+        match c with
+        | CTrue | CPerStack _ | CPerEnemy _ -> true
+        | CFalse -> false
+        | CCrit -> ev.Crit
+        | CTag t -> ev.Tags.Contains t
+        | CNamed n -> ev.Name = n
+        | CBuff b -> ev.BOn && b >= 0 && ev.BHas.[b]
+        | CStatus i -> hasStatus ev i
+        | CNot c -> not (holds ev c)
+
+    let private passes (ev: Ev) (it: Item) =
+        let mutable ok = true
+        for c in it.Conds do
+            if ok && not (holds ev c) then ok <- false
+        ok
+
+    /// The mod's value where its conditions hold (`Mod.eval`).
+    let private amount (ev: Ev) (it: Item) =
+        if it.Stacky then
+            let mutable k = 1.0
+            for c in it.Conds do
+                match c with
+                | CPerStack (b, every) -> k <- k * floor (float (buffStacksOf ev b) / every)
+                | CPerEnemy (i, every) -> k <- k * floor (float (statusStacks ev i) / every)
+                | _ -> ()
+            it.V * k
+        else it.V
+
+    /// The sum of the base (or the increased) mods (`Mods.sumBase`, `Mods.sumInc`).
+    let private qSum (ev: Ev) (q: Query) : float =
+        let mutable acc = q.Init
+        for i in q.Start .. q.Items.Length - 1 do
+            let it = q.Items.[i]
+            if it.Slot < 0 then (if it.Conds.Length = 0 || passes ev it then acc <- acc + amount ev it)
+            else
+                for d in ev.Dyn.[it.Slot] do
+                    if d.Conds.Length = 0 || passes ev d then acc <- acc + amount ev d
+        acc
+
+    /// The product of the more mods (`Mods.more`).
+    let private qMore (ev: Ev) (q: Query) : float =
+        let mutable acc = q.Init
+        for i in q.Start .. q.Items.Length - 1 do
+            let it = q.Items.[i]
+            if it.Slot < 0 then (if it.Conds.Length = 0 || passes ev it then acc <- acc * (1.0 + amount ev it / 100.0))
+            else
+                // (Rage's more attack damage is the newest mod of all)
+                if it.Slot = ev.RageSlot && not (System.Double.IsNaN ev.RageMore) && ev.Tags.Contains Attack then acc <- acc * (1.0 + ev.RageMore / 100.0)
+                for d in ev.Dyn.[it.Slot] do
+                    if d.Conds.Length = 0 || passes ev d then acc <- acc * (1.0 + amount ev d / 100.0)
+        acc
+
+    let private qFlag (ev: Ev) (q: Query) : bool =
+        let mutable acc = q.Init <> 0.0
+        if not acc then
+            for i in q.Start .. q.Items.Length - 1 do
+                let it = q.Items.[i]
+                if it.Slot < 0 then (if (it.Conds.Length = 0 || passes ev it) && amount ev it <> 0.0 then acc <- true)
+                else
+                    for d in ev.Dyn.[it.Slot] do
+                        if (d.Conds.Length = 0 || passes ev d) && amount ev d <> 0.0 then acc <- true
+        acc
+
+    /// The override, if there is one (`ev.Found`): the last of the mods in their order.
+    let private qOver (ev: Ev) (q: Query) : float =
+        let mutable v = 0.0
+        ev.Found <- false
+        for i in q.Start .. q.Items.Length - 1 do
+            let it = q.Items.[i]
+            if it.Slot < 0 then
+                if it.Conds.Length = 0 || passes ev it then
+                    v <- amount ev it
+                    ev.Found <- true
+            else
+                for d in ev.Dyn.[it.Slot] do
+                    if d.Conds.Length = 0 || passes ev d then
+                        v <- amount ev d
+                        ev.Found <- true
+        v
+
+    let inline private sumQ (ev: Ev) (i: int) = qSum ev ev.Q.[i]
+    let inline private flagQ (ev: Ev) (i: int) = qFlag ev ev.Q.[i]
+    let inline private incQ (ev: Ev) (i: int) = 1.0 + qSum ev ev.Q.[i] / 100.0
+    /// increased x more of a question asked as two (`Mods.mult`): the increased at i, the more at i + 1.
+    let inline private multQ (ev: Ev) (i: int) = max 0.0 ((1.0 + qSum ev ev.Q.[i] / 100.0) * qMore ev ev.Q.[i + 1])
+
+    /// A stat and a kind as one key.
+    let private statKey (stat: Stat) (kind: ModKind) : string =
+        let c = StatKey.code stat
+        (if c >= 0 then "\u0003" + string c else StatKey.name stat) + "|" + string (ModKind.number kind)
+
+    /// A mod's conditions with their names as numbers. `skill`: the tags and name of the
+    /// skill, where it is known (its conditions are then decided here).
+    let private compileConds (buffId: string -> int) (statusId: string -> int) (skill: (Set<SkillTag> * string) option) (conds: Cond list) : CC[] option * bool =
+        let rec one (c: Cond) : CC =
+            match c with
+            | IsCrit -> CCrit
+            | SkillIs t -> (match skill with Some (tags, _) -> (if tags.Contains t then CTrue else CFalse) | None -> CTag t)
+            | SkillNamed n -> (match skill with Some (_, name) -> (if name = n then CTrue else CFalse) | None -> CNamed n)
+            | WhileBuff b -> CBuff(buffId b)
+            | EnemyHas st -> CStatus(statusId st)
+            | PerStack (b, every) -> CPerStack(buffId b, every)
+            | PerEnemyStack (st, every) -> CPerEnemy(statusId st, every)
+            | Not inner ->
+                match one inner with
+                | CTrue | CPerStack _ | CPerEnemy _ -> CFalse
+                | CFalse -> CTrue
+                | x -> CNot x
+        let all = conds |> List.map one
+        if all |> List.contains CFalse then None, false
+        else
+            let kept = all |> List.filter (fun c -> c <> CTrue) |> Array.ofList
+            Some kept, kept |> Array.exists (fun c -> match c with CPerStack _ | CPerEnemy _ -> true | _ -> false)
+
+    /// A question from its items in the reference's order: what can be worked out now is.
+    let private makeQuery (kind: ModKind) (items: Item list) : Query =
+        let items = Array.ofList items
+        let fixed' (it: Item) = it.Slot < 0 && it.Conds.Length = 0
+        match kind with
+        | Flag ->
+            if items |> Array.exists (fun it -> fixed' it && it.V <> 0.0) then { Items = [||]; Start = 0; Init = 1.0 }
+            else { Items = items |> Array.filter (fun it -> not (fixed' it)); Start = 0; Init = 0.0 }
+        | Override ->
+            // (the last one that holds is the answer: nothing before the last sure one matters)
+            let mutable from = 0
+            for i in 0 .. items.Length - 1 do
+                if fixed' items.[i] then from <- i
+            { Items = (if items.Length = 0 then items else items.[from..]); Start = 0; Init = 0.0 }
+        | _ ->
+            let mutable acc = if kind = More then 1.0 else 0.0
+            let mutable start = 0
+            while start < items.Length && fixed' items.[start] do
+                acc <- (if kind = More then acc * (1.0 + items.[start].V / 100.0) else acc + items.[start].V)
+                start <- start + 1
+            { Items = items; Start = start; Init = acc }
+
+    // ---- the questions the engine asks of a skill ----
+
+    [<Literal>]
+    let private MSkill = 0
+    /// Asked with nothing known (`Ctx.empty`): no skill, no buffs, no enemy.
+    [<Literal>]
+    let private MEmpty = 1
+    /// Asked as the skill's damage over time is: without the skill being a spell or an attack.
+    [<Literal>]
+    let private MDot = 2
+
+    let private sites = ResizeArray<int * ModKind * Stat list>()
+    let private site (mode: int) (kind: ModKind) (stats: Stat list) : int =
+        sites.Add((mode, kind, stats))
+        sites.Count - 1
+    /// The increased and the more of the stats (for `multQ`).
+    let private siteMult (mode: int) (stats: Stat list) : int =
+        let i = site mode Inc stats
+        site mode More stats |> ignore
+        i
+    let private named (n: string) = [ Named n ]
+    let private perType (mode: int) (kind: ModKind) (f: DamageType -> Stat list) : int[] =
+        DamageType.all |> List.map (fun t -> site mode kind (f t)) |> Array.ofList
+    let private perAilment (make: Ailment -> int) : int[] = allAilments |> List.map make |> Array.ofList
+    let private scopes (t: DamageType) = [ Damage AllDamage; Damage(OfType t) ] @ (if DamageType.isElemental t then [ Damage Elemental ] else [])
+
+    let private qOpenMore = site MEmpty Base (named "OpenWeaknessMore")
+    let private qReveal = site MEmpty Flag (named "RevealWeakness")
+    let private qHitChance = site MSkill Override [ HitChance ]
+    let private qAccuracy = site MSkill Base (named "Accuracy")
+    let private qAccuracyMult = siteMult MSkill (named "Accuracy")
+    let private qEnemyTaken = site MSkill Inc (named "EnemyDamageTaken")
+    let private qCritOver = site MSkill Override [ CritChance ]
+    let private qCritBase = site MSkill Base [ CritChance ]
+    let private qCritMult = siteMult MSkill [ CritChance ]
+    let private qMaxCrit = site MSkill Base (named "MaxCritChance")
+    let private qLuckyCrit = site MSkill Flag (named "LuckyCrit")
+    let private qInevitable = site MSkill Flag (named "InevitableCrits")
+    let private qBifurcate = site MSkill Flag (named "BifurcateCrits")
+    let private qLucky = site MSkill Flag [ LuckyDamage ]
+    let private qLuckyChance = site MSkill Base (named "LuckyDamageChance")
+    let private qCritBonus = site MSkill Base [ CritBonus ]
+    let private qCritBonusMult = siteMult MSkill [ CritBonus ]
+    let private qDouble = site MSkill Base [ DoubleDamageChance ]
+    let private qAddedEffect = siteMult MSkill [ AddedDamageEffect ]
+    let private qAddedMin = perType MSkill Base (fun t -> [ AddedMin t ])
+    let private qAddedMax = perType MSkill Base (fun t -> [ AddedMax t ])
+    let private pairs (make: DamageType * DamageType -> Stat) =
+        [| for from in DamageType.all do
+            for into in DamageType.all -> site MSkill Base [ make (from, into) ] |]
+    let private qGain = pairs GainAs
+    let private qSkillConvert = pairs SkillConvert
+    let private qConvert = pairs Convert
+    let private qNoNonFire = site MSkill Flag (named "DealNoNonFire")
+    let private qDamage = DamageType.all |> List.map (fun t -> siteMult MSkill (scopes t)) |> Array.ofList
+    let private qNegate = site MSkill Base (named "NegateEnemyResistChance")
+    let private qEnemyResist = perType MSkill Base (fun t -> named ("EnemyResist:" + DamageType.name t))
+    let private qPen = perType MSkill Base (fun t -> [ Penetration t ])
+    let private qPenFloorOver = site MSkill Override (named "PenetrationFloorOverride")
+    let private qPenFloor = site MSkill Base (named "PenetrationFloor")
+    let private qIgnoreElemental = site MSkill Flag (named "IgnoreElementalResist")
+    let private qIgnoreResist = perType MSkill Flag (fun t -> named ("IgnoreResist:" + DamageType.name t))
+    let private qCulling = site MSkill Flag (named "CullingStrike")
+    let private qCullThreshold = site MSkill Inc (named "CullingThreshold")
+    let private qCloseMore = site MSkill Base (named "CloseCombatMore")
+    let private qFarMore = site MSkill Base (named "FarCombatMore")
+    let private qAllIgnites = site MSkill Flag (named "AllDamageIgnites")
+    let private qAllChills = site MSkill Flag (named "AllDamageChills")
+    let private qAllShocks = site MSkill Flag (named "AllDamageShocks")
+    let private qAilChance = perAilment (fun a -> site MSkill Base [ AilmentChance a ])
+    let private qAilChanceMult = perAilment (fun a -> siteMult MSkill [ AilmentChance a ])
+    let private qFaster = site MSkill Inc (named "FasterAilments")
+    let private qFasterIgnite = site MSkill Inc [ Named "FasterAilments"; Named "FasterIgnite" ]
+    let private qMagnitude = perAilment (fun a -> siteMult MSkill [ AilmentMagnitude(Some a); AilmentMagnitude None ])
+    let private qDuration = perAilment (fun a -> siteMult MSkill [ AilmentDuration(Some a); AilmentDuration None ])
+    let private qBleedDuration = site MSkill Override (named "BaseBleedDuration")
+    let private qPoisonDuration = site MSkill Override (named "BasePoisonDuration")
+    let private qAilStacks = perAilment (fun a -> site MSkill Base [ AilmentStacks a ])
+    let private qCanElectrocute = site MSkill Flag (named "CanElectrocute")
+    let private qCanPin = site MSkill Flag (named "CanPin")
+    let private qBuildup = perAilment (fun a -> siteMult MSkill [ Buildup a ])
+    let private qNoHitDamage = site MSkill Flag (named "NoHitDamage")
+    let private qBreakPhysical = site MSkill Base (named "ArmourBreakOfPhysical")
+    let private qBreakFire = site MSkill Base (named "ArmourBreakOfFire")
+    let private qBreakDamage = site MSkill Base (named "ArmourBreakOfDamage")
+    let private qBreakFlat = site MSkill Base (named "ArmourBreakFlat")
+    let private qBreakAmount = siteMult MSkill (named "ArmourBreakAmount")
+    let private qBreakDuration = site MSkill Inc (named "ArmourBreakDuration")
+    let private qBrokenEffect = site MSkill Inc (named "FullyBrokenArmourEffect")
+    let private qBrokenAll = site MSkill Flag (named "BrokenArmourAllDamage")
+    let private qBrokenFire = site MSkill Flag (named "BrokenArmourFire")
+    let private qBrokenColdLightning = site MSkill Flag (named "BrokenArmourColdLightning")
+    let private qManaLeech = site MSkill Base [ ManaLeech ]
+    let private qManaLeechAmount = siteMult MSkill (named "ManaLeechAmount")
+    let private qLifeLeech = site MSkill Base (named "LifeLeech")
+    let private qLifeLeechAmount = siteMult MSkill (named "LifeLeechAmount")
+    let private qLifeOnHit = site MSkill Base (named "LifeOnHit")
+    let private qManaOnHit = site MSkill Base (named "ManaOnHit")
+    let private qManaOnKill = site MEmpty Base [ ManaOnKill ]
+    let private qManaPercentOnKill = site MEmpty Base (named "ManaPercentOnKill")
+    let private qSkillDuration = siteMult MSkill [ SkillDuration ]
+    let private qDotDamageAs = DamageType.all |> List.map (fun t -> siteMult MDot (scopes t)) |> Array.ofList
+    let private qDotDamage = siteMult MDot (named "DotDamage")
+    let private qSpellDotDamage = siteMult MSkill (named "DotDamage")
+    let private qRageOnHit = site MSkill Base (named "RageOnHit")
+    let private qArea = siteMult MSkill [ AreaOfEffect ]
+    let private qProjectiles = site MSkill Base [ AdditionalProjectiles ]
+    let private qExtraProjectiles2 = site MSkill Base (named "ExtraProjectileChance2")
+    let private qExtraProjectiles1 = site MSkill Base (named "ExtraProjectileChance1")
+    let private qPierce = site MSkill Base [ Pierce ]
+    let private qPierceChance = site MSkill Base (named "PierceChance")
+    let private qChains = site MSkill Base [ Chains ]
+    let private qTerrainChain = site MSkill Base (named "TerrainChain")
+    let private qAftershock = site MSkill Base (named "AftershockChance")
+    let private qCooldownRecovery = siteMult MSkill [ CooldownRecovery ]
+    let private qDoubleUses = site MSkill Base (named "DoubleCooldownUses")
+    let private qLosePools = site MSkill Base (named "LosePoolsOnUse")
+    let private qDodgeDistance = site MSkill Base (named "DodgeRollDistance")
+    let private qSpeed = siteMult MSkill [ Speed ]
+    let private qFixedUse = site MSkill Base (named "FixedUseTime")
+    let private qExtraCost = site MSkill Base (named "ExtraCostPercentOfMaxMana")
+    let private qManaCost = siteMult MSkill [ ManaCost ]
+    let private qCostEfficiency = site MSkill Inc [ ManaCostEfficiency ]
+    let private qSkipConsume = site MEmpty Base (named "ChargeSkipConsume")
+    let private qConsumeEvery = site MEmpty Base (named "ConsumeChargeEveryMs")
+    let private qConsumeCount = site MEmpty Base (named "ConsumeChargeCount")
+    let private qRageEffect = siteMult MEmpty (named "RageEffect")
+
+    let private damageTypes = Array.ofList DamageType.all
+
     // ---- a program ----
 
     /// A reaction with its names as numbers (see `Reaction`).
@@ -177,7 +538,22 @@ module Flat =
           /// The charge whose stacks the skill counts more of ("N additional consumed"), and
           /// how many more (see `Sim.skillStacks`).
           StackCharge: string
+          StackBuff: int
           StackExtra: int
+          /// The answers to the engine's questions (see `sites`), and to each archon's.
+          Q: Query[]
+          QArchon: Query[]
+          /// Base damage by type.
+          BaseMin: float[]
+          BaseMax: float[]
+          /// Whether a mod of the character or the skill gains damage as extra, or converts it.
+          HasGain: bool
+          HasConvert: bool
+          DotTags: Set<SkillTag>
+          SpellDot: bool
+          IsMelee: bool
+          /// The buff whose stacks add projectiles (-1: none).
+          PerChargeBuff: int
           Pattern: (HitTiming * float) list
           CostCtx: Ctx
           // where its numbers go
@@ -245,6 +621,22 @@ module Flat =
             { Fight: Fight
               Vitals: PlayerStats option
               BuffNames: string[]
+              BuffIds: Dictionary<string, int>
+              /// Where the mods of buffs go, by stat and kind; how many such places; those of
+              /// gained and of converted damage; Rage's.
+              DynKeys: Dictionary<string, int>
+              DynCount: int
+              NoDyn: Item[][]
+              GainSlots: int[]
+              ConvSlots: int[]
+              RageSlot: int
+              /// By buff: the chance of one more when it is gained (asked of the first skill).
+              QExtra: Query[]
+              SIso: int
+              SClose: int
+              SOpen: int
+              /// The statuses an enemy's state gives it, in `derivedStatuses`' order.
+              SDerived: int[]
               /// The buffs in the order of their names (the order the reference's maps go through them).
               BuffOrder: int[]
               StatusNames: string[]
@@ -312,7 +704,6 @@ module Flat =
               CKeptOf: int[]
               CLostOf: int[]
               IsCharge: bool[]
-              ExtraChance: Stat list[]
               CGained: int[]
               CExpired: int[]
               /// Ailments: where their damage goes, their statuses, their counts.
@@ -511,6 +902,23 @@ module Flat =
                 reject (what + " of a skill the player does not have")
                 0
 
+        // ---- where the mods of buffs go ----
+        let dynKeys = Dictionary<string, int>()
+        let dynStats = ResizeArray<Stat>()
+        let dynOf (stat: Stat) (kind: ModKind) =
+            let key = statKey stat kind
+            if not (dynKeys.ContainsKey key) then
+                dynKeys.[key] <- dynStats.Count
+                dynStats.Add stat
+            dynKeys.[key]
+        let buffMods (mods: Mod list) =
+            for m in mods do
+                dynOf m.Stat m.Kind |> ignore
+        let rageSlot = dynOf (Damage AllDamage) More
+        // (what a monster's hit can leave on the player)
+        dynOf (Named "ShockTaken") Base |> ignore
+        dynOf Speed More |> ignore
+
         // ---- every mod there can be ----
         let checkMods (mods: Mod list) =
             for m in mods do
@@ -574,6 +982,7 @@ module Flat =
             match r with
             | GrantBuff (name, duration, maxStacks, mods) ->
                 checkMods mods
+                buffMods mods
                 RGrantBuff(buff name, duration, maxStacks, mods)
             | ApplyDebuff (name, duration, maxStacks, mods) ->
                 let blocked = all |> List.map (fun s -> s.Mods |> List.exists (fun m -> m.Stat = Named("CannotInflict:" + name))) |> Array.ofList
@@ -671,6 +1080,7 @@ module Flat =
                         PConsumeEach(rs |> List.map buff |> Array.ofList)
                     | GainTimedBuff (b, chance, duration, maxStacks, mods) ->
                         checkMods mods
+                        buffMods mods
                         PGainTimedBuff(buff b, chance, duration, maxStacks, mods)
                     | HealLife amount -> PHealLife(amount, counts.Id "healed")
                     | TriggerNamed name -> PTrigger(skillId "a periodic trigger" name)
@@ -687,6 +1097,7 @@ module Flat =
                 if c.Variants.IsEmpty then reject "a cycle without variants"
                 for v in c.Variants do
                     checkMods v
+                    buffMods v
                 ({ Buff = buff c.Name
                    Period = c.Period
                    Variants = Array.ofList c.Variants
@@ -696,6 +1107,7 @@ module Flat =
             player.Archons
             |> List.map (fun a ->
                 checkMods a.Mods
+                buffMods a.Mods
                 ({ Buff = buff a.Name
                    Stat = a.OnIgniteStat
                    Duration = a.Duration
@@ -733,10 +1145,39 @@ module Flat =
         for charge in consumed do
             buff charge |> ignore
             consumedOf.Add charge
+        // a skill's answers: its mods and the character's, newest first, by stat and kind
+        let queriesOf (s: Skill) : (int * ModKind * Stat list) -> Query =
+            let byKey = Dictionary<string, ResizeArray<Mod>>()
+            for m in List.rev (player.Mods @ s.Mods) do
+                let key = statKey m.Stat m.Kind
+                if not (byKey.ContainsKey key) then byKey.[key] <- ResizeArray<Mod>()
+                byKey.[key].Add m
+            let dotTags = s.Tags |> Set.remove Spell |> Set.remove Attack
+            fun (mode, kind, stats) ->
+                [ for stat in stats do
+                    let key = statKey stat kind
+                    match dynKeys.TryGetValue key with
+                    | true, slot -> yield { V = 0.0; Conds = [||]; Stacky = false; Slot = slot }
+                    | _ -> ()
+                    match byKey.TryGetValue key with
+                    | true, mods ->
+                        for m in mods do
+                            if mode = MEmpty then
+                                match Mod.eval Ctx.empty m with
+                                | Some v -> yield { V = v; Conds = [||]; Stacky = false; Slot = -1 }
+                                | None -> ()
+                            else
+                                match compileConds buffs.Id statuses.Id (Some((if mode = MDot then dotTags else s.Tags), s.Name)) m.Conds with
+                                | Some conds, stacky -> yield { V = m.Value; Conds = conds; Stacky = stacky; Slot = -1 }
+                                | None, _ -> ()
+                    | _ -> () ]
+                |> makeQuery kind
         let skills =
             all
             |> List.map (fun s ->
                 let flag (name: string) = s.Mods |> List.exists (fun m -> m.Stat = Named name)
+                let query = queriesOf s
+                let own = player.Mods @ s.Mods
                 // (as `Sim.skillStacks`: a part counts like the skill it belongs to)
                 let stackCharge =
                     s.Consumes
@@ -752,6 +1193,17 @@ module Flat =
                   Parts = (s :: s.Parts) |> List.map (fun p -> skillIds.[p.Name]) |> Array.ofList
                   Consumes = (match s.Consumes with Some c -> buffs.Id c | None -> -1)
                   StackCharge = stackCharge |> Option.defaultValue ""
+                  StackBuff = (match stackCharge with Some c -> buffs.Id c | None -> -1)
+                  Q = sites.ToArray() |> Array.map query
+                  QArchon = player.Archons |> List.map (fun a -> query (MSkill, Base, [ Named a.OnIgniteStat ])) |> Array.ofList
+                  BaseMin = DamageType.all |> List.map (fun t -> match Map.tryFind t s.BaseDamage with Some r -> r.Min | None -> 0.0) |> Array.ofList
+                  BaseMax = DamageType.all |> List.map (fun t -> match Map.tryFind t s.BaseDamage with Some r -> r.Max | None -> 0.0) |> Array.ofList
+                  HasGain = own |> List.exists (fun m -> match m.Stat with GainAs _ -> true | _ -> false)
+                  HasConvert = own |> List.exists (fun m -> match m.Stat with SkillConvert _ | Convert _ -> true | _ -> false)
+                  DotTags = s.Tags |> Set.remove Spell |> Set.remove Attack
+                  SpellDot = s.Tags.Contains(Tag "SpellDot")
+                  IsMelee = s.Tags.Contains Melee
+                  PerChargeBuff = (match s.Delivery with Projectiles { PerCharge = Some (charge, _) } -> buffs.Id charge | _ -> -1)
                   StackExtra = stackExtra
                   Pattern = Map.tryFind s.Name player.HitPattern |> Option.defaultValue (s.Hits |> List.map (fun (f, m) -> DuringUse f, m))
                   CostCtx = { Ctx.empty with SkillTags = s.Tags; SkillName = s.Name }
@@ -787,6 +1239,8 @@ module Flat =
                   SpendsEmpowered = s.Tags.Contains Attack && not (s.Tags.Contains Warcry)
                   SpendsRepeats = s.Tags.Contains Attack && s.Tags.Contains(Tag "Type:Barrageable") })
             |> Array.ofList
+        let sIso, sClose, sOpen = statuses.Id "Isolated", statuses.Id "Close", statuses.Id "OpenWeakness"
+        let sDerived = derivedStatuses |> List.map statuses.Id |> Array.ofList
         let rotation = player.Rotation |> List.map (fun step -> skillId "a step" step.Use, step.When) |> Array.ofList
 
         // ---- the names are all known now ----
@@ -826,6 +1280,23 @@ module Flat =
                 { Fight = fight
                   Vitals = player.Vitals
                   BuffNames = buffNames
+                  BuffIds = buffs.Ids
+                  DynKeys = dynKeys
+                  DynCount = dynStats.Count
+                  NoDyn = Array.create dynStats.Count [||]
+                  GainSlots = [| for i in 0 .. dynStats.Count - 1 do match dynStats.[i] with GainAs _ -> yield i | _ -> () |]
+                  ConvSlots = [| for i in 0 .. dynStats.Count - 1 do match dynStats.[i] with SkillConvert _ | Convert _ -> yield i | _ -> () |]
+                  RageSlot = rageSlot
+                  QExtra =
+                    (match player.Skills with
+                     | first :: _ ->
+                        let query = queriesOf first
+                        buffNames |> Array.map (fun n -> query (MEmpty, Base, [ Named("ExtraChargeChance:" + n); Named "ExtraChargeChance:Any" ]))
+                     | [] -> [||])
+                  SIso = sIso
+                  SClose = sClose
+                  SOpen = sOpen
+                  SDerived = sDerived
                   BuffOrder = buffs.Order
                   StatusNames = statusNames
                   StatusOrder = statuses.Order
@@ -876,7 +1347,6 @@ module Flat =
                   CKeptOf = cKeptOf
                   CLostOf = cLostOf
                   IsCharge = buffNames |> Array.map (fun n -> n.EndsWith "Charge")
-                  ExtraChance = buffNames |> Array.map (fun n -> [ Named("ExtraChargeChance:" + n); Named "ExtraChargeChance:Any" ])
                   CGained = cGained
                   CExpired = cExpired
                   AilmentSource = ailmentSource
@@ -1049,6 +1519,20 @@ module Flat =
           Until: float
           Most: int }
 
+    /// What a hit asks of an enemy as a defender (see `numsFor`): NaN where not asked yet.
+    type private DefNums =
+        { mutable Of: Defender
+          mutable Base: Defender
+          mutable X: float
+          MaxRes: float[]
+          Res: float[]
+          Taken: float[]
+          Poise: float[]
+          mutable Armour: float
+          mutable PhysFlat: float
+          mutable Threshold: float
+          mutable Flam: float }
+
     type private Foe =
         { Info: EnemyInfo
           Index: int
@@ -1075,6 +1559,13 @@ module Flat =
           /// Its statuses (`Sim.status`) with their numbers, good until a debuff or the damage
           /// over time changes, or its life crosses one of the marks that are statuses.
           mutable Status: Map<string, int>
+          /// The statuses by number: whether it has each, and its stacks. Made anew when they
+          /// change, never changed in place: a hit keeps the ones it began with.
+          mutable SHas: bool[]
+          mutable SStacks: int[]
+          mutable StatusMapStale: bool
+          DefA: DefNums
+          DefB: DefNums
           mutable StatusKeys: int[]
           mutable StatusStale: bool
           /// The damage over time the statuses were worked out with.
@@ -1123,6 +1614,21 @@ module Flat =
           /// Counts the changes to what the buffs' mods are: a skill's mods with the buffs
           /// (`Sim.skillDb`) are good while this is what it was when they were made.
           mutable ModsVersion: int
+          /// Counts the changes to which buffs there are and their stacks; the buffs as they
+          /// were at the count `SnapVersion`.
+          mutable BuffsVersion: int
+          mutable SnapHas: bool[]
+          mutable SnapStacks: int[]
+          mutable SnapVersion: int
+          /// The buffs' mods per stat (see `dyn`), for the mods as they were at `DynVersion`.
+          mutable Dyn: Item[][]
+          mutable DynVersion: int
+          BComp: (int * Item)[][]
+          BCompOf: Mod list[]
+          RageMore: float[]
+          RageVer: int[]
+          Evs: ResizeArray<Ev>
+          mutable EvDepth: int
           Dbs: ModDb[]
           DbVersion: int[]
           Cooldowns: float[]
@@ -1219,7 +1725,9 @@ module Flat =
 
     let private setBuff (s: State) (id: int) (stacks: int) (expires: float) (mods: Mod list) =
         let had = s.BHas.[id]
-        if not had || s.BStacks.[id] <> stacks then s.BuffMapStale <- true
+        if not had || s.BStacks.[id] <> stacks then
+            s.BuffMapStale <- true
+            s.BuffsVersion <- s.BuffsVersion + 1
         if not (had && s.BStacks.[id] = stacks && obj.ReferenceEquals(s.BMods.[id], mods)) then
             if not mods.IsEmpty || (had && not s.BMods.[id].IsEmpty) || id = s.P.BRage then s.ModsVersion <- s.ModsVersion + 1
         s.BHas.[id] <- true
@@ -1231,6 +1739,7 @@ module Flat =
     let private removeBuff (s: State) (id: int) =
         if s.BHas.[id] then
             s.BuffMapStale <- true
+            s.BuffsVersion <- s.BuffsVersion + 1
             if not s.BMods.[id].IsEmpty || id = s.P.BRage then s.ModsVersion <- s.ModsVersion + 1
             s.BHas.[id] <- false
             s.BStacks.[id] <- 0
@@ -1349,53 +1858,85 @@ module Flat =
             e.ActiveOf <- e.Dots
             active
 
-    /// An enemy's statuses (`Sim.statusOf`).
-    let private status (s: State) (e: Foe) : Map<string, int> =
+    /// An enemy's statuses (`Sim.statusOf`), by number.
+    let private refreshStatus (s: State) (e: Foe) =
         let def = e.Def
         let cullable = e.Life <= e.Info.CullLife
         let low = e.Life <= 0.35 * def.Life
         let full = e.Life >= def.Life
         if e.StatusStale || not (obj.ReferenceEquals(e.StatusDots, e.Dots)) || cullable <> e.WasCullable || low <> e.WasLow || full <> e.WasFull then
             let p = s.P
-            let mutable m : Map<string, int> = Map.empty
+            let has = Array.copy e.Has
+            let stacks = Array.copy e.Stacks
             let mutable cursed = false
             let mutable marked = false
             let mutable exposed = false
-            for id in 0 .. e.Has.Length - 1 do
-                if e.Has.[id] then
-                    m <- Map.add p.StatusNames.[id] e.Stacks.[id] m
+            for id in 0 .. has.Length - 1 do
+                if has.[id] then
                     if p.StatusCurse.[id] then cursed <- true
                     if p.StatusMark.[id] then marked <- true
                     if p.StatusExposure.[id] then exposed <- true
-            let m =
-                activeDots e
-                |> List.choose (fun d -> d.Ailing |> Option.map Ailment.status)
-                |> List.countBy id
-                |> List.fold (fun m (k, n) -> Map.add k n m) m
-            let ailing = m |> Map.exists (fun k _ -> allAilments |> List.exists (fun a -> Ailment.status a = k))
-            let m =
-                m
-                |> fun m -> if def.Moving then Map.add "Moving" 1 m else m
-                |> fun m -> if cullable then Map.add "Cullable" 1 m else m
-                |> fun m -> if ailing then Map.add "AnyAilment" 1 m else m
-                |> fun m -> if cursed then Map.add "Cursed" 1 m else m
-                |> fun m -> if marked then Map.add "Marked" 1 m else m
-                |> fun m -> if [ "Frozen"; "HeavilyStunned"; "Electrocuted"; "Pinned" ] |> List.exists m.ContainsKey then Map.add "Immobilised" 1 m else m
-                |> fun m ->
-                    match [ "Ignited"; "Chilled"; "Frozen"; "Shocked"; "Electrocuted" ] |> List.filter m.ContainsKey |> List.length with
-                    | 0 -> m
-                    | n -> Map.add "ElementalAilments" n m
-                |> fun m -> if exposed then Map.add "Exposed" 1 m else m
-                |> fun m -> if def.Rarity = Rare || def.Rarity = Unique then Map.add "RareOrUnique" 1 m else m
-                |> fun m -> if low then Map.add "LowLife" 1 m else m
-                |> fun m -> if full then Map.add "FullLife" 1 m else m
-            e.Status <- m
-            e.StatusKeys <- m |> Map.toArray |> Array.map (fun (k, _) -> p.StatusIds.[k])
+            // the ailments that deal damage: as many stacks as count
+            let mutable first = true
+            for d in activeDots e do
+                match d.Ailing with
+                | Some a ->
+                    let id = p.AilmentStatus.[ailmentIndex a]
+                    if first then
+                        for b in Ailment.damaging do
+                            if activeDots e |> List.exists (fun x -> x.Ailing = Some b) then
+                                has.[p.AilmentStatus.[ailmentIndex b]] <- true
+                                stacks.[p.AilmentStatus.[ailmentIndex b]] <- 0
+                        first <- false
+                    stacks.[id] <- stacks.[id] + 1
+                | None -> ()
+            let on (name: Ailment) = has.[p.AilmentStatus.[ailmentIndex name]]
+            let set (slot: int) =
+                has.[p.SDerived.[slot]] <- true
+                stacks.[p.SDerived.[slot]] <- 1
+            let ailing = allAilments |> List.exists on
+            if def.Moving then set 0
+            if cullable then set 1
+            if ailing then set 2
+            if cursed then set 3
+            if marked then set 4
+            if on Freeze || on HeavyStun || on Electrocute || on Pin then set 5
+            (let n = (if on Ignite then 1 else 0) + (if on Chill then 1 else 0) + (if on Freeze then 1 else 0) + (if on Shock then 1 else 0) + (if on Electrocute then 1 else 0)
+             if n > 0 then
+                set 6
+                stacks.[p.SDerived.[6]] <- n)
+            if exposed then set 7
+            if def.Rarity = Rare || def.Rarity = Unique then set 8
+            if low then set 9
+            if full then set 10
+            e.SHas <- has
+            e.SStacks <- stacks
+            let mutable count = 0
+            for id in 0 .. has.Length - 1 do
+                if has.[id] then count <- count + 1
+            let keys = Array.zeroCreate count
+            let mutable k = 0
+            for id in 0 .. has.Length - 1 do
+                if has.[id] then
+                    keys.[k] <- id
+                    k <- k + 1
+            e.StatusKeys <- keys
+            e.StatusMapStale <- true
             e.StatusStale <- false
             e.StatusDots <- e.Dots
             e.WasCullable <- cullable
             e.WasLow <- low
             e.WasFull <- full
+
+    /// An enemy's statuses as the map the reference has (for what reads them by name).
+    let private status (s: State) (e: Foe) : Map<string, int> =
+        refreshStatus s e
+        if e.StatusMapStale then
+            let mutable m = Map.empty
+            for id in e.StatusKeys do
+                m <- Map.add s.P.StatusNames.[id] e.SStacks.[id] m
+            e.Status <- m
+            e.StatusMapStale <- false
         e.Status
 
     /// An enemy as a defender: its own mods and its debuffs' (`Sim.defender`).
@@ -1460,7 +2001,7 @@ module Flat =
             for e in s.Foes do
                 if e.Life > 0.0 then
                     if e.Dots.IsEmpty then
-                        status s e |> ignore
+                        refreshStatus s e
                         let share = dt / n
                         for k in e.StatusKeys do
                             s.Uptime.[k] <- s.Uptime.[k] + share
@@ -1480,7 +2021,7 @@ module Flat =
                         let span = if dps > 0.0 && e.Life <= dps * dt then e.Life / dps else dt
                         let life = e.Life - dps * span
                         let dead = life <= 1e-9
-                        status s e |> ignore
+                        refreshStatus s e
                         let keys = e.StatusKeys
                         for d in active do
                             addDamage s d.Label (rate d * span)
@@ -1777,6 +2318,117 @@ module Flat =
             e.HasEntropy <- true
             hit
 
+    // ---- the numbers of a hit ----
+
+    /// The buffs as they are now, for conditions to be tested against later.
+    let private snapBuffs (s: State) =
+        if s.SnapVersion <> s.BuffsVersion then
+            s.SnapHas <- Array.copy s.BHas
+            s.SnapStacks <- Array.copy s.BStacks
+            s.SnapVersion <- s.BuffsVersion
+
+    /// A buff's mods as items, each with the place it goes to.
+    let private compileBuffMods (p: Program) (mods: Mod list) : (int * Item)[] =
+        let id (ids: Dictionary<string, int>) (name: string) = match ids.TryGetValue name with | true, i -> i | _ -> -1
+        [| for m in mods do
+            let slot =
+                match p.DynKeys.TryGetValue(statKey m.Stat m.Kind) with
+                | true, slot -> slot
+                | _ -> failwithf "Flat: a buff's mod of a stat that was not foreseen (%A)" m.Stat
+            match compileConds (id p.BuffIds) (id p.StatusIds) None m.Conds with
+            | Some conds, stacky -> yield slot, { V = m.Value; Conds = conds; Stacky = stacky; Slot = -1 }
+            | None, _ -> () |]
+
+    /// The mods of the buffs, per stat and kind, newest first (as they lie in `Sim.skillDb`).
+    let private dyn (s: State) : Item[][] =
+        if s.DynVersion <> s.ModsVersion then
+            let p = s.P
+            let mutable lists : ResizeArray<Item>[] = [||]
+            for k in p.BuffOrder.Length - 1 .. -1 .. 0 do
+                let id = p.BuffOrder.[k]
+                if s.BHas.[id] && not s.BMods.[id].IsEmpty then
+                    if not (obj.ReferenceEquals(s.BCompOf.[id], s.BMods.[id])) then
+                        s.BComp.[id] <- compileBuffMods p s.BMods.[id]
+                        s.BCompOf.[id] <- s.BMods.[id]
+                    let comp = s.BComp.[id]
+                    let stacks = float s.BStacks.[id]
+                    if lists.Length = 0 then lists <- Array.init p.DynCount (fun _ -> ResizeArray<Item>())
+                    for j in comp.Length - 1 .. -1 .. 0 do
+                        let slot, it = comp.[j]
+                        lists.[slot].Add { it with V = it.V * stacks }
+            s.Dyn <- (if lists.Length = 0 then p.NoDyn else lists |> Array.map (fun l -> l.ToArray()))
+            s.DynVersion <- s.ModsVersion
+        s.Dyn
+
+    let private acquireRaw (s: State) : Ev =
+        if s.EvDepth = s.Evs.Count then
+            let ev = Ev()
+            ev.IsoId <- s.P.SIso
+            ev.CloseId <- s.P.SClose
+            ev.OpenId <- s.P.SOpen
+            ev.RageSlot <- s.P.RageSlot
+            s.Evs.Add ev
+        let ev = s.Evs.[s.EvDepth]
+        s.EvDepth <- s.EvDepth + 1
+        ev.Crit <- false
+        ev.BOn <- false
+        ev.SOn <- false
+        ev.Extra <- -1
+        ev.Iso <- false
+        ev.Close <- false
+        ev.Open <- false
+        ev.RageMore <- nan
+        ev
+
+    let private release (s: State) = s.EvDepth <- s.EvDepth - 1
+
+    /// For questions asked with nothing known but the skill's mods (`Ctx.empty`).
+    let private acquireEmpty (s: State) (sid: int) : Ev =
+        let ev = acquireRaw s
+        ev.Q <- s.P.Skills.[sid].Q
+        ev.Tags <- Set.empty
+        ev.Name <- ""
+        ev.Dyn <- dyn s
+        ev
+
+    /// For questions asked as the skill (its tags and name known; buffs and enemy to be given).
+    let private acquire (s: State) (sid: int) : Ev =
+        let info = s.P.Skills.[sid]
+        let table = dyn s
+        // Rage: 1% more attack damage per Rage, times rage effect, rounded down
+        if s.RageVer.[sid] <> s.DynVersion then
+            let rage = s.P.BRage
+            s.RageMore.[sid] <-
+                (if s.BHas.[rage] && s.BStacks.[rage] > 0 then
+                    let e = acquireEmpty s sid
+                    let effect = multQ e qRageEffect
+                    release s
+                    floor (float s.BStacks.[rage] * effect) * Constants.moreAttackDamagePerRage
+                 else nan)
+            s.RageVer.[sid] <- s.DynVersion
+        let ev = acquireRaw s
+        ev.Q <- info.Q
+        ev.Tags <- info.Skill.Tags
+        ev.Name <- info.Skill.Name
+        ev.Dyn <- table
+        ev.RageMore <- s.RageMore.[sid]
+        ev
+
+    let private useBuffs (s: State) (ev: Ev) (info: SkillInfo) (extra: bool) =
+        snapBuffs s
+        ev.BOn <- true
+        ev.BHas <- s.SnapHas
+        ev.BStacks <- s.SnapStacks
+        if extra && info.StackExtra > 0 then
+            ev.Extra <- info.StackBuff
+            ev.ExtraN <- info.StackExtra
+
+    let private useStatus (s: State) (ev: Ev) (e: Foe) =
+        refreshStatus s e
+        ev.SOn <- true
+        ev.SHas <- e.SHas
+        ev.SStacks <- e.SStacks
+
     let private ready (s: State) (sid: int) = s.Cooldowns.[sid] <= s.Time
 
     let rec private react (s: State) (rng: Rng) (rules: CRule[]) (killed: string) (sid: int) (target: int) =
@@ -1878,12 +2530,18 @@ module Flat =
             for part in info.Parts do
                 s.CritRoll.[part] <- r
                 s.HasCritRoll.[part] <- true
-            let ctx = Skill.ctx skill false (skillStacks s sid) (status s foe)
-            let mods = skillDb s sid
+            // (what the use asks of the mods, with the buffs and the enemy as they are now)
+            let ev = acquire s sid
+            useBuffs s ev info true
+            useStatus s ev foe
+            let recovery = if skill.Cooldown.IsSome then multQ ev qCooldownRecovery else 1.0
+            let doubled = skill.Cooldown.IsSome && sumQ ev qDoubleUses > 0.0
+            let lose = if p.Vitals.IsSome then sumQ ev qLosePools / 100.0 else 0.0
+            let dodge = if p.Metas.Length > 0 && skill.Tags.Contains(Tag "DodgeRoll") then Constants.dodgeRollDistance + sumQ ev qDodgeDistance else 0.0
+            release s
             match skill.Cooldown with
             | Some cd ->
-                let recovery = Mods.mult ctx [ CooldownRecovery ] mods
-                let uses = skill.StoredUses * (if Mods.sumBase ctx [ Named "DoubleCooldownUses" ] mods > 0.0 then 2 else 1)
+                let uses = skill.StoredUses * (if doubled then 2 else 1)
                 let pending = s.Recharges.[sid] |> List.filter (fun t -> t > s.Time)
                 let start = if p.Fight.Player.ParallelUses || pending.IsEmpty then s.Time else List.max pending
                 let pending = List.sort (pending @ [ start + cd / recovery ])
@@ -1894,7 +2552,6 @@ module Flat =
             // "Lose X% of maximum Life, Mana and Energy Shield when you use"
             (match p.Vitals with
              | Some v ->
-                let lose = Mods.sumBase ctx [ Named "LosePoolsOnUse" ] mods / 100.0
                 if lose > 0.0 && useTime > 0.0 then
                     s.Life <- max (min 1.0 s.Life) (s.Life - lose * v.Life)
                     s.Shield <- max 0.0 (s.Shield - lose * v.EnergyShield)
@@ -1940,7 +2597,7 @@ module Flat =
             if useTime > 0.0 && p.Metas.Length > 0 then
                 // Cast on Dodge: energy per unit travelled by a dodge roll, there when the roll ends
                 if skill.Tags.Contains(Tag "DodgeRoll") then
-                    let distance = Constants.dodgeRollDistance + Mods.sumBase ctx [ Named "DodgeRollDistance" ] mods
+                    let distance = dodge
                     p.Metas |> Array.iteri (fun i meta ->
                         let amount = meta.Meta.Sources |> List.sumBy (function DodgeRolls per -> per * distance | _ -> 0.0)
                         if amount > 0.0 then schedule s (s.Time + useTime) EEnergy i 0 (amount * meta.Meta.EnergyMult) 0.0)
@@ -1963,12 +2620,15 @@ module Flat =
 
     /// How long a use of the skill takes now (`Sim.useTime`).
     let private useTime (s: State) (sid: int) : float =
-        let skill = s.P.Skills.[sid].Skill
-        let target = (let t = aimed s in if t >= 0 then status s s.Foes.[t] else Map.empty)
-        let ctx = Skill.ctx skill false (buffMap s) target
-        let db = skillDb s sid
-        let speed = Mods.mult ctx [ Speed ] db
-        skill.BaseTime / speed * (1.0 + Constants.longerPerRepeat * 0.0) + Mods.sumBase ctx [ Named "FixedUseTime" ] db
+        let info = s.P.Skills.[sid]
+        let ev = acquire s sid
+        useBuffs s ev info false
+        (let t = aimed s
+         if t >= 0 then useStatus s ev s.Foes.[t])
+        let speed = multQ ev qSpeed
+        let time = info.Skill.BaseTime / speed * (1.0 + Constants.longerPerRepeat * 0.0) + sumQ ev qFixedUse
+        release s
+        time
 
     /// What the player sees when choosing a skill (`Sim.view`).
     let private view (s: State) : View =
@@ -1991,16 +2651,20 @@ module Flat =
         let costAt (sid: int) (seconds: unit -> float) =
             let info = p.Skills.[sid]
             let skill = info.Skill
-            let db = skillDb s sid
+            // (asked with the skill known and nothing else: no buffs, no enemy)
+            let ev = acquire s sid
             let extraCost =
                 match p.Vitals with
-                | Some pools -> pools.Mana * Mods.sumBase info.CostCtx [ Named "ExtraCostPercentOfMaxMana" ] db / 100.0
+                | Some pools -> pools.Mana * sumQ ev qExtraCost / 100.0
                 | None -> 0.0
+            let costMult = multQ ev qManaCost
+            let efficiency = incQ ev qCostEfficiency
+            release s
             let ownCost = skill.Cost
             let ownCost =
                 if skill.CostPerSecond <= 0.0 then ownCost
                 else (if s.LastUsed = sid then 0.0 else ownCost) + skill.CostPerSecond * seconds ()
-            (ownCost + extraCost) * Mods.mult info.CostCtx [ ManaCost ] db / Mods.inc info.CostCtx [ ManaCostEfficiency ] db
+            (ownCost + extraCost) * costMult / efficiency
         let costOf (sid: int) = costAt sid (fun () -> max Constants.serverTick (useTime s sid))
         let affordable (sid: int) =
             match p.Vitals with
@@ -2078,6 +2742,315 @@ module Flat =
         if s.P.Vitals.IsSome && s.LockedUntil > s.Time then schedule s s.LockedUntil EReady 0 0 0.0 0.0
         else act s rng
 
+    let private resetNums (n: DefNums) (d: Defender) =
+        n.Of <- d
+        for i in 0 .. 4 do
+            n.MaxRes.[i] <- nan
+            n.Res.[i] <- nan
+            n.Taken.[i] <- nan
+        for i in 0 .. 12 do
+            n.Poise.[i] <- nan
+        n.Armour <- nan
+        n.PhysFlat <- nan
+        n.Threshold <- nan
+        n.Flam <- nan
+
+    /// What a hit asks of the enemy as a defender, each worked out by the reference's own
+    /// code when first asked and kept while the defender is the same. `x`: the attacker's
+    /// "enemies take increased damage", which the reference adds to the defender's mods.
+    let private numsFor (s: State) (e: Foe) (x: float) : DefNums =
+        let d = defender s e
+        if x = 0.0 then
+            if not (obj.ReferenceEquals(e.DefA.Of, d)) then resetNums e.DefA d
+            e.DefA
+        else
+            if not (obj.ReferenceEquals(e.DefB.Base, d) && e.DefB.X = x) then
+                resetNums e.DefB { d with Mods = ModDb.add d.Mods (Mod.inc (DamageTaken AllDamage) x) }
+                e.DefB.Base <- d
+                e.DefB.X <- x
+            e.DefB
+
+    let private nMaxRes (n: DefNums) (t: int) =
+        if System.Double.IsNaN n.MaxRes.[t] then
+            n.MaxRes.[t] <- min Constants.resistCeiling (Constants.enemyBaseMaxResist + Mods.sumBase Ctx.empty [ MaxResist damageTypes.[t] ] n.Of.Mods)
+        n.MaxRes.[t]
+    let private nRes (n: DefNums) (t: int) =
+        if System.Double.IsNaN n.Res.[t] then n.Res.[t] <- Mods.sumBase Ctx.empty [ Resist damageTypes.[t] ] n.Of.Mods
+        n.Res.[t]
+    let private nTaken (n: DefNums) (t: int) =
+        if System.Double.IsNaN n.Taken.[t] then n.Taken.[t] <- Hit.damageTakenMult n.Of damageTypes.[t]
+        n.Taken.[t]
+    let private nThreshold (n: DefNums) =
+        if System.Double.IsNaN n.Threshold then n.Threshold <- Ailments.threshold n.Of
+        n.Threshold
+    let private nPoise (n: DefNums) (a: Ailment) =
+        let i = ailmentIndex a
+        if System.Double.IsNaN n.Poise.[i] then n.Poise.[i] <- Ailments.poise n.Of a
+        n.Poise.[i]
+
+    /// Armour's part of `Hit.physicalReduction`.
+    let private physicalReduction (n: DefNums) (damage: float) =
+        if System.Double.IsNaN n.Armour then
+            n.Armour <- max 0.0 (Mods.total Ctx.empty [ Armour ] n.Of.Mods)
+            n.PhysFlat <- Mods.sumBase Ctx.empty [ PhysicalReduction ] n.Of.Mods
+        let armour = n.Armour
+        let fromArmour = if armour <= 0.0 && damage <= 0.0 then 0.0 else armour / (armour + Constants.armourRatio * damage) * 100.0
+        min Constants.enemyMaxPhysReduction (fromArmour + n.PhysFlat)
+
+    /// `Hit.effectiveResist`.
+    let private effectiveResist (ev: Ev) (n: DefNums) (t: int) =
+        let maxRes = nMaxRes n t
+        let res = nRes n t + sumQ ev qEnemyResist.[t] |> min maxRes |> max Constants.resistFloor
+        let pen = sumQ ev qPen.[t]
+        let floor' =
+            if t >= 1 && t <= 3 then
+                let f = qOver ev ev.Q.[qPenFloorOver]
+                if ev.Found then f else min 0.0 (sumQ ev qPenFloor)
+            else 0.0
+        if res > floor' then max floor' (res - pen) else res
+
+    /// `Hit.mitigateWith`: what the enemy takes of `un`, into `de`.
+    let private mitigate (ev: Ev) (n: DefNums) (negate: bool) (has: bool[]) (un: float[]) (de: float[]) =
+        for t in 0 .. 4 do
+            if has.[t] then
+                let v = un.[t]
+                let reduction =
+                    if t = 0 then physicalReduction n v
+                    else
+                        let r = effectiveResist ev n t
+                        let elemental = t >= 1 && t <= 3
+                        let ignored = r > 0.0 && ((elemental && flagQ ev qIgnoreElemental) || flagQ ev qIgnoreResist.[t])
+                        if ignored then 0.0
+                        elif negate && elemental && r > 0.0 then -r
+                        else r
+                de.[t] <- v * (1.0 - reduction / 100.0) * nTaken n t
+            else de.[t] <- 0.0
+
+    let private anyDyn (ev: Ev) (slots: int[]) =
+        let mutable any = false
+        for slot in slots do
+            if ev.Dyn.[slot].Length > 0 then any <- true
+        any
+
+    /// `Hit.ranges`: the damage ranges ready to roll, into the ev's `RMin`, `RMax`, `RHas`.
+    let private ranges (p: Program) (ev: Ev) (info: SkillInfo) =
+        let skill = info.Skill
+        let rMin, rMax, rHas = ev.RMin, ev.RMax, ev.RHas
+        let oMin, oMax, oHas = ev.OMin, ev.OMax, ev.OHas
+        let addedEffect = skill.AddedDamageEffectiveness * multQ ev qAddedEffect
+        for t in 0 .. 4 do
+            rMin.[t] <- (info.BaseMin.[t] + sumQ ev qAddedMin.[t] * addedEffect) * skill.BaseMultiplier
+            rMax.[t] <- (info.BaseMax.[t] + sumQ ev qAddedMax.[t] * addedEffect) * skill.BaseMultiplier
+            rHas.[t] <- rMax.[t] > 0.0
+        // "gain as extra" is taken from the base damage first
+        if info.HasGain || anyDyn ev p.GainSlots then
+            for t in 0 .. 4 do
+                oMin.[t] <- rMin.[t]
+                oMax.[t] <- rMax.[t]
+                oHas.[t] <- rHas.[t]
+            for from in 0 .. 4 do
+                if oHas.[from] then
+                    for into in 0 .. 4 do
+                        let pct = sumQ ev qGain.[from * 5 + into]
+                        if pct > 0.0 then
+                            let k = pct / 100.0
+                            rMin.[into] <- (if rHas.[into] then rMin.[into] else 0.0) + oMin.[from] * k
+                            rMax.[into] <- (if rHas.[into] then rMax.[into] else 0.0) + oMax.[from] * k
+                            rHas.[into] <- true
+        // conversion: the skill's own first, then everything else on the result
+        if info.HasConvert || anyDyn ev p.ConvSlots then
+            for step in 0 .. 1 do
+                let q = if step = 0 then qSkillConvert else qConvert
+                for t in 0 .. 4 do
+                    oMin.[t] <- rMin.[t]
+                    oMax.[t] <- rMax.[t]
+                    oHas.[t] <- rHas.[t]
+                    rHas.[t] <- false
+                for from in 0 .. 4 do
+                    if oHas.[from] then
+                        let mutable total = 0.0
+                        for into in 0 .. 4 do
+                            if into <> from then total <- total + max 0.0 (sumQ ev q.[from * 5 + into]) / 100.0
+                        let share (into: int) =
+                            let v = max 0.0 (sumQ ev q.[from * 5 + into]) / 100.0
+                            if total > 1.0 then v / total else v
+                        let mutable gone = 0.0
+                        for into in 0 .. 4 do
+                            if into <> from then
+                                let k = share into
+                                if k > 0.0 then gone <- gone + k
+                        let put (into: int) (k: float) =
+                            if k > 0.0 then
+                                rMin.[into] <- (if rHas.[into] then rMin.[into] else 0.0) + oMin.[from] * k
+                                rMax.[into] <- (if rHas.[into] then rMax.[into] else 0.0) + oMax.[from] * k
+                                rHas.[into] <- true
+                        put from (1.0 - gone)
+                        for into in 0 .. 4 do
+                            if into <> from then put into (share into)
+            for t in 0 .. 4 do
+                if rHas.[t] && not (rMax.[t] > 0.0) then rHas.[t] <- false
+        // Avatar of Fire: "Deal no Non-Fire Damage"
+        if flagQ ev qNoNonFire then
+            for t in 0 .. 4 do
+                if t <> 3 then rHas.[t] <- false
+
+    /// `Hit.critMultiplier`.
+    let private critMultiplier (ev: Ev) =
+        let bonus = Constants.playerBaseCritBonus + sumQ ev qCritBonus
+        1.0 + max 0.0 (bonus * multQ ev qCritBonusMult) / 100.0
+
+    /// `Hit.critChance` (asked before it is known whether the hit is a critical one).
+    let private critChance (ev: Ev) (info: SkillInfo) =
+        ev.Crit <- false
+        let v = qOver ev ev.Q.[qCritOver]
+        if ev.Found then v
+        else
+            let baseCrit = info.Skill.BaseCrit + sumQ ev qCritBase
+            let chance = min 100.0 (max 0.0 (baseCrit * multQ ev qCritMult))
+            let cap = sumQ ev qMaxCrit
+            let chance = if cap > 0.0 then min cap chance else chance
+            if flagQ ev qLuckyCrit then 100.0 - (100.0 - chance) * (100.0 - chance) / 100.0 else chance
+
+    /// `Hit.rollUnmitigated`: one hit's damage before mitigation, into `un` (`has`: the types it has).
+    let private rollUnmitigated (p: Program) (ev: Ev) (info: SkillInfo) (rng: Rng) (crit: bool) (has: bool[]) (un: float[]) =
+        ev.Crit <- crit
+        let lucky = flagQ ev qLucky || rng.Chance(sumQ ev qLuckyChance)
+        let critMult = if crit then critMultiplier ev else 1.0
+        let doubled = rng.Chance(sumQ ev qDouble)
+        ranges p ev info
+        for t in 0 .. 4 do
+            has.[t] <- ev.RHas.[t]
+            if has.[t] then
+                let lo, hi = ev.RMin.[t], ev.RMax.[t]
+                let rolled =
+                    if lucky then
+                        let a = rng.Between(lo, hi)
+                        let b = rng.Between(lo, hi)
+                        max a b
+                    else rng.Between(lo, hi)
+                un.[t] <- rolled * multQ ev qDamage.[t] * critMult * (if doubled then 2.0 else 1.0)
+            else un.[t] <- 0.0
+
+    /// `Hit.rollWith`: crit roll, damage roll, mitigation; whether it is a critical hit.
+    /// `critRoll`: the use's roll (NaN: rolled for this hit alone).
+    let private rollHit (p: Program) (ev: Ev) (info: SkillInfo) (rng: Rng) (critRoll: float) (n: DefNums) (has: bool[]) (un: float[]) (de: float[]) : bool =
+        let given = not (System.Double.IsNaN critRoll)
+        let chance = if given && critRoll >= 1.0 then 0.0 else critChance ev info
+        ev.Crit <- false
+        let first = if given then chance >= 100.0 || (chance > 0.0 && critRoll * 100.0 < chance) else rng.Chance chance
+        let rerolls =
+            if first || chance <= 0.0 || not (flagQ ev qInevitable) then 0
+            else
+                let rec go k = if k >= 4 || rng.Chance chance then k else go (k + 1)
+                go 1
+        let second = rerolls = 0 && chance > 0.0 && flagQ ev qBifurcate && rng.Chance chance
+        let crit = first || second || rerolls > 0
+        rollUnmitigated p ev info rng crit has un
+        if first && second then
+            let full = critMultiplier ev
+            for t in 0 .. 4 do
+                if has.[t] then un.[t] <- un.[t] * (1.0 + 2.0 * (full - 1.0)) / full
+        elif rerolls <> 0 then
+            let full = critMultiplier ev
+            let kept = max 0.0 (1.0 - Constants.inevitableCritLessPerReroll * float rerolls)
+            for t in 0 .. 4 do
+                if has.[t] then un.[t] <- un.[t] * (1.0 + (full - 1.0) * kept) / full
+        mitigate ev n (rng.Chance(sumQ ev qNegate)) has un de
+        crit
+
+    let private total5 (xs: float[]) = 0.0 + xs.[0] + xs.[1] + xs.[2] + xs.[3] + xs.[4]
+
+    let private allTypes = [| 0; 1; 2; 3; 4 |]
+    let private scalesOf =
+        allAilments |> List.map (fun a -> Ailments.scalesFrom a |> List.map typeIndex |> Array.ofList) |> Array.ofList
+
+    /// The damage an ailment scales from (`Ailments.scalesFromWith`, summed in its order).
+    let private source (ev: Ev) (a: Ailment) (un: float[]) =
+        let types =
+            match a with
+            | Ignite when flagQ ev qAllIgnites -> allTypes
+            | Chill when flagQ ev qAllChills -> allTypes
+            | Shock when flagQ ev qAllShocks -> allTypes
+            | _ -> scalesOf.[ailmentIndex a]
+        let mutable sum = 0.0
+        for t in types do
+            sum <- sum + un.[t]
+        sum
+
+    let private ailmentDuration (ev: Ev) (a: Ailment) =
+        let baseD =
+            match a with
+            | Bleed -> (let v = qOver ev ev.Q.[qBleedDuration] in if ev.Found then v else Ailments.baseDuration a)
+            | Poison -> (let v = qOver ev ev.Q.[qPoisonDuration] in if ev.Found then v else Ailments.baseDuration a)
+            | _ -> Ailments.baseDuration a
+        baseD * multQ ev qDuration.[ailmentIndex a]
+
+    /// `Ailments.fromHit`: everything the hit inflicts. `flammable`: the Flammability earlier
+    /// hits left on the enemy.
+    let private fromHit (p: Program) (ev: Ev) (info: SkillInfo) (rng: Rng) (n: DefNums) (flammable: float) (crit: bool) (un: float[]) : Inflict list =
+        ev.Crit <- crit
+        let threshold = nThreshold n
+        let chance (a: Ailment) =
+            let i = ailmentIndex a
+            let baseChance, mult = sumQ ev qAilChance.[i], multQ ev qAilChanceMult.[i]
+            let c =
+                match a with
+                | Ignite ->
+                    let left =
+                        if flammable > 0.0 then Mods.sumBase Ctx.empty [ Named "Flammability" ] (ModDb.add n.Of.Mods (Mod.base' (Named "Flammability") flammable))
+                        else
+                            if System.Double.IsNaN n.Flam then n.Flam <- Mods.sumBase Ctx.empty [ Named "Flammability" ] n.Of.Mods
+                            n.Flam
+                    (source ev a un / threshold * Constants.igniteChanceMultiplier + baseChance) * mult + left
+                | Shock -> (source ev a un / threshold * Constants.shockChanceMultiplier + baseChance) * mult
+                | _ -> baseChance * mult
+            min 100.0 (max 0.0 c)
+        let rolled a = source ev a un > 0.0 && rng.Chance(chance a)
+        let magnitude (a: Ailment) = multQ ev qMagnitude.[ailmentIndex a]
+        let damaging =
+            [ for a in Ailment.damaging do
+                if rolled a then
+                    let faster = incQ ev (if a = Ignite then qFasterIgnite else qFaster)
+                    let dps = source ev a un * Ailments.percentPerSecond a / 100.0 * magnitude a * faster
+                    yield Dot(a, Ailments.dealsType a, dps, ailmentDuration ev a / max 0.1 faster, 1 + int (sumQ ev qAilStacks.[ailmentIndex a])) ]
+        let shock =
+            [ if rolled Shock then
+                yield Status(Shock, Constants.baseShockMagnitude * magnitude Shock, ailmentDuration ev Shock) ]
+        let chill =
+            let cold = source ev Chill un
+            let effect = Constants.chillEffectMultiplier * cold / threshold * magnitude Chill
+            [ if effect >= 1.0 then
+                yield Status(Chill, min Constants.chillMaxEffect (max Constants.chillMinEffect effect), ailmentDuration ev Chill) ]
+        let flat =
+            [ for a in [ Daze; Maim; Blind; Hinder ] do
+                if rng.Chance(chance a) then
+                    yield Status(a, 0.0, ailmentDuration ev a) ]
+        let buildup =
+            [ for a in Ailment.buildup do
+                let enabled =
+                    match a with
+                    | Freeze | HeavyStun -> true
+                    | Electrocute -> flagQ ev qCanElectrocute
+                    | Pin -> flagQ ev qCanPin
+                    | _ -> false
+                let dmg =
+                    match a with
+                    | HeavyStun ->
+                        (source ev a un + un.[0] * Constants.playerPhysicalStunMore / 100.0)
+                        * (if info.IsMelee then 1.0 + Constants.playerMeleeStunMore / 100.0 else 1.0)
+                        * (if hasStatus ev p.AilmentStatus.[ailmentIndex Daze] then 1.5 else 1.0)
+                    | _ -> source ev a un
+                if enabled && dmg > 0.0 then
+                    yield AddBuildup(a, dmg * Constants.buildupScale a / nPoise n a * multQ ev qBuildup.[ailmentIndex a] * 100.0) ]
+        damaging @ shock @ chill @ flat @ buildup
+
+    /// The statuses in two arrays as the map the reference has.
+    let private statusMap (p: Program) (has: bool[]) (stacks: int[]) : Map<string, int> =
+        let mutable m = Map.empty
+        for i in 0 .. has.Length - 1 do
+            if has.[i] then m <- Map.add p.StatusNames.[i] stacks.[i] m
+        m
+
     /// One hit on one enemy (`Sim.hitEnemy`, in its order).
     let private hitEnemy (s: State) (rng: Rng) (sid: int) (mult: float) (target: int) =
         let e = s.Foes.[target]
@@ -2086,112 +3059,119 @@ module Flat =
             let info = p.Skills.[sid]
             let skill = info.Skill
             let def0 = e.Def
-            let mods = skillDb s sid
             // the enemy as it is before the hit: its life, its statuses
             let lifeBefore = e.Life
-            let before = status s e
-            // Isolated: none of its allies within 6 m (keyword text)
-            let isolated =
-                let mutable alone = true
-                for o in s.Foes do
-                    if o.Life > 0.0 && o.Index <> e.Index && not (Vec.dist o.Def.Position def0.Position > 60.0) then alone <- false
-                alone
-            // Close Range: within 2 m of the player (keyword text)
-            let close = Vec.length def0.Position - def0.Size <= 20.0
-            let enemyStatus =
-                if e.HitStatusMade && obj.ReferenceEquals(e.HitStatusOf, before) && e.HitIsolated = isolated && e.HitClose = close then e.HitStatus
-                else
-                    let m = before |> (fun m -> if isolated then Map.add "Isolated" 1 m else m) |> (fun m -> if close then Map.add "Close" 1 m else m)
-                    e.HitStatus <- m
-                    e.HitStatusOf <- before
-                    e.HitIsolated <- isolated
-                    e.HitClose <- close
-                    e.HitStatusMade <- true
-                    m
-            let enemyStatus =
-                let more = Mods.sumBase Ctx.empty [ Named "OpenWeaknessMore" ] mods
-                if def0.Rarity <> Normal && def0.Rarity <> Magic && Mods.flag Ctx.empty (Named "RevealWeakness") mods then
-                    let c, m = Constants.revealedWeaknessLifeShare, 1.0 + more / 100.0
-                    if rng.Float() < (c / m) / (1.0 - c + c / m) then Map.add "OpenWeakness" 1 enemyStatus else enemyStatus
-                else enemyStatus
-            let ctx = Skill.ctx skill false (skillStacks s sid) enemyStatus
+            let ev = acquire s sid
+            useBuffs s ev info true
+            useStatus s ev e
+            let beforeHas, beforeStacks = e.SHas, e.SStacks
+            // Isolated: none of its allies within 6 m; Close Range: within 2 m of the player (keyword text)
+            let mutable alone = true
+            for o in s.Foes do
+                if o.Life > 0.0 && o.Index <> e.Index && not (Vec.dist o.Def.Position def0.Position > 60.0) then alone <- false
+            ev.Iso <- alone
+            ev.Close <- Vec.length def0.Position - def0.Size <= 20.0
+            // Revealed Weaknesses: an Open Weakness for the share of the time the enemy's life is in one
+            (let evE = acquireEmpty s sid
+             let more = sumQ evE qOpenMore
+             if def0.Rarity <> Normal && def0.Rarity <> Magic && flagQ evE qReveal then
+                let c, m = Constants.revealedWeaknessLifeShare, 1.0 + more / 100.0
+                if rng.Float() < (c / m) / (1.0 - c + c / m) then ev.Open <- true
+             release s)
             let hitChance =
-                match Mods.override' ctx HitChance mods with
-                | Some v -> v
-                | None when info.IsAttack ->
-                    let accuracy = Mods.total ctx [ Named "Accuracy" ] mods
+                let v = qOver ev ev.Q.[qHitChance]
+                if ev.Found then v
+                elif info.IsAttack then
+                    let accuracy = sumQ ev qAccuracy * multQ ev qAccuracyMult
                     if accuracy <= 0.0 then 100.0
                     else
                         let evasion =
                             e.Info.Evasion
-                            * (if enemyStatus.ContainsKey "Blinded" then 1.0 - Constants.blindAccuracyLess / 100.0 else 1.0)
-                            * (if enemyStatus.ContainsKey "Maimed" then 1.0 - Constants.maimEvasionReduced / 100.0 else 1.0)
+                            * (if hasStatus ev p.AilmentStatus.[ailmentIndex Blind] then 1.0 - Constants.blindAccuracyLess / 100.0 else 1.0)
+                            * (if hasStatus ev p.AilmentStatus.[ailmentIndex Maim] then 1.0 - Constants.maimEvasionReduced / 100.0 else 1.0)
                         let distance = max 0.0 (Vec.length def0.Position - def0.Size)
                         Hit.accuracyHitChance evasion (Hit.accuracyAtDistance distance accuracy)
-                | None -> 100.0
+                else 100.0
             if not (lands s rng e hitChance) then bump s info.CMiss
             else
-                let def = defender s e
                 // "Enemies you Curse / Mark take X% increased Damage": additive with what the enemy already takes
-                let def =
-                    match Mods.sumInc ctx [ Named "EnemyDamageTaken" ] mods with
-                    | 0.0 -> def
-                    | x -> { def with Mods = ModDb.add def.Mods (Mod.inc (DamageTaken AllDamage) x) }
-                let critRoll = if info.Sustained || not s.HasCritRoll.[sid] then None else Some s.CritRoll.[sid]
-                let critRoll = if hitChance < 100.0 && rng.Chance(100.0 - hitChance) then Some 1.0 else critRoll
-                let hit = Hit.rollWith critRoll rng ctx mods skill def
+                let nums = numsFor s e (sumQ ev qEnemyTaken)
+                let critRoll = if info.Sustained || not s.HasCritRoll.[sid] then nan else s.CritRoll.[sid]
+                let critRoll = if hitChance < 100.0 && rng.Chance(100.0 - hitChance) then 1.0 else critRoll
+                let has, un, de = ev.Has, ev.Un, ev.De
+                let crit = rollHit p ev info rng critRoll nums has un de
                 // the same hit the other way, rolled apart from the fight's stream (see `Outcome.Evened`)
                 let evenly =
-                    let chance = if critRoll |> Option.exists (fun r -> r >= 1.0) then 0.0 else min 100.0 (max 0.0 (Hit.critChance ctx mods skill))
-                    let was = Dmg.total hit.Dealt
-                    if chance <= 0.0 || chance >= 100.0 || was <= 0.0 || Mods.flag ctx (Named "InevitableCrits") mods || Mods.flag ctx (Named "BifurcateCrits") mods then 1.0
+                    let chance = if critRoll >= 1.0 then 0.0 else min 100.0 (max 0.0 (critChance ev info))
+                    let was = total5 de
+                    ev.Crit <- false
+                    if chance <= 0.0 || chance >= 100.0 || was <= 0.0 || flagQ ev qInevitable || flagQ ev qBifurcate then 1.0
                     else
-                        let other = Dmg.total (Hit.rollWith (Some(if hit.Crit then 1.0 else 0.0)) (Rng(uint32 (s.Seq % 1000000) + 7919u)) ctx mods skill def).Dealt
-                        let p = chance / 100.0
-                        (if hit.Crit then p * was + (1.0 - p) * other else p * other + (1.0 - p) * was) / was
+                        let scratch = Rng(uint32 (s.Seq % 1000000) + 7919u)
+                        rollUnmitigated p ev info scratch (not crit) ev.Has2 ev.Un2
+                        mitigate ev nums (scratch.Chance(sumQ ev qNegate)) ev.Has2 ev.Un2 ev.De2
+                        let other = total5 ev.De2
+                        let pc = chance / 100.0
+                        (if crit then pc * was + (1.0 - pc) * other else pc * other + (1.0 - pc) * was) / was
                 // Culling Strike: an enemy at or below the threshold for its rarity dies, before the hit's damage
-                let hit =
-                    let cctx = { ctx with Crit = hit.Crit }
-                    if Mods.flag cctx (Named "CullingStrike") mods
-                       && lifeBefore <= def0.Life * Constants.cullingThreshold (Rarity.name def0.Rarity) / 100.0 * Mods.inc cctx [ Named "CullingThreshold" ] mods then
-                        { hit with Dealt = Dmg.map (fun _ v -> v + lifeBefore) hit.Dealt }
-                    else hit
+                ev.Crit <- crit
+                if flagQ ev qCulling
+                   && lifeBefore <= def0.Life * Constants.cullingThreshold (Rarity.name def0.Rarity) / 100.0 * incQ ev qCullThreshold then
+                    for t in 0 .. 4 do
+                        if has.[t] then de.[t] <- de.[t] + lifeBefore
+                ev.Crit <- false
                 let mult =
-                    let near, far = Mods.sumBase ctx [ Named "CloseCombatMore" ] mods, Mods.sumBase ctx [ Named "FarCombatMore" ] mods
+                    let near, far = sumQ ev qCloseMore, sumQ ev qFarMore
                     if near = 0.0 && far = 0.0 then mult
                     else
                         let d = max 0.0 (Vec.length def0.Position - def0.Size)
                         let closeness = max 0.0 (min 1.0 ((35.0 - d) / 25.0))
                         let farness = max 0.0 (min 1.0 ((d - 35.0) / 35.0))
                         mult * (1.0 + near * closeness / 100.0) * (1.0 + far * farness / 100.0)
-                let hit =
-                    { hit with
-                        Unmitigated = Dmg.map (fun _ v -> v * mult) hit.Unmitigated
-                        Dealt = Dmg.map (fun _ v -> v * mult) hit.Dealt }
+                for t in 0 .. 4 do
+                    if has.[t] then
+                        un.[t] <- un.[t] * mult
+                        de.[t] <- de.[t] * mult
                 // ailments are rolled before the damage lands
                 let flammable = e.Flammability |> List.filter (fun (_, until) -> until > s.Time)
-                let inflicted =
-                    let total = flammable |> List.sumBy fst
-                    Ailments.fromHit rng ctx mods (if total > 0.0 then { def with Mods = ModDb.add def.Mods (Mod.base' (Named "Flammability") total) } else def) hit
-                (match Ailments.flammability ctx mods def hit with
-                 | f when f > 0.0 -> e.Flammability <- (f, s.Time + Constants.flammabilityDuration) :: flammable
-                 | _ -> ())
-                let hit = if Mods.flag ctx (Named "NoHitDamage") mods then { hit with Dealt = Dmg.map (fun _ _ -> 0.0) hit.Dealt; Unmitigated = Dmg.map (fun _ _ -> 0.0) hit.Unmitigated } else hit
+                let inflicted = fromHit p ev info rng nums (flammable |> List.sumBy fst) crit un
+                // the Flammability this hit leaves (`Ailments.flammability`)
+                (ev.Crit <- crit
+                 let fire = source ev Ignite un
+                 if fire > 0.0 then
+                    let f = min 100.0 (max 0.0 ((fire / nThreshold nums * Constants.igniteChanceMultiplier + sumQ ev qAilChance.[0]) * multQ ev qAilChanceMult.[0]))
+                    if f > 0.0 then e.Flammability <- (f, s.Time + Constants.flammabilityDuration) :: flammable)
+                ev.Crit <- false
+                if flagQ ev qNoHitDamage then
+                    for t in 0 .. 4 do
+                        if has.[t] then
+                            un.[t] <- 0.0
+                            de.[t] <- 0.0
                 // a shock the hit applies already counts for the hit itself
-                let hit =
-                    let currentShock =
-                        if e.Has.[p.SShocked] && e.Expires.[p.SShocked] > s.Time then e.DMods.[p.SShocked] |> List.sumBy (fun m -> m.Value) else 0.0
-                    let newShock = inflicted |> List.tryPick (function Status (Shock, m, _) when m > currentShock -> Some m | _ -> None)
-                    match newShock with
-                    | Some m ->
-                        let withoutOld = def.Mods |> ModDb.toList |> List.filter (fun x -> x.Source <> "Shock")
-                        let def' = { def with Mods = ModDb.ofList ((Mod.inc (DamageTaken AllDamage) m |> Mod.from "Shock") :: withoutOld) }
-                        { hit with Dealt = Hit.mitigate ctx mods def' hit.Unmitigated }
-                    | None -> hit
-                let dealt = Dmg.total hit.Dealt
+                (let currentShock =
+                    if e.Has.[p.SShocked] && e.Expires.[p.SShocked] > s.Time then e.DMods.[p.SShocked] |> List.sumBy (fun m -> m.Value) else 0.0
+                 match inflicted |> List.tryPick (function Status (Shock, m, _) when m > currentShock -> Some m | _ -> None) with
+                 | Some m ->
+                    // (seldom: asked of the reference itself, with the mods and maps it would have;
+                    // nothing of them has changed since the hit began)
+                    let def = nums.Of
+                    let withoutOld = def.Mods |> ModDb.toList |> List.filter (fun x -> x.Source <> "Shock")
+                    let def' = { def with Mods = ModDb.ofList ((Mod.inc (DamageTaken AllDamage) m |> Mod.from "Shock") :: withoutOld) }
+                    let enemyStatus =
+                        statusMap p beforeHas beforeStacks
+                        |> (fun st -> if ev.Iso then Map.add "Isolated" 1 st else st)
+                        |> (fun st -> if ev.Close then Map.add "Close" 1 st else st)
+                        |> (fun st -> if ev.Open then Map.add "OpenWeakness" 1 st else st)
+                    let ctx = Skill.ctx skill false (skillStacks s sid) enemyStatus
+                    let unmitigated = [ for t in 0 .. 4 do if has.[t] then yield damageTypes.[t], un.[t] ] |> Map.ofList
+                    let dealt = Hit.mitigate ctx (skillDb s sid) def' unmitigated
+                    for t in 0 .. 4 do
+                        if has.[t] then de.[t] <- dealt.[damageTypes.[t]]
+                 | None -> ())
+                let dealt = total5 de
                 let life = lifeBefore - dealt
                 let dead = life <= 1e-9
-                (match s.Tell with Some tell -> tell s.Time (if hit.Crit then "crit" else "hit") def0.Name skill.Name dealt | None -> ())
+                (match s.Tell with Some tell -> tell s.Time (if crit then "crit" else "hit") def0.Name skill.Name dealt | None -> ())
                 // what the armour break below reads of the enemy as it was before the hit
                 let brokenBefore =
                     if e.Has.[p.SArmourBreak] && e.Expires.[p.SArmourBreak] > s.Time then -(e.DMods.[p.SArmourBreak] |> List.sumBy (fun m -> m.Value)) else 0.0
@@ -2200,53 +3180,54 @@ module Flat =
                 if not dead then s.Evened <- s.Evened + dealt * (evenly - 1.0)
                 // (a hit that deals more than the enemy has left: each type's share of what was left)
                 (let k = if dealt > lifeBefore && dealt > 0.0 then lifeBefore / dealt else 1.0
-                 hit.Dealt |> Map.iter (fun t v -> if v > 0.0 then addByType s (typeIndex t) (v * k)))
+                 for t in 0 .. 4 do
+                    if has.[t] && de.[t] > 0.0 then addByType s t (de.[t] * k))
                 bump s info.CHits
-                if hit.Crit then bump s info.CCrits
+                if crit then bump s info.CCrits
                 if dead then kill s e s.Time else e.Life <- life
                 // Armour Break: the hit breaks armour by a share of the damage it dealt; armour at
                 // zero is Fully Broken: the enemy takes increased physical damage from hits
                 (let share =
-                    Dmg.get Physical hit.Dealt * Mods.sumBase ctx [ Named "ArmourBreakOfPhysical" ] mods / 100.0
-                    + Dmg.get Fire hit.Dealt * Mods.sumBase ctx [ Named "ArmourBreakOfFire" ] mods / 100.0
-                    + dealt * Mods.sumBase ctx [ Named "ArmourBreakOfDamage" ] mods / 100.0
-                    + Mods.sumBase ctx [ Named "ArmourBreakFlat" ] mods
+                    de.[0] * sumQ ev qBreakPhysical / 100.0
+                    + de.[3] * sumQ ev qBreakFire / 100.0
+                    + dealt * sumQ ev qBreakDamage / 100.0
+                    + sumQ ev qBreakFlat
                  // "Players Break 3 times Armour against Normal Monsters and 2 times Armour against Magic Monsters"
                  let broken =
-                    share * Mods.mult ctx [ Named "ArmourBreakAmount" ] mods
+                    share * multQ ev qBreakAmount
                     * (match def0.Rarity with Normal -> 3.0 | Magic -> 2.0 | _ -> 1.0)
                  if not (dead || broken <= 0.0) then
                     let baseArmour = e.Info.BaseArmour
                     let total = min baseArmour (brokenBefore + broken)
-                    let seconds = Constants.armourBreakDuration * Mods.inc ctx [ Named "ArmourBreakDuration" ] mods
+                    let seconds = Constants.armourBreakDuration * incQ ev qBreakDuration
                     addDebuff s e p.SArmourBreak seconds 1 [ Mod.base' Armour -total |> Mod.from "Armour Break" ]
                     if total >= baseArmour then
-                        let taken = Constants.fullyBrokenArmourTaken * Mods.inc ctx [ Named "FullyBrokenArmourEffect" ] mods
+                        let taken = Constants.fullyBrokenArmourTaken * incQ ev qBrokenEffect
                         let scopes =
-                            if Mods.flag ctx (Named "BrokenArmourAllDamage") mods then [ AllDamage ]
+                            if flagQ ev qBrokenAll then [ AllDamage ]
                             else
                                 [ OfType Physical ]
-                                @ (if Mods.flag ctx (Named "BrokenArmourFire") mods then [ OfType Fire ] else [])
-                                @ (if Mods.flag ctx (Named "BrokenArmourColdLightning") mods then [ OfType Cold; OfType Lightning ] else [])
+                                @ (if flagQ ev qBrokenFire then [ OfType Fire ] else [])
+                                @ (if flagQ ev qBrokenColdLightning then [ OfType Cold; OfType Lightning ] else [])
                         addDebuff s e p.SFullyBroken seconds 1 (scopes |> List.map (fun sc -> Mod.inc (DamageTaken sc) taken |> Mod.from "Fully Broken Armour")))
                 // leech, and what a hit and a kill give back
                 (match p.Vitals with
                  | Some v ->
-                    let leech = min (Dmg.get Physical hit.Dealt) Constants.effectiveMaxDamageForLeech * Mods.sumBase ctx [ ManaLeech ] mods / 100.0
+                    let leech = min de.[0] Constants.effectiveMaxDamageForLeech * sumQ ev qManaLeech / 100.0
                     // leech counts from one enemy per hit event: only the largest instance
                     let extra = max 0.0 (leech - s.StrikeLeech)
                     let charges =
                         match p.Fight.Player.ManaFlask with
                         | Some f when dead -> min f.MaxCharges (s.FlaskCharges + RarityCharges.flaskChargesPerKill def0.Rarity * f.ChargeGainMult)
                         | _ -> s.FlaskCharges
-                    let leechMult = Mods.mult ctx [ Named "ManaLeechAmount" ] mods
+                    let leechMult = multQ ev qManaLeechAmount
                     let extra = extra * leechMult
                     let lifeLeechFull =
-                        min (Dmg.get Physical hit.Dealt) Constants.effectiveMaxDamageForLeech * Mods.sumBase ctx [ Named "LifeLeech" ] mods / 100.0
-                        * Mods.mult ctx [ Named "LifeLeechAmount" ] mods * v.LifeRecoveryRate
+                        min de.[0] Constants.effectiveMaxDamageForLeech * sumQ ev qLifeLeech / 100.0
+                        * multQ ev qLifeLeechAmount * v.LifeRecoveryRate
                     let lifeLeech = max 0.0 (lifeLeechFull - s.StrikeLifeLeech)
-                    let onHit = Mods.sumBase ctx [ Named "LifeOnHit" ] mods * v.LifeRecoveryRate
-                    let manaOnHit = Mods.sumBase ctx [ Named "ManaOnHit" ] mods * v.ManaRecoveryRate
+                    let onHit = sumQ ev qLifeOnHit * v.LifeRecoveryRate
+                    let manaOnHit = sumQ ev qManaOnHit * v.ManaRecoveryRate
                     let lifeCharges =
                         match v.LifeFlask with
                         | Some f when dead -> min f.MaxCharges (s.LifeFlaskCharges + RarityCharges.flaskChargesPerKill def0.Rarity * f.ChargeGainMult)
@@ -2267,14 +3248,20 @@ module Flat =
                     s.Shield <- min (max s.Shield v.EnergyShield) (s.Shield + (if dead then v.ESOnKill else 0.0))
                     if manaOnHit > 0.0 then gainMana s v 4 manaOnHit
                     if dead then
-                        let kill = (Mods.sumBase Ctx.empty [ ManaOnKill ] mods + v.Mana * Mods.sumBase Ctx.empty [ Named "ManaPercentOnKill" ] mods / 100.0) * v.ManaRecoveryRate
+                        let evE = acquireRaw s
+                        evE.Q <- info.Q
+                        evE.Tags <- Set.empty
+                        evE.Name <- ""
+                        evE.Dyn <- ev.Dyn
+                        let kill = (sumQ evE qManaOnKill + v.Mana * sumQ evE qManaPercentOnKill / 100.0) * v.ManaRecoveryRate
+                        release s
                         gainMana s v 5 kill
                  | None -> ())
                 // a killing hit's ailments are not inflicted; what the killed enemy was can set things off
                 if dead then
                     react s rng p.OnKill "" sid -1
                     if p.HasKillOf then
-                        before |> Map.iter (fun k _ -> react s rng p.OnKillOf k sid -1)
+                        statusMap p beforeHas beforeStacks |> Map.iter (fun k _ -> react s rng p.OnKillOf k sid -1)
                 else
                     for i in inflicted do
                         inflict s e i
@@ -2285,22 +3272,26 @@ module Flat =
                         | AddBuildup _ -> ()
                 // the skill's own damage over time: one instance per skill and type, the strongest stays
                 if not (dead || info.Dots.IsEmpty) then
+                    let duration = (if skill.Duration > 0.0 then skill.Duration else 1.0) * multQ ev qSkillDuration
                     // spell (or attack) damage mods only count if the skill says so
-                    let dotCtx = if skill.Tags.Contains(Tag "SpellDot") then ctx else { ctx with SkillTags = ctx.SkillTags |> Set.remove Spell |> Set.remove Attack }
-                    let duration = (if skill.Duration > 0.0 then skill.Duration else 1.0) * Mods.mult ctx [ SkillDuration ] mods
+                    if not info.SpellDot then ev.Tags <- info.DotTags
                     for (t, perSecond, _, label) in info.Dots do
-                        let dps = perSecond * Hit.damageMult dotCtx mods t * Mods.mult dotCtx [ Named "DotDamage" ] mods
+                        let ti = typeIndex t
+                        let dps =
+                            if info.SpellDot then perSecond * multQ ev qDamage.[ti] * multQ ev qSpellDotDamage
+                            else perSecond * multQ ev qDotDamageAs.[ti] * multQ ev qDotDamage
                         let d = { Ailing = None; Label = label; Of = t; Dps = dps; Until = s.Time + duration; Most = 1 }
                         e.Dots <- d :: (e.Dots |> List.filter (fun x -> x.Label <> label || x.Dps > dps))
                         if not (d.Until >= e.Soonest) then e.Soonest <- d.Until
                         expireAt s d.Until
+                    ev.Tags <- skill.Tags
                 // meta gem energy: crits and newly inflicted ailments, scaled by monster power and by
                 // the share of the ailment threshold the hit deals; none from triggered skills
                 if p.Metas.Length > 0 && not (skill.Tags.Contains Triggered) then
-                    let threshold = max 1.0 (Ailments.threshold def)
+                    let threshold = max 1.0 (nThreshold nums)
                     let power = MonsterPower.ofRarity def0.Rarity
-                    let ratio types = Dmg.sumOf types hit.Unmitigated / threshold
-                    let after = if dead then Map.empty else status s e
+                    if not dead then refreshStatus s e
+                    let afterHas = e.SHas
                     let newly a =
                         if dead then
                             // on a killing hit: what this hit inflicted, and buildup that would complete
@@ -2309,16 +3300,16 @@ module Flat =
                                 match i with
                                 | Dot (x, _, _, _, _) | Status (x, _, _) -> x = a
                                 | AddBuildup (x, pct) -> x = a && e.Buildup.[ailmentIndex x] + pct >= 100.0)
-                        else after.ContainsKey (Ailment.status a) && not (before.ContainsKey (Ailment.status a))
+                        else afterHas.[p.AilmentStatus.[ailmentIndex a]] && not beforeHas.[p.AilmentStatus.[ailmentIndex a]]
                     p.Metas |> Array.iteri (fun i meta ->
                         let amount =
                             meta.Meta.Sources
                             |> List.sumBy (fun src ->
                                 match src with
-                                | CritHits per when hit.Crit -> per * power * ratio DamageType.all
-                                | MeleeHits per when skill.Tags.Contains Melee -> per * power * ratio DamageType.all
+                                | CritHits per when crit -> per * power * (total5 un / threshold)
+                                | MeleeHits per when skill.Tags.Contains Melee -> per * power * (total5 un / threshold)
                                 | MeleeKills per when dead && skill.Tags.Contains Melee -> per * power
-                                | InflictsAilment (a, per) when newly a -> per * power * ratio (Ailments.scalesFromWith ctx mods a)
+                                | InflictsAilment (a, per) when newly a -> per * power * (source ev a un / threshold)
                                 | _ -> 0.0)
                         // (what this fills up and triggers is aimed at the enemy that was hit)
                         if amount > 0.0 then
@@ -2333,13 +3324,15 @@ module Flat =
                     let active = p.Archons |> Array.exists (fun a -> s.BHas.[a.Buff])
                     let recovering = s.ArchonRecovery > s.Time
                     if not (active || recovering) then
-                        match p.Archons |> Array.tryFind (fun a -> rng.Chance(Mods.sumBase ctx [ Named a.Stat ] mods)) with
-                        | Some a ->
+                        let mutable found = -1
+                        for i in 0 .. p.Archons.Length - 1 do
+                            if found < 0 && rng.Chance(qSum ev info.QArchon.[i]) then found <- i
+                        if found >= 0 then
+                            let a = p.Archons.[found]
                             setBuff s a.Buff 1 (s.Time + a.Duration) a.AMods
                             s.ArchonRecovery <- s.Time + a.Duration + a.Recovery
                             expireAt s (s.Time + a.Duration)
-                            bump s a.Gained
-                        | None -> ())
+                            bump s a.Gained)
                 // charms: charges from kills, and the ones used by killing a rare or unique monster
                 if dead && p.Charms.Length > 0 then
                     if p.Vitals.IsSome then
@@ -2351,18 +3344,19 @@ module Flat =
                 // "Only one Hit every 0.5 seconds can cause you to gain Rage": when one last could
                 // is kept, even where there is no Rage to gain
                 (let fresh = s.Time - (Map.tryFind "RageHitAt" s.Energy |> Option.defaultValue -1e9) >= 0.5
-                 let onHit = if fresh then Mods.sumBase ctx [ Named "RageOnHit" ] mods else 0.0
+                 let onHit = if fresh then sumQ ev qRageOnHit else 0.0
                  if onHit > 0.0 then s.Energy <- Map.add "RageHitAt" s.Time s.Energy
                  gainRage s (onHit + (if dead then p.RageOnKill else 0.0)))
                 // what the game tracks for "recently" conditions
                 mark s p.BHit 4.0
-                if not hit.Crit then mark s p.BNonCrit 4.0
-                if hit.Crit then
+                if not crit then mark s p.BNonCrit 4.0
+                if crit then
                     mark s p.BCrit 4.0
                     mark s p.BCrit8 8.0
                 if dead then mark s p.BKilled 4.0
                 react s rng p.OnHit "" sid target
-                if hit.Crit then react s rng p.OnCrit "" sid target
+                if crit then react s rng p.OnCrit "" sid target
+            release s
 
     /// A strike lands: who is hit, and each hit (`Sim.onStrike`).
     let private onStrike (s: State) (rng: Rng) (sid: int) (mult: float) (aimedAt: int) (elapsed: float) (passing: bool) (direct: bool) =
@@ -2375,38 +3369,39 @@ module Flat =
             let skill = info.Skill
             let primaryDef = s.Foes.[primary].Def
             // (the buffs are the ones the strike began with, whatever its hits change)
-            let stacks = skillStacks s sid
-            let mods = skillDb s sid
+            let ev = acquire s sid
+            useBuffs s ev info true
             let shape () =
-                let ctx = Skill.ctx skill false stacks Map.empty
-                let areaMult = Mods.mult ctx [ AreaOfEffect ] mods
+                let areaMult = multQ ev qArea
                 let delivery =
                     match skill.Delivery with
-                    | Projectiles p ->
+                    | Projectiles pr ->
                         let fromCharges =
-                            match p.PerCharge with
-                            | Some (charge, per) -> per * (Map.tryFind charge stacks |> Option.defaultValue 0)
+                            match pr.PerCharge with
+                            | Some (_, per) -> per * buffStacksOf ev info.PerChargeBuff
                             | None -> 0
                         Projectiles
-                            { p with
+                            { pr with
                                 Count =
-                                    p.Count + fromCharges
-                                    + (if p.Count + fromCharges > 0 && not (skill.Tags.Contains(Tag "Type:ProjectilesNumberModifiersNotApplied")) then
-                                           int (Mods.sumBase ctx [ AdditionalProjectiles ] mods)
-                                           + (if rng.Chance(Mods.sumBase ctx [ Named "ExtraProjectileChance2" ] mods) then 2 else 0)
-                                           + (let c = Mods.sumBase ctx [ Named "ExtraProjectileChance1" ] mods
+                                    pr.Count + fromCharges
+                                    + (if pr.Count + fromCharges > 0 && not (skill.Tags.Contains(Tag "Type:ProjectilesNumberModifiersNotApplied")) then
+                                           int (sumQ ev qProjectiles)
+                                           + (if rng.Chance(sumQ ev qExtraProjectiles2) then 2 else 0)
+                                           + (let c = sumQ ev qExtraProjectiles1
                                               int (c / 100.0) + (if rng.Chance(c - 100.0 * floor (c / 100.0)) then 1 else 0))
                                        else 0)
-                                Pierce = p.Pierce + int (Mods.sumBase ctx [ Pierce ] mods) + (if rng.Chance(Mods.sumBase ctx [ Named "PierceChance" ] mods) then 1 else 0)
-                                Chains = p.Chains + int (Mods.sumBase ctx [ Chains ] mods)
-                                TerrainChain = p.TerrainChain + Mods.sumBase ctx [ Named "TerrainChain" ] mods }
+                                Pierce = pr.Pierce + int (sumQ ev qPierce) + (if rng.Chance(sumQ ev qPierceChance) then 1 else 0)
+                                Chains = pr.Chains + int (sumQ ev qChains)
+                                TerrainChain = pr.TerrainChain + sumQ ev qTerrainChain }
                     | d -> d
-                ctx, areaMult, delivery
+                areaMult, delivery
             s.StrikeLeech <- 0.0
             s.StrikeLifeLeech <- 0.0
             // (the reference works the shape out twice, and each time rolls what it rolls)
-            shape () |> ignore
-            let ctx, areaMult, delivery = shape ()
+            (match skill.Delivery with
+             | Projectiles _ -> shape () |> ignore
+             | _ -> ())
+            let areaMult, delivery = shape ()
             let hitAll (names: string list) =
                 for name in names do
                     hitEnemy s rng sid mult p.EnemyIds.[name]
@@ -2428,17 +3423,20 @@ module Flat =
                     | _ -> Geometry.targetsFrom rng p.Fight.Walls p.Fight.Reach delivery areaMult primaryDef alive |> hitAll
             strike ()
             // Aftershock: a slam has a chance to hit its area once more
-            if info.IsSlam && rng.Chance(Mods.sumBase ctx [ Named "AftershockChance" ] mods) then
+            if info.IsSlam && rng.Chance(sumQ ev qAftershock) then
                 strike ()
                 bump s info.CAftershock
+            release s
 
     /// After a use's hits: the skill consumes its charges, unless they are kept (`Sim.step`).
     let private onConsume (s: State) (rng: Rng) (charge: int) (sid: int) =
         let p = s.P
         let info = p.Skills.[sid]
-        let db = skillDb s sid
-        let skip = Mods.sumBase Ctx.empty [ Named "ChargeSkipConsume" ] db
-        let every = Mods.sumBase Ctx.empty [ Named "ConsumeChargeEveryMs" ] db / 1000.0
+        let ev = acquireEmpty s sid
+        let skip = sumQ ev qSkipConsume
+        let every = sumQ ev qConsumeEvery / 1000.0
+        let count = int (sumQ ev qConsumeCount)
+        release s
         let spared = every > 0.0 && not (rng.Chance(100.0 * min 1.0 (useTime s sid / every)))
         if s.BHas.[charge] && not spared then
             // "still count as consuming": the consumed-recently status starts either way
@@ -2459,7 +3457,6 @@ module Flat =
                         expireAt s expires
             else
                 // one charge, a set number, or all of them (0)
-                let count = int (Mods.sumBase Ctx.empty [ Named "ConsumeChargeCount" ] db)
                 if s.BHas.[charge] && count > 0 && s.BStacks.[charge] > count then setBuff s charge (s.BStacks.[charge] - count) s.BExpires.[charge] s.BMods.[charge]
                 else removeBuff s charge
                 bump s info.CConsumed
@@ -2472,8 +3469,9 @@ module Flat =
         let n =
             if not p.IsCharge.[r] || p.FirstSkill < 0 then n
             else
-                let db = skillDb s p.FirstSkill
-                let chance = Mods.sumBase Ctx.empty p.ExtraChance.[r] db
+                let ev = acquireEmpty s p.FirstSkill
+                let chance = qSum ev p.QExtra.[r]
+                release s
                 if chance > 0.0 && rng.Chance chance then n + 1 else n
         setStacks s true r (min maxR (stacksOf s r + n))
         if p.IsCharge.[r] then markStatus s p.GainedRecently.[r]
@@ -2845,6 +3843,11 @@ module Flat =
                 else removeBuff s a
             | _ -> ()
 
+    let private newNums () : DefNums =
+        let none = { Level = -1; Mods = ModDb.empty }
+        { Of = none; Base = none; X = 0.0; MaxRes = Array.create 5 nan; Res = Array.create 5 nan; Taken = Array.create 5 nan
+          Poise = Array.create 13 nan; Armour = nan; PhysFlat = nan; Threshold = nan; Flam = nan }
+
     let private start (p: Program) (seed: uint32) (tell: (float -> string -> string -> string -> float -> unit) option) : State =
         let fight = p.Fight
         let player = fight.Player
@@ -2874,6 +3877,11 @@ module Flat =
                       EntropyAt = 0.0
                       HasEntropy = false
                       Status = Map.empty
+                      SHas = [||]
+                      SStacks = [||]
+                      StatusMapStale = true
+                      DefA = newNums ()
+                      DefB = newNums ()
                       StatusKeys = [||]
                       StatusStale = true
                       StatusDots = []
@@ -2915,6 +3923,18 @@ module Flat =
               BuffMap = Map.empty
               BuffMapStale = true
               ModsVersion = 0
+              BuffsVersion = 0
+              SnapHas = [||]
+              SnapStacks = [||]
+              SnapVersion = -1
+              Dyn = p.NoDyn
+              DynVersion = -1
+              BComp = Array.create nb [||]
+              BCompOf = Array.create nb []
+              RageMore = Array.create nk nan
+              RageVer = Array.create nk -1
+              Evs = ResizeArray()
+              EvDepth = 0
               Dbs = p.Skills |> Array.map (fun k -> k.Db)
               DbVersion = Array.create nk -1
               Cooldowns = Array.create nk -infinity
