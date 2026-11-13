@@ -472,6 +472,10 @@ type Outcome =
       DamageTaken: float
       /// Seconds the player waited for mana.
       ManaStarved: float
+      /// What the hits would have dealt more (or less) had each dealt what it deals on
+      /// average over critical hit or not, in place of what its roll made it: added to the
+      /// damage dealt, a fight's damage without the luck of which uses were critical hits.
+      Evened: float
       /// Lowest life as a fraction of maximum.
       MinLife: float
       /// Mana by source: "regen", "leech", "kill".
@@ -607,6 +611,10 @@ module Sim =
           Seq: int
           /// The fight's seed (for rolls that are drawn apart from the fight's stream).
           Seed: uint32
+          /// See `Outcome.Evened`.
+          Evened: float
+          /// How many events each stream of random numbers has served (see `step`).
+          Streams: Map<string, int>
           DamageBy: Map<string, float>
           DamageByType: Map<string, float>
           Counts: Map<string, int>
@@ -660,6 +668,13 @@ module Sim =
 
     let private addf key v (m: Map<string, float>) =
         Map.add key ((Map.tryFind key m |> Option.defaultValue 0.0) + v) m
+
+    /// The seed of the n-th draw of a stream of its own, named by `key`, in a fight of this seed.
+    let private streamSeed (seed: uint32) (key: string) (n: int) : uint32 =
+        let mutable h = 5381u
+        for ch in key do
+            h <- (((h <<< 5) &&& 0xFFFFFFFFu) + h + uint32 ch) &&& 0xFFFFFFFFu
+        ((seed ^^^ h) + uint32 (n % 65536) * 40503u + 1u) &&& 0xFFFFFFFFu
 
     let private schedule t ev (w: World) =
         { w with
@@ -1578,10 +1593,7 @@ module Sim =
             // passive does and not by which uses happen to crit.)
             let w =
                 let n = Map.tryFind skill.Name (Map.find actor.Name w.Actors).Rolled |> Option.defaultValue 0
-                let mutable h = 5381u
-                for ch in actor.Name + "|" + skill.Name do
-                    h <- (((h <<< 5) &&& 0xFFFFFFFFu) + h + uint32 ch) &&& 0xFFFFFFFFu
-                let r = Rng(((w.Seed ^^^ h) + uint32 (n % 65536) * 40503u + 1u) &&& 0xFFFFFFFFu).Float()
+                let r = Rng(streamSeed w.Seed (actor.Name + "|" + skill.Name) n).Float()
                 updateActor actor.Name (fun st -> { st with Rolled = Map.add skill.Name (n + 1) st.Rolled; CritRolls = (skill :: skill.Parts) |> List.fold (fun m p -> Map.add p.Name r m) st.CritRolls }) w
             let st = Map.find actor.Name w.Actors
             let ctx = Skill.ctx skill false (skillStacks actor skill st) (status target)
@@ -2344,6 +2356,18 @@ module Sim =
                 // non-critical hit" (wiki, Evasion)
                 let critRoll = if hitChance < 100.0 && rng.Chance(100.0 - hitChance) then Some 1.0 else critRoll
                 let hit = Hit.rollWith critRoll rng ctx mods skill def
+                // The same hit the other way (a critical hit if it was none, none if it was one),
+                // rolled apart from the fight's stream, and with it what the hit deals on average
+                // over the two, as a factor on what it did deal. (Not where a critical hit is
+                // rolled in a way of its own.)
+                let evenly =
+                    let chance = if critRoll |> Option.exists (fun r -> r >= 1.0) then 0.0 else min 100.0 (max 0.0 (Hit.critChance ctx mods skill))
+                    let was = Dmg.total hit.Dealt
+                    if chance <= 0.0 || chance >= 100.0 || was <= 0.0 || Mods.flag ctx (Named "InevitableCrits") mods || Mods.flag ctx (Named "BifurcateCrits") mods then 1.0
+                    else
+                        let other = Dmg.total (Hit.rollWith (Some(if hit.Crit then 1.0 else 0.0)) (Rng(uint32 (w.Seq % 1000000) + 7919u)) ctx mods skill def).Dealt
+                        let p = chance / 100.0
+                        (if hit.Crit then p * was + (1.0 - p) * other else p * other + (1.0 - p) * was) / was
                 // Culling Strike: an enemy at or below the threshold for its rarity dies, before the hit's damage
                 let hit =
                     let cctx = { ctx with Crit = hit.Crit }
@@ -2401,6 +2425,8 @@ module Sim =
                         // the enemy as it is now: what the hit consumed stays consumed
                         Enemies = Map.add target { (Map.find target w.Enemies) with Life = (if dead then 0.0 else life) } w.Enemies
                         DamageBy = addf (skill.Name + " (hit)") (min dealt e.Life) w.DamageBy
+                        // (only of a hit the enemy outlives: what a killing hit deals is the life that was left)
+                        Evened = (if dead then w.Evened else w.Evened + dealt * (evenly - 1.0))
                         // (a hit that deals more than the enemy has left: each type's share of what was left)
                         DamageByType = (let k = if dealt > e.Life && dealt > 0.0 then e.Life / dealt else 1.0 in hit.Dealt |> Map.fold (fun m t v -> if v > 0.0 then addf (DamageType.name t) (v * k) m else m) w.DamageByType)
                         // "25% of Hit Damage dealt to them while Debuffed": hits are what is recorded
@@ -3317,6 +3343,22 @@ module Sim =
     let private step env rng (w: World) =
         let (KeyValue ((t, sq), ev)) = Seq.head w.Queue
         let dt = t - w.Time
+        // What a skill's hits roll comes from a stream of that skill alone (who strikes with
+        // what: its first event, its second, ...), not from the one stream of the fight: its
+        // tenth strike rolls the same whatever else happened before. Two fights of one seed
+        // that differ a little (a passive more) then differ by what that does, not by luck.
+        let rng, w =
+            let key =
+                match ev with
+                | Strike (a, s, _, _) | PassingStrike (a, s, _, _, _) | DirectHit (a, s, _, _) -> "S|" + a + "|" + s
+                | ConsumeCharges (a, _, s) -> "C|" + a + "|" + s
+                | EnemyAttack e -> "E|" + e
+                | PeriodicTick (a, p) -> "P|" + a + "|" + p
+                | _ -> ""
+            if key = "" then rng, w
+            else
+                let n = Map.tryFind key w.Streams |> Option.defaultValue 0
+                Rng(streamSeed w.Seed key n), { w with Streams = Map.add key (n + 1) w.Streams }
         let w = { w with Queue = Map.remove (t, sq) w.Queue } |> advance t |> recover env.Fight.Player.Vitals env.Fight.Player.ManaFlask env.Fight.Player.Charms dt
         if allDead w || (w.Player |> Option.exists (fun p -> p.Died.IsSome)) then
             w
@@ -3729,6 +3771,8 @@ module Sim =
               ShownAt = Map.empty
               Seq = 0
               Seed = seed
+              Evened = 0.0
+              Streams = Map.empty
               DamageBy = Map.empty
               DamageByType = Map.empty
               Counts = Map.empty
@@ -3806,6 +3850,7 @@ module Sim =
           Died = w.Player |> Option.bind (fun p -> p.Died)
           DamageTaken = w.Player |> Option.map (fun p -> p.Taken) |> Option.defaultValue 0.0
           ManaStarved = w.Player |> Option.map (fun p -> p.Starved) |> Option.defaultValue 0.0
+          Evened = w.Evened
           MinLife = w.Player |> Option.map (fun p -> p.MinLife) |> Option.defaultValue 1.0
           ManaGained = w.Player |> Option.map (fun p -> p.ManaGained) |> Option.defaultValue Map.empty }
 

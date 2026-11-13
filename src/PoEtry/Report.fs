@@ -399,6 +399,7 @@ module Report =
               "killRate", num summary.KillRate
               "clear", (match summary.Ttk with Some t -> stats t | None -> JNull)
               "dps", stats summary.Dps
+              "dpsEvened", num summary.DpsEvened
               "damageShare", pairs summary.DamageShare
               "damageType", pairs summary.TypeShare
               "uptime", pairs summary.Uptime

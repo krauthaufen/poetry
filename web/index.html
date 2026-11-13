@@ -140,7 +140,9 @@
         // ("then_x": x is so only once the change is made, e.g. an item taken off)
         const then = {};
         for (const k of Object.keys(rest)) if (k.startsWith("then_")) { then[k.slice(5)] = rest[k]; delete rest[k]; }
-        const dps = (text) => { try { const r = JSON.parse(text); return r.error ? null : r.dps.mean; } catch { return null; } };
+        // (against enemies that do not die, every hit counted as what it deals on average over
+        // critical hit or not: the same in the long run, steadier from few fights)
+        const dps = (text) => { try { const r = JSON.parse(text); return r.error ? null : (r.dpsEvened != null && r.killRate === 0 ? r.dpsEvened : r.dps.mean); } catch { return null; } };
         const of = (scene, tree, seed) => ({ ...rest, ...tree, op: "fight", scenario: scene[0], time: scene[1], runs: 1, seed: seed || 1, ...(scene[2] ? { life: scene[2] } : {}) });
         // (a fight a job: whatever is asked next need not wait for more than one)
         const seeds = (scene) => Array.from({ length: scene[3] }, (_, i) => scene[3] - i);
@@ -197,7 +199,7 @@
           const entries = String(list || "").split("\n@@\n").filter((e) => e).map((e) => { const [k, param, ...v] = e.split("\n"); return { key: k, param, value: v.join("\n") }; });
           a = { results: [], total: entries.length, told: -1, waiters: [] };
           analyses.set(key, a);
-          const dps = (text) => { try { const r = JSON.parse(text); return r.error ? null : r.dps.mean; } catch { return null; } };
+          const dps = (text) => { try { const r = JSON.parse(text); return r.error ? null : (r.dpsEvened != null && r.killRate === 0 ? r.dpsEvened : r.dps.mean); } catch { return null; } };
           const several = (extra) => Promise.all(Array.from({ length: seeds || 5 }, (_, i) => ask({ ...rest, ...extra, op: "fight", scenario: scene[0], time: Math.min(scene[1], 14), runs: 1, seed: i + 1, ...(scene[2] ? { life: scene[2] } : {}) }, "analyse").then(dps)))
             .then((xs) => (xs.some((x) => x == null) ? null : mean(xs)));
           const base = several({});
