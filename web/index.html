@@ -134,6 +134,9 @@
       let compared = "";
       const compare = async (request) => {
         const { op, depth, base, basechoices, passives, choices, ...rest } = request;
+        // ("then_x": x is so only once the change is made, e.g. an item taken off)
+        const then = {};
+        for (const k of Object.keys(rest)) if (k.startsWith("then_")) { then[k.slice(5)] = rest[k]; delete rest[k]; }
         const dps = (text) => { try { const r = JSON.parse(text); return r.error ? null : r.dps.mean; } catch { return null; } };
         const of = (scene, tree, seed) => ({ ...rest, ...tree, op: "fight", scenario: scene[0], time: scene[1], runs: 1, seed: seed || 1, ...(scene[2] ? { life: scene[2] } : {}) });
         // (a fight a job: whatever is asked next need not wait for more than one)
@@ -144,7 +147,7 @@
         const baseKey = (scene) => scene[3] + "|" + JSON.stringify({ ...of(scene, was), build: undefined });
         if (bases.size > 64) bases.clear();
         // another change is asked about: what still waits for the one before is not wanted
-        const now = String(passives) + "|" + String(choices);
+        const now = String(passives) + "|" + String(choices) + "|" + JSON.stringify(then);
         if (now !== compared) {
           compared = now;
           for (let i = jobs.length - 1; i >= 0; i--) if (jobs[i].fight === "compare") jobs.splice(i, 1)[0].done(JSON.stringify({ error: "dropped" }));
@@ -153,7 +156,7 @@
         // (asked last, they are first in the line: the changed ones, then the bases not known yet)
         const missing = list.filter((scene) => !bases.has(baseKey(scene)));
         [...missing].reverse().forEach((scene) => bases.set(baseKey(scene), several(scene, was, "base")));
-        const changed = [...list].reverse().map((scene) => several(scene, { passives, choices: choices || "" }, "compare")).reverse();
+        const changed = [...list].reverse().map((scene) => several(scene, { ...(passives === undefined ? {} : { passives, choices: choices || "" }), ...then }, "compare")).reverse();
         const out = [];
         for (let i = 0; i < list.length; i++) out.push({ name: list[i][0], base: await bases.get(baseKey(list[i])), changed: await changed[i] });
         return JSON.stringify({ runs: list[0][3], scenarios: out });
@@ -373,6 +376,61 @@
     #app .gem .face:hover { background: #1a1a1a; }
     #app .passive-tip .delta.up .by, #app .up { color: #33ff77; }
     #app .passive-tip .delta.down .by, #app .down { color: #dd0022; }
+      /* the inventory: what is worn, laid out as the game does; an item's tooltip beside it (under it on a narrow page) */
+    #app .main.items { position: relative; display: block; max-width: 760px; min-height: 620px; }
+    #app .doll { display: grid; width: 336px; grid-template-columns: repeat(7, 48px); grid-template-rows: repeat(9, 48px);
+      grid-template-areas:
+        "Weapon Weapon Helm   Helm   .      Offhand Offhand"
+        "Weapon Weapon Helm   Helm   .      Offhand Offhand"
+        "Weapon Weapon Body   Body   Amulet Offhand Offhand"
+        "Weapon Weapon Body   Body   .      Offhand Offhand"
+        ".      Ring1  Body   Body   Ring2  .       ."
+        "Gloves Gloves Belt   Belt   Boots  Boots   ."
+        "Gloves Gloves .      .      Boots  Boots   ."
+        "Flask1 .      Charm1 Charm2 Charm3 .       Flask2"
+        "Flask1 .      .      .      .      .       Flask2"; }
+    #app .loose-items { display: flex; flex-wrap: wrap; width: 336px; margin-top: 10px; }
+    #app .item { margin: 2px; border: 1px solid #3a3a3a; background: #0a0a0a; min-width: 0; min-height: 0; }
+    #app .item.loose { width: 44px; height: 44px; }
+    #app .item.empty { display: flex; align-items: center; justify-content: center; color: #444; font-size: 11px; border-style: dashed; }
+    #app .item.magic { border-color: #44447a; background: #0c0c1c; }
+    #app .item.rare { border-color: #77772f; background: #17170a; }
+    #app .item.unique { border-color: #7a4520; background: #1c1108; }
+    #app .item.pinned { border-color: #fff; }
+    #app .item .face { position: relative; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; padding: 2px; border: 0; background: none; cursor: pointer; color: var(--dim); font: inherit; font-size: 11px; overflow: hidden; }
+    #app .item .face > img { max-width: 100%; max-height: 100%; object-fit: contain; }
+    #app .item .sockets { position: absolute; left: 0; right: 0; bottom: 1px; display: flex; justify-content: center; gap: 2px; }
+    #app .item .socket { width: 16px; height: 16px; border: 1px solid #555; border-radius: 50%; background: #000c; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+    #app .item .socket img { width: 15px; height: 15px; object-fit: contain; }
+    #app .item-tip { display: none; position: absolute; z-index: 30; left: 390px; top: 0; width: min(400px, calc(100vw - 24px)); border: 1px solid #666; background: #000; box-shadow: 0 4px 14px rgba(0,0,0,.8); text-align: center; pointer-events: none; }
+    #app .item.pinned .item-tip { display: block; pointer-events: auto; }
+    @media (hover: hover) { #app .item:hover .item-tip { display: block; z-index: 31; } }
+    @media (max-width: 780px) { #app .item-tip { left: 0; top: 100%; margin-top: 8px; } }
+    #app .item-tip .head { padding: 6px 12px; font-family: "Fontin SmallCaps", "Fontin", serif; font-size: 18px; line-height: 1.25; color: #c8c8c8; background: #1a1a1a; border-bottom: 1px solid #666; }
+    #app .item.magic .item-tip .head { color: #8888ff; background: #121230; border-color: #8888ff; }
+    #app .item.rare .item-tip .head { color: #ffff77; background: #2b2b0e; border-color: #ffff77; }
+    #app .item.unique .item-tip .head { color: #af6025; background: #2b1a0e; border-color: #af6025; }
+    #app .item-tip .body { padding: 8px 12px 10px; font-size: 14px; line-height: 1.4; }
+    #app .item-tip .prop { color: #7f7f7f; }
+    #app .item-tip .mod { color: #8888ff; }
+    #app .item-tip .mod.enchant, #app .item-tip .mod.crafted { color: #b8daf1; }
+    #app .item-tip .mod.rune { color: #5cf0bb; }
+    #app .item-tip .mod.fractured { color: #a29162; }
+    #app .item-tip .mod.desecrated { color: #6fc76f; }
+    #app .item-tip .mod.mutated { color: #d02090; }
+    #app .item-tip .mod.utility { color: #c8c8c8; }
+    #app .item-tip .corrupted { color: #d20000; }
+    #app .item-tip .holds { color: #666; font-size: 12px; }
+    #app .item-tip .prop + .mod, #app .item-tip .mod.enchant + .mod:not(.enchant), #app .item-tip .mod.implicit + .mod:not(.implicit), #app .item-tip .mod.rune + .mod:not(.rune), #app .item-tip .mod + .corrupted, #app .item-tip .mod + .holds, #app .item-tip .corrupted + .holds
+      { border-top: 1px solid #333; margin-top: 5px; padding-top: 5px; }
+    #app .item-tip .deltas { margin-top: 8px; padding-top: 6px; border-top: 1px solid #666; text-align: left; }
+    #app .item-tip .deltas .depth { color: var(--dim); font-size: 12px; text-align: center; }
+    #app .item-tip .delta { display: flex; justify-content: space-between; gap: 16px; color: var(--dim); text-transform: capitalize; }
+    #app .item-tip .delta .by { color: var(--ink); text-transform: none; }
+    #app .item-tip .delta.up .by { color: #33ff77; }
+    #app .item-tip .delta.down .by { color: #dd0022; }
+    #app .item-tip .actions { display: flex; justify-content: center; margin-top: 8px; }
+    #app .item-tip .act { padding: 4px 10px; background: #1a1a1a; color: #e0e0e0; border: 1px solid #808080; cursor: pointer; font: inherit; font-size: 13px; }
   </style>
 </head>
 <body>

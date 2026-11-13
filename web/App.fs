@@ -11,6 +11,14 @@ type Row = { Label : string; Value : string }
 /// A socketed gem (`Key`: how the simulator is told to leave it out) and a group of them.
 type Gem = { Key : string; Named : string; Level : int; Quality : int; Support : bool; Icon : string; Own : string; Spirit : float; Persistent : bool }
 type GemGroup = { Slot : string; Gems : Gem list }
+
+/// An item of the inventory: where it is worn (`Place`: its number, as "unequip" names it;
+/// `Col`: which of several in one slot, the flasks and charms), what it says, its picture.
+type ItemLine = { Mark : string; Reads : string }
+type Socketed = { Rune : string; Pic : string }
+type Item =
+    { Place : int; Worn : string; Col : int; Headed : string; Type : string; Grade : string; Picture : string
+      Says : string list; Requires : string; Lines : ItemLine list; Holds : Socketed list; Spoiled : bool }
 type Share = { Name : string; Percent : float; Text : string; Part : bool }
 
 /// A passive as the tree draws it: where, how big, and its art in the sprite sheets (a
@@ -129,6 +137,7 @@ type Model =
       Shares : Share list
       /// The character's socket groups, and the gems turned off here.
       Groups : GemGroup list
+      Items : Item list
       /// What the pinned passive's change does (scenario, percent more damage), and the question that was answered.
       Deltas : (string * float) list
       /// The question about the pinned passive ("": none), asked at once and again for more
@@ -249,7 +258,7 @@ type Model =
 let init : Model =
     { Build = ""; Scenario = "boss"; Status = "locating"; Title = ""; Class = ""; Ascendancy = ""; Tab = "character"
       Pools = []; Defences = []; Resistances = []; Minions = []
-      NotUnderstood = 0; Fighting = false; Gem = ""; Dps = []; Shares = []; Groups = []; Dropped = Set.empty; Pinned = ""; Deltas = []; DeltaOf = ""; Ask = ""; AskMore = ""; Anointed = Set.empty; Types = []; Counts = []; Start = Map.empty; Switches = Set.empty
+      NotUnderstood = 0; Fighting = false; Gem = ""; Dps = []; Shares = []; Groups = []; Items = []; Dropped = Set.empty; Pinned = ""; Deltas = []; DeltaOf = ""; Ask = ""; AskMore = ""; Anointed = Set.empty; Types = []; Counts = []; Start = Map.empty; Switches = Set.empty
       Passives = [||]; Ascendancies = []; Shown = []; AscendancyWeb = Data.pack (Data.ofList ([] : V3f list)); Path = Data.pack (Data.ofList ([] : V3f list))
       Loaded = false; Capacity = 0
       WebUv = Data.pack (Data.ofList ([] : V2f list)); AscendancyWebUv = Data.pack (Data.ofList ([] : V2f list)); PathUv = Data.pack (Data.ofList ([] : V2f list)); Art = ""; Links = [||]; Neighbours = Map.empty; Web = Data.pack (Data.ofList ([] : V3f list)); Allocated = Set.empty; Edited = false
@@ -863,12 +872,20 @@ let private gesture (id : int) (before : V2d) (now : V2d) (m : Model) : Model =
 /// The question what pressing the pinned passive's button would do to the damage: the
 /// passives as they are and as they would be then.
 let private compareOf (m : Model) (deep : bool) : string =
+    let listed (x : Model) =
+        (Set.difference x.Allocated x.Anointed |> Set.toList |> List.map string |> String.concat ","),
+        (x.Choices |> Map.toList |> List.filter (fun (i, _) -> x.Allocated.Contains i) |> List.map (fun (i, c) -> string i + ":" + c) |> String.concat ",")
     match m.Selected with
+    // (in the inventory: what taking the pinned item off would do)
+    | _ when m.Tab = "items" ->
+        if not (m.Pinned.StartsWith "item:") then ""
+        else
+            let was, wasChosen = listed m
+            "__sim?op=compare" + (if deep then "&depth=1" else "") + (if m.Gem <> "" then "&gem=" + m.Gem.Replace (" ", "%20") else "") + knobs m
+            + (if m.Edited then "&base=" + was + "&basechoices=" + wasChosen + "&passives=" + was + "&choices=" + wasChosen else "")
+            + "&then_unequip=" + m.Pinned.Substring 5 + "&build=" + m.Build
     | None -> ""
     | Some id ->
-        let listed (x : Model) =
-            (Set.difference x.Allocated x.Anointed |> Set.toList |> List.map string |> String.concat ","),
-            (x.Choices |> Map.toList |> List.filter (fun (i, _) -> x.Allocated.Contains i) |> List.map (fun (i, c) -> string i + ":" + c) |> String.concat ",")
         let was, wasChosen = listed m
         let then', thenChosen = listed (toggle id m)
         if then' = was then ""
@@ -905,7 +922,10 @@ let rec private step (msg : Msg) (m : Model) : Model =
             let deltas =
                 Json.field "scenarios" j |> Json.list |> List.choose (fun x ->
                     let b, c = Json.number (Json.field "base" x), Json.number (Json.field "changed" x)
-                    if b > 0.0 && c > 0.0 then Some (Json.string (Json.field "name" x), (c / b - 1.0) * 100.0) else None)
+                    // (without an item there may be nothing left to fight with)
+                    if b > 0.0 && c > 0.0 then Some (Json.string (Json.field "name" x), (c / b - 1.0) * 100.0)
+                    elif b > 0.0 && r.Url.Contains "then_unequip" then Some (Json.string (Json.field "name" x), -100.0)
+                    else None)
             if deltas.IsEmpty then m else { m with Deltas = deltas; DeltaOf = r.Url }
          | _ -> m)
     | Pin key -> { m with Pinned = key }
@@ -1002,6 +1022,15 @@ let rec private step (msg : Msg) (m : Model) : Model =
                                                               Centres = Json.field "centres" x |> Json.list |> List.map Json.string })
                         |> Map.ofList
                     Counts = Json.field "resources" j |> Json.list |> List.map (fun x -> Json.string (Json.field "name" x), Json.int (Json.field "max" x)) |> List.filter (fun (_, most) -> most > 0)
+                    Items =
+                        Json.field "items" j |> Json.list
+                        |> List.map (fun x ->
+                            let s k = Json.string (Json.field k x)
+                            { Place = Json.int (Json.field "index" x); Worn = s "slot"; Col = Json.int (Json.field "at" x); Headed = s "name"; Type = s "base"; Grade = s "rarity"; Picture = s "icon"
+                              Says = Json.field "props" x |> Json.list |> List.map Json.string; Requires = s "requires"
+                              Lines = Json.field "mods" x |> Json.list |> List.map (fun l -> { Mark = Json.string (Json.field "kind" l); Reads = Json.string (Json.field "text" l) })
+                              Holds = Json.field "sockets" x |> Json.list |> List.map (fun l -> { Rune = Json.string (Json.field "name" l); Pic = Json.string (Json.field "icon" l) })
+                              Spoiled = Json.bool (Json.field "corrupted" x) })
                     Groups =
                         Json.field "groups" j |> Json.list
                         |> List.map (fun g ->
@@ -1065,7 +1094,7 @@ let update (msg : Msg) (m : Model) : Model =
         n.Selected = m.Selected && n.Gem = m.Gem && n.Edited = m.Edited
         && n.Allocated = m.Allocated && n.Choices = m.Choices && n.Anointed = m.Anointed
         && n.Start = m.Start && n.Switches = m.Switches && n.Dropped = m.Dropped
-        && n.Passives.Length = m.Passives.Length
+        && n.Passives.Length = m.Passives.Length && n.Tab = m.Tab && n.Pinned = m.Pinned
     if same then n else { n with Ask = compareOf n false; AskMore = compareOf n true }
 
 let private panel (title : string) (rows : Row list) : Node<Msg> =
@@ -1158,6 +1187,114 @@ let private group (m : Model) (g : GemGroup) : Node<Msg> =
         for x in g.Gems do
             gem m x
         if spirit > 0.0 then div { Dom.Class "spirit"; reserved }
+    }
+
+/// Where an item is worn on the doll ("": not on it, a jewel).
+let private area (i : Item) : string =
+    match i.Worn with
+    | "Weapon 1" -> "Weapon" | "Weapon 2" -> "Offhand" | "Helmet" -> "Helm" | "Body Armour" -> "Body"
+    | "Amulet" -> "Amulet" | "Gloves" -> "Gloves" | "Belt" -> "Belt" | "Boots" -> "Boots"
+    | "Ring 1" -> "Ring1" | "Ring 2" -> "Ring2"
+    | "Flask 1" -> "Flask1" | "Flask 2" -> "Flask2" | "Charm 1" -> "Charm1" | "Charm 2" -> "Charm2" | "Charm 3" -> "Charm3"
+    | "Flask" -> (match i.Col with | 0 -> "Flask1" | 1 -> "Flask2" | 2 -> "Charm1" | 3 -> "Charm2" | 4 -> "Charm3" | _ -> "")
+    | _ -> ""
+
+let private places : (string * string) list =
+    [ "Weapon", "Weapon"; "Offhand", "Offhand"; "Helm", "Helmet"; "Body", "Body"; "Amulet", "Amulet"; "Gloves", "Gloves"; "Belt", "Belt"; "Boots", "Boots"
+      "Ring1", "Ring"; "Ring2", "Ring"; "Flask1", "Flask"; "Flask2", "Flask"; "Charm1", "Charm"; "Charm2", "Charm"; "Charm3", "Charm" ]
+
+/// An item in its place: its picture with what is in its sockets. What it says in a tooltip,
+/// under the mouse or once pressed; pressed, the tooltip stays and tells what taking the
+/// item off would do to the damage.
+let private item (m : Model) (i : Item) (where : string) : Node<Msg> =
+    let key = "item:" + string i.Place
+    let pinned = m.Pinned = key
+    let asked = if pinned then m.Ask else ""
+    let refined = asked <> "" && m.DeltaOf = m.AskMore
+    let known = asked <> "" && (m.DeltaOf = asked || refined)
+    let depth = if refined then "10 fights each" else "3 short fights each, refining ..."
+    let needs = "Requires " + i.Requires
+    let face = if i.Headed <> "" then i.Headed else i.Type
+    div {
+        Dom.Class ("item " + i.Grade + (if pinned then " pinned" else "") + (if where = "auto" then " loose" else ""))
+        Dom.Style [ Css.Prop ("grid-area", where) ]
+        Dom.Attr ("data-item", i.Worn)
+        button {
+            Dom.Class "face"
+            Dom.OnClick (fun _ -> Pin (if pinned then "" else key))
+            if i.Picture <> "" then img { Dom.Attr ("src", i.Picture); Dom.Attr ("alt", "") }
+            if i.Picture = "" then span { Dom.Class "name"; face }
+            if not i.Holds.IsEmpty then
+                span {
+                    Dom.Class "sockets"
+                    for h in i.Holds do
+                        span {
+                            Dom.Class "socket"
+                            if h.Pic <> "" then img { Dom.Attr ("src", h.Pic); Dom.Attr ("alt", "") }
+                        }
+                }
+        }
+        div {
+            Dom.Class "item-tip"
+            div {
+                Dom.Class "head"
+                if i.Headed <> "" then div { i.Headed }
+                div { i.Type }
+            }
+            div {
+                Dom.Class "body"
+                for p in i.Says do
+                    div { Dom.Class "prop"; p }
+                if i.Requires <> "" then div { Dom.Class "prop"; needs }
+                for l in i.Lines do
+                    div { Dom.Class ("mod " + l.Mark); l.Reads }
+                if i.Spoiled then div { Dom.Class "corrupted"; "Corrupted" }
+                for h in i.Holds do
+                    if h.Rune <> "" then div { Dom.Class "holds"; h.Rune }
+                if pinned && asked <> "" then
+                    div {
+                        Dom.Class "deltas"
+                        div { Dom.Class "depth"; "Without it" }
+                        if not known then div { Dom.Class "depth"; "fighting it out ..." }
+                        if known then
+                            for (name, by) in m.Deltas do
+                                div {
+                                    Dom.Class (if by > 0.05 then "delta up" elif by < -0.05 then "delta down" else "delta")
+                                    span { name }
+                                    span { Dom.Class "by"; Dom.Attr ("data-check", "delta"); sprintf "%+.1f%% damage" by }
+                                }
+                        if known then div { Dom.Class "depth"; depth }
+                    }
+                if pinned then
+                    div {
+                        Dom.Class "actions"
+                        button { Dom.Class "act close"; Dom.OnClick (fun _ -> Pin ""); "Close" }
+                    }
+            }
+        }
+    }
+
+/// The inventory: what is worn where it is worn, as the game lays it out, and under it the
+/// jewels and whatever else has no place there.
+let private inventory (m : Model) : Node<Msg> =
+    let worn = m.Items |> List.filter (fun i -> area i <> "")
+    let loose = m.Items |> List.filter (fun i -> area i = "")
+    let taken = worn |> List.map area |> Set.ofList
+    let empty = places |> List.filter (fun (a, _) -> not (taken.Contains a))
+    div {
+        Dom.Class "main items"
+        div {
+            Dom.Class "doll"
+            for (a, label) in empty do
+                div { Dom.Class "item empty"; Dom.Style [ Css.Prop ("grid-area", a) ]; label }
+            for i in worn do
+                item m i (area i)
+        }
+        div {
+            Dom.Class "loose-items"
+            for i in loose do
+                item m i "auto"
+        }
     }
 
 let private scenario (m : Model) (key : string) (name : string) : Node<Msg> =
@@ -1458,8 +1595,8 @@ let view (m : Model) : Node<Msg> =
             if m.Build <> "" then span { Dom.Fetch (sheetUrl m, Sheet) }
             if m.Title <> "" then span { Dom.Fetch (fightUrl m, Fought) }
             if warming m <> "" then span { Dom.Fetch (fightOf m (warming m) "&wait=1", Warmed) }
-            if m.Tab = "tree" && m.Ask <> "" then span { Dom.Fetch (m.Ask, Compared) }
-            if m.Tab = "tree" && m.Ask <> "" && (m.DeltaOf = m.Ask || m.DeltaOf = m.AskMore) then span { Dom.Fetch (m.AskMore, Compared) }
+            if (m.Tab = "tree" || m.Tab = "items") && m.Ask <> "" then span { Dom.Fetch (m.Ask, Compared) }
+            if (m.Tab = "tree" || m.Tab = "items") && m.Ask <> "" && (m.DeltaOf = m.Ask || m.DeltaOf = m.AskMore) then span { Dom.Fetch (m.AskMore, Compared) }
         }
         span { Dom.Fetch ("tree.json", TreeData) }
         div {
@@ -1471,6 +1608,7 @@ let view (m : Model) : Node<Msg> =
             div { Dom.Class "title"; Dom.Attr ("data-check", "title"); m.Title }
             nav {
                 tab m "character" "Character"
+                tab m "items" "Items"
                 tab m "gems" "Gems"
                 tab m "tree" "Passive tree"
             }
@@ -1485,6 +1623,8 @@ let view (m : Model) : Node<Msg> =
                 div { Dom.Class "headline"; Dom.Attr ("data-check", "dps"); m.Dps.Head.Value + " DPS" }
             div { Dom.Class "status"; Dom.Attr ("data-check", "status"); status m }
         }
+        if m.Tab = "items" then
+            inventory m
         if m.Tab = "gems" then
             div {
                 Dom.Class "main gems"

@@ -62,7 +62,7 @@ module Api =
             else Some l)
 
     let private modLines (item: Json) =
-        [ "enchantMods"; "implicitMods"; "runeMods"; "explicitMods"; "craftedMods"; "fracturedMods"; "desecratedMods" ]
+        [ "enchantMods"; "implicitMods"; "runeMods"; "explicitMods"; "mutatedMods"; "craftedMods"; "fracturedMods"; "desecratedMods" ]
         |> List.collect (fun key ->
             Json.list (Json.field key item)
             |> List.choose (fun m ->
@@ -162,6 +162,19 @@ module Api =
         |> Option.bind (fun s -> match System.Int32.TryParse s with | true, v -> Some v | _ -> None)
         |> Option.defaultValue 0
 
+    /// A jewel among what sits in an item's sockets (not a rune, soul core or idol).
+    let private isJewel (s: Json) =
+        let t = Json.strField "typeLine" s |> Option.defaultValue ""
+        Json.strField "frameTypeId" s <> Some "Currency" && [ "Ruby"; "Emerald"; "Sapphire"; "Diamond" ] |> List.exists t.EndsWith
+
+    /// The character's items as the API gives them, one for each of `read`'s Items and in
+    /// their order: what is worn, the tree's jewels, the jewels in sockets of items.
+    let rawItems (json: string) : Json list =
+        let root = Json.parse json
+        let c = Json.field "character" root |> Option.defaultValue root
+        let equipment = Json.list (Json.field "equipment" c)
+        equipment @ Json.list (Json.field "jewels" c) @ (equipment |> List.collect (fun it -> Json.list (Json.field "socketedItems" it) |> List.filter isJewel))
+
     /// Convert an API character into the same shape a PoB build is read into.
     let read (json: string) : PobBuild * (string * DisplayedWeapon) list =
         let root = Json.parse json
@@ -176,9 +189,6 @@ module Api =
             |> List.mapi (fun i j -> sprintf "Jewel %d" (Json.numField "x" j |> Option.map int |> Option.defaultValue i), itemText j)
         // a jewel in a socket made on an item (Cadigan's Epiphany on gloves): a jewel like those
         // of the tree, in no socket of it ("Jewel Gloves")
-        let isJewel (s: Json) =
-            let t = Json.strField "typeLine" s |> Option.defaultValue ""
-            Json.strField "frameTypeId" s <> Some "Currency" && [ "Ruby"; "Emerald"; "Sapphire"; "Diamond" ] |> List.exists t.EndsWith
         let jewels =
             jewels
             @ (equipment |> List.collect (fun it ->
