@@ -252,6 +252,10 @@ type Model =
       CanLogin : bool
       Player : string
       Characters : (string * string * string) list
+      /// The same by league (its name, how many, its characters): the running leagues, shown
+      /// open, and the lasting ones (Standard), shown folded.
+      Running : (string * string * (string * string) list) list
+      Lasting : (string * string * (string * string) list) list
       Going : string
       Kept : string
       Restored : bool
@@ -381,7 +385,7 @@ type Model =
 let init : Model =
     { Build = ""; Scenario = "boss"; Status = "locating"; Title = ""; Class = ""; Ascendancy = ""; Tab = "character"
       Pools = []; Guards = []; Survival = []; Defences = []; Resistances = []; Minions = []
-      NotUnderstood = 0; Fighting = false; Gem = ""; Dps = []; Shares = []; Groups = []; Items = []; Bag = []; Swapped = Map.empty; Wearing = []; Equip = ""; Aim = ""; Pasting = false; Draft = ""; Dropped = Set.empty; GemEdits = []; Picker = ""; Offers = []; Wanted = ""; Offered = []; Probe = ""; ProbeRound = 0; Probing = false; Probed = ""; Worth = []; Play = []; Rotation = []; Pressable = []; EnemyLevel = ""; EnemyEle = ""; EnemyChaos = ""; CustomDraft = ""; Custom = ""; Calcs = []; CanLogin = false; Player = ""; Characters = []; Going = ""; Kept = ""; Restored = false; Notes = ""; NotesWere = ""; NodeWorth = Map.empty; Among = ""; CalcShown = []; Pinned = ""; Deltas = []; DeltaOf = ""; Ask = ""; AskMore = ""; Anointed = Set.empty; Types = []; Counts = []; Start = Map.empty; Switches = Set.empty
+      NotUnderstood = 0; Fighting = false; Gem = ""; Dps = []; Shares = []; Groups = []; Items = []; Bag = []; Swapped = Map.empty; Wearing = []; Equip = ""; Aim = ""; Pasting = false; Draft = ""; Dropped = Set.empty; GemEdits = []; Picker = ""; Offers = []; Wanted = ""; Offered = []; Probe = ""; ProbeRound = 0; Probing = false; Probed = ""; Worth = []; Play = []; Rotation = []; Pressable = []; EnemyLevel = ""; EnemyEle = ""; EnemyChaos = ""; CustomDraft = ""; Custom = ""; Calcs = []; CanLogin = false; Player = ""; Characters = []; Running = []; Lasting = []; Going = ""; Kept = ""; Restored = false; Notes = ""; NotesWere = ""; NodeWorth = Map.empty; Among = ""; CalcShown = []; Pinned = ""; Deltas = []; DeltaOf = ""; Ask = ""; AskMore = ""; Anointed = Set.empty; Types = []; Counts = []; Start = Map.empty; Switches = Set.empty
       Passives = [||]; Ascendancies = []; Shown = []; AscendancyWeb = Data.pack (Data.ofList ([] : V3f list)); Path = Data.pack (Data.ofList ([] : V3f list))
       Loaded = false; Capacity = 0
       WebUv = Data.pack (Data.ofList ([] : V2f list)); AscendancyWebUv = Data.pack (Data.ofList ([] : V2f list)); PathUv = Data.pack (Data.ofList ([] : V2f list)); Art = ""; Links = [||]; Neighbours = Map.empty; Web = Data.pack (Data.ofList ([] : V3f list)); Allocated = Set.empty; Edited = false
@@ -1478,7 +1482,13 @@ let rec private step (msg : Msg) (m : Model) : Model =
         (match r.Status, Native.parseJson r.Text with
          | 200, Ok j ->
             let failed = Json.string (Json.field "error" j)
+            let leagues (lasting : bool) =
+                Json.field "characters" j |> Json.list |> List.filter (fun c -> Json.bool (Json.field "lasting" c) = lasting)
+                |> List.groupBy (fun c -> Json.string (Json.field "league" c))
+                |> List.map (fun (league, cs) -> league, string cs.Length, cs |> List.map (fun c -> Json.string (Json.field "name" c), Json.string (Json.field "name" c) + ": " + Json.string (Json.field "about" c)))
             { m with
+                Running = leagues false
+                Lasting = leagues true
                 CanLogin = Json.bool (Json.field "can" j); Player = Json.string (Json.field "name" j)
                 // (the one that is open first: a list shows its first)
                 Characters =
@@ -2529,8 +2539,19 @@ let view (m : Model) : Node<Msg> =
                     button { Dom.Class "act enter"; Dom.OnClick (fun _ -> Login); "Log in with your Path of Exile account" }
                 if not m.CanLogin then
                     div { Dom.Class "depth"; "no character: add ?build=<url of a character or a PoB build> to the address" }
-                for (name, about, _) in m.Characters do
-                    button { Dom.Class "act character"; Dom.OnClick (fun _ -> Open name); about }
+                for (league, count, heroes) in m.Running do
+                    details {
+                        Dom.Attr ("open", "open")
+                        summary { span { league }; span { Dom.Class "count"; count } }
+                        for (name, about) in heroes do
+                            button { Dom.Class "act character"; Dom.OnClick (fun _ -> Open name); about }
+                    }
+                for (league, count, heroes) in m.Lasting do
+                    details {
+                        summary { span { league }; span { Dom.Class "count"; count } }
+                        for (name, about) in heroes do
+                            button { Dom.Class "act character"; Dom.OnClick (fun _ -> Open name); about }
+                    }
             }
         if m.Tab = "character" && m.Build <> "" then
             div {
