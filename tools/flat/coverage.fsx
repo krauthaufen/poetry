@@ -59,7 +59,7 @@ let report (title: string) (o: Options) =
         a.Duration = b.Duration && a.Ttk = b.Ttk && a.Kills = b.Kills && a.DamageBy = b.DamageBy && a.DamageByType = b.DamageByType && a.Counts = b.Counts
         && a.Uptime = b.Uptime && a.Died = b.Died && a.DamageTaken = b.DamageTaken && a.Evened = b.Evened && a.MinLife = b.MinLife
         && a.ManaGained = b.ManaGained && a.ManaStarved = b.ManaStarved
-    let seeds = [ 1u .. 10u ]
+    let seeds = [ 1u .. 40u ]
     let timed =
         compiled |> Array.choose snd |> Array.map (fun (fight, p) ->
             for seed in 100u .. 103u do
@@ -74,7 +74,7 @@ let report (title: string) (o: Options) =
             let events = ref 0
             Flat.traced (fun _ k _ _ _ -> if k <> "hit" && k <> "crit" then events.Value <- events.Value + 1) p 1u |> ignore
             List.forall2 same a b, simMs, flatMs, events.Value)
-    printfn "\n== %s: %d characters with a fight, %d compile (%d of them the same as the reference with seeds 1 to 10)" title results.Length compiled.Length (timed |> Array.filter (fun (ok, _, _, _) -> ok) |> Array.length)
+    printfn "\n== %s: %d characters with a fight, %d compile (%d of them the same as the reference with seeds 1 to 40)" title results.Length compiled.Length (timed |> Array.filter (fun (ok, _, _, _) -> ok) |> Array.length)
     for (_, simMs, flatMs, events) in timed do
         printfn "   a fight of %d events: reference %.2f ms, flat %.2f ms (%.1f times as fast)" events simMs flatMs (simMs / flatMs)
     if timed.Length > 0 then

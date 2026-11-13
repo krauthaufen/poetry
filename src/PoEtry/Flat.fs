@@ -7,10 +7,21 @@ namespace PoEtry
 /// what the fight has that is not built here yet; `run` plays a program with a seed.
 ///
 /// What a hit deals, what it inflicts and what a modifier is worth are the reference's own
-/// functions (`Hit`, `Ailments`, `Mods`), asked with the same values in the same order. What
-/// is new is the bookkeeping around them: the state is a set of arrays that are changed in
-/// place, the events wait in a heap, and what is asked again and again (an actor's
+/// functions (`Hit`, `Ailments`, `Mods`, `Geometry`), asked with the same values in the same
+/// order. What is new is the bookkeeping around them: the state is a set of arrays that are
+/// changed in place, the events wait in a heap, and what is asked again and again (an actor's
 /// modifiers with its buffs, an enemy's statuses) is kept until what it was made from changes.
+///
+/// Played: one player (no minions, no totems) against any number of enemies that are not
+/// replaced; skills with parts, cooldowns, costs and charges; the rules whose reactions are
+/// listed in `Re`; ailments, damage over time, curses, exposure, armour break; meta gems;
+/// cycles, periodic actions, archons, rage, charms; the player's pools, with monsters
+/// walking up and hitting back. Everything else is refused by `compile`, by name
+/// (`unsupported` lists it): the lists at `build` say what.
+///
+/// One thing is taken for granted of a fight: the defences for a set of buffs
+/// (`Actor.VitalsAt`) are a function of the buffs. They are asked once per set of buffs
+/// here, where the reference asks at every hit of a monster.
 ///
 /// Nothing here outlives a run: all that changes belongs to the `State` of one `run`, so
 /// several runs of one program can go on at once.
@@ -1173,8 +1184,11 @@ module Flat =
           mutable PHasEntropy: bool
           AttackStream: int[]
           PeriodicStream: int[]
-          /// The defences for the last few sets of buffs they were asked for (`Actor.VitalsAt`).
-          mutable VitalsSeen: (Map<string, int> * PlayerStats) list
+          /// The defences for the sets of buffs they were asked for (`Actor.VitalsAt`), by the
+          /// buffs written out; and the last set asked for, with its defences.
+          VitalsSeen: Dictionary<string, PlayerStats>
+          mutable VitalsOf: Map<string, int>
+          mutable VitalsLast: PlayerStats option
           /// Mana gained: regen, leech, flask, recoup, hit, kill, consume.
           Gained: float[]
           GainedSeen: bool[] }
@@ -1970,10 +1984,7 @@ module Flat =
 
     /// The player is free to act: the first step of the rotation that can be used and paid
     /// for is used (`Sim.onReadyUnlocked`).
-    let private onReady (s: State) (rng: Rng) =
-      // a stunned or frozen player waits
-      if s.P.Vitals.IsSome && s.LockedUntil > s.Time then schedule s s.LockedUntil EReady 0 0 0.0 0.0
-      else
+    let private act (s: State) (rng: Rng) =
         let p = s.P
         let v = view s
         // what a use of the skill costs now: base x increased cost / (1 + cost efficiency)
@@ -2061,6 +2072,11 @@ module Flat =
             for t in s.InvocationReady do
                 if t > s.Time && t < infinity && t < next then next <- t
             schedule s (if next < infinity then next else s.Time + Constants.serverTick) EReady 0 0 0.0 0.0
+
+    /// The player's turn comes (`Sim.onReady`): a stunned or frozen player waits.
+    let private onReady (s: State) (rng: Rng) =
+        if s.P.Vitals.IsSome && s.LockedUntil > s.Time then schedule s s.LockedUntil EReady 0 0 0.0 0.0
+        else act s rng
 
     /// One hit on one enemy (`Sim.hitEnemy`, in its order).
     let private hitEnemy (s: State) (rng: Rng) (sid: int) (mult: float) (target: int) =
@@ -2544,11 +2560,19 @@ module Flat =
                 match p.Fight.Player.VitalsAt with
                 | Some at ->
                     let buffs = buffMap s
-                    match s.VitalsSeen |> List.tryFind (fun (m, _) -> obj.ReferenceEquals(m, buffs) || m = buffs) with
-                    | Some (_, v) -> v
-                    | None ->
-                        let v = at buffs
-                        s.VitalsSeen <- (buffs, v) :: List.truncate 7 s.VitalsSeen
+                    match s.VitalsLast with
+                    | Some v when obj.ReferenceEquals(s.VitalsOf, buffs) -> v
+                    | _ ->
+                        let key = buffs |> Map.fold (fun (key: string) name stacks -> key + name + "=" + string stacks + ";") ""
+                        let v =
+                            match s.VitalsSeen.TryGetValue key with
+                            | true, v -> v
+                            | _ ->
+                                let v = at buffs
+                                s.VitalsSeen.[key] <- v
+                                v
+                        s.VitalsOf <- buffs
+                        s.VitalsLast <- Some v
                         v
                 | None -> pools
             let st = status s e
@@ -2948,7 +2972,9 @@ module Flat =
               PHasEntropy = false
               AttackStream = Array.zeroCreate p.Enemies.Length
               PeriodicStream = Array.zeroCreate p.Periodics.Length
-              VitalsSeen = []
+              VitalsSeen = Dictionary()
+              VitalsOf = Map.empty
+              VitalsLast = None
               Gained = Array.zeroCreate gainedNames.Length
               GainedSeen = Array.create gainedNames.Length false }
         for c in p.Charms do
