@@ -230,7 +230,9 @@
           if (!t) throw new Error("not logged in");
           const r = await plain("/poe-api/" + path, { headers: { Authorization: "Bearer " + t.access } });
           if (r.status === 401) { put("token", null); throw new Error("the login has run out: log in again"); }
-          if (!r.ok) throw new Error(path + ": status " + r.status);
+          if (r.status === 503 || r.status === 502) throw new Error("the game's servers hand out no characters right now (status " + r.status + "): try again later");
+          if (r.status === 429) throw new Error("asked the game's servers too often: wait a minute");
+          if (!r.ok) throw new Error("the game's servers answered status " + r.status);
           return r.text();
         };
         // (what was fetched is kept a while: the game's servers allow few questions)
@@ -651,6 +653,8 @@
       #app header > nav button.tab { flex: 0 0 auto; }
       #app header .headline { flex: 0 0 auto; overflow: visible; }
       #app header .status, #app header .points, #app header .found { display: none; }
+      /* (with no damage to show, what the page has to say is shown instead) */
+      #app header:not(:has(.headline)) .status { display: block; white-space: normal; font-size: 12px; line-height: 1.2; }
       #app button.act { padding: 9px 14px; font-size: 15px; }
       #app .press button.act { padding: 7px 12px; }
     }
