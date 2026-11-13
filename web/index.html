@@ -534,6 +534,30 @@
     #app .main.calcs .line .what { color: var(--dim); }
     #app .knob input { width: 110px; background: #0f0d0c; border: 1px solid var(--edge); color: var(--ink); padding: 2px 6px; font: inherit; }
     #app .panel.custom textarea { width: 100%; box-sizing: border-box; }
+    /* on a phone a pinned item or gem is a sheet over the whole page, with its picture and a
+       button to close it in the corner (and the usual Close at the bottom) */
+    #app .shut, #app .item-tip .pic, #app .gem-tip .pic { display: none; }
+    #app .item-tip .holds img { width: 18px; height: 18px; vertical-align: middle; margin-right: 4px; }
+    #app .item-tip .holds .does { color: #5cf0bb; opacity: .7; }
+    @media (max-width: 780px) {
+      #app .item.pinned > .item-tip, #app .gem.pinned .gem-tip { position: fixed; left: 0; top: 0; right: 0; bottom: 0; width: 100vw; height: 100dvh; max-width: none; margin: 0; box-sizing: border-box;
+        overflow-y: auto; z-index: 200; border: 0; background: #070605; padding-bottom: 28px; text-align: center; }
+      #app .item.pinned > .item-tip .shut, #app .gem.pinned .gem-tip .shut { display: block; position: fixed; top: 6px; right: 8px; z-index: 201; width: 48px; height: 48px; font-size: 30px; line-height: 1;
+        background: #1a1a1a; color: #fff; border: 1px solid #808080; border-radius: 50%; }
+      #app .item.pinned > .item-tip .pic { display: block; margin: 14px auto 4px; max-height: 30vh; max-width: 60vw; }
+      #app .gem.pinned .gem-tip .pic { display: block; margin: 64px auto 8px; width: 96px; height: 96px; }
+      #app .item.pinned > .item-tip .head { padding: 16px 64px 12px 16px; font-size: 21px; }
+      #app .item.pinned > .item-tip .body { font-size: 16px; padding: 10px 16px 16px; }
+      #app .gem.pinned .gem-tip .name { font-size: 22px; white-space: normal; } #app .gem.pinned .gem-tip .line { font-size: 16px; white-space: normal; }
+      #app .item.pinned > .item-tip .act, #app .gem.pinned .gem-tip .act { padding: 12px 18px; font-size: 16px; min-width: 48px; }
+      #app .item.pinned > .item-tip .actions, #app .gem.pinned .gem-tip .actions { margin-top: 18px; gap: 10px; flex-wrap: wrap; }
+      #app .main.items { padding: 10px 4px; }
+      #app .picker { position: fixed; left: 0; top: 0; right: 0; bottom: 0; z-index: 200; overflow-y: auto; border: 0; }
+      #app .offers { max-height: none; }
+      #app .offer { padding: 10px 10px; font-size: 16px; }
+      #app header nav { overflow-x: auto; flex-shrink: 1 !important; scrollbar-width: none; }
+    }
+    #app .main.notes .panel { flex: 1 1 100%; max-width: 760px; }
     #app .main.defence { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; align-items: start; max-width: 1100px; }
     #app .main.defence .survival { display: flex; flex-direction: column; gap: 8px; }
     #app .line.runic-ward .what, #app .line.runic-ward .amount, #app .line.runic-ward-regenerated .amount { color: #d9a441; }

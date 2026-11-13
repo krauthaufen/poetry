@@ -132,6 +132,10 @@ type Msg =
     /// Where the character's numbers come from: the list arrives, is searched.
     | Sources of Fetched
     | Among of string
+    /// What was changed here is kept in the browser (by character) and comes back on the next visit.
+    | Saved of Fetched
+    | Restore of Fetched
+    | Note of string
     /// The inventory: the box to paste an item into opens or closes, what is typed there, the
     /// item is added; where the pinned one is tried; a pasted item is worn (or taken off
     /// again), or thrown away.
@@ -234,6 +238,14 @@ type Model =
       Custom : string
       /// Where the numbers come from: by what is changed, searched, those shown.
       Calcs : (string * Row list) list
+      /// What is kept between visits as text, whether what was kept has been read, and notes
+      /// (as typed, and as they were when read: what the box shows to begin with).
+      Kept : string
+      Restored : bool
+      Notes : string
+      NotesWere : string
+      /// What an analysis found a passive worth (percent of the damage lost without it).
+      NodeWorth : Map<int, float>
       Among : string
       CalcShown : (string * Row list) list
       Pinned : string
@@ -356,7 +368,7 @@ type Model =
 let init : Model =
     { Build = ""; Scenario = "boss"; Status = "locating"; Title = ""; Class = ""; Ascendancy = ""; Tab = "character"
       Pools = []; Guards = []; Survival = []; Defences = []; Resistances = []; Minions = []
-      NotUnderstood = 0; Fighting = false; Gem = ""; Dps = []; Shares = []; Groups = []; Items = []; Bag = []; Swapped = Map.empty; Wearing = []; Equip = ""; Aim = ""; Pasting = false; Draft = ""; Dropped = Set.empty; GemEdits = []; Picker = ""; Offers = []; Wanted = ""; Offered = []; Probe = ""; ProbeRound = 0; Probing = false; Probed = ""; Worth = []; Play = []; Rotation = []; Pressable = []; EnemyLevel = ""; EnemyEle = ""; EnemyChaos = ""; CustomDraft = ""; Custom = ""; Calcs = []; Among = ""; CalcShown = []; Pinned = ""; Deltas = []; DeltaOf = ""; Ask = ""; AskMore = ""; Anointed = Set.empty; Types = []; Counts = []; Start = Map.empty; Switches = Set.empty
+      NotUnderstood = 0; Fighting = false; Gem = ""; Dps = []; Shares = []; Groups = []; Items = []; Bag = []; Swapped = Map.empty; Wearing = []; Equip = ""; Aim = ""; Pasting = false; Draft = ""; Dropped = Set.empty; GemEdits = []; Picker = ""; Offers = []; Wanted = ""; Offered = []; Probe = ""; ProbeRound = 0; Probing = false; Probed = ""; Worth = []; Play = []; Rotation = []; Pressable = []; EnemyLevel = ""; EnemyEle = ""; EnemyChaos = ""; CustomDraft = ""; Custom = ""; Calcs = []; Kept = ""; Restored = false; Notes = ""; NotesWere = ""; NodeWorth = Map.empty; Among = ""; CalcShown = []; Pinned = ""; Deltas = []; DeltaOf = ""; Ask = ""; AskMore = ""; Anointed = Set.empty; Types = []; Counts = []; Start = Map.empty; Switches = Set.empty
       Passives = [||]; Ascendancies = []; Shown = []; AscendancyWeb = Data.pack (Data.ofList ([] : V3f list)); Path = Data.pack (Data.ofList ([] : V3f list))
       Loaded = false; Capacity = 0
       WebUv = Data.pack (Data.ofList ([] : V2f list)); AscendancyWebUv = Data.pack (Data.ofList ([] : V2f list)); PathUv = Data.pack (Data.ofList ([] : V2f list)); Art = ""; Links = [||]; Neighbours = Map.empty; Web = Data.pack (Data.ofList ([] : V3f list)); Allocated = Set.empty; Edited = false
@@ -1218,7 +1230,8 @@ let private weigh (m : Model) : Model =
     { m with
         Items = m.Items |> List.map item
         Groups = m.Groups |> List.map (fun g -> { g with Gems = g.Gems |> List.map (fun x -> { x with Gives = of' ("gem:" + x.Key) }) })
-        Offers = m.Offers |> List.map (fun o -> { o with Adds = of' ("pick:" + o.Choice) }) }
+        Offers = m.Offers |> List.map (fun o -> { o with Adds = of' ("pick:" + o.Choice) })
+        NodeWorth = m.Worth |> List.filter (fun (k, _) -> k.StartsWith "node:") |> List.map (fun (k, v) -> int (k.Substring 5), v) |> Map.ofList }
 
 /// The gems shown in the list to choose from: of the kind asked for, those that are searched
 /// (without a search: those that fit), the ones known to add most first.
@@ -1242,6 +1255,11 @@ let private choice (m : Model) (name : string) : string =
 let private probes (m : Model) : (string * string * string) list =
     if m.Picker <> "" then
         m.Offered |> List.filter (fun o -> o.Fits) |> List.map (fun o -> "pick:" + o.Choice, "gems", String.concat ";" (m.GemEdits @ [ choice m o.Choice ]))
+    elif m.Tab = "tree" then
+        // every notable and keystone allocated, given back alone
+        let ids = Set.difference m.Allocated m.Anointed
+        m.Passives |> Array.filter (fun p -> ids.Contains p.Id && (p.Kind = "notable" || p.Kind = "keystone")) |> List.ofArray
+        |> List.map (fun p -> "node:" + string p.Id, "passives", Set.remove p.Id ids |> Set.toList |> List.map string |> String.concat ",")
     elif m.Tab = "gems" then
         m.Groups |> List.collect (fun g -> g.Gems) |> List.filter (fun x -> not (m.Dropped.Contains x.Key))
         |> List.map (fun x -> "gem:" + x.Key, "without", String.concat "," (Set.toList (Set.add x.Key m.Dropped)))
@@ -1302,6 +1320,9 @@ let private ordered (m : Model) (how : string) (gem : string) : string list =
     | "drop" when now.Length > 1 -> now |> List.filter (fun g -> named g <> gem)
     | "when" when at >= 0 ->
         let code = match now.[at].IndexOf '@' with | -1 -> "" | k -> now.[at].Substring (k + 1)
+        // (what it does by its type is not offered again as a choice)
+        let own = match m.Play |> List.tryFind (fun p -> p.Skill = gem && p.Code = "") |> Option.map (fun p -> p.How) with | Some "when ready" -> "ready" | Some "kept up" -> "buff" | Some "kept on the enemy" -> "curse" | _ -> "-"
+        let whens = whens |> List.filter (fun w -> w <> own)
         let next = whens.[((whens |> List.tryFindIndex (fun w -> w = code) |> Option.defaultValue 0) + 1) % whens.Length]
         now |> List.mapi (fun i g -> if i = at then (if next = "" then gem else gem + "@" + next) else g)
     // (before the last: that one is what is pressed when nothing else is ready)
@@ -1312,6 +1333,58 @@ let private ordered (m : Model) (how : string) (gem : string) : string list =
 /// A fight is to be fought anew: what is shown of the last one goes.
 let private afresh (m : Model) : Model =
     { m with Fighting = true; Dps = []; Shares = []; Types = []; Runs = 0; Round = 0; Happened = []; Warm = [] }
+
+let private quote (t : string) : string =
+    "\"" + t.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\r", "").Replace("\n", "\\n").Replace("\t", " ") + "\""
+
+/// What was changed here, as text to keep.
+let private kept (m : Model) : string =
+    let list (xs : string list) = "[" + String.concat "," xs + "]"
+    let at (i : Item) = m.Bag |> List.tryFindIndex (fun x -> x.Place = i.Place) |> Option.defaultValue -1
+    "{" + String.concat ","
+            [ "\"gems\":" + list (m.GemEdits |> List.map quote)
+              "\"dropped\":" + list (m.Dropped |> Set.toList |> List.map quote)
+              "\"rotation\":" + list (m.Rotation |> List.map quote)
+              "\"custom\":" + quote m.Custom
+              "\"level\":" + quote m.EnemyLevel; "\"eres\":" + quote m.EnemyEle; "\"cres\":" + quote m.EnemyChaos
+              "\"bag\":" + list (m.Bag |> List.map (fun i -> quote i.Raw))
+              "\"worn\":" + list (m.Wearing |> List.map (fun (spot, i) -> list [ quote spot; string (at i) ]))
+              "\"start\":" + list (m.Start |> Map.toList |> List.map (fun (k, v) -> list [ quote k; string v ]))
+              "\"switches\":" + list (m.Switches |> Set.toList |> List.map quote)
+              "\"passives\":" + (if m.Edited then list (Set.difference m.Allocated m.Anointed |> Set.toList |> List.map string) else "[]")
+              "\"choices\":" + (if m.Edited then list (m.Choices |> Map.toList |> List.map (fun (i, c) -> list [ string i; quote c ])) else "[]")
+              "\"notes\":" + quote m.Notes ] + "}"
+
+let private storeKey (m : Model) : string = m.Build.Replace("%", "%25").Replace("&", "%26").Replace("#", "%23").Replace("+", "%2B")
+let private saveUrl (m : Model) : string = "__store?op=put&key=" + storeKey m + "&value=" + esc m.Kept
+let private restoreUrl (m : Model) : string = "__store?op=get&key=" + storeKey m
+
+/// What was kept, put back.
+let private restore (m : Model) (j : Json) : Model =
+    let strs (k : string) = Json.field k j |> Json.list |> List.map Json.string
+    let bag = strs "bag" |> List.mapi (fun i raw -> pasted (1000 + i) raw) |> List.choose id
+    let worn =
+        Json.field "worn" j |> Json.list
+        |> List.choose (fun w ->
+            match Json.list w with
+            | [ spot; i ] -> bag |> List.tryFind (fun x -> x.Place = 1000 + Json.int i) |> Option.map (fun it -> Json.string spot, it)
+            | _ -> None)
+        |> Map.ofList
+    let ids = Json.field "passives" j |> Json.list |> List.map Json.int
+    let m =
+        { m with
+            GemEdits = strs "gems"; Dropped = Set.ofList (strs "dropped"); Rotation = strs "rotation"
+            Custom = Json.string (Json.field "custom" j); CustomDraft = Json.string (Json.field "custom" j)
+            EnemyLevel = Json.string (Json.field "level" j); EnemyEle = Json.string (Json.field "eres" j); EnemyChaos = Json.string (Json.field "cres" j)
+            Bag = bag; Swapped = worn
+            Start = Json.field "start" j |> Json.list |> List.choose (fun x -> match Json.list x with | [ k; v ] -> Some (Json.string k, Json.int v) | _ -> None) |> Map.ofList
+            Switches = Set.ofList (strs "switches")
+            Notes = Json.string (Json.field "notes" j); NotesWere = Json.string (Json.field "notes" j) }
+    if ids.IsEmpty then m
+    else
+        { m with
+            Edited = true; Allocated = Set.union (Set.ofList ids) m.Anointed
+            Choices = Json.field "choices" j |> Json.list |> List.choose (fun x -> match Json.list x with | [ i; c ] -> Some (Json.int i, Json.string c) | _ -> None) |> Map.ofList }
 
 let private picturesOf (m : Model) (name : string) : string =
     m.Groups |> List.collect (fun g -> g.Gems) |> List.tryFind (fun x -> x.Named = name) |> Option.map (fun x -> if x.Icon <> "" then x.Icon else x.Own) |> Option.defaultValue ""
@@ -1343,13 +1416,6 @@ let rec private step (msg : Msg) (m : Model) : Model =
     | GemEdit cmd -> afresh { m with GemEdits = m.GemEdits @ [ cmd ]; Pressing = ""; Pinned = (if cmd.StartsWith "del" || cmd.StartsWith "swap" then "" else m.Pinned) }
     | UndoGems -> if m.GemEdits.IsEmpty then m else afresh { m with GemEdits = List.take (m.GemEdits.Length - 1) m.GemEdits; Pressing = ""; Pinned = "" }
     | Pick what -> offer { m with Picker = what; Wanted = ""; Offers = []; Pinned = "" }
-    // (an answer is taken by what was asked, whichever question's message brings it)
-    | Analysed r when r.Url.Contains "op=gems" -> step (Picked r) m
-    | Analysed r when r.Url.Contains "op=calcs" -> step (Sources r) m
-    | Picked r when r.Url.Contains "op=analyse" -> step (Analysed r) m
-    | Picked r when r.Url.Contains "op=calcs" -> step (Sources r) m
-    | Sources r when r.Url.Contains "op=analyse" -> step (Analysed r) m
-    | Sources r when r.Url.Contains "op=gems" -> step (Picked r) m
     | Picked r when r.Url <> pickUrl m || m.Picker = "" -> m
     | Picked r ->
         (match r.Status, Native.parseJson r.Text with
@@ -1394,6 +1460,16 @@ let rec private step (msg : Msg) (m : Model) : Model =
          | 200, Ok j -> among { m with Calcs = sourcesOf j }
          | _ -> m)
     | Among text -> among { m with Among = text }
+    | Saved _ -> m
+    | Note text -> { m with Notes = text }
+    | Restore _ when m.Restored -> m
+    | Restore r ->
+        (match r.Status, Native.parseJson r.Text with
+         | 200, Ok j ->
+            (match Native.parseJson (Json.string (Json.field "value" j)) with
+             | Ok kept when Json.string (Json.field "value" j) <> "" -> afresh { restore m kept with Restored = true; Pressing = "" }
+             | _ -> { m with Restored = true })
+         | _ -> { m with Restored = true })
     | Paste -> { m with Pasting = not m.Pasting; Draft = "" }
     | Draft text -> { m with Draft = text }
     | Add ->
@@ -1600,6 +1676,12 @@ let update (msg : Msg) (m : Model) : Model =
     let n = if same then n else { n with Ask = compareOf n false; AskMore = compareOf n true }
     // (what an analysis found is of the character as it was then)
     let n = if n.Probe = "" || (match msg with | Rank | Analyse -> true | _ -> false) || (knobs n + fightKnobs n + passives n + n.Scenario = knobs m + fightKnobs m + passives m + m.Scenario) then n else weigh { n with Probe = ""; Probing = false; Probed = ""; Worth = [] }
+    // (what is kept between visits: after anything but the pointer, a frame, an answer)
+    let n =
+        match msg with
+        | PointerDown _ | PointerMove _ | PointerUp _ | Zoom _ | Sized _ | Tick _ | Fought _ | Warmed _ | Compared _ | Analysed _ | Sources _ | Saved _ | TreeData _ | Sheet _ | Picked _ -> n
+        | _ when not n.Restored -> n
+        | _ -> (let k = kept n in if k = n.Kept then n else { n with Kept = k })
     // (what the passive looked at would take or give back, drawn on the tree)
     if n.Selected = m.Selected && n.Hovered = m.Hovered && n.Allocated = m.Allocated && n.Passives.Length = m.Passives.Length && n.Ascendancy = m.Ascendancy then n
     else plan n
@@ -1684,6 +1766,8 @@ let private gem (m : Model) (g : Gem) : Node<Msg> =
         }
         div {
             Dom.Class "gem-tip"
+            button { Dom.Class "shut"; Dom.Attr ("aria-label", "close"); Dom.OnClick (fun _ -> Pin ""); "×" }
+            if picture <> "" then img { Dom.Class "pic"; Dom.Attr ("src", picture); Dom.Attr ("alt", "") }
             div { Dom.Class "name"; g.Named }
             div { Dom.Class "what"; what }
             div { Dom.Class "line"; level }
@@ -1848,11 +1932,13 @@ let private item (m : Model) (i : Item) (where : string) : Node<Msg> =
             }
         div {
             Dom.Class "item-tip"
+            button { Dom.Class "shut"; Dom.Attr ("aria-label", "close"); Dom.OnClick (fun _ -> Pin ""); "×" }
             div {
                 Dom.Class "head"
                 if i.Headed <> "" then div { i.Headed }
                 div { i.Type }
             }
+            if i.Picture <> "" then img { Dom.Class "pic"; Dom.Attr ("src", i.Picture); Dom.Attr ("alt", "") }
             div {
                 Dom.Class "body"
                 for p in i.Says do
@@ -1869,7 +1955,14 @@ let private item (m : Model) (i : Item) (where : string) : Node<Msg> =
                 if weighed then div { Dom.Class ("depth" + worthClass i.Weighs); weight }
                 if i.Spoiled then div { Dom.Class "corrupted"; "Corrupted" }
                 for h in i.Holds do
-                    if h.Rune <> "" then div { Dom.Class "holds"; h.Rune }
+                    if h.Rune <> "" then
+                        div {
+                            Dom.Class "holds"
+                            if h.Pic <> "" then img { Dom.Attr ("src", h.Pic); Dom.Attr ("alt", "") }
+                            span { h.Rune }
+                            for l in h.Does do
+                                div { Dom.Class "does"; l }
+                        }
                 if pinned && asked <> "" then
                     div {
                         Dom.Class "deltas"
@@ -1974,6 +2067,10 @@ let private chosen (m : Model) (p : Passive) : V4d =
     | Some "Intelligence" -> V4d (0.4, 0.6, 1.0, 0.35)
     | _ -> white
 
+/// The colour of what an analysis found a passive worth.
+let private worthTint (v : float) : V4d =
+    if v < -1.0 then V4d (1.0, 0.25, 0.5, 0.35) elif v < 1.0 then V4d (0.45, 0.45, 0.45, 0.35) elif v < 4.0 then V4d (0.85, 0.8, 0.6, 0.35) elif v < 12.0 then V4d (1.0, 0.8, 0.25, 0.35) else V4d (1.0, 0.5, 0.1, 0.35)
+
 /// A passive's icon: out of the sheet bound above, dim until it is allocated.
 let icon (m : Model) (p : Passive) : Scene<Msg> =
     // (a socket with a jewel in it shows the jewel, over its frame)
@@ -1998,7 +2095,7 @@ let frame (m : Model) (p : Passive) : Scene<Msg> =
         Sg.Scale (p.Size)
         Sg.Texture ("Atlas", p.Frame)
         Sg.Uniform ("Rect", (if m.Allocated.Contains p.Id then p.FrameOn else p.FrameOff))
-        Sg.Uniform ("Tint", white)
+        Sg.Uniform ("Tint", (match Map.tryFind p.Id m.NodeWorth with | Some v -> worthTint v | None -> white))
         quad
     }
 
@@ -2174,6 +2271,8 @@ let private tooltip (m : Model) : Node<Msg> =
         let y = top + s.Y / 2.0 + (q.Y + m.Centre.Y) / u + q.Size / u / 2.0 + 6.0
         let wide = min 380.0 (m.Page.X - 24.0)
         let state = if m.Anointed.Contains p.Id then "Allocated by an item" elif has then "Allocated" else "Unallocated"
+        let weighs = Map.tryFind p.Id m.NodeWorth |> Option.defaultValue nan
+        let worth = if System.Double.IsNaN weighs then "" else sprintf "%.1f%% of the damage is lost without it" weighs
         // how many passives the button takes or gives back, this one with them
         let cost =
             if m.Change > 1 then sprintf "takes %d passives (%d on the way)" m.Change (m.Change - 1)
@@ -2210,6 +2309,7 @@ let private tooltip (m : Model) : Node<Msg> =
                         div { Dom.Class (if l = "Corrupted" then "corrupted" else "mod"); l }
                 }
             if cost <> "" then div { Dom.Class costs; Dom.Attr ("data-check", "cost"); cost }
+            if worth <> "" then div { Dom.Class ("cost" + worthClass weighs); worth }
             if not p.Options.IsEmpty && pinned then
                 div {
                     Dom.Class "select"
@@ -2256,6 +2356,7 @@ let view (m : Model) : Node<Msg> =
     // element that holds it is taken away)
     let headline = match m.Dps with | d :: _ -> d.Value + " DPS" | [] -> ""
     let undo = "Undo (" + string m.GemEdits.Length + ")"
+    let analysing = if m.Probing then "Analysing " + m.Probed else "Analyse"
     let named = if m.Title = "" then "" else sprintf "Level %d %s" m.Level (if m.Ascendancy <> "" then m.Ascendancy else m.Class)
     body {
         Dom.OnLocation Located
@@ -2272,6 +2373,8 @@ let view (m : Model) : Node<Msg> =
             if warming m <> "" then span { Dom.Fetch (fightOf m (warming m) "&wait=1", Warmed) }
             if (m.Tab = "tree" || m.Tab = "items") && m.Ask <> "" then span { Dom.Fetch (m.Ask, Compared) }
             if m.Probing then span { Dom.Fetch (probeUrl m, Analysed) }
+            if m.Build <> "" then span { Dom.Fetch (restoreUrl m, Restore) }
+            if m.Restored && m.Kept <> "" then span { Dom.Fetch (saveUrl m, Saved) }
             if m.Picker <> "" then span { Dom.Fetch (pickUrl m, Picked) }
             if m.Tab = "calcs" && m.Title <> "" then span { Dom.Fetch (calcsUrl m, Sources) }
             if (m.Tab = "tree" || m.Tab = "items") && m.Ask <> "" && (m.DeltaOf = m.Ask || m.DeltaOf = m.AskMore) then span { Dom.Fetch (m.AskMore, Compared) }
@@ -2293,9 +2396,12 @@ let view (m : Model) : Node<Msg> =
                 tab m "tree" "Passive tree"
                 tab m "calcs" "Calcs"
                 tab m "config" "Config"
+                tab m "notes" "Notes"
             }
             if m.Tab = "tree" then
                 div { Dom.Class "points"; Dom.Attr ("data-check", "points"); points m }
+            if m.Tab = "tree" then
+                button { Dom.Class "tab"; Dom.Attr ("title", "what every notable and keystone allocated is worth: each is given back alone and the fight fought without it"); Dom.OnClick (fun _ -> Analyse); analysing }
             if m.Tab = "tree" then
                 input { Dom.Class "seek"; Dom.Attr ("type", "search"); Dom.Attr ("placeholder", "search the tree"); Dom.OnInput Seek }
             if m.Tab = "tree" && m.Sought.Trim().Length >= 2 then
@@ -2346,6 +2452,15 @@ let view (m : Model) : Node<Msg> =
                 }
                 for (title, rows) in m.CalcShown do
                     panel title rows
+            }
+        if m.Tab = "notes" then
+            div {
+                Dom.Class "main notes"
+                section {
+                    Dom.Class "panel custom"
+                    h3 { "Notes" }
+                    textarea { Dom.Class "draft"; Dom.Attr ("placeholder", "kept in this browser, with everything else changed here"); Dom.Attr ("rows", "18"); Dom.OnInput Note; m.NotesWere }
+                }
             }
         if m.Tab = "config" then
             div {

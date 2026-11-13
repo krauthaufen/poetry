@@ -671,12 +671,58 @@ module Sim =
     // ---- views of an enemy ----
 
     /// Damaging ailments that actually deal damage: the strongest N of each kind.
+    /// (Remembered for the last few lists of them, by the very list: sorting hundreds of
+    /// stacks is asked for several times between two changes of them.)
+    let private dotsSeen : (obj * DotInstance list) option[] = Array.create 32 None
+    let mutable private dotsNext = 0
+
     let private activeDots (e: EnemyState) =
-        e.Dots
-        |> List.groupBy (fun d -> d.Label)
-        |> List.collect (fun (_, ds) ->
-            let limit = ds |> List.map (fun d -> d.MaxStacks) |> List.max
-            ds |> List.sortByDescending (fun d -> d.Dps) |> List.truncate limit)
+        if e.Dots.IsEmpty then []
+        else
+            let mutable found = None
+            for i in 0 .. dotsSeen.Length - 1 do
+                match dotsSeen.[i] with
+                | Some (dots, active) when obj.ReferenceEquals(dots, e.Dots) -> found <- Some active
+                | _ -> ()
+            match found with
+            | Some active -> active
+            | None ->
+                // (as `groupBy label |> collect (sortByDescending dps |> truncate limit)` would give
+                // them: the groups in the order their labels first come, in a group the strongest
+                // first and of equals the one that came first; without sorting where only the
+                // few strongest of many are wanted)
+                let labels = ResizeArray<string>()
+                let groups = ResizeArray<ResizeArray<DotInstance>>()
+                for d in e.Dots do
+                    let mutable g = -1
+                    for i in 0 .. labels.Count - 1 do
+                        if g < 0 && labels.[i] = d.Label then g <- i
+                    if g < 0 then
+                        labels.Add d.Label
+                        groups.Add(ResizeArray<DotInstance>())
+                        g <- labels.Count - 1
+                    groups.[g].Add d
+                let active =
+                    [ for ds in groups do
+                        let mutable limit = ds.[0].MaxStacks
+                        for d in ds do
+                            if d.MaxStacks > limit then limit <- d.MaxStacks
+                        if limit > 0 then
+                            // the strongest `limit` so far, strongest first
+                            let top = ResizeArray<DotInstance>()
+                            for d in ds do
+                                if top.Count < limit || d.Dps > top.[top.Count - 1].Dps then
+                                    // after every one at least as strong
+                                    let mutable at = top.Count
+                                    while at > 0 && top.[at - 1].Dps < d.Dps do
+                                        at <- at - 1
+                                    top.Insert(at, d)
+                                    if top.Count > limit then top.RemoveAt(top.Count - 1)
+                            yield! top ]
+                let at = dotsNext % dotsSeen.Length
+                dotsNext <- at + 1
+                dotsSeen.[at] <- Some (box e.Dots, active)
+                active
 
     let private statusOf (e: EnemyState) =
         let fromDebuffs = e.Debuffs |> Map.map (fun _ x -> x.Stacks)
@@ -725,13 +771,37 @@ module Sim =
             statusSeen.[at] <- Some (e, s)
             s
 
+    /// The last few enemies' own mods and debuffs with what they make together: a hit on an
+    /// enemy changes its life, and a debuff put on it again its time, far more often than
+    /// what the debuffs do; and every hit asks. Remembered by the enemy's own mods (the very
+    /// value) and what each debuff is (its stacks and mods). (Put in whole, as above.)
+    let private defenderSeen : (obj * int * (int * Mod list) list * Defender) option[] = Array.create 32 None
+    let mutable private defenderNext = 0
+
     let private defender (e: EnemyState) : Defender =
-        let debuffMods =
-            e.Debuffs
-            |> Map.toList
-            |> List.collect (fun (_, x) -> x.Mods |> List.map (Mod.scaled (float x.Stacks)))
-        { Level = e.Def.Level
-          Mods = ModDb.addList debuffMods e.Db }
+        let now = e.Debuffs |> Map.fold (fun acc _ x -> (x.Stacks, x.Mods) :: acc) []
+        let rec same (a: (int * Mod list) list) (b: (int * Mod list) list) =
+            match a, b with
+            | [], [] -> true
+            | (n, ms) :: ra, (k, ks) :: rb -> n = k && (obj.ReferenceEquals(ms, ks) || ms = ks) && same ra rb
+            | _ -> false
+        let mutable found = None
+        for i in 0 .. defenderSeen.Length - 1 do
+            match defenderSeen.[i] with
+            | Some (db, level, debuffs, d) when found.IsNone && obj.ReferenceEquals(db, e.Db) && level = e.Def.Level && same debuffs now -> found <- Some d
+            | _ -> ()
+        match found with
+        | Some d -> d
+        | None ->
+            let debuffMods =
+                e.Debuffs
+                |> Map.toList
+                |> List.collect (fun (_, x) -> x.Mods |> List.map (Mod.scaled (float x.Stacks)))
+            let d = { Level = e.Def.Level; Mods = ModDb.addList debuffMods e.Db }
+            let at = defenderNext % defenderSeen.Length
+            defenderNext <- at + 1
+            defenderSeen.[at] <- Some (box e.Db, e.Def.Level, now, d)
+            d
 
     let private actorDef (env: Env) name =
         if name = env.Fight.Player.Name then env.Fight.Player
@@ -837,15 +907,21 @@ module Sim =
             let living = alive w
             let n = float living.Length
             let step (w: World) (e: EnemyState) =
+              // (nothing over time on it: only its statuses' time is counted, and it stays the
+              // very value it was, so what is remembered about it stays good)
+              if e.Dots.IsEmpty then
+                { w with Uptime = status e |> Map.fold (fun m k _ -> addf k (dt / n) m) w.Uptime }
+              else
                 let def = defender e
                 let bleedK = if e.Def.Moving then Constants.bleedMovingMultiplier else 1.0
+                let active = activeDots e
                 let parts =
-                    activeDots e
+                    active
                     |> List.map (fun d ->
                         let k = if d.Ailment = Some Bleed then bleedK else 1.0
                         d.Label, d.Dps * k * Ailments.dotTakenMult def d.Type)
                 let types =
-                    activeDots e
+                    active
                     |> List.map (fun d ->
                         let k = if d.Ailment = Some Bleed then bleedK else 1.0
                         DamageType.name d.Type, d.Dps * k * Ailments.dotTakenMult def d.Type)
@@ -1036,8 +1112,10 @@ module Sim =
                     w.Actors |> Map.map (fun _ st -> if actorStale st then { st with Buffs = st.Buffs |> Map.filter (fun _ x -> live x) } else st)
                  else w.Actors)
             Counts =
-                w.Actors
-                |> Map.fold (fun c _ st -> st.Buffs |> Map.fold (fun c k x -> if not (live x) && x.Expires < infinity && k.EndsWith "Charge" then bump ("expired:" + k) c else c) c) w.Counts }
+                (if w.Actors |> Map.exists (fun _ st -> actorStale st) then
+                    w.Actors
+                    |> Map.fold (fun c _ st -> st.Buffs |> Map.fold (fun c k x -> if not (live x) && x.Expires < infinity && k.EndsWith "Charge" then bump ("expired:" + k) c else c) c) w.Counts
+                 else w.Counts) }
 
     // ---- effects ----
 
