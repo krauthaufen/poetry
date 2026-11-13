@@ -2334,9 +2334,14 @@ module Sim =
                                 let radius = match sk.Delivery with | AreaAtTarget r -> Geometry.radius r (Mods.mult bctx [ AreaOfEffect ] bmods) | _ -> 0.0
                                 let seconds = sk.Duration * Mods.mult bctx [ SkillDuration ] bmods
                                 let dps = overkill * b.PercentPerSecond / 100.0
+                                // (the explosion is shown, and its burn is the herald's in the damage shares, not any Ignite)
+                                let called = (let k = b.Skill.IndexOf ':' in if k > 0 then b.Skill.Substring(0, k) else b.Skill)
+                                let w = if w.Tracing then { w with Shown = Used(w.Time, actor.Name, called, [ Ring(e.Def.Position, radius, 0.0) ]) :: w.Shown } else w
                                 alive w
                                 |> List.filter (fun o -> o.Def.Name <> e.Def.Name && Vec.dist o.Def.Position e.Def.Position <= radius + o.Def.Size)
-                                |> List.fold (fun w o -> inflict o.Def.Name actor.Name (Dot(Ignite, Fire, dps, seconds, 1)) { w with Counts = bump ("overkill ignite:" + b.Skill) w.Counts }) w
+                                |> List.fold (fun w o ->
+                                    inflict o.Def.Name actor.Name (Dot(Ignite, Fire, dps, seconds, 1)) { w with Counts = bump ("overkill ignite:" + b.Skill) w.Counts }
+                                    |> updateEnemy o.Def.Name (fun x -> match x.Dots with d :: rest when d.Label = Ailment.name Ignite -> { x with Dots = { d with Label = called } :: rest } | _ -> x)) w
                             | None -> w) w
                 // Armour Break: the hit breaks armour by a share of the damage it dealt; armour at
                 // zero is Fully Broken: the enemy takes increased physical damage from hits

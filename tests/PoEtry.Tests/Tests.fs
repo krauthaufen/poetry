@@ -761,7 +761,7 @@ let main _ =
         // 100 damage into 50 life: 50 overkill (100% of its life): 23% of 50 per second for 3 s
         let o = run 50.0
         equal 1 o.Counts.["overkill ignite:Blast"]
-        near (50.0 * 0.23 * 3.0) o.DamageBy.["Ignite"]
+        near (50.0 * 0.23 * 3.0) o.DamageBy.["Blast"]
         // 100 into 90 life: 10 overkill is under 20% of 90: no explosion
         if (run 90.0).Counts.ContainsKey "overkill ignite:Blast" then failwith "overkill under the threshold should not explode")
 
