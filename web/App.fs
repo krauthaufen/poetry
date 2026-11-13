@@ -1499,7 +1499,7 @@ let rec private step (msg : Msg) (m : Model) : Model =
          | _ -> m)
     | Login -> { m with Going = "login" }
     | Logout -> { m with Going = "logout" }
-    | Open name -> if name = "" then m else { m with Going = "open&name=" + esc name }
+    | Open name -> if name = "" then m elif name = "*" then { m with Going = "home" } else { m with Going = "open&name=" + esc name }
     | Note text -> { m with Notes = text }
     | Restore _ when m.Restored -> m
     | Restore r ->
@@ -2437,9 +2437,23 @@ let view (m : Model) : Node<Msg> =
                     if not here then option { Dom.Attr ("value", ""); chosen' }
                     for (name, about, _) in m.Characters do
                         option { Dom.Attr ("value", name); about }
+                    option { Dom.Attr ("value", "*"); "all characters ..." }
                 }
             if m.CanLogin && m.Player = "" then button { Dom.Class "login"; Dom.OnClick (fun _ -> Login); "login" }
             if m.CanLogin && m.Player <> "" then button { Dom.Class "login"; Dom.Attr ("title", "logged in as " + m.Player); Dom.OnClick (fun _ -> Logout); "logout" }
+            // (on a phone the tabs are a list to choose from)
+            select {
+                Dom.Class "tabs"
+                Dom.OnChange Tab
+                option { Dom.Attr ("value", "character"); "Character" }
+                option { Dom.Attr ("value", "defence"); "Defence" }
+                option { Dom.Attr ("value", "items"); "Items" }
+                option { Dom.Attr ("value", "gems"); "Gems" }
+                option { Dom.Attr ("value", "tree"); "Passive tree" }
+                option { Dom.Attr ("value", "calcs"); "Calcs" }
+                option { Dom.Attr ("value", "config"); "Config" }
+                option { Dom.Attr ("value", "notes"); "Notes" }
+            }
             nav {
                 tab m "character" "Character"
                 tab m "defence" "Defence"
