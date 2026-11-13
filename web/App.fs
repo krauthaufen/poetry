@@ -251,6 +251,8 @@ type Model =
       /// characters (name, what they are, the url of each), and where the page is going
       /// ("login", "logout", "open&name=..": asked of the bridge, which goes there).
       CanLogin : bool
+      /// Whether the account's answer has come (until then nothing is said about logging in).
+      Asked : bool
       Player : string
       Characters : (string * string * string) list
       /// The same by league (its name, how many, its characters): the running leagues, shown
@@ -386,7 +388,7 @@ type Model =
 let init : Model =
     { Build = ""; Scenario = "boss"; Status = "locating"; Title = ""; Class = ""; Ascendancy = ""; Tab = "character"
       Pools = []; Guards = []; Survival = []; Defences = []; Resistances = []; Minions = []
-      NotUnderstood = 0; Fighting = false; Gem = ""; Dps = []; Shares = []; Groups = []; Items = []; Bag = []; Swapped = Map.empty; Wearing = []; Equip = ""; Aim = ""; Pasting = false; Draft = ""; Dropped = Set.empty; GemEdits = []; Picker = ""; Offers = []; Wanted = ""; Offered = []; Probe = ""; ProbeRound = 0; Probing = false; Probed = ""; Worth = []; Play = []; Rotation = []; Pressable = []; EnemyLevel = ""; EnemyEle = ""; EnemyChaos = ""; CustomDraft = ""; Custom = ""; Calcs = []; CanLogin = false; Player = ""; Characters = []; Running = []; Lasting = []; Going = ""; Kept = ""; Restored = false; Notes = ""; NotesWere = ""; NodeWorth = Map.empty; Among = ""; CalcShown = []; Pinned = ""; Deltas = []; DeltaOf = ""; Ask = ""; AskMore = ""; Anointed = Set.empty; Types = []; Counts = []; Start = Map.empty; Switches = Set.empty
+      NotUnderstood = 0; Fighting = false; Gem = ""; Dps = []; Shares = []; Groups = []; Items = []; Bag = []; Swapped = Map.empty; Wearing = []; Equip = ""; Aim = ""; Pasting = false; Draft = ""; Dropped = Set.empty; GemEdits = []; Picker = ""; Offers = []; Wanted = ""; Offered = []; Probe = ""; ProbeRound = 0; Probing = false; Probed = ""; Worth = []; Play = []; Rotation = []; Pressable = []; EnemyLevel = ""; EnemyEle = ""; EnemyChaos = ""; CustomDraft = ""; Custom = ""; Calcs = []; CanLogin = false; Asked = false; Player = ""; Characters = []; Running = []; Lasting = []; Going = ""; Kept = ""; Restored = false; Notes = ""; NotesWere = ""; NodeWorth = Map.empty; Among = ""; CalcShown = []; Pinned = ""; Deltas = []; DeltaOf = ""; Ask = ""; AskMore = ""; Anointed = Set.empty; Types = []; Counts = []; Start = Map.empty; Switches = Set.empty
       Passives = [||]; Ascendancies = []; Shown = []; AscendancyWeb = Data.pack (Data.ofList ([] : V3f list)); Path = Data.pack (Data.ofList ([] : V3f list))
       Loaded = false; Capacity = 0
       WebUv = Data.pack (Data.ofList ([] : V2f list)); AscendancyWebUv = Data.pack (Data.ofList ([] : V2f list)); PathUv = Data.pack (Data.ofList ([] : V2f list)); Art = ""; Links = [||]; Neighbours = Map.empty; Web = Data.pack (Data.ofList ([] : V3f list)); Allocated = Set.empty; Edited = false
@@ -1412,7 +1414,7 @@ let rec private step (msg : Msg) (m : Model) : Model =
     | Located href ->
         match Native.queryParam "build" href with
         | Some b -> { m with Build = b; Status = "reading the character" }
-        | None -> { m with Status = "no character: add ?build=<url of a character or a PoB build> to the address" }
+        | None -> { m with Status = "" }
     | Scenario s -> { m with Scenario = s; Fighting = true; Dps = []; Shares = []; Types = []; Runs = 0; Round = 0; Happened = [] }
     | Begin (name, count) ->
         let most = m.Counts |> List.tryFind (fun (k, _) -> k = name) |> Option.map snd |> Option.defaultValue 0
@@ -1488,6 +1490,7 @@ let rec private step (msg : Msg) (m : Model) : Model =
                 |> List.groupBy (fun c -> Json.string (Json.field "league" c))
                 |> List.map (fun (league, cs) -> league, string cs.Length, cs |> List.map (fun c -> Json.string (Json.field "name" c), Json.string (Json.field "name" c) + ": " + Json.string (Json.field "about" c)))
             { m with
+                Asked = true
                 Running = leagues false
                 Lasting = leagues true
                 CanLogin = Json.bool (Json.field "can" j); Player = Json.string (Json.field "name" j)
@@ -2559,7 +2562,9 @@ let view (m : Model) : Node<Msg> =
                 Dom.Class "main landing"
                 if m.CanLogin && m.Player = "" then
                     button { Dom.Class "act enter"; Dom.OnClick (fun _ -> Login); "Log in with your Path of Exile account" }
-                if not m.CanLogin then
+                if not m.Asked then
+                    div { Dom.Class "depth waiting"; "looking for your characters ..." }
+                if m.Asked && not m.CanLogin then
                     div { Dom.Class "depth"; "no character: add ?build=<url of a character or a PoB build> to the address" }
                 for (league, count, heroes) in m.Running do
                     details {

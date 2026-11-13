@@ -340,7 +340,7 @@
           } catch (err) { return answer(JSON.stringify({ value: "", error: String(err) })); }
         }
         const account = url.indexOf("__poe?");
-        if (account >= 0) return answer(JSON.stringify(await poe.ask(new URLSearchParams(url.slice(account + 6)))));
+        if (account >= 0) return answer(JSON.stringify(await poe.ask(new URLSearchParams(url.slice(account + 6))).catch((err) => ({ can: location.hostname === "poetry.awx.at", name: "", characters: [], error: String(err && err.message || err) }))));
         const at = url.indexOf("__sim?");
         if (at < 0) return plain(input, init);
         // everything after "build=" is the character's url, whatever it contains
@@ -795,6 +795,7 @@
     @media (max-width: 780px) { #app header .headline { font-size: 13px; } }
     @media (max-width: 780px) { #app .treebar { flex-wrap: wrap; gap: 6px 10px; padding: 5px 10px; } #app .treebar .points { flex: 1 1 100%; font-size: 12px; } #app .treebar .seek { max-width: none; } #app .treebar button.act { padding: 5px 12px; } }
     #app .delta.unsure .by { color: #8a7a64 !important; } #app .delta .pm { color: #8a7a64; font-size: 12px; margin-left: 6px; }
+    #app .main.landing .waiting { text-align: center; margin-top: 14vh; font-size: 16px; }
   </style>
 </head>
 <body>
