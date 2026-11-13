@@ -532,6 +532,8 @@ module Sim =
           Pending: Map<string, int>
           /// The critical hit roll (0..1) of the last use of each skill and its parts.
           CritRolls: Map<string, float>
+          /// How many uses of each skill have had their critical hit roll.
+          Rolled: Map<string, int>
           /// A minion's life and energy shield, when it was last hit, and whether it is out of
           /// the fight (killed, or not summoned).
           Life: float
@@ -603,6 +605,8 @@ module Sim =
           Shown: Shown list
           ShownAt: Map<string, Vec>
           Seq: int
+          /// The fight's seed (for rolls that are drawn apart from the fight's stream).
+          Seed: uint32
           DamageBy: Map<string, float>
           DamageByType: Map<string, float>
           Counts: Map<string, int>
@@ -1568,9 +1572,17 @@ module Sim =
         | None -> w
         | Some target ->
             // the use's critical hit roll, for the skill and every part of it
+            // (Drawn apart from the fight's stream, by who uses what for the how-many-th time: the
+            // tenth use of a skill crits or not whatever else happened before it. Two fights of
+            // the same seed that differ a little, a passive more, then differ by what the
+            // passive does and not by which uses happen to crit.)
             let w =
-                let r = rng.Float()
-                updateActor actor.Name (fun st -> { st with CritRolls = (skill :: skill.Parts) |> List.fold (fun m p -> Map.add p.Name r m) st.CritRolls }) w
+                let n = Map.tryFind skill.Name (Map.find actor.Name w.Actors).Rolled |> Option.defaultValue 0
+                let mutable h = 5381u
+                for ch in actor.Name + "|" + skill.Name do
+                    h <- (((h <<< 5) &&& 0xFFFFFFFFu) + h + uint32 ch) &&& 0xFFFFFFFFu
+                let r = Rng(((w.Seed ^^^ h) + uint32 (n % 65536) * 40503u + 1u) &&& 0xFFFFFFFFu).Float()
+                updateActor actor.Name (fun st -> { st with Rolled = Map.add skill.Name (n + 1) st.Rolled; CritRolls = (skill :: skill.Parts) |> List.fold (fun m p -> Map.add p.Name r m) st.CritRolls }) w
             let st = Map.find actor.Name w.Actors
             let ctx = Skill.ctx skill false (skillStacks actor skill st) (status target)
             let mods = skillDb env actor skill st
@@ -3615,6 +3627,7 @@ module Sim =
               RageCarry = 0.0
               Pending = Map.empty
               CritRolls = Map.empty
+              Rolled = Map.empty
               Life = 0.0
               Shield = 0.0
               HitAt = -1e9
@@ -3715,6 +3728,7 @@ module Sim =
               Shown = []
               ShownAt = Map.empty
               Seq = 0
+              Seed = seed
               DamageBy = Map.empty
               DamageByType = Map.empty
               Counts = Map.empty

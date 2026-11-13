@@ -2395,6 +2395,7 @@ let view (m : Model) : Node<Msg> =
     let headline = match m.Dps with | d :: _ -> d.Value + " DPS" | [] -> ""
     let undo = "Undo (" + string m.GemEdits.Length + ")"
     let here = m.Characters |> List.exists (fun (_, _, url) -> url = m.Build)
+    let found = if m.Sought.Trim().Length >= 2 then string m.Hits + " found" else ""
     let analysing = if m.Probing then "Analysing " + m.Probed else "Analyse"
     let named = if m.Title = "" then "" else sprintf "Level %d %s" m.Level (if m.Ascendancy <> "" then m.Ascendancy else m.Class)
     let chosen' = if named = "" then "choose a character" else named
@@ -2424,6 +2425,15 @@ let view (m : Model) : Node<Msg> =
         div {
             if m.Tab = "tree" then
                 tooltip m
+            // (the tree's own bar, under the header: points, the search, the analysis)
+            if m.Tab = "tree" then
+                div {
+                    Dom.Class "treebar"
+                    div { Dom.Class "points"; Dom.Attr ("data-check", "points"); points m }
+                    input { Dom.Class "seek"; Dom.Attr ("type", "search"); Dom.Attr ("placeholder", "search the tree"); Dom.OnInput Seek }
+                    div { Dom.Class "found"; Dom.Attr ("data-check", "found"); found }
+                    button { Dom.Class "act"; Dom.Attr ("title", "what every notable and keystone allocated is worth: each is given back alone and the fight fought without it"); Dom.OnClick (fun _ -> Analyse); analysing }
+                }
         }
         header {
             h1 { "PoEtry" }
@@ -2464,14 +2474,6 @@ let view (m : Model) : Node<Msg> =
                 tab m "config" "Config"
                 tab m "notes" "Notes"
             }
-            if m.Tab = "tree" then
-                div { Dom.Class "points"; Dom.Attr ("data-check", "points"); points m }
-            if m.Tab = "tree" then
-                button { Dom.Class "tab"; Dom.Attr ("title", "what every notable and keystone allocated is worth: each is given back alone and the fight fought without it"); Dom.OnClick (fun _ -> Analyse); analysing }
-            if m.Tab = "tree" then
-                input { Dom.Class "seek"; Dom.Attr ("type", "search"); Dom.Attr ("placeholder", "search the tree"); Dom.OnInput Seek }
-            if m.Tab = "tree" && m.Sought.Trim().Length >= 2 then
-                div { Dom.Class "found"; Dom.Attr ("data-check", "found"); string m.Hits + " found" }
             div { Dom.Attr ("data-check", "pointer"); Dom.Style [ Css.Display "none" ]; sprintf "%.0fx%.0f touches %d" m.Page.X m.Page.Y m.Touches.Length }
             if not m.Dps.IsEmpty then
                 div { Dom.Class "headline"; Dom.Attr ("data-check", "dps"); headline }

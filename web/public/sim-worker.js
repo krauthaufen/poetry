@@ -12,16 +12,21 @@ const ready = Promise.all(files.map(async (f) => {
   data[`${f}.json`] = await r.text();
 }));
 let session;
+let freed = false;
 
 self.onmessage = async (e) => {
   const { id, request, build } = e.data;
   try {
     await ready;
     session ??= Front_create((name) => {
-      if (!(name in data)) throw new Error(`no game data file ${name}`);
+      if (data[name] === undefined) throw new Error(`no game data file ${name}`);
       return data[name];
     });
-    self.postMessage({ id, answer: Front_handleWith(session, request, build || "") });
+    const answer = Front_handleWith(session, request, build || "");
+    // (once a character was read, the game data is all parsed: its text, some 25 MB in
+    // memory, is let go; a phone closes a page that holds too much)
+    if (!freed && !answer.startsWith('{"error"')) { freed = true; for (const k of Object.keys(data)) data[k] = undefined; }
+    self.postMessage({ id, answer });
   } catch (err) {
     self.postMessage({ id, answer: JSON.stringify({ error: String(err && err.message || err) }) });
   }
