@@ -224,6 +224,21 @@ for (a, b, orbit) in edges.values():
 js = sprites["jewel-sockets_152_156_BC7.dds.zst"]
 ji = sheet("sprites/" + js["sheet"], js["width"], js["height"])
 jewels = {k: [ji, v["x"], v["y"], v["w"], v["h"]] for k, v in js["sprites"].items()}
+# unique jewels that sheet does not have: their item art from the game's image server (kept
+# in web/public/art, fetched once)
+MORE_JEWELS = {
+    "Split Personality": "https://web.poecdn.com/gen/image/WzI1LDE0LHsiZiI6IjJESXRlbXMvSmV3ZWxzL1VuaXF1ZXMvU3BsaXRQZXJzb25hbGl0eSIsInciOjEsImgiOjEsInNjYWxlIjoxLCJyZWFsbSI6InBvZTIifV0/e3de478bb7/SplitPersonality.png",
+}
+for name, link in MORE_JEWELS.items():
+    if name in jewels: continue
+    import urllib.request
+    from PIL import Image
+    url = "art/jewel-%s.png" % name.lower().replace(" ", "-")
+    path = os.path.join(root, "web", "public", url)
+    if not os.path.exists(path):
+        urllib.request.urlretrieve(link, path)
+    w, h = Image.open(path).size
+    jewels[name] = [sheet(url, w, h), 0, 0, w, h]
 json.dump({"jewels": jewels, "box": box, "classes": classes, "nodes": nodes, "edges": drawn, "sheets": sheets, "frames": frames, "ascendancies": ascendancies}, open(os.path.join(out, "tree.json"), "w"), separators=(",", ":"))
 svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="%d %d %d %d">'
        '<path d="%s" fill="none" stroke="#4a4136" stroke-width="14" stroke-linecap="round"/></svg>') % (box[0], box[1], box[2], box[3], "".join(paths))

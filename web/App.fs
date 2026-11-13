@@ -76,6 +76,8 @@ type Msg =
     | Sheet of Fetched
     | Fought of Fetched
     | Scenario of string
+    /// The text searched in the tree.
+    | Seek of string
     /// A count the character begins the fight with (below zero: as the fight decides).
     | Begin of string * int
     | Switch of string
@@ -116,6 +118,8 @@ type Model =
       Gem : string
       Dps : Row list
       Shares : Share list
+      /// The passives the items allocate (an anoint, a jewel): shown as allocated, not to be refunded.
+      Anointed : Set<int>
       /// The damage by damage type.
       Types : Share list
       /// What the character has a count of going into a fight (name, most), the counts said
@@ -187,6 +191,11 @@ type Model =
       OpenedUv : Buffer<V2f>
       /// The radii of the jewels in allocated sockets, as a mesh.
       Rings : Buffer<V3f>
+      /// What is searched in the tree, how many passives have it, and the rings around them.
+      Sought : string
+      Hits : int
+      Found : Buffer<V3f>
+      FoundUv : Buffer<V2f>
       RingsUv : Buffer<V2f>
       /// The gem the fights after a change of passives press: the one the first fight found
       /// strongest ("" before; finding it costs as much as the fight itself).
@@ -220,14 +229,14 @@ type Model =
 let init : Model =
     { Build = ""; Scenario = "boss"; Status = "locating"; Title = ""; Class = ""; Ascendancy = ""; Tab = "character"
       Pools = []; Defences = []; Resistances = []; Minions = []
-      NotUnderstood = 0; Fighting = false; Gem = ""; Dps = []; Shares = []; Types = []; Counts = []; Start = Map.empty; Switches = Set.empty
+      NotUnderstood = 0; Fighting = false; Gem = ""; Dps = []; Shares = []; Anointed = Set.empty; Types = []; Counts = []; Start = Map.empty; Switches = Set.empty
       Passives = [||]; Ascendancies = []; Shown = []; AscendancyWeb = Data.pack (Data.ofList ([] : V3f list)); Path = Data.pack (Data.ofList ([] : V3f list))
       Loaded = false; Capacity = 0
       WebUv = Data.pack (Data.ofList ([] : V2f list)); AscendancyWebUv = Data.pack (Data.ofList ([] : V2f list)); PathUv = Data.pack (Data.ofList ([] : V2f list)); Art = ""; Links = [||]; Neighbours = Map.empty; Web = Data.pack (Data.ofList ([] : V3f list)); Allocated = Set.empty; Edited = false
       Centre = V2d (0.0, 0.0); Height = 9000.0
       Camera = { Sky = V3d (0.0, 1.0, 0.0); Location = V3d (0.0, 0.0, 7794.2); Forward = V3d (0.0, 0.0, -1.0); Up = V3d (0.0, 1.0, 0.0); Right = V3d (1.0, 0.0, 0.0) }
       Near = 7000.0; Far = 8600.0
-      Touches = []; Travel = 0.0; Page = V2d (0.0, 0.0); Pending = None; Choices = Map.empty; JewelSprites = Map.empty; Jewels = Map.empty; Unlocks = Map.empty; Opened = Data.pack (Data.ofList ([] : V3f list)); OpenedUv = Data.pack (Data.ofList ([] : V2f list)); Rings = Data.pack (Data.ofList ([] : V3f list)); RingsUv = Data.pack (Data.ofList ([] : V2f list)); Pressing = ""; Foes = []; Allies = []; Happened = []; Lasts = 0.0; Field = 100.0; Middle = V2d (0.0, 0.0); Began = -1.0; Stands = Map.empty; Clock = 0.0; Stage = []; Warm = []; Round = 0; Runs = 0; More = false; Selected = None; Hovered = None; Level = 0 }
+      Touches = []; Travel = 0.0; Page = V2d (0.0, 0.0); Pending = None; Choices = Map.empty; JewelSprites = Map.empty; Jewels = Map.empty; Unlocks = Map.empty; Opened = Data.pack (Data.ofList ([] : V3f list)); OpenedUv = Data.pack (Data.ofList ([] : V2f list)); Sought = ""; Hits = 0; Found = Data.pack (Data.ofList ([] : V3f list)); FoundUv = Data.pack (Data.ofList ([] : V2f list)); Rings = Data.pack (Data.ofList ([] : V3f list)); RingsUv = Data.pack (Data.ofList ([] : V2f list)); Pressing = ""; Foes = []; Allies = []; Happened = []; Lasts = 0.0; Field = 100.0; Middle = V2d (0.0, 0.0); Began = -1.0; Stands = Map.empty; Clock = 0.0; Stage = []; Warm = []; Round = 0; Runs = 0; More = false; Selected = None; Hovered = None; Level = 0 }
 
 /// The camera straight above the centre, so far up that `Height` of the tree is seen through
 /// its 60 degree lens; the depth range close around the tree's plane (its layers are a unit
@@ -242,7 +251,7 @@ let private look (m : Model) : Model =
 /// The passives as the simulator is told them (only once they were changed here).
 let private passives (m : Model) =
     if m.Edited then
-        "&passives=" + (m.Allocated |> Set.toList |> List.map string |> String.concat ",")
+        "&passives=" + (Set.difference m.Allocated m.Anointed |> Set.toList |> List.map string |> String.concat ",")
         + "&choices=" + (m.Choices |> Map.toList |> List.filter (fun (i, _) -> m.Allocated.Contains i) |> List.map (fun (i, c) -> string i + ":" + c) |> String.concat ",")
     else ""
 
@@ -251,7 +260,7 @@ let private knobs (m : Model) =
     (if m.Start.IsEmpty then "" else "&start=" + (m.Start |> Map.toList |> List.map (fun (k, v) -> k + ":" + string v) |> String.concat ","))
     + (m.Switches |> Set.toList |> List.map (fun k -> "&" + k + "=1") |> String.concat "")
 
-let private sheetUrl (m : Model) = "__sim?op=character" + passives m + "&build=" + m.Build
+let private sheetUrl (m : Model) = "__sim?op=character" + knobs m + passives m + "&build=" + m.Build
 let private fightOf (m : Model) (scenario : string) (ask : string) = "__sim?op=fight&runs=32&time=20" + (if scenario = "pack" || scenario = "surrounded" then "" else "&life=1e12") + ask + "&scenario=" + scenario + (if m.Pressing <> "" then "&gem=" + m.Pressing.Replace (" ", "%20") else "") + knobs m + passives m + "&build=" + m.Build
 let private fightUrl (m : Model) = fightOf m m.Scenario ("&round=" + string m.Round)
 
@@ -670,6 +679,18 @@ let private circle (c : V2d) (r : float) (width : float) (z : float) : V3f list 
         let a0, a1, b0, b1 = pt i (r - width / 2.0), pt (i + 1) (r - width / 2.0), pt i (r + width / 2.0), pt (i + 1) (r + width / 2.0)
         yield! [ a0; b0; a1; a1; b0; b1 ] ]
 
+/// The passives whose name or text has what is searched (two letters at least), ringed.
+let private seek (text : string) (m : Model) : Model =
+    let t = text.Trim().ToLower ()
+    let hits =
+        if t.Length < 2 then []
+        else
+            m.Shown |> List.filter (fun p ->
+                p.Kind <> "ascstart" && (p.Ascendancy = "" || p.Ascendancy = m.Ascendancy)
+                && (p.Name.ToLower().Contains t || p.Stats |> List.exists (fun s -> s.ToLower().Contains t)))
+    let rings = hits |> List.truncate 600 |> List.collect (fun p -> circle (V2d (p.X, p.Y)) (p.Size * 0.72) 26.0 0.6)
+    { m with Sought = text; Hits = hits.Length; Found = Data.pack (Data.ofList rings); FoundUv = noUv rings }
+
 /// The connections between allocated passives, as one mesh.
 let private paths (m : Model) : Model =
     // (an ascendancy's start is no passive one allocates: the way from it to a taken passive is taken)
@@ -855,6 +876,7 @@ let rec update (msg : Msg) (m : Model) : Model =
         paths { m with Choices = (if choice = "" then m.Choices else Map.add id choice m.Choices); Edited = true; Fighting = true; Warm = []; Runs = 0; Round = 0; Happened = []; Pressing = (if m.Pressing = "" then m.Gem else m.Pressing) }
     | Deallocate id -> if m.Allocated.Contains id then paths { toggle id m with Fighting = true; Warm = []; Runs = 0; Round = 0; Happened = []; Pressing = (if m.Pressing = "" then m.Gem else m.Pressing) } else m
     | Close -> { m with Selected = None }
+    | Seek text -> seek text m
     | Toggle id -> paths { toggle id m with Fighting = true }
     // A place on the tree comes from the last frame drawn; under an older camera than the
     // model's it is no use.
@@ -913,7 +935,8 @@ let rec update (msg : Msg) (m : Model) : Model =
                     Class = Json.string (Json.field "class" j)
                     Ascendancy = Json.string (Json.field "ascendancy" j)
                     // what the character has allocated, until it is changed here
-                    Allocated = (if m.Edited then m.Allocated else Json.field "passives" j |> Json.list |> List.map Json.int |> Set.ofList)
+                    Allocated = Set.union (if m.Edited then m.Allocated else Json.field "passives" j |> Json.list |> List.map Json.int |> Set.ofList) (Json.field "anointed" j |> Json.list |> List.map Json.int |> Set.ofList)
+                    Anointed = Json.field "anointed" j |> Json.list |> List.map Json.int |> Set.ofList
                     Choices = (if m.Edited then m.Choices else Json.field "choices" j |> Json.list |> List.map (fun c -> Json.int (Json.field "id" c), Json.string (Json.field "name" c)) |> Map.ofList)
                     Level = int (n [ "level" ])
                     Jewels =
@@ -1125,6 +1148,11 @@ let tree (m : Model) : Node<Msg> =
                     Sg.Uniform ("Color", V4d (0.227, 0.227, 0.306, 1.0))
                     mesh Topology.Triangles { Mesh.Attribute ("Positions", m.Web); Mesh.Attribute ("DiffuseColorCoordinates", m.WebUv) }
                 }
+                // what the search found
+                sg {
+                    Sg.Uniform ("Color", V4d (1.0, 0.25, 0.85, 1.0))
+                    mesh Topology.Triangles { Mesh.Attribute ("Positions", m.Found); Mesh.Attribute ("DiffuseColorCoordinates", m.FoundUv) }
+                }
                 // the radii of jewels
                 sg {
                     Sg.Uniform ("Color", V4d (0.45, 0.68, 1.0, 1.0))
@@ -1215,7 +1243,7 @@ let private tooltip (m : Model) : Node<Msg> =
         let x = (q.X - m.Centre.X) / u + s.X / 2.0 + q.Size / u / 2.0 + 10.0
         let y = top + s.Y / 2.0 + (q.Y + m.Centre.Y) / u + q.Size / u / 2.0 + 6.0
         let wide = min 380.0 (m.Page.X - 24.0)
-        let state = if has then "Allocated" else "Unallocated"
+        let state = if m.Anointed.Contains p.Id then "Allocated by an item" elif has then "Allocated" else "Unallocated"
         // (a chosen attribute grants that one)
         let stats = match Map.tryFind p.Id m.Choices with Some c when has -> p.Stats |> List.map (fun s -> s.Replace ("any Attribute", c)) | _ -> p.Stats
         let j = Map.tryFind p.Id m.Jewels
@@ -1255,7 +1283,7 @@ let private tooltip (m : Model) : Node<Msg> =
                     Dom.Class "actions"
                     if p.Options.IsEmpty && not has then
                         button { Dom.Class "act"; Dom.OnClick (fun _ -> Allocate (p.Id, "")); "Allocate" }
-                    if has then
+                    if has && not (m.Anointed.Contains p.Id) then
                         button { Dom.Class "act"; Dom.OnClick (fun _ -> Deallocate p.Id); "Refund" }
                     button { Dom.Class "act close"; Dom.OnClick (fun _ -> Close); "Close" }
                 }
@@ -1298,6 +1326,10 @@ let view (m : Model) : Node<Msg> =
             }
             if m.Tab = "tree" then
                 div { Dom.Class "points"; Dom.Attr ("data-check", "points"); points m }
+            if m.Tab = "tree" then
+                input { Dom.Class "seek"; Dom.Attr ("type", "search"); Dom.Attr ("placeholder", "search the tree"); Dom.OnInput Seek }
+            if m.Tab = "tree" && m.Sought.Trim().Length >= 2 then
+                div { Dom.Class "found"; Dom.Attr ("data-check", "found"); string m.Hits + " found" }
             div { Dom.Attr ("data-check", "pointer"); Dom.Style [ Css.Display "none" ]; sprintf "%.0fx%.0f touches %d" m.Page.X m.Page.Y m.Touches.Length }
             if not m.Dps.IsEmpty then
                 div { Dom.Class "headline"; Dom.Attr ("data-check", "dps"); m.Dps.Head.Value + " DPS" }

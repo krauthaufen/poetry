@@ -174,6 +174,16 @@ module Api =
             // "Jewel <x>": x is the socket's index in the tree's jewel slot order
             Json.list (Json.field "jewels" c)
             |> List.mapi (fun i j -> sprintf "Jewel %d" (Json.numField "x" j |> Option.map int |> Option.defaultValue i), itemText j)
+        // a jewel in a socket made on an item (Cadigan's Epiphany on gloves): a jewel like those
+        // of the tree, in no socket of it ("Jewel Gloves")
+        let isJewel (s: Json) =
+            let t = Json.strField "typeLine" s |> Option.defaultValue ""
+            Json.strField "frameTypeId" s <> Some "Currency" && [ "Ruby"; "Emerald"; "Sapphire"; "Diamond" ] |> List.exists t.EndsWith
+        let jewels =
+            jewels
+            @ (equipment |> List.collect (fun it ->
+                let slot = slotName (Json.strField "inventoryId" it |> Option.defaultValue "")
+                Json.list (Json.field "socketedItems" it) |> List.filter isJewel |> List.map (fun j -> "Jewel " + slot, itemText j)))
         let displayed =
             equipment
             |> List.filter (fun it -> Json.field "properties" it |> Option.isSome && (property "Attacks per Second" it).IsSome)

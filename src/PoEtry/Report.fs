@@ -38,7 +38,7 @@ module Report =
     /// The character sheet: who it is, pools, defences, resistances, what can be pressed, the
     /// socket groups, the minions, and what was not understood.
     /// (`slots`: the tree's jewel sockets in the order a character's jewels are numbered.)
-    let character (slots: int list) (c: Loaded) : Json =
+    let character (slots: int list) (anointed: int list) (c: Loaded) : Json =
         // a jewel in a socket of the tree: its item text is rarity, name, base, properties, mods
         let jewel (slot: string, text: string) =
             if not (slot.StartsWith "Jewel ") then None
@@ -93,6 +93,8 @@ module Report =
               "level", num (float c.Sheet.Level)
               // the passives allocated (those bound to a weapon set apart)
               "passives", JArr(c.Build.TreeNodes |> List.map (fun i -> num (float i)))
+              // the passives the items allocate (an anoint, a jewel's "Allocates"): no points, no way to them
+              "anointed", JArr(anointed |> List.map (fun i -> num (float i)))
               // what an attribute passive was chosen to be
               "choices", JArr(c.Build.TreeOverrides |> Map.toList |> List.choose (fun (i, stats) ->
                   [ "Strength"; "Dexterity"; "Intelligence" ]
@@ -168,6 +170,15 @@ module Report =
               // (a stable sort: what happened at the same time stays in its order)
               "events", JArr(happened @ kills |> List.sortBy fst |> List.map snd) ]
 
+    /// "PowerCharge:3,Rage:0": the counts a character begins with.
+    let starts (text: string) : (string * int) list =
+        text.Split(',') |> Array.choose (fun x ->
+            // (a mote's name has a colon of its own: the count is after the last)
+            let cut = x.LastIndexOf ':'
+            if cut <= 0 then None
+            else match System.Int32.TryParse(x.Substring(cut + 1).Trim()) with | true, v -> Some(x.Substring(0, cut).Trim(), v) | _ -> None)
+        |> List.ofArray
+
     let fight (c: Loaded) (request: Json) : Json =
         let n key d = Json.numField key request |> Option.defaultValue d
         let s key d = Json.strField key request |> Option.defaultValue d
@@ -175,12 +186,7 @@ module Report =
         // how the character goes into the fight: "start" is "PowerCharge:3,Rage:0" (counts to
         // begin with), the others are switches (1: on)
         let on key = n key 0.0 > 0.0
-        let start =
-            (s "start" "").Split(',') |> Array.choose (fun x ->
-                match x.Split(':') with
-                | [| k; v |] -> (match System.Int32.TryParse(v.Trim()) with | true, v -> Some(k.Trim(), v) | _ -> None)
-                | _ -> None)
-            |> List.ofArray
+        let start = starts (s "start" "")
         let o = { Options.defaults with MaxTime = n "time" 30.0; Start = start; Infused = on "infused"; NoFlask = on "noflask"; Immortal = on "immortal"; CastOnSelf = on "self"; LowLife = on "lowlife" }
         // a pack does not end: who dies is replaced (unless the enemies are made unkillable)
         let o = { o with Replace = (s "scenario" "boss" = "pack" || s "scenario" "boss" = "surrounded") && n "life" 0.0 <= 0.0 }
@@ -235,13 +241,14 @@ module Report =
 type Session(read: string -> string) =
     let db = lazy (GameDb.load read)
     let tree = lazy (read "tree.json")
+    let nodes = lazy (Tree.parseNodes tree.Value)
     let mutable parsed: (string * PobBuild) option = None
     let mutable last: (string * Loaded) option = None
 
     /// The character of a build text; `passives` ("" or ids separated by commas) replaces
     /// the passives allocated in it.
-    member _.Load(build: string, passives: string, choices: string, lowLife: bool) : Loaded =
-        let key = (if lowLife then "low|" else "") + passives + "|" + choices + "|" + build
+    member _.Load(build: string, passives: string, choices: string, lowLife: bool, start: string) : Loaded =
+        let key = (if lowLife then "low|" else "") + start + "|" + passives + "|" + choices + "|" + build
         match last with
         | Some (k, c) when k = key -> c
         | _ ->
@@ -263,7 +270,7 @@ type Session(read: string -> string) =
                             | [| i; a |] -> (match System.Int32.TryParse(i.Trim()) with | true, v -> Some(v, [ "+5 to " + a.Trim() ]) | _ -> None)
                             | _ -> None)
                     { b with TreeNodes = ids; TreeOverrides = chosen |> Array.fold (fun m (i, s) -> Map.add i s m) b.TreeOverrides }
-            let c = Setup.loadWith db.Value tree.Value b { Options.defaults with LowLife = lowLife }
+            let c = Setup.loadWith db.Value tree.Value b { Options.defaults with LowLife = lowLife; Start = Report.starts start }
             last <- Some(key, c)
             c
 
@@ -279,9 +286,11 @@ type Session(read: string -> string) =
                 | _ -> ""
             let choices = Json.strField "choices" j |> Option.defaultValue ""
             let low = Json.numField "lowlife" j |> Option.exists (fun v -> v > 0.0)
+            let start = Json.strField "start" j |> Option.defaultValue ""
             match Json.strField "op" j with
-            | Some "character" -> Report.write (Report.character (Tree.jewelSlots tree.Value) (this.Load(build, passives, choices, low)))
-            | Some "fight" -> Report.write (Report.fight (this.Load(build, passives, choices, low)) j)
+            | Some "character" -> (let c = this.Load(build, passives, choices, low, start)
+                                   Report.write (Report.character (Tree.jewelSlots tree.Value) (Pob.itemPassives nodes.Value c.Build) c))
+            | Some "fight" -> Report.write (Report.fight (this.Load(build, passives, choices, low, start)) j)
             | other -> Report.write (JObj(Map.ofList [ "error", JStr(sprintf "unknown op %A" other) ]))
         with e ->
             Report.write (JObj(Map.ofList [ "error", JStr e.Message ]))

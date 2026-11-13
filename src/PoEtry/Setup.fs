@@ -203,6 +203,7 @@ module Setup =
             maxResources
             |> Map.map (fun k n ->
                 match k, o.StartPowerCharges with
+                | _ when o.Start |> List.exists (fun (x, _) -> x = k) -> max 0 (min n (o.Start |> List.find (fun (x, _) -> x = k) |> snd))
                 | "PowerCharge", Some c -> c
                 | _ when o.StartEmpty && k <> "PowerCharge" && k <> "Rage" -> 0
                 | _ -> n)

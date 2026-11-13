@@ -140,7 +140,7 @@
         delete request.wait;
         const key = JSON.stringify(request) + "|" + buildUrl;
         try {
-          if (!builds.has(buildUrl)) builds.set(buildUrl, plain(buildUrl).then((r) => { if (!r.ok) throw new Error(`${buildUrl}: status ${r.status}`); return r.text(); }));
+          if (!builds.has(buildUrl)) builds.set(buildUrl, plain(buildUrl, { cache: "no-cache" }).then((r) => { if (!r.ok) throw new Error(`${buildUrl}: status ${r.status}`); return r.text(); }));
           request.build = await builds.get(buildUrl);
         } catch (err) {
           builds.delete(buildUrl);
@@ -252,6 +252,8 @@
     #app .share.lightning .bar { background: linear-gradient(90deg, rgba(200,180,40,.75), rgba(200,180,40,.35)); }
     #app .share.chaos .bar { background: linear-gradient(90deg, rgba(150,60,170,.8), rgba(150,60,170,.4)); }
     #app .share.physical .bar { background: linear-gradient(90deg, rgba(140,130,120,.8), rgba(140,130,120,.4)); }
+    #app .seek { width: 150px; padding: 5px 8px; border: 1px solid #2a221c; background: #171310; color: var(--ink); font: inherit; font-size: 13px; }
+    #app .found { color: #ff5fd8; font-size: 13px; white-space: nowrap; }
     #app .knob { display: flex; align-items: center; gap: 4px; margin: 3px 0; }
     #app .knob .what { flex: 1; color: var(--ink); }
     #app .knob button { min-width: 30px; padding: 3px 8px; border: 1px solid #2a221c; background: #171310; color: var(--ink); cursor: pointer; font: inherit; }

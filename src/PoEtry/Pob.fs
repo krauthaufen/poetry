@@ -244,6 +244,10 @@ module Pob =
             // a line that is just a keystone's name grants that keystone ("Eldritch Battery")
             else tree |> Map.tryPick (fun id n -> if n.IsKeystone && n.Name = l then Some id else None))
 
+    /// The passives a build's equipped items allocate (anoints, "Allocates" on jewels).
+    let itemPassives (tree: Map<int, TreeNode>) (build: PobBuild) : int list =
+        allocatedByItems tree (build.Items |> List.filter (fst >> alwaysOn) |> List.map snd) |> List.distinct
+
     /// Character mods from equipped items and allocated passives.
     let character (db: GameDb) (tree: Map<int, TreeNode>) (jewelSlots: int list) (build: PobBuild) : CharacterSheet =
         let items = build.Items |> List.filter (fst >> alwaysOn) |> List.map (fun (slot, text) -> slot, resolveBonded build slot text)

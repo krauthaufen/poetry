@@ -273,6 +273,13 @@ module Items =
         let showsWard = lines |> List.exists (fun l -> l.StartsWith "Runic Ward:")
         let context = if baseName.IsSome || hasLocalDefences then StatText.ItemLocal else StatText.Global
         let stats, unknown = StatText.parseLinesIn context db.Text candidates
+        // What only a weapon has of its own (attack speed, critical hits, accuracy) is the
+        // character's on an armour piece: "16% increased Attack Speed" on gloves.
+        let stats =
+            if baseName.IsSome then stats
+            else
+                stats |> List.map (fun (id: string, v) ->
+                    if id.StartsWith "local_" && (id.Contains "attack_speed" || id.Contains "critical_strike" || id.Contains "accuracy_rating") then id.Substring 6, v else id, v)
         let mods, locals, cov = interpret stats
         let rescued, unknown = rescue db unknown
         let mods = mods @ rescued
