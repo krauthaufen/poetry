@@ -619,6 +619,8 @@ module Flat =
         | RRemoveDebuff of status: int
         | RGainResource of buff: int * count: int
         | RDropRemnant of buff: int * delay: float * extraChance: float * count: int
+        /// A buff scaled by the charges held (see `Reaction.ChargeBuff`).
+        | RChargeBuff of buff: int * charge: int * perStack: Mod list * secondsPerStack: float * doubleChance: float * count: int
         | RSpendStack of buff: int * next: Re
         | RSetStacks of buff: int * stacks: int
         | RIfEnemyHas of status: string * next: Re
@@ -653,6 +655,20 @@ module Flat =
           /// Whether the character has "increased Energy" of its own for it.
           HasEnergyMods: bool
           Released: int }
+
+    /// An overkill explosion (see `OverkillBurn`).
+    type private OverkillInfo =
+        { Fits: bool[]
+          ThresholdPercent: float
+          PercentPerSecond: float
+          /// The explosion among the player's skills (-1: it has none of the name), its
+          /// radius before area modifiers (0: no area), its duration before modifiers.
+          Burst: int
+          Radius: float
+          Seconds: float
+          /// Where the burn's damage goes, and the count of its ignites.
+          Label: int
+          Ignited: int }
 
     type private CharmInfo =
         { Charm: Charm
@@ -730,6 +746,7 @@ module Flat =
           Explosion: bool
           HasChargedPart: bool
           NeedsCharge: bool
+          IsAreaAtTarget: bool
           /// An attack that uses up empowerments (a warcry's), and one that uses up readied repeats.
           SpendsEmpowered: bool
           SpendsRepeats: bool }
@@ -809,6 +826,10 @@ module Flat =
               OnInflict: CRule[][]
               WhenHit: CRule[]
               OnBlock: CRule[]
+              /// The charge buffs that are up when the fight starts: buff, charge, mods per
+              /// stack, seconds per stack, chance (%) of twice the stacks.
+              StartCharged: (int * int * Mod list * float * float) list
+              Overkill: OverkillInfo[]
               Metas: MetaInfo[]
               Charms: CharmInfo[]
               /// By what a charm stops: where the count of it being stopped goes.
@@ -1031,7 +1052,6 @@ module Flat =
         if player.ActiveWhile.IsSome || player.Body.IsSome || player.Pool.IsSome then reject "a player that is a minion"
         // (infusions that nothing drops and nothing consumes do nothing)
         if player.Infusions |> Option.exists (fun i -> not i.Remnants.IsEmpty || not i.Consumers.IsEmpty) then reject "infusions"
-        if not player.OverkillBurns.IsEmpty then reject "overkill explosions (Herald of Ash)"
         if player.Vitals |> Option.exists (fun v -> v.CostsInfernalFlame) then reject "Infernal Flame"
 
         // ---- its skills ----
@@ -1149,6 +1169,10 @@ module Flat =
             | RemoveDebuff name -> RRemoveDebuff(statuses.Id name)
             | GainResource (r, n) -> RGainResource(buff r, n)
             | DropRemnant (r, delay, extra) -> RDropRemnant(buff r, delay, extra, counts.Id("remnant:" + r))
+            | ChargeBuff (name, charge, perStack, seconds, doubleChance) ->
+                checkMods perStack
+                buffMods perStack
+                RChargeBuff(buff name, buffs.Id charge, perStack, seconds, doubleChance, counts.Id("buff:" + name))
             | SpendStack (b, next) -> RSpendStack(buffs.Id b, reaction next)
             | SetStacks (b, n) -> RSetStacks(buff b, n)
             | IfEnemyHas (st, next) -> RIfEnemyHas(st, reaction next)
@@ -1164,8 +1188,17 @@ module Flat =
             | other ->
                 reject ("the reaction " + reactionName other)
                 RNone
-        // (a charge buff is up when the fight starts, whatever its rule's hook is)
-        if player.Rules |> List.exists (fun r -> match r.Reaction with ChargeBuff _ -> true | _ -> false) then reject "the reaction ChargeBuff"
+        // (a charge buff is up when the fight starts, if fights start prepared, whatever its rule's hook is)
+        let startCharged =
+            if fight.BankedInvocations <= 0.0 then []
+            else
+                player.Rules |> List.choose (fun r ->
+                    match r.Reaction with
+                    | ChargeBuff (name, charge, perStack, seconds, doubleChance) ->
+                        checkMods perStack
+                        buffMods perStack
+                        Some(buff name, buffs.Id charge, perStack, seconds, doubleChance)
+                    | _ -> None)
         let rule (r: Rule) : CRule =
             { Applies = all |> List.map (matches r.Filter) |> Array.ofList
               Chance = r.Chance
@@ -1189,6 +1222,22 @@ module Flat =
                    Triggers = m.Triggers |> List.map (skillId "a meta gem's trigger") |> Array.ofList
                    HasEnergyMods = ModDb.hasStat (fun st -> st = Named "EnergyGenerated") m.EnergyMods
                    Released = counts.Id("meta:" + m.Name) }: MetaInfo))
+            |> Array.ofList
+
+        // ---- overkill explosions ----
+        let overkill =
+            player.OverkillBurns
+            |> List.map (fun b ->
+                let burst = player.Skills |> List.tryFind (fun x -> x.Name = b.Skill)
+                let called = (let k = b.Skill.IndexOf ':' in if k > 0 then b.Skill.Substring(0, k) else b.Skill)
+                ({ Fits = all |> List.map (matches b.Filter) |> Array.ofList
+                   ThresholdPercent = b.ThresholdPercent
+                   PercentPerSecond = b.PercentPerSecond
+                   Burst = (match burst with Some sk -> skillIds.[sk.Name] | None -> -1)
+                   Radius = (match burst with Some { Delivery = AreaAtTarget r } -> r | _ -> 0.0)
+                   Seconds = (match burst with Some sk -> sk.Duration | None -> 0.0)
+                   Label = sources.Id called
+                   Ignited = counts.Id("overkill ignite:" + b.Skill) }: OverkillInfo))
             |> Array.ofList
 
         // ---- charms ----
@@ -1398,6 +1447,7 @@ module Flat =
                   Explosion = s.Name.EndsWith ": Explosion"
                   HasChargedPart = s.Parts |> List.exists (fun p -> p.Name.EndsWith "-Charged")
                   NeedsCharge = flag "NeedsCharge"
+                  IsAreaAtTarget = (match s.Delivery with AreaAtTarget _ -> true | _ -> false)
                   SpendsEmpowered = s.Tags.Contains Attack && not (s.Tags.Contains Warcry)
                   SpendsRepeats = s.Tags.Contains Attack && s.Tags.Contains(Tag "Type:Barrageable") })
             |> Array.ofList
@@ -1481,6 +1531,8 @@ module Flat =
                   OnKillOf = onKillOf |> Array.map fixCurses
                   OnInflict = onInflict |> Array.map (Array.map fixCurses)
                   WhenHit = whenHit |> Array.map fixCurses
+                  StartCharged = startCharged
+                  Overkill = overkill
                   Metas = metas
                   OnBlock = onBlock |> Array.map fixCurses
                   Charms = charms
@@ -2982,6 +3034,15 @@ module Flat =
             let n = if rng.Chance extra then 2 else 1
             bump s count
             schedule s (s.Time + delay) EGainStacks b n 0.0 0.0
+        | RChargeBuff (b, charge, perStack, seconds, doubleChance, count) ->
+            let held = stacksOf s charge
+            if held <> 0 then
+                let stacks = if rng.Chance doubleChance then 2 * held else held
+                // mods are per stack: the buff's stacks scale them
+                let expires = s.Time + seconds * float stacks
+                setBuff s b stacks expires perStack
+                expireAt s expires
+                bump s count
 
     /// A meta gem gains energy, and triggers its spells if that allows (`Sim.gainEnergy`,
     /// `Sim.releaseMeta`): "Cast on" at maximum, Invocations whenever enough is banked and the
@@ -3734,6 +3795,26 @@ module Flat =
                 bump s info.CHits
                 if crit then bump s info.CCrits
                 if dead then kill s e s.Time else e.Life <- life
+                // overkill explosions: nearby enemies are ignited for a share of the overkill
+                (let overkill = dealt - lifeBefore
+                 if dead && overkill > 0.0 && p.Overkill.Length > 0 then
+                    for b in p.Overkill do
+                        if b.Fits.[sid] && overkill >= def0.Life * b.ThresholdPercent / 100.0 && b.Burst >= 0 then
+                            // (the explosion's area and the burn's time are the explosion skill's, with the buffs as they are)
+                            let bev = acquire s b.Burst
+                            useBuffs s bev p.Skills.[b.Burst] true
+                            let radius = if b.Radius > 0.0 || p.Skills.[b.Burst].IsAreaAtTarget then Geometry.radius b.Radius (multQ bev qArea) else 0.0
+                            let seconds = b.Seconds * multQ bev qSkillDuration
+                            release s
+                            let dps = overkill * b.PercentPerSecond / 100.0
+                            for o in s.Foes do
+                                if o.Life > 0.0 && o.Index <> e.Index && Vec.dist o.Def.Position def0.Position <= radius + o.Def.Size then
+                                    bump s b.Ignited
+                                    // (an ignite, counted as the explosion's damage)
+                                    let d = { Ailing = Some Ignite; Label = b.Label; Of = Fire; Dps = dps; Until = s.Time + seconds; Most = 1 }
+                                    o.Dots <- d :: o.Dots
+                                    if not (d.Until >= o.Soonest) then o.Soonest <- d.Until
+                                    expireAt s d.Until)
                 // Armour Break: the hit breaks armour by a share of the damage it dealt; armour at
                 // zero is Fully Broken: the enemy takes increased physical damage from hits
                 (let share =
@@ -4615,6 +4696,12 @@ module Flat =
         for (id, n, lasts) in p.Resources do
             let expires = match lasts with Some d -> s.Rng.Float() * d | None -> infinity
             setBuff s id n expires []
+        // charge buffs are up when the fight starts: a random part of their time has already passed
+        for (b, charge, perStack, seconds, doubleChance) in p.StartCharged do
+            if s.BHas.[charge] && s.BStacks.[charge] > 0 then
+                let stacks = if s.Rng.Chance doubleChance then 2 * s.BStacks.[charge] else s.BStacks.[charge]
+                let left = seconds * float stacks * (0.5 + 0.5 * s.Rng.Float())
+                setBuff s b stacks left perStack
         schedule s 0.0 EReady 0 0 0.0 0.0
         p.Cycles |> Array.iteri (fun i _ -> schedule s 0.0 ECycle i 0 0.0 0.0)
         for i__56 in 0 .. p.Timed.Length - 1 do

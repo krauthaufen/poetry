@@ -301,7 +301,8 @@ let randomFight (case: uint32) : Fight * string =
             | 11 -> SetStacks(pick [ "Buffed"; "Readied"; "EmpoweredAttacks:Temper"; "EmpoweredRepeatable:Tips" ], whole 1 4)
             | 12 -> (if triggered.IsEmpty then GainEnergy(pick [ "Cast on Crit"; "Invocation"; "No such gem" ], between 5.0 40.0) else TriggerSkill "Echo")
             | _ -> NoReaction
-        match whole 0 10 with
+        match whole 0 11 with
+        | 11 -> ChargeBuff(pick [ "Charged"; "Tide" ], pick [ "PowerCharge"; "FrenzyCharge" ], buffMods (), between 0.5 3.0, pick [ 0.0; 30.0; 100.0 ])
         | 10 -> Empower(pick [ "EmpoweredAttacks"; "EmpoweredAttacks:Cry"; "Buffed" ], pick [ 1.0; 5.0; 0.5 ], pick [ 10.0; 20.0; 3.0 ])
         | 0 -> SpendStack(pick [ "Buffed"; "Readied"; "PowerCharge" ], simple ())
         | 1 -> IfBuff(pick [ "Buffed"; "Tide"; "CritRecently" ], simple ())
@@ -462,6 +463,14 @@ let randomFight (case: uint32) : Fight * string =
             ManaFlask =
                 (if chance 0.4 then Some { Amount = between 50.0 300.0; Duration = between 1.0 4.0; ChargesPerUse = 20.0; MaxCharges = 60.0; ChargesPerSecond = between 0.0 3.0; ChargeGainMult = 1.0; Instant = (if chance 0.3 then 0.5 else 0.0) }
                  else None) }
+    // an overkill explosion: its skill is one of the player's, never pressed
+    let player =
+        if chance 0.8 then player
+        else
+            let burst = { Skill.make (pick [ "Ash: Burst"; "Burst" ]) [ Spell; Area ] with Delivery = (if chance 0.8 then AreaAtTarget(between 15.0 60.0) else Single); Duration = between 1.0 5.0; Hits = [] }
+            { player with
+                Skills = player.Skills @ [ burst ]
+                OverkillBurns = [ { Skill = burst.Name; Filter = pick [ AnySkill; WithTag Attack; WithTag Spell ]; ThresholdPercent = pick [ 0.0; 5.0; 30.0 ]; PercentPerSecond = between 20.0 90.0 } ] }
     let player = if player.Archons.IsEmpty then player else { player with Mods = Mod.base' (Named "ArchonOnIgnite") (between 20.0 100.0) :: player.Mods }
     // what it fights
     let enemies =
@@ -495,7 +504,7 @@ let randomFight (case: uint32) : Fight * string =
                 (if chance 0.2 then [ pick [ "Curse:Aura"; "Withered"; "Mark:Aura" ], whole 1 4, [ Mod.inc (DamageTaken AllDamage) 5.0; Mod.base' (Resist Chaos) -3.0 ] ] else []) }
     // now and then something the fast engine does not play: it must say so
     let fight =
-        match (if chance 0.12 then pick [ 1; 3; 5; 6 ] else -1) with
+        match (if chance 0.12 then pick [ 1; 3; 5 ] else -1) with
         | 1 ->
             note "minion"
             { fight with Minions = [ Actor.make "Hound" [] [ { skill 7 true with Name = "Bite" } ] ] }
@@ -505,9 +514,6 @@ let randomFight (case: uint32) : Fight * string =
         | 5 ->
             note "replace"
             { fight with Replace = true }
-        | 6 ->
-            note "charge buff"
-            { fight with Player = { player with Rules = { Hook = OnUse; Filter = AnySkill; Chance = 100.0; Reaction = ChargeBuff("Charged", "PowerCharge", [ Mod.more (Damage AllDamage) 10.0 ], 2.0, 20.0) } :: player.Rules } }
         | _ -> fight
     let described =
         sprintf "case %d: %d skills (%s), %d rules (%s), %d mods, %d enemies, vitals %b, %.2f s%s"
@@ -647,6 +653,29 @@ let run (test: string -> (unit -> unit) -> unit) =
                 Metas = [ meta; invocation ] }
         let pack = Encounter.pack 80 Rarity.defaults [ Magic, 3; Rare, 2 ] 30.0 15.0 false 3u |> List.map (fun e -> { e with Life = e.Life * 30.0 })
         same { Fight.single pack.Head player 20.0 with Enemies = pack; BankedInvocations = 0.5 } seeds)
+
+    test "flat: an overkill explosion ignites the enemies near the one killed; a buff scaled by the charges held" (fun () ->
+        let pack = Encounter.pack 80 Rarity.defaults [ Normal, 8; Magic, 3 ] 30.0 20.0 false 5u |> List.map (fun e -> { e with Life = e.Life * 0.3 })
+        let burst = { Skill.make "Ash: Burst" [ Spell; Area ] with Delivery = AreaAtTarget 40.0; Duration = 4.0; Hits = [] }
+        let staff = { Skill.make "Charged Staff" [ Spell ] with Hits = []; BaseTime = 0.5; Cooldown = Some 6.0 }
+        let player =
+            { Actor.make "Player" [ Mod.inc AreaOfEffect 40.0; Mod.inc SkillDuration 25.0; Mod.inc CritChance 300.0 ]
+                  [ staff; { strike "Swing" 4000.0 9000.0 with Delivery = AreaAtTarget 12.0 }; burst ] with
+                Rotation = [ { Use = "Charged Staff"; When = fun v -> not (v.Buffs.ContainsKey "Charged") }; Actor.always "Swing" ]
+                OverkillBurns = [ { Skill = "Ash: Burst"; Filter = WithTag Attack; ThresholdPercent = 5.0; PercentPerSecond = 60.0 } ]
+                Rules =
+                    [ { Hook = OnUse; Filter = Called "Charged Staff"; Chance = 100.0; Reaction = ChargeBuff("Charged", "PowerCharge", [ Mod.more (Damage(OfType Lightning)) 8.0; Mod.base' (AddedMax Lightning) 50.0 ], 3.0, 40.0) }
+                      { Hook = OnCrit; Filter = AnySkill; Chance = 100.0; Reaction = GainResource("PowerCharge", 1) } ]
+                Resources = [ "PowerCharge", 2 ]
+                MaxResources = Map.ofList [ "PowerCharge", 4 ] }
+        let fight = { Fight.single pack.Head player 25.0 with Enemies = pack }
+        same fight seeds
+        same { fight with BankedInvocations = 0.0 } seeds
+        let o = Sim.run fight 1u
+        if not (o.Counts |> Map.exists (fun k _ -> k.StartsWith "overkill ignite:")) then failwith "expected overkill ignites"
+        // (with nothing prepared the buff is not up at the start: the staff is used for it)
+        let unprepared = Sim.run { fight with BankedInvocations = 0.0; Enemies = pack |> List.map (fun e -> { e with Life = 1e9 }) } 1u
+        if not (unprepared.Counts.ContainsKey "buff:Charged") then failwith "expected the charge buff")
 
     test "flat: what is not built is refused, with every reason" (fun () ->
         let player = Actor.make "Player" [] [ spell "Bolt" Fire 1.0 2.0 ]
