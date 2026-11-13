@@ -2326,7 +2326,10 @@ module Flat =
 
     let private refreshAlive (s: State) =
         if s.AliveStale then
-            s.Living <- [ for e in s.Foes do if e.Life > 0.0 then yield e.Def ]
+            let mutable living : EnemyDef list = []
+            for i in s.Foes.Length - 1 .. -1 .. 0 do
+                if s.Foes.[i].Life > 0.0 then living <- s.Foes.[i].Def :: living
+            s.Living <- living
             s.Aimed <-
                 match Geometry.aim s.P.Fight.Targeting s.Living with
                 | Some d -> s.P.EnemyIds.[d.Name]
