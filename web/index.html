@@ -2,7 +2,10 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0c0a08" />
+  <meta name="color-scheme" content="dark" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <title>PoEtry</title>
   <link rel="icon" href="data:," />
   <script>window.global = globalThis;</script>
@@ -666,6 +669,44 @@
     #app .main.defence .survival { display: flex; flex-direction: column; gap: 8px; }
     #app .line.runic-ward .what, #app .line.runic-ward .amount, #app .line.runic-ward-regenerated .amount { color: #d9a441; }
     #app .line.physical .amount { color: #c8c8c8; }
+    /* ---- the game's own warmth over the flat black: brown stone, bronze frames, gold headings
+       (the numbers keep their stats' colours) ---- */
+    html { background: #0c0a08; color-scheme: dark; }
+    #app > div { background: radial-gradient(ellipse at top, #1a140f 0%, #0c0a08 55%) fixed; }
+    #app header { background: linear-gradient(180deg, #1c150f, #120e0a); border-bottom: 1px solid #5a4630; }
+    #app .panel, #app .group, #app .picker { background: linear-gradient(180deg, #17120d, #0d0a08); border: 1px solid #4a3a28; box-shadow: inset 0 0 0 1px rgba(0,0,0,.6), 0 2px 8px rgba(0,0,0,.5); }
+    #app h3 { color: #d8b878; border-bottom: 1px solid #4a3a28; font-family: "Fontin SmallCaps", "Fontin", serif; }
+    #app .line .what, #app .knob .what { color: #b8a88c; }
+    #app .line .amount { color: #f0e6d2; }
+    #app button.tab, #app .knob button, #app .gem-tip .act, #app .seek, #app button.act, #app .item-tip .act, #app .paste .act {
+      background: linear-gradient(180deg, #2a1f15, #19120c); color: #d8c8a8; border: 1px solid #6b5438; }
+    #app button.tab:hover, #app .knob button:hover, #app .gem-tip .act:hover, #app button.act:hover, #app .item-tip .act:hover { background: linear-gradient(180deg, #3a2a1a, #241a10); border-color: #c89a58; color: #fff0d0; }
+    #app button.tab.active, #app .item-tip .act.active { background: linear-gradient(180deg, #5a3c1c, #33220f); color: #ffe6b0; border-color: #d8a050; }
+    #app .title, #app header select.title { color: #e8c888; }
+    #app .headline { color: #ffd890; }
+    #app .status, #app .depth { color: #8a7a64; }
+    #app .share { border: 1px solid #3b2e20; background: #120e0a; }
+    #app .share .bar { background: linear-gradient(90deg, #6a3a14, #a8601e); }
+    #app .share .name, #app .share .pct { color: #f0e6d2; }
+    #app .item { border: 1px solid #4a3a28; background: #100c09; }
+    #app .item.empty { color: #5a4a38; }
+    #app .item-tip { border: 1px solid #6b5438; background: #0a0806; }
+    #app .item-tip .deltas { border-top: 1px solid #4a3a28; }
+    #app .gem-tip { border: 1px solid #6b5438; background: #0e0b08; }
+    #app .gem .face:hover { background: #241a10; }
+    #app header .crest { border: 1px solid #a8824a; }
+    #app header .login { color: #8a7a64; }
+    #app .shut { background: #2a1f15 !important; border-color: #a8824a !important; color: #ffe6b0 !important; }
+    #app .knob input, #app .paste .draft, #app .panel.custom textarea, #app textarea.draft { background: #0e0b08; color: #e0d4bc; border: 1px solid #4a3a28; }
+    #app .offer { background: #140f0b; border-color: #3b2e20; border-left-width: 3px; }
+    @media (max-width: 780px) {
+      #app .item.pinned > .item-tip, #app .gem.pinned .gem-tip, #app .picker { background: #0c0a08; }
+      /* (with no damage to show, what the page has to say: a line under the header) */
+      #app header:not(:has(.headline)) .status { display: block; position: fixed; left: 0; right: 0; top: 64px; z-index: 2; padding: 6px 12px; background: #1c150f; border-bottom: 1px solid #5a4630; color: #d8b878;
+        white-space: normal; overflow: visible; font-size: 13px; line-height: 1.3; font-style: normal; }
+    }
+    #app header .headline { flex: 0 0 auto; overflow: visible; }
+    #app header > nav { flex: 0 1 auto; overflow-x: auto; scrollbar-width: none; display: flex; } #app header > nav button.tab { flex: 0 0 auto; }
   </style>
 </head>
 <body>
