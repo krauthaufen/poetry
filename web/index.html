@@ -67,7 +67,7 @@
         const rs = f.results;
         const clears = rs.map((r) => r.clear && r.clear.mean).filter((x) => x != null);
         return {
-          gem: f.gem, play: rs[0].play || [], scenario: rs[0].scenario, runs: rs.length, more: rs.length < f.total && !f.failed,
+          gem: f.gem, engine: rs[0].engine || "", play: rs[0].play || [], scenario: rs[0].scenario, runs: rs.length, more: rs.length < f.total && !f.failed,
           replay: (rs.find((r) => r.replay) || {}).replay || null,
           killRate: mean(rs.map((r) => r.killRate)),
           clear: clears.length === rs.length ? stats(clears) : null,
