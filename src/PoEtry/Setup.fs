@@ -134,16 +134,19 @@ module Setup =
 
     /// The same with game data already loaded (many builds, one database).
     and loadWith (db: GameDb) (treeJson: string) (build: PobBuild) (o: Options) : Loaded =
-        let tree = Tree.parseNodes treeJson
+        loadParsed db (Tree.parseNodes treeJson) (Tree.jewelSlots treeJson) (Defence.classBases treeJson) build o
+
+    /// The same with the tree read already (one character loaded again and again: a front end).
+    and loadParsed (db: GameDb) (tree: Map<int, TreeNode>) (jewelSlots: int list) (classBases: Map<string, float * float * float>) (build: PobBuild) (o: Options) : Loaded =
         let build = if o.Bonded then { build with Config = Map.add "bonded" "1" build.Config } else build
         let build = dropGems o.Without build
-        let sheet = Pob.character db tree (Tree.jewelSlots treeJson) build |> fun s -> Pob.withPersistentBuffs db s build
+        let sheet = Pob.character db tree jewelSlots build |> fun s -> Pob.withPersistentBuffs db s build
         // charms: their effects are sheet mods that hold while the charm lasts
         let charms, charmMods = Behaviours.charms db sheet build
         let sheet = { sheet with Mods = sheet.Mods @ charmMods }
         // named effects the character has outright, and what their stacks add
         let sheet = { sheet with Mods = sheet.Mods @ Behaviours.keywordMods sheet }
-        let bases = Defence.classBases treeJson
+        let bases = classBases
         // motes: base maximum from the mote-granting gem's description stat
         let moteBase =
             build.Groups

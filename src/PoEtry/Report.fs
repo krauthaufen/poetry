@@ -48,8 +48,10 @@ module Report =
             let rec gems (items: Json list) =
                 items |> List.collect (fun g ->
                     let name = Json.strField "typeLine" g |> Option.defaultValue ""
-                    let icon = Json.strField "gemSkill" g |> Option.orElse (Json.strField "icon" g) |> Option.defaultValue ""
-                    (if name <> "" && icon <> "" then [ name, icon ] else []) @ gems (Json.list (Json.field "socketedItems" g)))
+                    // the skill's picture (a gem that grants a skill has one), and the gem's own after a "|"
+                    let own = Json.strField "icon" g |> Option.defaultValue ""
+                    let icon = (Json.strField "gemSkill" g |> Option.defaultValue own) + "|" + own
+                    (if name <> "" && icon <> "|" then [ name, icon ] else []) @ gems (Json.list (Json.field "socketedItems" g)))
             gems (Json.list (Json.field "skills" c)) |> Map.ofList
 
     /// (`groups`: the build's socket groups before any gem was turned off, `icons`: see `gemIcons`.)
@@ -138,7 +140,8 @@ module Report =
                                       "gems", JArr [ for x in g.Gems do
                                                        if x.Enabled then
                                                            yield obj [ "name", JStr x.Name; "level", num (float x.Level); "quality", num (float x.Quality); "support", JBool x.IsSupport
-                                                                       "icon", JStr(Map.tryFind x.Name icons |> Option.defaultValue "")
+                                                                       "icon", JStr((Map.tryFind x.Name icons |> Option.defaultValue "|").Split('|').[0])
+                                                                       "gemIcon", JStr((Map.tryFind x.Name icons |> Option.defaultValue "|").Split('|').[1])
                                                                        // kept up by Spirit: a persistent buff, a meta gem, a minion
                                                                        "spirit", num (c.SpiritUses |> List.tryFind (fun u -> u.Gem = x.Name) |> Option.map (fun u -> u.Flat + u.PerMinion) |> Option.defaultValue 0.0)
                                                                        "persistent", JBool(not x.IsSupport && (Gems.isPersistentBuff c.Db x.Name || Gems.isMeta c.Db x.Name)) ] ] ] ]
@@ -265,6 +268,8 @@ type Session(read: string -> string) =
     let db = lazy (GameDb.load read)
     let tree = lazy (read "tree.json")
     let nodes = lazy (Tree.parseNodes tree.Value)
+    let slots = lazy (Tree.jewelSlots tree.Value)
+    let bases = lazy (Defence.classBases tree.Value)
     let mutable parsed: (string * PobBuild) option = None
     let mutable last: (string * Loaded) option = None
 
@@ -293,14 +298,19 @@ type Session(read: string -> string) =
                             | [| i; a |] -> (match System.Int32.TryParse(i.Trim()) with | true, v -> Some(v, [ "+5 to " + a.Trim() ]) | _ -> None)
                             | _ -> None)
                     { b with TreeNodes = ids; TreeOverrides = chosen |> Array.fold (fun m (i, s) -> Map.add i s m) b.TreeOverrides }
-            let c = Setup.loadWith db.Value tree.Value b { Options.defaults with LowLife = lowLife; Start = Report.starts start; Without = without.Split(',') |> Array.map (fun x -> x.Trim()) |> Array.filter (fun x -> x <> "") |> List.ofArray }
+            let c = Setup.loadParsed db.Value nodes.Value slots.Value bases.Value b { Options.defaults with LowLife = lowLife; Start = Report.starts start; Without = without.Split(',') |> Array.map (fun x -> x.Trim()) |> Array.filter (fun x -> x <> "") |> List.ofArray }
             last <- Some(key, c)
             c
 
     member this.Handle(request: string) : string =
+        this.HandleWith(request, "")
+
+    /// The same with the build's text apart from the request (it is long, and the same again
+    /// and again: no need to read it out of the request every time).
+    member this.HandleWith(request: string, text: string) : string =
         try
             let j = Json.parse request
-            let build = Json.strField "build" j |> Option.defaultValue ""
+            let build = if text <> "" then text else Json.strField "build" j |> Option.defaultValue ""
             // (a single id arrives as a number)
             let passives =
                 match Json.field "passives" j with
@@ -316,7 +326,7 @@ type Session(read: string -> string) =
             | Some "character" ->
                 let c = this.Load(build, passives, choices, low, start, without)
                 let groups = match parsed with Some (_, b) -> b.Groups | None -> c.Build.Groups
-                Report.write (Report.character (Tree.jewelSlots tree.Value) (Pob.itemPassives nodes.Value c.Build) groups (Report.gemIcons build) c)
+                Report.write (Report.character slots.Value (Pob.itemPassives nodes.Value c.Build) groups (Report.gemIcons build) c)
             | Some "fight" -> Report.write (Report.fight (this.Load(build, passives, choices, low, start, without)) j)
             | other -> Report.write (JObj(Map.ofList [ "error", JStr(sprintf "unknown op %A" other) ]))
         with e ->
@@ -327,3 +337,4 @@ type Session(read: string -> string) =
 module Front =
     let create (read: string -> string) : Session = Session read
     let handle (session: Session) (request: string) : string = session.Handle request
+    let handleWith (session: Session) (request: string) (build: string) : string = session.HandleWith(request, build)

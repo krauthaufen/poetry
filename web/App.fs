@@ -9,7 +9,7 @@ open Pure
 
 type Row = { Label : string; Value : string }
 /// A socketed gem (`Key`: how the simulator is told to leave it out) and a group of them.
-type Gem = { Key : string; Named : string; Level : int; Quality : int; Support : bool; Icon : string; Spirit : float; Persistent : bool }
+type Gem = { Key : string; Named : string; Level : int; Quality : int; Support : bool; Icon : string; Own : string; Spirit : float; Persistent : bool }
 type GemGroup = { Slot : string; Gems : Gem list }
 type Share = { Name : string; Percent : float; Text : string; Part : bool }
 
@@ -86,6 +86,10 @@ type Msg =
     | Switch of string
     /// A gem is turned off, or on again.
     | Socket of string
+    /// The gem whose tooltip stays ("": none).
+    | Pin of string
+    /// What changing the pinned passive does to the damage came back.
+    | Compared of Fetched
     | Tab of string
     | TreeData of Fetched
     | Toggle of int
@@ -125,7 +129,15 @@ type Model =
       Shares : Share list
       /// The character's socket groups, and the gems turned off here.
       Groups : GemGroup list
+      /// What the pinned passive's change does (scenario, percent more damage), and the question that was answered.
+      Deltas : (string * float) list
+      /// The question about the pinned passive ("": none), asked at once and again for more
+      /// fights: worked out when what it depends on changes, not whenever it is looked at.
+      Ask : string
+      AskMore : string
+      DeltaOf : string
       Dropped : Set<string>
+      Pinned : string
       /// The passives the items allocate (an anoint, a jewel): shown as allocated, not to be refunded.
       Anointed : Set<int>
       /// The damage by damage type.
@@ -237,7 +249,7 @@ type Model =
 let init : Model =
     { Build = ""; Scenario = "boss"; Status = "locating"; Title = ""; Class = ""; Ascendancy = ""; Tab = "character"
       Pools = []; Defences = []; Resistances = []; Minions = []
-      NotUnderstood = 0; Fighting = false; Gem = ""; Dps = []; Shares = []; Groups = []; Dropped = Set.empty; Anointed = Set.empty; Types = []; Counts = []; Start = Map.empty; Switches = Set.empty
+      NotUnderstood = 0; Fighting = false; Gem = ""; Dps = []; Shares = []; Groups = []; Dropped = Set.empty; Pinned = ""; Deltas = []; DeltaOf = ""; Ask = ""; AskMore = ""; Anointed = Set.empty; Types = []; Counts = []; Start = Map.empty; Switches = Set.empty
       Passives = [||]; Ascendancies = []; Shown = []; AscendancyWeb = Data.pack (Data.ofList ([] : V3f list)); Path = Data.pack (Data.ofList ([] : V3f list))
       Loaded = false; Capacity = 0
       WebUv = Data.pack (Data.ofList ([] : V2f list)); AscendancyWebUv = Data.pack (Data.ofList ([] : V2f list)); PathUv = Data.pack (Data.ofList ([] : V2f list)); Art = ""; Links = [||]; Neighbours = Map.empty; Web = Data.pack (Data.ofList ([] : V3f list)); Allocated = Set.empty; Edited = false
@@ -848,6 +860,25 @@ let private gesture (id : int) (before : V2d) (now : V2d) (m : Model) : Model =
             look { m with Height = height; Centre = V2d (held.X - at.X, held.Y - at.Y) }
 
 /// The passive drawn at a place of the tree (y up), if any.
+/// The question what pressing the pinned passive's button would do to the damage: the
+/// passives as they are and as they would be then.
+let private compareOf (m : Model) (deep : bool) : string =
+    match m.Selected with
+    | None -> ""
+    | Some id ->
+        let listed (x : Model) =
+            (Set.difference x.Allocated x.Anointed |> Set.toList |> List.map string |> String.concat ","),
+            (x.Choices |> Map.toList |> List.filter (fun (i, _) -> x.Allocated.Contains i) |> List.map (fun (i, c) -> string i + ":" + c) |> String.concat ",")
+        let was, wasChosen = listed m
+        let then', thenChosen = listed (toggle id m)
+        if then' = was then ""
+        else
+            "__sim?op=compare" + (if deep then "&depth=1" else "") + (if m.Gem <> "" then "&gem=" + m.Gem.Replace (" ", "%20") else "") + knobs m
+            + (if m.Edited then "&base=" + was + "&basechoices=" + wasChosen else "")
+            + "&passives=" + then' + "&choices=" + thenChosen + "&build=" + m.Build
+
+let private compareUrl (m : Model) : string = compareOf m false
+
 let private passiveAt (m : Model) (x : float) (y : float) : Passive option =
     let near (ps : Passive list) =
         ps
@@ -857,7 +888,7 @@ let private passiveAt (m : Model) (x : float) (y : float) : Passive option =
     // (the ascendancy's lie over the tree's own there: they come first)
     near (m.Shown |> List.filter (fun q -> q.Ascendancy <> "" && visible m q)) |> Option.orElse (near (m.Shown |> List.filter (visible m)))
 
-let rec update (msg : Msg) (m : Model) : Model =
+let rec private step (msg : Msg) (m : Model) : Model =
     match msg with
     | Located href ->
         match Native.queryParam "build" href with
@@ -867,6 +898,17 @@ let rec update (msg : Msg) (m : Model) : Model =
     | Begin (name, count) ->
         let most = m.Counts |> List.tryFind (fun (k, _) -> k = name) |> Option.map snd |> Option.defaultValue 0
         { m with Start = (if count < 0 || count > most then Map.remove name m.Start else Map.add name count m.Start); Fighting = true; Dps = []; Shares = []; Types = []; Runs = 0; Round = 0; Happened = []; Warm = [] }
+    | Compared r when r.Url <> m.Ask && r.Url <> m.AskMore -> m
+    | Compared r ->
+        (match r.Status, Native.parseJson r.Text with
+         | 200, Ok j ->
+            let deltas =
+                Json.field "scenarios" j |> Json.list |> List.choose (fun x ->
+                    let b, c = Json.number (Json.field "base" x), Json.number (Json.field "changed" x)
+                    if b > 0.0 && c > 0.0 then Some (Json.string (Json.field "name" x), (c / b - 1.0) * 100.0) else None)
+            if deltas.IsEmpty then m else { m with Deltas = deltas; DeltaOf = r.Url }
+         | _ -> m)
+    | Pin key -> { m with Pinned = key }
     | Socket key ->
         { m with Dropped = (if m.Dropped.Contains key then Set.remove key m.Dropped else Set.add key m.Dropped); Pressing = ""; Fighting = true; Dps = []; Shares = []; Types = []; Runs = 0; Round = 0; Happened = []; Warm = [] }
     | Switch key ->
@@ -899,7 +941,7 @@ let rec update (msg : Msg) (m : Model) : Model =
         match m.Pending with
         | Some p ->
             let q = placeAt m m.Centre m.Height p
-            update (Click (V3d (q.X, q.Y, 0.0))) { m with Pending = None }
+            step (Click (V3d (q.X, q.Y, 0.0))) { m with Pending = None }
         | None -> m
     | PointerDown e ->
         let others = m.Touches |> List.filter (fun (i, _) -> i <> e.PointerId)
@@ -922,7 +964,7 @@ let rec update (msg : Msg) (m : Model) : Model =
         if m.Touches.Length = 1 && left.IsEmpty && m.Travel < 8.0 then
             if m.Page.X > 0.0 then
                 let p = placeAt m m.Centre m.Height e.Position
-                update (Click (V3d (p.X, p.Y, 0.0))) lifted
+                step (Click (V3d (p.X, p.Y, 0.0))) lifted
             else { lifted with Pending = Some e.Position }
         else lifted
     | Zoom (p, _, wheel) ->
@@ -970,7 +1012,7 @@ let rec update (msg : Msg) (m : Model) : Model =
                                 |> List.map (fun x ->
                                     let name = Json.string (Json.field "name" x)
                                     { Key = string index + ":" + name; Named = name; Level = Json.int (Json.field "level" x); Quality = Json.int (Json.field "quality" x)
-                                      Support = Json.bool (Json.field "support" x); Icon = Json.string (Json.field "icon" x); Spirit = Json.number (Json.field "spirit" x); Persistent = Json.bool (Json.field "persistent" x) }) })
+                                      Support = Json.bool (Json.field "support" x); Icon = Json.string (Json.field "icon" x); Own = Json.string (Json.field "gemIcon" x); Spirit = Json.number (Json.field "spirit" x); Persistent = Json.bool (Json.field "persistent" x) }) })
                     Pools = [ row "Life" (n [ "pools"; "life" ]); row "Mana" (n [ "pools"; "mana" ]); row "Energy Shield" (n [ "pools"; "energyShield" ]); row "Spirit" (n [ "pools"; "spirit" ]) ]
                     Defences = [ row "Armour" (n [ "defences"; "armour" ]); row "Evasion" (n [ "defences"; "evasion" ]); row "Deflection" (n [ "defences"; "deflection" ]); row "Block" (n [ "defences"; "block" ]) ]
                     Resistances = named "resistances"
@@ -979,7 +1021,7 @@ let rec update (msg : Msg) (m : Model) : Model =
                     Fighting = true }
         | s, _ -> { m with Status = "the simulator did not answer (status " + string s + ")" }
     | Tick t ->
-        if m.Happened.IsEmpty || m.Tab = "tree" then m
+        if m.Happened.IsEmpty || m.Tab <> "character" then m
         else
             let began = if m.Began < 0.0 then t else m.Began
             // the fight, a breath, and again
@@ -1014,6 +1056,17 @@ let rec update (msg : Msg) (m : Model) : Model =
                     |> List.map (fun x -> let v = Json.number (Json.field "value" x) * 100.0 in { Name = Json.string (Json.field "name" x); Percent = v; Text = sprintf "%.1f%%" v; Part = false })
                     |> List.filter (fun s -> s.Percent >= 0.05) }
         | s, _ -> { m with Fighting = false; Status = "the fight did not come back (status " + string s + ")" }
+
+/// One message: the model after it, and with it the question about the pinned passive when
+/// something it depends on is another now.
+let update (msg : Msg) (m : Model) : Model =
+    let n = step msg m
+    let same =
+        n.Selected = m.Selected && n.Gem = m.Gem && n.Edited = m.Edited
+        && n.Allocated = m.Allocated && n.Choices = m.Choices && n.Anointed = m.Anointed
+        && n.Start = m.Start && n.Switches = m.Switches && n.Dropped = m.Dropped
+        && n.Passives.Length = m.Passives.Length
+    if same then n else { n with Ask = compareOf n false; AskMore = compareOf n true }
 
 let private panel (title : string) (rows : Row list) : Node<Msg> =
     section {
@@ -1053,23 +1106,58 @@ let private switch (m : Model) (key : string) (name : string) : Node<Msg> =
         name
     }
 
-/// A gem: its picture and name, level and quality, what it reserves; pressed, it is turned
-/// off (and the fights fought again), pressed again on.
+/// A gem as the game's skill panel shows it: its picture (a skill's with its name beside).
+/// What it is in a tooltip, under the mouse or once pressed; pressed, the tooltip stays and
+/// has the button that turns the gem off (and the fights are fought again) or on.
 let private gem (m : Model) (g : Gem) : Node<Msg> =
     let off = m.Dropped.Contains g.Key
+    let pinned = m.Pinned = g.Key
     let kind = if g.Support then "gem support" elif g.Persistent then "gem persistent" else "gem"
-    let detail = "level " + string g.Level + (if g.Quality > 0 then ", " + string g.Quality + "% quality" else "") + (if g.Spirit > 0.0 then sprintf ", %.0f spirit" g.Spirit else "")
-    let shown = if off then "turned off" else detail
-    button {
-        Dom.Class (if off then kind + " off" else kind)
+    let level = "Level " + string g.Level
+    let quality = "+" + string g.Quality + "% quality"
+    let spirit = sprintf "reserves %.0f Spirit" g.Spirit
+    let turn = if off then "Turn on" else "Turn off"
+    // (a skill's own picture; a support's gem)
+    let picture = if g.Support then g.Own else g.Icon
+    let lvl = if g.Support then "" elif g.Quality > 0 then string g.Level + " / " + string g.Quality else string g.Level
+    let what = if g.Support then "Support gem" elif g.Persistent then "Persistent skill" else "Skill gem"
+    div {
+        Dom.Class (kind + (if off then " off" else "") + (if pinned then " pinned" else ""))
         Dom.Attr ("data-gem", g.Named)
-        Dom.OnClick (fun _ -> Socket g.Key)
-        if g.Icon <> "" then img { Dom.Attr ("src", g.Icon); Dom.Attr ("alt", "") }
-        span {
-            Dom.Class "text"
+        button {
+            Dom.Class "face"
+            Dom.OnClick (fun _ -> Pin (if pinned then "" else g.Key))
+            if picture <> "" then img { Dom.Attr ("src", picture); Dom.Attr ("alt", "") }
             span { Dom.Class "name"; g.Named }
-            span { Dom.Class "detail"; shown }
+            span { Dom.Class "lvl"; lvl }
         }
+        div {
+            Dom.Class "gem-tip"
+            div { Dom.Class "name"; g.Named }
+            div { Dom.Class "what"; what }
+            div { Dom.Class "line"; level }
+            if g.Quality > 0 then div { Dom.Class "line"; quality }
+            if g.Spirit > 0.0 then div { Dom.Class "line"; spirit }
+            if off then div { Dom.Class "line offed"; "turned off" }
+            if pinned then
+                div {
+                    Dom.Class "actions"
+                    button { Dom.Class "act"; Dom.OnClick (fun _ -> Socket g.Key); turn }
+                    button { Dom.Class "act close"; Dom.OnClick (fun _ -> Pin ""); "Close" }
+                }
+        }
+    }
+
+/// A socket group as a card (as poe.ninja lists them): its gems one under the other, a
+/// skill's before its supports, each with its picture, name and level.
+let private group (m : Model) (g : GemGroup) : Node<Msg> =
+    let spirit = g.Gems |> List.sumBy (fun x -> if m.Dropped.Contains x.Key then 0.0 else x.Spirit)
+    let reserved = sprintf "%.0f Spirit" spirit
+    section {
+        Dom.Class "group"
+        for x in g.Gems do
+            gem m x
+        if spirit > 0.0 then div { Dom.Class "spirit"; reserved }
     }
 
 let private scenario (m : Model) (key : string) (name : string) : Node<Msg> =
@@ -1134,11 +1222,11 @@ let arena (m : Model) : Node<Msg> =
     renderControl {
         Dom.Style [ Css.Position "fixed"; Css.Prop ("right", "12px"); Css.Prop ("bottom", "12px"); Css.Width "min(180px, 34vw)"; Css.Height "min(180px, 34vw)"
                     Css.Prop ("border", "1px solid #3b3024"); Css.Prop ("z-index", "4"); Css.Prop ("pointer-events", "none")
-                    Css.Prop ("visibility", (if m.Happened.IsEmpty || m.Tab = "tree" then "hidden" else "visible")) ]
+                    Css.Prop ("visibility", (if m.Happened.IsEmpty || m.Tab <> "character" then "hidden" else "visible")) ]
         RenderControl.Orthographic (m.Field, 1.0, 400.0)
         RenderControl.Camera { Sky = V3d (0.0, 1.0, 0.0); Location = V3d (m.Middle.X, m.Middle.Y, 200.0); Forward = V3d (0.0, 0.0, -1.0); Up = V3d (0.0, 1.0, 0.0); Right = V3d (1.0, 0.0, 0.0) }
         RenderControl.OnRendered Tick
-        RenderControl.Animating (not m.Happened.IsEmpty && m.Tab <> "tree")
+        RenderControl.Animating (not m.Happened.IsEmpty && m.Tab = "character")
         sg {
             Sg.Shader { Shaders.flat }
             Sg.NoEvents true
@@ -1158,7 +1246,8 @@ let arena (m : Model) : Node<Msg> =
 
 let tree (m : Model) : Node<Msg> =
     renderControl {
-        Dom.Style [ Css.Position "absolute"; Css.Left "0"; Css.Top "64px"; Css.Width "100%"; Css.Height "calc(100% - 64px)"; Css.TouchAction "none"; Css.UserSelect "none"
+        // (fixed to the window: as tall as a long page, it would be more than a phone's GPU draws)
+        Dom.Style [ Css.Position "fixed"; Css.Left "0"; Css.Top "64px"; Css.Width "100%"; Css.Height "calc(100% - 64px)"; Css.TouchAction "none"; Css.UserSelect "none"
                     Css.Prop ("visibility", (if m.Tab = "tree" then "visible" else "hidden")) ]
         Dom.OnPointerDown PointerDown
         Dom.OnPointerMove PointerMove
@@ -1276,6 +1365,10 @@ let private tooltip (m : Model) : Node<Msg> =
     | None -> div { Dom.Class "passive-tip none" }
     | Some p ->
         let has = m.Allocated.Contains p.Id
+        let asked = if pinned then m.Ask else ""
+        let refined = asked <> "" && m.DeltaOf = m.AskMore
+        let known = asked <> "" && (m.DeltaOf = asked || refined)
+        let depth = if refined then "10 fights each" else "3 short fights each, refining ..."
         let title = match Map.tryFind p.Id m.Choices with Some c when has -> c | _ -> p.Name
         // beside the passive where it is drawn (an ascendancy's: around the middle), kept on the page
         let q = m.Shown |> List.tryFind (fun s -> s.Id = p.Id) |> Option.defaultValue p
@@ -1328,6 +1421,19 @@ let private tooltip (m : Model) : Node<Msg> =
                         button { Dom.Class "act"; Dom.OnClick (fun _ -> Deallocate p.Id); "Refund" }
                     button { Dom.Class "act close"; Dom.OnClick (fun _ -> Close); "Close" }
                 }
+            if pinned && asked <> "" then
+                div {
+                    Dom.Class "deltas"
+                    if not known then div { Dom.Class "depth"; "fighting it out ..." }
+                    if known then
+                        for (name, by) in m.Deltas do
+                            div {
+                                Dom.Class (if by > 0.05 then "delta up" elif by < -0.05 then "delta down" else "delta")
+                                span { name }
+                                span { Dom.Class "by"; Dom.Attr ("data-check", "delta"); sprintf "%+.1f%% damage" by }
+                            }
+                    if known then div { Dom.Class "depth"; Dom.Attr ("data-check", "depth"); depth }
+                }
             if not pinned then
                 div { Dom.Class "state"; state }
         }
@@ -1352,6 +1458,8 @@ let view (m : Model) : Node<Msg> =
             if m.Build <> "" then span { Dom.Fetch (sheetUrl m, Sheet) }
             if m.Title <> "" then span { Dom.Fetch (fightUrl m, Fought) }
             if warming m <> "" then span { Dom.Fetch (fightOf m (warming m) "&wait=1", Warmed) }
+            if m.Tab = "tree" && m.Ask <> "" then span { Dom.Fetch (m.Ask, Compared) }
+            if m.Tab = "tree" && m.Ask <> "" && (m.DeltaOf = m.Ask || m.DeltaOf = m.AskMore) then span { Dom.Fetch (m.AskMore, Compared) }
         }
         span { Dom.Fetch ("tree.json", TreeData) }
         div {
@@ -1380,13 +1488,8 @@ let view (m : Model) : Node<Msg> =
         if m.Tab = "gems" then
             div {
                 Dom.Class "main gems"
-                div { Dom.Class "hint"; "Press a gem to turn it off or on. Every change fights again." }
                 for g in m.Groups do
-                    section {
-                        Dom.Class "panel group"
-                        for x in g.Gems do
-                            gem m x
-                    }
+                    group m g
             }
         if m.Tab = "character" then
             div {

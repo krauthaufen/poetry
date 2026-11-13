@@ -92,6 +92,7 @@ Confidence levels:
 | Hits | one hit at the end of the use, unless the skill or actor gives a hit pattern | modelling choice |
 | Triggered skills | use immediately, cost no time, respect their cooldown | guess per trigger |
 | Meta gems | energy from rules; at max energy, trigger and subtract max | modelling choice; energy amounts per hook must come from gem data |
+| Meta energy from the character | "Meta Skills gain X% increased Energy" on passives and items adds to the gem's own increase; "if you've dealt a Critical Hit Recently" holds while the actor has crit in the last 4 s | game text | data |
 | Server ticks | not quantised: actions happen at exact times; wiki Skill speed: one non-channelling action per server frame of 33 ms (the minimum use time we apply) | data |
 | DoT damage | integrated exactly between events (DoT dps is constant between events) | exact |
 | Resources (mana, life costs) | not modelled | missing |

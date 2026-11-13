@@ -28,7 +28,9 @@
         if (at < 0) return;
         const job = jobs.splice(at, 1)[0];
         w.busy = job;
-        w.worker.postMessage({ id: 0, request: JSON.stringify(job.request) });
+        // (the character's text apart: it is long, and the worker need not read it out of the request)
+        const { build, ...rest } = job.request;
+        w.worker.postMessage({ id: 0, request: JSON.stringify(rest), build: build || "" });
       };
       // the first worker at once (it reads the character); the others when fights are asked
       const start = () => {
@@ -39,8 +41,8 @@
         workers.push(w);
       };
       start();
-      const ask = (request, fight) => new Promise((done) => {
-        jobs.push({ request, done, fight });
+      const ask = (request, fight, first) => new Promise((done) => {
+        if (first) jobs.unshift({ request, done, fight }); else jobs.push({ request, done, fight });
         if (fight && workers.length < count && workers.every((w) => w.busy)) start();
         workers.forEach(feed);
       });
@@ -121,6 +123,42 @@
         return new Promise((done) => { f.waiters.push({ done, all }); settle(f); });
       };
 
+      // What a change of passives does, soon: every scenario fought a few short times with the
+      // passives as they are ("base", kept for the next question) and as they would be, on the
+      // same seeds, before anything else that waits. { scenarios: [{ name, base, changed }] }
+      const bases = new Map();
+      // (depth 0: at once and rough; depth 1: asked after it, more and longer fights)
+      const scenes = (depth) => depth
+        ? [["boss", 20, 1e12, 10], ["pinnacle", 20, 1e12, 10], ["pack", 8, 0, 10], ["surrounded", 8, 0, 10]]
+        : [["boss", 8, 1e12, 3], ["pinnacle", 8, 1e12, 3], ["pack", 4, 0, 3], ["surrounded", 4, 0, 3]];
+      let compared = "";
+      const compare = async (request) => {
+        const { op, depth, base, basechoices, passives, choices, ...rest } = request;
+        const dps = (text) => { try { const r = JSON.parse(text); return r.error ? null : r.dps.mean; } catch { return null; } };
+        const of = (scene, tree, seed) => ({ ...rest, ...tree, op: "fight", scenario: scene[0], time: scene[1], runs: 1, seed: seed || 1, ...(scene[2] ? { life: scene[2] } : {}) });
+        // (a fight a job: whatever is asked next need not wait for more than one)
+        const seeds = (scene) => Array.from({ length: scene[3] }, (_, i) => scene[3] - i);
+        const several = (scene, tree, kind) => Promise.all(seeds(scene).map((seed) => ask(of(scene, tree, seed), kind, true).then(dps)))
+          .then((xs) => (xs.some((x) => x == null) ? null : mean(xs)));
+        const was = base === undefined || base === "" ? {} : { passives: base, choices: basechoices || "" };
+        const baseKey = (scene) => scene[3] + "|" + JSON.stringify({ ...of(scene, was), build: undefined });
+        if (bases.size > 64) bases.clear();
+        // another change is asked about: what still waits for the one before is not wanted
+        const now = String(passives) + "|" + String(choices);
+        if (now !== compared) {
+          compared = now;
+          for (let i = jobs.length - 1; i >= 0; i--) if (jobs[i].fight === "compare") jobs.splice(i, 1)[0].done(JSON.stringify({ error: "dropped" }));
+        }
+        const list = scenes(depth ? 1 : 0);
+        // (asked last, they are first in the line: the changed ones, then the bases not known yet)
+        const missing = list.filter((scene) => !bases.has(baseKey(scene)));
+        [...missing].reverse().forEach((scene) => bases.set(baseKey(scene), several(scene, was, "base")));
+        const changed = [...list].reverse().map((scene) => several(scene, { passives, choices: choices || "" }, "compare")).reverse();
+        const out = [];
+        for (let i = 0; i < list.length; i++) out.push({ name: list[i][0], base: await bases.get(baseKey(list[i])), changed: await changed[i] });
+        return JSON.stringify({ runs: list[0][3], scenarios: out });
+      };
+
       const builds = new Map();
       const plain = window.fetch.bind(window);
       const answer = (text, status = 200) => new Response(text, { status, headers: { "content-type": "application/json" } });
@@ -146,6 +184,7 @@
           builds.delete(buildUrl);
           return answer(JSON.stringify({ error: String(err && err.message || err) }));
         }
+        if (request.op === "compare") return answer(await compare(request));
         return answer(await (request.op === "fight" ? fight(key, request, all) : ask(request, "")));
       };
     })();
@@ -156,6 +195,9 @@
        unique orange #af6025, gem teal #1ba29b, currency #aa9e82; fire #960000, cold #366492, lightning #ffd700, chaos #d02090 */
     :root { --ink: #c8c8c8; --gold: #aa9e82; --dim: #7f7f7f; --stone: #0c0b0a; --slab: #151311; --edge: #3b3024; --fire: #960000;
             --magic: #8888ff; --rare: #ffff77; --unique: #af6025; --gem: #1ba29b; --cold: #366492; --lightning: #ffd700; --chaos: #d02090; }
+    /* the game's typeface (web/public/fonts, not in the repository: fontin-regular-webfont.woff, fontin-smallcaps-webfont.woff) */
+    @font-face { font-family: "Fontin"; src: url("fonts/fontin-regular-webfont.woff") format("woff"); font-display: swap; }
+    @font-face { font-family: "Fontin SmallCaps"; src: url("fonts/fontin-smallcaps-webfont.woff") format("woff"); font-display: swap; }
     html, body, #app { margin: 0; height: 100%; }
     #app > div { position: relative; min-height: 100%; }
     body { background: radial-gradient(ellipse at top, #1c1814 0%, var(--stone) 60%) fixed !important; color: var(--ink) !important;
@@ -212,11 +254,11 @@
     #app .treeview { position: absolute; left: 0; right: 0; top: 64px; bottom: 0; }
     #app .points { color: var(--gold); }
     #app .passive-tip { position: fixed; box-sizing: border-box; padding: 0 0 12px 0; background: rgba(0, 0, 0, 0.84); color: #8888ff; text-align: center; pointer-events: none;
-      font-family: "Fontin SmallCaps", "Fontin", "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif; font-size: 15px; line-height: 1.4; z-index: 5; box-shadow: 0 8px 28px rgba(0,0,0,.75); }
+      font-family: "Fontin", "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif; font-size: 15px; line-height: 1.4; z-index: 5; box-shadow: 0 8px 28px rgba(0,0,0,.75); }
     #app .passive-tip.none { display: none; }
     #app .passive-tip.pinned { pointer-events: auto; }
     /* the name on a dark plaque with a rounded gilt line inside, as the game's */
-    #app .passive-tip .name { position: relative; color: #f4eee0; font-size: 21px; margin-bottom: 12px; padding: 12px 30px 13px; letter-spacing: 0.5px; text-shadow: 0 1px 2px #000;
+    #app .passive-tip .name { font-family: "Fontin SmallCaps", "Fontin", Georgia, serif; position: relative; color: #f4eee0; font-size: 21px; margin-bottom: 12px; padding: 12px 30px 13px; letter-spacing: 0.5px; text-shadow: 0 1px 2px #000;
       background: linear-gradient(#17140f, #0b0907); border: 1px solid #3a3226; box-shadow: inset 0 0 0 1px #000, inset 0 0 18px rgba(0,0,0,.9); }
     #app .passive-tip .name::before { content: ""; position: absolute; inset: 5px 7px; border: 1px solid #6e5f44; border-radius: 16px; box-shadow: inset 0 0 6px rgba(0,0,0,.8), 0 0 0 1px rgba(0,0,0,.6); pointer-events: none; }
     #app .passive-tip.keystone .name { color: #f7e9b0; font-size: 23px; }
@@ -254,19 +296,38 @@
     #app .share.physical .bar { background: linear-gradient(90deg, rgba(140,130,120,.8), rgba(140,130,120,.4)); }
     #app .seek { width: 150px; padding: 5px 8px; border: 1px solid #2a221c; background: #171310; color: var(--ink); font: inherit; font-size: 13px; }
     #app .found { color: #ff5fd8; font-size: 13px; white-space: nowrap; }
-    #app .main.gems { flex-direction: column; gap: 10px; }
-    #app .main.gems .hint { color: #9a8f80; font-size: 13px; }
-    #app .group { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; max-width: 1100px; }
-    #app .gem { display: flex; align-items: center; gap: 8px; padding: 4px 10px 4px 4px; border: 1px solid #2a221c; background: #171310; color: var(--ink); cursor: pointer; font: inherit; text-align: left; }
-    #app .gem img { width: 40px; height: 40px; object-fit: contain; }
-    #app .gem.support img { width: 28px; height: 28px; }
-    #app .gem .text { display: flex; flex-direction: column; }
-    #app .gem .name { color: var(--gem); font-size: 15px; }
-    #app .gem.support .name { color: #7f9fd0; font-size: 13px; }
-    #app .gem.persistent { border-color: #3d5a57; }
-    #app .gem .detail { color: #9a8f80; font-size: 11px; }
-    #app .gem.off { opacity: .4; }
-    #app .gem.off .name { text-decoration: line-through; }
+    #app .main.gems { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; align-items: start; max-width: 1100px; }
+    #app .group { border: 1px solid #2f271f; background: #14110f; padding: 6px; display: flex; flex-direction: column; gap: 1px; }
+    #app .group .spirit { color: #5fb8b0; font-size: 12px; text-align: right; padding: 2px 6px 0; }
+    #app .gem { position: relative; }
+    #app .gem .face { display: flex; align-items: center; gap: 8px; width: 100%; padding: 3px 6px; border: 1px solid transparent; background: none; color: var(--ink); cursor: pointer; font: inherit; text-align: left; }
+    #app .gem .face:hover { background: #1d1915; }
+    #app .gem .face img { flex: 0 0 auto; width: 30px; height: 30px; object-fit: contain; }
+    #app .gem.support .face { padding-left: 14px; }
+    #app .gem.support .face img { width: 24px; height: 24px; }
+    #app .gem .face .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--gem); font-size: 15px; }
+    #app .gem.support .face .name { color: #9aa7c7; font-size: 14px; }
+    #app .gem .face .lvl { color: var(--dim); font-size: 12px; white-space: nowrap; }
+    #app .gem.pinned .face { border-color: var(--gold); }
+    #app .gem.off .face img { opacity: .3; filter: grayscale(1); }
+    #app .gem.off .face .name { color: var(--dim); text-decoration: line-through; }
+    #app .gem-tip { display: none; position: absolute; z-index: 30; left: 0; top: 100%; min-width: 190px; padding: 8px 12px; border: 1px solid var(--edge); background: #0e0c0b; box-shadow: 0 4px 14px rgba(0,0,0,.7); text-align: center; pointer-events: none; }
+    #app .gem.pinned .gem-tip { display: block; pointer-events: auto; z-index: 31; }
+    @media (hover: hover) { #app .gem:hover .gem-tip { display: block; } }
+    #app .gem-tip .name { color: var(--gem); font-size: 16px; white-space: nowrap; }
+    #app .gem.support .gem-tip .name { color: #7f9fd0; }
+    #app .gem-tip .what { color: var(--dim); font-size: 12px; margin-bottom: 4px; }
+    #app .gem-tip .line { color: var(--magic); font-size: 13px; white-space: nowrap; }
+    #app .gem-tip .offed { color: #e06050; }
+    #app .gem-tip .actions { display: flex; gap: 6px; justify-content: center; margin-top: 8px; }
+    #app .gem-tip .act { padding: 4px 10px; border: 1px solid var(--edge); background: #1c1814; color: var(--ink); cursor: pointer; font: inherit; font-size: 13px; }
+    #app .passive-tip .deltas { margin-top: 8px; padding-top: 6px; border-top: 1px solid #3b3024; font-size: 14px; }
+    #app .passive-tip .deltas .depth { color: var(--dim); font-size: 12px; text-align: center; }
+    #app .passive-tip .delta { display: flex; justify-content: space-between; gap: 16px; color: var(--dim); text-transform: capitalize; }
+    #app .passive-tip .delta .by { color: var(--ink); text-transform: none; }
+    #app .passive-tip .delta.up .by { color: #33ff77; }
+    #app .passive-tip .delta.down .by { color: #dd0022; }
+    #app h1, #app h3, #app button.tab { font-family: "Fontin SmallCaps", "Fontin", "Palatino Linotype", Georgia, serif; }
     #app .knob { display: flex; align-items: center; gap: 4px; margin: 3px 0; }
     #app .knob .what { flex: 1; color: var(--ink); }
     #app .knob button { min-width: 30px; padding: 3px 8px; border: 1px solid #2a221c; background: #171310; color: var(--ink); cursor: pointer; font: inherit; }

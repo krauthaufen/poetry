@@ -823,6 +823,7 @@ module StatMap =
         | "frenzy_charge_duration_+%" | "base_frenzy_charge_duration_+%" -> one (Mod.inc (Named "FrenzyChargeDuration") v)
         | "endurance_charge_duration_+%" | "base_endurance_charge_duration_+%" -> one (Mod.inc (Named "EnduranceChargeDuration") v)
         | "energy_generated_+%" -> one (Mod.inc (Named "EnergyGenerated") v)
+        | "energy_generated_+%_if_crit_recently" -> one (Mod.inc (Named "EnergyGenerated") v |> Mod.whenever (WhileBuff "CritRecently"))
         | "elemental_penetration_can_go_down_to_override" -> one (Mod.base' (Named "PenetrationFloor") v)
         // ---- keystones ----
         // "30% less Critical Damage Bonus when on Full Life, 30% more when on Low Life"

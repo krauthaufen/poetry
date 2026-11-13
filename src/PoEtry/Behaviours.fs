@@ -304,6 +304,7 @@ module Behaviours =
                       Triggers = triggered |> List.map (fun (s, _) -> s.Name)
                       Sources = sources
                       EnergyMult = 1.0 + sum ((=) "energy_generated_+%") / 100.0
+                      EnergyMods = ModDb.ofList (sheet.Mods |> List.filter (fun m -> m.Stat = Named "EnergyGenerated"))
                       RefundChance = sum ((=) "trigger_skills_refund_half_energy_spent_chance_%") }
                 Some(meta, triggered |> List.map fst, consumers))
 

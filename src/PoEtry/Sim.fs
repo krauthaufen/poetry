@@ -161,6 +161,9 @@ type Meta =
       Sources: EnergySource list
       /// Increased energy generated (gem + supports), as a multiplier.
       EnergyMult: float
+      /// The character's own "Meta Skills gain increased Energy" (the tree's, an item's): they
+      /// add to the gem's increase, and some hold only for a while ("if you've dealt a Critical Hit Recently").
+      EnergyMods: ModDb
       /// Chance (%) to get half the spent energy back (Energy Retention).
       RefundChance: float }
 
@@ -174,6 +177,7 @@ module Meta =
           Triggers = [ triggers ]
           Sources = []
           EnergyMult = 1.0
+          EnergyMods = ModDb.ofList []
           RefundChance = 0.0 }
 
 type Step =
@@ -1436,6 +1440,11 @@ module Sim =
         | None -> w
         | Some meta ->
             let st = Map.find actor.Name w.Actors
+            let amount =
+                if not (ModDb.hasStat (fun s -> s = Named "EnergyGenerated") meta.EnergyMods) then amount
+                else
+                    let more = Mods.sumInc { Ctx.empty with Buffs = buffStacks st } [ Named "EnergyGenerated" ] meta.EnergyMods / 100.0
+                    amount * (meta.EnergyMult + more) / meta.EnergyMult
             let energy = min meta.MaxEnergy ((Map.tryFind meta.Name st.Energy |> Option.defaultValue 0.0) + amount)
             let w = updateActor actor.Name (fun st -> { st with Energy = Map.add meta.Name energy st.Energy }) w
             releaseMeta env rng actor meta w
