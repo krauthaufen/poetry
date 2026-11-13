@@ -92,6 +92,7 @@ let randomFight (case: uint32) : Fight * string =
             [ pick
                   [ IsCrit; SkillIs Spell; SkillIs Attack; WhileBuff "Buffed"; WhileBuff "HitRecently"; WhileBuff "CritRecently"; EnemyHas "Shocked"
                     EnemyHas "Ignited"; EnemyHas "Cursed"; EnemyHas "Isolated"; EnemyHas "LowLife"; PerStack("PowerCharge", 1.0); PerStack("Buffed", 1.0)
+                    WhileBuff "EmpoweredAttacks"; WhileBuff "EmpoweredAttacks:Temper"; WhileBuff "EmpoweredRepeatable:Tips"; WhileBuff "EmpoweredAttacks:Cry"
                     PerEnemyStack("Poisoned", 2.0); PerEnemyStack("Marked by pain", 1.0); Not(WhileBuff "FullMana"); WhileBuff "LowMana"; WhileBuff "KilledRecently"
                     WhileBuff "ConsumedPowerChargeRecently"; WhileBuff "TriggeredRecently"; WhileBuff "Tide"; EnemyHas "Exposed"; EnemyHas "FullyBrokenArmour" ] ]
     let withConds (m: Mod) = { m with Conds = conds () }
@@ -185,6 +186,7 @@ let randomFight (case: uint32) : Fight * string =
             (if attack then [ Attack ] else [ Spell ])
             @ (if chance 0.3 then [ Melee ] else []) @ (if chance 0.2 then [ Slam ] else []) @ (if chance 0.2 then [ Area ] else [])
             @ (if chance 0.1 then [ Tag "Type:Sustained" ] else []) @ (if chance 0.1 then [ Tag "SpellDot" ] else [])
+            @ (if chance 0.1 then [ Warcry ] else []) @ (if chance 0.2 then [ Tag "Type:Barrageable" ] else [])
         { Skill.make (sprintf "Skill %d" i) tags with
             BaseDamage = (if chance 0.08 then Map.empty else damage ())
             BaseMultiplier = (if chance 0.3 then between 0.5 2.5 else 1.0)
@@ -245,10 +247,11 @@ let randomFight (case: uint32) : Fight * string =
             | 7 -> RemoveDebuff(pick [ "Marked by pain"; "Shocked"; "Curse:Hex" ])
             | 8 | 9 -> GainResource(pick [ "PowerCharge"; "FrenzyCharge"; "Mote" ], whole 1 2)
             | 10 -> DropRemnant(pick [ "PowerCharge"; "Mote" ], between 0.1 1.5, between 0.0 60.0)
-            | 11 -> SetStacks(pick [ "Buffed"; "Readied" ], whole 1 4)
-            | 12 -> (if triggered.IsEmpty then NoReaction else TriggerSkill "Echo")
+            | 11 -> SetStacks(pick [ "Buffed"; "Readied"; "EmpoweredAttacks:Temper"; "EmpoweredRepeatable:Tips" ], whole 1 4)
+            | 12 -> (if triggered.IsEmpty then GainEnergy(pick [ "Cast on Crit"; "Invocation"; "No such gem" ], between 5.0 40.0) else TriggerSkill "Echo")
             | _ -> NoReaction
-        match whole 0 9 with
+        match whole 0 10 with
+        | 10 -> Empower(pick [ "EmpoweredAttacks"; "EmpoweredAttacks:Cry"; "Buffed" ], pick [ 1.0; 5.0; 0.5 ], pick [ 10.0; 20.0; 3.0 ])
         | 0 -> SpendStack(pick [ "Buffed"; "Readied"; "PowerCharge" ], simple ())
         | 1 -> IfBuff(pick [ "Buffed"; "Tide"; "CritRecently" ], simple ())
         | 2 -> IfEnemyHas(pick [ "Shocked"; "Ignited"; "Cursed"; "LowLife"; "Marked by pain"; "FullLife" ], simple ())
@@ -357,6 +360,22 @@ let randomFight (case: uint32) : Fight * string =
                     [ { Name = "Archon"; OnIgniteStat = "ArchonOnIgnite"; Duration = between 1.0 5.0; Recovery = between 0.5 4.0; Mods = [ Mod.more (Damage Elemental) 30.0 ] } ]
                  else [])
             Vitals = vitals
+            Metas =
+                [ if chance 0.3 then
+                    yield
+                        { Meta.simple "Cast on Crit" (between 100.0 300.0) (if triggered.IsEmpty then names.Head else "Echo") with
+                            Sources = [ for _ in 1 .. whole 0 3 -> pick [ CritHits(between 20.0 400.0); MeleeHits(between 20.0 200.0); MeleeKills(between 5.0 60.0); InflictsAilment(pick [ Ignite; Shock; Freeze; Chill; Poison ], between 50.0 800.0); CastsSpells(between 0.2 0.9); Blocks(between 20.0 60.0); DodgeRolls 1.0 ] ]
+                            EnergyMult = between 0.8 1.6
+                            EnergyMods = ModDb.ofList (if chance 0.4 then [ Mod.inc (Named "EnergyGenerated") (between 10.0 50.0) |> Mod.whenever (WhileBuff "CritRecently") ] else [])
+                            RefundChance = (if chance 0.3 then between 10.0 60.0 else 0.0) }
+                  if chance 0.2 then
+                    let most = between 200.0 600.0
+                    yield
+                        { Meta.simple "Invocation" most (if triggered.IsEmpty then names.Head else "Echo") with
+                            Release = Invocation(between 0.5 4.0)
+                            Cost = most / float (whole 1 4)
+                            Triggers = (if triggered.IsEmpty then [ names.Head ] else [ "Echo"; names.Head ])
+                            Sources = [ CritHits(between 50.0 400.0); CastsSpells(between 0.3 0.9) ] } ]
             // (what the buffs do to the defences: more armour while buffed)
             VitalsAt = (if chance 0.3 then vitals |> Option.map (fun v -> fun (buffs: Map<string, int>) -> { v with Armour = v.Armour + 500.0 * float (Map.tryFind "Buffed" buffs |> Option.defaultValue 0); Block = (if buffs.ContainsKey "Tide" then min 75.0 (v.Block + 20.0) else v.Block) }) else None)
             Charms =
@@ -418,14 +437,12 @@ let randomFight (case: uint32) : Fight * string =
             Enemies = enemies
             Targeting = pick [ Strongest; Nearest ]
             Reach = (if chance 0.3 then between 20.0 50.0 else infinity)
+            BankedInvocations = pick [ 1.0; 0.0; 0.5 ]
             EnemyAuras =
                 (if chance 0.2 then [ pick [ "Curse:Aura"; "Withered"; "Mark:Aura" ], whole 1 4, [ Mod.inc (DamageTaken AllDamage) 5.0; Mod.base' (Resist Chaos) -3.0 ] ] else []) }
     // now and then something the fast engine does not play: it must say so
     let fight =
-        match (if chance 0.12 then pick [ 0; 1; 3; 5; 6 ] else -1) with
-        | 0 ->
-            note "meta"
-            { fight with Player = { player with Metas = [ Meta.simple "Cast on Crit" 100.0 names.Head ]; Rules = { Hook = OnCrit; Filter = AnySkill; Chance = 100.0; Reaction = GainEnergy("Cast on Crit", 40.0) } :: player.Rules } }
+        match (if chance 0.12 then pick [ 1; 3; 5; 6 ] else -1) with
         | 1 ->
             note "minion"
             { fight with Minions = [ Actor.make "Hound" [] [ { skill 7 true with Name = "Bite" } ] ] }
@@ -567,6 +584,17 @@ let run (test: string -> (unit -> unit) -> unit) =
         | { Died = Some _ } -> ()
         | _ -> failwith "expected the player to die")
 
+    test "flat: a meta gem gains energy from critical hits and triggers its spell at the enemy that was hit" (fun () ->
+        let flare = { spell "Flare" Fire 900.0 1300.0 with Tags = Set.ofList [ Spell; Area; Triggered ]; Delivery = AreaAtTarget 15.0 }
+        let meta = { Meta.simple "Cast on Crit" 100.0 "Flare" with Sources = [ CritHits 300.0; InflictsAilment(Shock, 200.0) ]; EnergyMult = 1.3; RefundChance = 25.0 }
+        let invocation = { Meta.simple "Invocation" 400.0 "Flare" with Release = Invocation 2.0; Cost = 100.0; Sources = [ CastsSpells 0.6 ] }
+        let player =
+            { Actor.make "Player" [ Mod.inc CritChance 250.0; Mod.inc (Damage AllDamage) 60.0 ] [ { spell "Arc Bolt" Lightning 20.0 380.0 with Delivery = Projectiles(ProjectileShape.make 3); BaseTime = 0.6 }; flare ] with
+                Rotation = [ { Use = "Arc Bolt"; When = fun v -> (Map.tryFind "Invocation" v.Energy |> Option.defaultValue 0.0) >= 0.0 } ]
+                Metas = [ meta; invocation ] }
+        let pack = Encounter.pack 80 Rarity.defaults [ Magic, 3; Rare, 2 ] 30.0 15.0 false 3u |> List.map (fun e -> { e with Life = e.Life * 30.0 })
+        same { Fight.single pack.Head player 20.0 with Enemies = pack; BankedInvocations = 0.5 } seeds)
+
     test "flat: what is not built is refused, with every reason" (fun () ->
         let player = Actor.make "Player" [] [ spell "Bolt" Fire 1.0 2.0 ]
         let fine = Fight.single (boss 1e9) player 5.0
@@ -576,7 +604,7 @@ let run (test: string -> (unit -> unit) -> unit) =
             | Error why -> if not (why.Contains reason) then failwithf "refused for '%s', expected '%s'" why reason
         if not (Flat.unsupported fine).IsEmpty then failwithf "a plain fight is refused: %A" (Flat.unsupported fine)
         refused { fine with Minions = [ Actor.make "Hound" [] [ strike "Bite" 1.0 2.0 ] ] } "minions"
-        refused { fine with Player = { player with Metas = [ Meta.simple "Cast on Crit" 100.0 "Bolt" ] } } "meta gems"
+        refused { fine with Player = { player with Metas = [ Meta.simple "Cast on Crit" 100.0 "Bolt"; Meta.simple "Cast on Crit" 50.0 "Bolt" ] } } "meta gems of the same name"
         refused { fine with Player = { player with Infusions = Some { Remnants = [ Ignite, "FireInfusion", 50.0 ]; ExtraRemnantChance = 0.0; Delay = 0.5; Consumers = Map.empty; Wildcard = None } } } "infusions"
         refused { fine with Player = { player with Skills = [ { spell "Bolt" Fire 1.0 2.0 with Mods = [ Mod.base' (Named "MaxSeals") 2.0 ] } ] } } "sealed skills"
         refused { fine with Player = { player with Rules = [ { Hook = OnHit; Filter = AnySkill; Chance = 100.0; Reaction = Summon("Wolves", 1, 5.0) } ] } } "the reaction Summon"

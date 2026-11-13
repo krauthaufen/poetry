@@ -47,19 +47,39 @@ let report (title: string) (o: Options) =
                 match fightOf f o with
                 | Some fight ->
                     let reasons = Flat.unsupported fight
-                    // a fight that compiles is played by both engines once, and the two compared
-                    let same =
-                        match reasons, Flat.compile fight with
-                        | [], Ok p ->
-                            let a, b = Sim.run fight 1u, Flat.run p 1u
-                            Some(a.Duration = b.Duration && a.DamageBy = b.DamageBy && a.Counts = b.Counts && a.Uptime = b.Uptime && a.Evened = b.Evened && a.ManaGained = b.ManaGained && a.ManaStarved = b.ManaStarved)
-                        | _ -> None
+                    let same = match reasons, Flat.compile fight with [], Ok p -> Some(fight, p) | _ -> None
                     Some(reasons, same)
                 | None -> None
             with _ -> None)
         |> Array.choose id
     let compiled = results |> Array.filter (fun (r, _) -> r.IsEmpty)
-    printfn "\n== %s: %d characters with a fight, %d compile (%d of them the same as the reference with seed 1)" title results.Length compiled.Length (compiled |> Array.filter (fun (_, s) -> s = Some true) |> Array.length)
+    // a fight that compiles is played by both engines with a few seeds, the outcomes compared,
+    // and both timed, one after the other, after a few fights to warm up (rough all the same)
+    let same (a: Outcome) (b: Outcome) =
+        a.Duration = b.Duration && a.Ttk = b.Ttk && a.Kills = b.Kills && a.DamageBy = b.DamageBy && a.DamageByType = b.DamageByType && a.Counts = b.Counts
+        && a.Uptime = b.Uptime && a.Died = b.Died && a.DamageTaken = b.DamageTaken && a.Evened = b.Evened && a.MinLife = b.MinLife
+        && a.ManaGained = b.ManaGained && a.ManaStarved = b.ManaStarved
+    let seeds = [ 1u .. 10u ]
+    let timed =
+        compiled |> Array.choose snd |> Array.map (fun (fight, p) ->
+            for seed in 100u .. 103u do
+                Sim.run fight seed |> ignore
+                Flat.run p seed |> ignore
+            let sw = System.Diagnostics.Stopwatch.StartNew()
+            let a = seeds |> List.map (Sim.run fight)
+            let simMs = sw.Elapsed.TotalMilliseconds / float seeds.Length
+            sw.Restart()
+            let b = seeds |> List.map (Flat.run p)
+            let flatMs = sw.Elapsed.TotalMilliseconds / float seeds.Length
+            let events = ref 0
+            Flat.traced (fun _ k _ _ _ -> if k <> "hit" && k <> "crit" then events.Value <- events.Value + 1) p 1u |> ignore
+            List.forall2 same a b, simMs, flatMs, events.Value)
+    printfn "\n== %s: %d characters with a fight, %d compile (%d of them the same as the reference with seeds 1 to 10)" title results.Length compiled.Length (timed |> Array.filter (fun (ok, _, _, _) -> ok) |> Array.length)
+    for (_, simMs, flatMs, events) in timed do
+        printfn "   a fight of %d events: reference %.2f ms, flat %.2f ms (%.1f times as fast)" events simMs flatMs (simMs / flatMs)
+    if timed.Length > 0 then
+        let total f = timed |> Array.sumBy f
+        printfn "   all of them: reference %.2f ms a fight, flat %.2f ms a fight (%.1f times as fast; rough)" (total (fun (_, a, _, _) -> a) / float timed.Length) (total (fun (_, _, b, _) -> b) / float timed.Length) (total (fun (_, a, _, _) -> a) / total (fun (_, _, b, _) -> b))
     printfn "-- what stops the others (characters stopped by it; in brackets: by it alone)"
     results |> Array.collect (fun (r, _) -> Array.ofList r) |> Array.countBy id |> Array.sortByDescending snd
     |> Array.iter (fun (reason, n) ->

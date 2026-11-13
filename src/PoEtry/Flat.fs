@@ -43,6 +43,8 @@ module Flat =
     let private EPeriodic = 10
     [<Literal>]
     let private EEnemyAttack = 11
+    [<Literal>]
+    let private EEnergy = 12
 
     let private kindName kind =
         match kind with
@@ -57,6 +59,7 @@ module Flat =
         | ESpendBuff -> "SpendBuff"
         | EPeriodic -> "PeriodicTick"
         | EEnemyAttack -> "EnemyAttack"
+        | EEnergy -> "EnergyArrives"
         | _ -> "Expire"
 
     let private ailmentIndex (a: Ailment) =
@@ -109,6 +112,10 @@ module Flat =
         | RIfEnemyHas of status: string * next: Re
         | RIfBuff of buff: int * next: Re
         | RRegenES of perSecond: float * duration: float * count: int
+        /// `meta`: -1 if the actor has no meta gem of the name (nothing happens then).
+        | RGainEnergy of meta: int * amount: float
+        /// `counts`: by the number of attacks empowered, where the count of it goes.
+        | REmpower of buff: int * perPower: float * cap: float * counts: int[]
         | RNone
 
     /// What happens on its own every few seconds, with its names as numbers (see `PeriodicAction`).
@@ -127,6 +134,13 @@ module Flat =
           Action: PAction
           /// The name of its stream of random numbers.
           Key: string }
+
+    type private MetaInfo =
+        { Meta: Meta
+          Triggers: int[]
+          /// Whether the character has "increased Energy" of its own for it.
+          HasEnergyMods: bool
+          Released: int }
 
     type private CharmInfo =
         { Charm: Charm
@@ -184,7 +198,10 @@ module Flat =
           WithCharge: bool
           Explosion: bool
           HasChargedPart: bool
-          NeedsCharge: bool }
+          NeedsCharge: bool
+          /// An attack that uses up empowerments (a warcry's), and one that uses up readied repeats.
+          SpendsEmpowered: bool
+          SpendsRepeats: bool }
 
     type private EnemyInfo =
         { Def: EnemyDef
@@ -240,6 +257,7 @@ module Flat =
               OnInflict: CRule[][]
               WhenHit: CRule[]
               OnBlock: CRule[]
+              Metas: MetaInfo[]
               Charms: CharmInfo[]
               /// By what a charm stops: where the count of it being stopped goes.
               CPrevented: Dictionary<string, int>
@@ -272,6 +290,10 @@ module Flat =
               ResourceMax: int[]
               /// The resources with a duration, in the order of their names.
               Timed: int[]
+              /// The buffs that empower attacks, and those that are repeats readied for one, in
+              /// the order of their names.
+              Empowering: int[]
+              Readied: int[]
               /// By buff: the "Gained<buff>Recently" buff, whether its name ends with "Charge",
               /// what is asked for a chance of one more, where its counts go.
               GainedRecently: int[]
@@ -379,8 +401,7 @@ module Flat =
 
     /// Buffs the reference treats in a way of its own that is not built here.
     let private unbuiltBuffs = [ "Demon Form", "Demon Form"; "Barrage", "Barrage" ]
-    let private unbuiltBuffPrefixes =
-        [ "Warped:", "warps into projectiles"; "EmpoweredAttacks", "empowered attacks"; "EmpoweredRepeatable:", "empowered repeats" ]
+    let private unbuiltBuffPrefixes = [ "Warped:", "warps into projectiles" ]
 
     let private recentlyNames = [ "HitRecently"; "NonCritRecently"; "CritRecently"; "CritInPast8Seconds"; "KilledRecently" ]
 
@@ -452,7 +473,7 @@ module Flat =
         if fight.Enemies |> List.exists (fun e -> e.Name = "Player") then reject "an enemy called Player"
 
         // ---- the player ----
-        if not player.Metas.IsEmpty then reject "meta gems and energy"
+        if (player.Metas |> List.map (fun m -> m.Name) |> List.distinct).Length <> player.Metas.Length then reject "meta gems of the same name"
         if player.WardRemnants.IsSome then reject "Runic Ward remnants"
         if player.ManaRemnants.IsSome then reject "mana remnants"
         if not player.Banners.IsEmpty then reject "banners"
@@ -467,6 +488,8 @@ module Flat =
         if (all |> List.map (fun s -> s.Name) |> List.distinct).Length <> all.Length then reject "skills or parts of the same name"
         if player.Skills |> List.exists (fun s -> s.Parts |> List.exists (fun p -> not p.Parts.IsEmpty)) then reject "parts that have parts"
         if all |> List.exists (fun s -> s.Clip > 0) then reject "crossbow ammunition"
+        // (the reference keeps these beside the skills' cooldowns, under these names)
+        if all |> List.exists (fun s -> s.Name = "ArchonRecovery" || s.Name.StartsWith "invocation:" || s.Name.StartsWith "SealBreak:") then reject "a skill named like a cooldown of the engine's own"
         if all |> List.exists (fun s -> s.Tags.Contains(Tag "Type:TargetsDestructibleCorpses")) then reject "corpse skills"
         let skillIds = Dictionary<string, int>()
         all |> List.iteri (fun i s -> if not (skillIds.ContainsKey s.Name) then skillIds.[s.Name] <- i)
@@ -562,6 +585,12 @@ module Flat =
             | IfEnemyHas (st, next) -> RIfEnemyHas(st, reaction next)
             | IfBuff (b, next) -> RIfBuff(buffs.Id b, reaction next)
             | RegenES (rate, duration) -> RRegenES(rate, duration, counts.Id "regen:ES")
+            | GainEnergy (meta, amount) -> RGainEnergy((match player.Metas |> List.tryFindIndex (fun m -> m.Name = meta) with Some i -> i | None -> -1), amount)
+            | Empower (b, perPower, cap) ->
+                // (the most there can be: with every enemy alive)
+                let power = fight.Enemies |> List.sumBy (fun e -> MonsterPower.ofRarity e.Rarity)
+                let most = max 1 (int (floor (min cap power / max 1.0 perPower)))
+                REmpower(buff b, perPower, cap, Array.init (most + 1) (fun n -> counts.Id("empowered:" + string n)))
             | NoReaction -> RNone
             | other ->
                 reject ("the reaction " + reactionName other)
@@ -582,6 +611,16 @@ module Flat =
         let onInflict = allAilments |> List.map (fun a -> rulesOf (fun h -> h = OnInflict a)) |> Array.ofList
         let whenHit = rulesOf (fun h -> h = WhenHit)
         let onBlock = rulesOf (fun h -> h = OnBlock)
+
+        // ---- meta gems ----
+        let metas =
+            player.Metas
+            |> List.map (fun m ->
+                ({ Meta = m
+                   Triggers = m.Triggers |> List.map (skillId "a meta gem's trigger") |> Array.ofList
+                   HasEnergyMods = ModDb.hasStat (fun st -> st = Named "EnergyGenerated") m.EnergyMods
+                   Released = counts.Id("meta:" + m.Name) }: MetaInfo))
+            |> Array.ofList
 
         // ---- charms ----
         let charms =
@@ -733,7 +772,9 @@ module Flat =
                   WithCharge = s.Name.EndsWith "-Charged" || flag "OnlyWithCharge"
                   Explosion = s.Name.EndsWith ": Explosion"
                   HasChargedPart = s.Parts |> List.exists (fun p -> p.Name.EndsWith "-Charged")
-                  NeedsCharge = flag "NeedsCharge" })
+                  NeedsCharge = flag "NeedsCharge"
+                  SpendsEmpowered = s.Tags.Contains Attack && not (s.Tags.Contains Warcry)
+                  SpendsRepeats = s.Tags.Contains Attack && s.Tags.Contains(Tag "Type:Barrageable") })
             |> Array.ofList
         let rotation = player.Rotation |> List.map (fun step -> skillId "a step" step.Use, step.When) |> Array.ofList
 
@@ -791,6 +832,7 @@ module Flat =
                   OnKillOf = onKillOf |> Array.map fixCurses
                   OnInflict = onInflict |> Array.map (Array.map fixCurses)
                   WhenHit = whenHit |> Array.map fixCurses
+                  Metas = metas
                   OnBlock = onBlock |> Array.map fixCurses
                   Charms = charms
                   CPrevented = cPrevented
@@ -816,6 +858,8 @@ module Flat =
                   ResourceSeconds = buffNames |> Array.map (fun n -> Map.tryFind n player.ResourceDurations |> Option.defaultValue nan)
                   ResourceMax = buffNames |> Array.map (fun n -> Map.tryFind n player.MaxResources |> Option.defaultValue System.Int32.MinValue)
                   Timed = buffs.Order |> Array.filter (fun i -> player.ResourceDurations.ContainsKey buffNames.[i])
+                  Empowering = buffs.Order |> Array.filter (fun i -> buffNames.[i].StartsWith "EmpoweredAttacks")
+                  Readied = buffs.Order |> Array.filter (fun i -> buffNames.[i].StartsWith "EmpoweredRepeatable:")
                   GainedRecently = gainedRecently
                   ConsumedRecently = consumedRecently
                   CKeptOf = cKeptOf
@@ -1073,7 +1117,13 @@ module Flat =
           Cooldowns: float[]
           Recharges: float list[]
           mutable ArchonRecovery: float
+          /// By meta gem: when its invocation can be used again.
+          InvocationReady: float[]
           mutable Energy: Map<string, float>
+          /// The enemy that is the cause of what happens now (the one just hit, the one whose
+          /// hit was blocked; -1: none), and the enemy a triggered skill is aimed at while it starts.
+          mutable Cause: int
+          mutable Aim: int
           mutable LastUsed: int
           CritRoll: float[]
           HasCritRoll: bool[]
@@ -1123,6 +1173,8 @@ module Flat =
           mutable PHasEntropy: bool
           AttackStream: int[]
           PeriodicStream: int[]
+          /// The defences for the last few sets of buffs they were asked for (`Actor.VitalsAt`).
+          mutable VitalsSeen: (Map<string, int> * PlayerStats) list
           /// Mana gained: regen, leech, flask, recoup, hit, kill, consume.
           Gained: float[]
           GainedSeen: bool[] }
@@ -1365,10 +1417,24 @@ module Flat =
         refreshAlive s
         s.Living
 
-    /// The enemy aimed at (`Sim.aimed`; nothing here aims a trigger at its cause).
+    /// The enemy aimed at (`Sim.aimed`): a triggered skill "usually targets the cause of the trigger".
     let private aimed (s: State) : int =
         refreshAlive s
-        s.Aimed
+        if s.Aim < 0 then s.Aimed
+        elif s.Foes.[s.Aim].Life > 0.0 then s.Aim
+        elif s.AliveCount > 0 then
+            // (the cause died of the hit: the skill lands where it was, on whoever is nearest to there)
+            let at = s.Foes.[s.Aim].Def.Position
+            let mutable best = -1
+            let mutable least = infinity
+            for e in s.Foes do
+                if e.Life > 0.0 then
+                    let d = Vec.dist e.Def.Position at
+                    if best < 0 || d < least then
+                        best <- e.Index
+                        least <- d
+            best
+        else s.Aimed
 
     // ---- time passing ----
 
@@ -1716,6 +1782,15 @@ module Flat =
             if s.P.Vitals.IsSome && alive s then
                 s.Recoups <- (s.Time + duration, rate, "ShroudES") :: (s.Recoups |> List.filter (fun (_, _, pool) -> pool <> "ShroudES"))
                 bump s count
+        | RGainEnergy (meta, amount) -> if meta >= 0 then gainEnergy s rng meta amount
+        | REmpower (b, perPower, cap, counts) ->
+            // a warcry: one attack per so much monster power among the living, at least one
+            let mutable power = 0.0
+            for e in s.Foes do
+                if e.Life > 0.0 then power <- power + MonsterPower.ofRarity e.Def.Rarity
+            let n = max 1 (int (floor (min cap power / max 1.0 perPower)))
+            bump s counts.[n]
+            setBuff s b n infinity []
         | RNone -> ()
         | RIfBuff (b, next) -> if held s b then perform s rng sid target next
         | RIfEnemyHas (st, next) ->
@@ -1745,6 +1820,35 @@ module Flat =
             let n = if rng.Chance extra then 2 else 1
             bump s count
             schedule s (s.Time + delay) EGainStacks b n 0.0 0.0
+
+    /// A meta gem gains energy, and triggers its spells if that allows (`Sim.gainEnergy`,
+    /// `Sim.releaseMeta`): "Cast on" at maximum, Invocations whenever enough is banked and the
+    /// invocation is off cooldown (as many times as it covers).
+    and private gainEnergy (s: State) (rng: Rng) (index: int) (amount: float) =
+        let info = s.P.Metas.[index]
+        let meta = info.Meta
+        let amount =
+            if not info.HasEnergyMods then amount
+            else
+                let more = Mods.sumInc { Ctx.empty with Buffs = buffMap s } [ Named "EnergyGenerated" ] meta.EnergyMods / 100.0
+                amount * (meta.EnergyMult + more) / meta.EnergyMult
+        let energy = min meta.MaxEnergy ((Map.tryFind meta.Name s.Energy |> Option.defaultValue 0.0) + amount)
+        s.Energy <- Map.add meta.Name energy s.Energy
+        let triggers =
+            match meta.Release with
+            | AtMaximum -> if energy >= meta.MaxEnergy && meta.Cost > 0.0 then 1 else 0
+            | Invocation _ -> if s.InvocationReady.[index] <= s.Time && meta.Cost > 0.0 then int (energy / meta.Cost) else 0
+        if triggers <> 0 then
+            let spent = float triggers * meta.Cost
+            let refund = if rng.Chance meta.RefundChance then spent / 2.0 else 0.0
+            s.Energy <- Map.add meta.Name (energy - spent + refund) s.Energy
+            (match meta.Release with
+             | Invocation cd -> s.InvocationReady.[index] <- s.Time + cd
+             | AtMaximum -> ())
+            bump s info.Released
+            for _ in 1 .. triggers do
+                for skill in info.Triggers do
+                    trigger s rng skill
 
     /// A use of a skill starts now, aimed at the current target (`Sim.startUse`).
     and private startUse (s: State) (rng: Rng) (sid: int) (useTime: float) =
@@ -1806,9 +1910,31 @@ module Flat =
                     if happens then
                         if pi.Passing then schedule s at EPassing part target mult (at - s.Time)
                         else schedule s at EStrike part target mult 0.0
+            // an attack the player makes while empowered by a warcry uses one empowerment up,
+            // and a Repeatable attack one of the repeats readied for it
+            if useTime > 0.0 && (info.SpendsEmpowered || info.SpendsRepeats) then
+                let last = times |> List.map fst |> List.fold max s.Time
+                if info.SpendsEmpowered then
+                    for b in p.Empowering do
+                        if s.BHas.[b] then schedule s (last + 1e-9) ESpendBuff b 0 0.0 0.0
+                if info.SpendsRepeats then
+                    for b in p.Readied do
+                        if s.BHas.[b] then schedule s (last + 1e-9) ESpendBuff b 0 0.0 0.0
             if info.Consumes >= 0 then
                 let last = times |> List.map fst |> List.fold max s.Time
                 schedule s (last + 1e-9) EConsume info.Consumes sid 0.0 0.0
+            if useTime > 0.0 && p.Metas.Length > 0 then
+                // Cast on Dodge: energy per unit travelled by a dodge roll, there when the roll ends
+                if skill.Tags.Contains(Tag "DodgeRoll") then
+                    let distance = Constants.dodgeRollDistance + Mods.sumBase ctx [ Named "DodgeRollDistance" ] mods
+                    p.Metas |> Array.iteri (fun i meta ->
+                        let amount = meta.Meta.Sources |> List.sumBy (function DodgeRolls per -> per * distance | _ -> 0.0)
+                        if amount > 0.0 then schedule s (s.Time + useTime) EEnergy i 0 (amount * meta.Meta.EnergyMult) 0.0)
+                // energy per 10 ms of base cast time of spells the player casts
+                if skill.Tags.Contains Spell then
+                    p.Metas |> Array.iteri (fun i meta ->
+                        let amount = meta.Meta.Sources |> List.sumBy (function CastsSpells per -> per * skill.BaseTime * 100.0 | _ -> 0.0)
+                        if amount > 0.0 then gainEnergy s rng i (amount * meta.Meta.EnergyMult))
             react s rng p.OnUse "" sid target
 
     and private trigger (s: State) (rng: Rng) (sid: int) =
@@ -1816,7 +1942,10 @@ module Flat =
             bump s s.P.Skills.[sid].CTrigger
             setBuff s s.P.BTriggered 1 (s.Time + 4.0) []
             expireAt s (s.Time + 4.0)
+            // (aimed at the cause of the trigger while it starts)
+            s.Aim <- s.Cause
             startUse s rng sid 0.0
+            s.Aim <- -1
 
     /// How long a use of the skill takes now (`Sim.useTime`).
     let private useTime (s: State) (sid: int) : float =
@@ -1929,6 +2058,8 @@ module Flat =
             for t in s.Cooldowns do
                 if t > s.Time && t < infinity && t < next then next <- t
             if s.ArchonRecovery > s.Time && s.ArchonRecovery < infinity && s.ArchonRecovery < next then next <- s.ArchonRecovery
+            for t in s.InvocationReady do
+                if t > s.Time && t < infinity && t < next then next <- t
             schedule s (if next < infinity then next else s.Time + Constants.serverTick) EReady 0 0 0.0 0.0
 
     /// One hit on one enemy (`Sim.hitEnemy`, in its order).
@@ -2147,6 +2278,38 @@ module Flat =
                         e.Dots <- d :: (e.Dots |> List.filter (fun x -> x.Label <> label || x.Dps > dps))
                         if not (d.Until >= e.Soonest) then e.Soonest <- d.Until
                         expireAt s d.Until
+                // meta gem energy: crits and newly inflicted ailments, scaled by monster power and by
+                // the share of the ailment threshold the hit deals; none from triggered skills
+                if p.Metas.Length > 0 && not (skill.Tags.Contains Triggered) then
+                    let threshold = max 1.0 (Ailments.threshold def)
+                    let power = MonsterPower.ofRarity def0.Rarity
+                    let ratio types = Dmg.sumOf types hit.Unmitigated / threshold
+                    let after = if dead then Map.empty else status s e
+                    let newly a =
+                        if dead then
+                            // on a killing hit: what this hit inflicted, and buildup that would complete
+                            inflicted
+                            |> List.exists (fun i ->
+                                match i with
+                                | Dot (x, _, _, _, _) | Status (x, _, _) -> x = a
+                                | AddBuildup (x, pct) -> x = a && e.Buildup.[ailmentIndex x] + pct >= 100.0)
+                        else after.ContainsKey (Ailment.status a) && not (before.ContainsKey (Ailment.status a))
+                    p.Metas |> Array.iteri (fun i meta ->
+                        let amount =
+                            meta.Meta.Sources
+                            |> List.sumBy (fun src ->
+                                match src with
+                                | CritHits per when hit.Crit -> per * power * ratio DamageType.all
+                                | MeleeHits per when skill.Tags.Contains Melee -> per * power * ratio DamageType.all
+                                | MeleeKills per when dead && skill.Tags.Contains Melee -> per * power
+                                | InflictsAilment (a, per) when newly a -> per * power * ratio (Ailments.scalesFromWith ctx mods a)
+                                | _ -> 0.0)
+                        // (what this fills up and triggers is aimed at the enemy that was hit)
+                        if amount > 0.0 then
+                            let cause = s.Cause
+                            s.Cause <- target
+                            gainEnergy s rng i (amount * meta.Meta.EnergyMult)
+                            s.Cause <- cause)
                 // Archon: gained on an ignite by a skill with the chance; none while one is active
                 // or during the recovery period after one ends
                 (let ignited = inflicted |> List.exists (function Dot (Ignite, _, _, _, _) -> true | _ -> false)
@@ -2190,7 +2353,7 @@ module Flat =
         let p = s.P
         let alive = living s
         // Aim where the use was aimed; if that enemy died meanwhile, at the next one.
-        let primary = if s.Foes.[aimedAt].Life > 0.0 then aimedAt else aimed s
+        let primary = if s.Foes.[aimedAt].Life > 0.0 then aimedAt else s.Aimed
         if primary >= 0 then
             let info = p.Skills.[sid]
             let skill = info.Skill
@@ -2375,9 +2538,18 @@ module Flat =
         match e.Def.Attack, p.Vitals with
         | Some atk, Some pools when e.Life > 0.0 && alive s ->
             // mitigation from the player's current buffs and charges
+            // (the defences are a function of the buffs: the same buffs, the same defences, and
+            // working them out is most of what a monster's hit costs)
             let v =
                 match p.Fight.Player.VitalsAt with
-                | Some at -> at (buffMap s)
+                | Some at ->
+                    let buffs = buffMap s
+                    match s.VitalsSeen |> List.tryFind (fun (m, _) -> obj.ReferenceEquals(m, buffs) || m = buffs) with
+                    | Some (_, v) -> v
+                    | None ->
+                        let v = at buffs
+                        s.VitalsSeen <- (buffs, v) :: List.truncate 7 s.VitalsSeen
+                        v
                 | None -> pools
             let st = status s e
             let stopped = [ "Frozen"; "HeavilyStunned"; "Electrocuted" ] |> List.exists st.ContainsKey
@@ -2519,6 +2691,14 @@ module Flat =
                         s.Ward <- (if v.WardOnBlock > 0.0 then min (max s.Ward pools.Ward) (s.Ward + v.WardOnBlock) else s.Ward)
                         s.Life <- min (max s.Life pools.Life) (s.Life + v.LifeOnBlock)
                         s.Mana <- min pools.Mana (s.Mana + v.ManaOnBlock)
+                        // blocks feed meta gems (what a block triggers is aimed at the enemy whose hit was blocked)
+                        p.Metas |> Array.iteri (fun i meta ->
+                            let amount = meta.Meta.Sources |> List.sumBy (function Blocks energy -> energy | _ -> 0.0)
+                            if amount > 0.0 then
+                                let cause = s.Cause
+                                s.Cause <- index
+                                gainEnergy s rng i (amount * meta.Meta.EnergyMult)
+                                s.Cause <- cause)
                         // blocks set off the rules for blocking
                         if p.FirstSkill >= 0 then react s rng p.OnBlock "" p.FirstSkill index
         | _ -> ()
@@ -2577,6 +2757,7 @@ module Flat =
             | ECycle -> tell t "CycleTick" who p.BuffNames.[p.Cycles.[a].Buff] (float q.Seq)
             | EPeriodic -> tell t "PeriodicTick" who p.Fight.Player.Periodics.[a].Name (float q.Seq)
             | EEnemyAttack -> tell t "EnemyAttack" p.Enemies.[a].Def.Name "" (float q.Seq)
+            | EEnergy -> tell t "EnergyArrives" who p.Metas.[a].Meta.Name (float q.Seq)
             | EExpose -> tell t "Expose" who p.Enemies.[a].Def.Name (float q.Seq)
             | _ -> tell t "Expire" "" "" (float q.Seq)
          | None -> ())
@@ -2634,6 +2815,7 @@ module Flat =
             | EExpose -> expose s a DamageType.all.[b] x y
             | EPeriodic -> onPeriodic s rng a
             | EEnemyAttack -> attackPlayer s rng a
+            | EEnergy -> gainEnergy s rng a x
             | ESpendBuff ->
                 if s.BHas.[a] && s.BStacks.[a] > 1 then setBuff s a (s.BStacks.[a] - 1) s.BExpires.[a] s.BMods.[a]
                 else removeBuff s a
@@ -2714,7 +2896,15 @@ module Flat =
               Cooldowns = Array.create nk -infinity
               Recharges = Array.create nk []
               ArchonRecovery = -infinity
-              Energy = Map.empty
+              InvocationReady = Array.create p.Metas.Length -infinity
+              // invocations start with what was banked while clearing
+              Energy =
+                p.Metas |> Array.fold (fun (m: Map<string, float>) meta ->
+                    match meta.Meta.Release with
+                    | Invocation _ -> Map.add meta.Meta.Name (meta.Meta.MaxEnergy * fight.BankedInvocations) m
+                    | AtMaximum -> m) Map.empty
+              Cause = -1
+              Aim = -1
               LastUsed = -1
               CritRoll = Array.zeroCreate nk
               HasCritRoll = Array.create nk false
@@ -2758,6 +2948,7 @@ module Flat =
               PHasEntropy = false
               AttackStream = Array.zeroCreate p.Enemies.Length
               PeriodicStream = Array.zeroCreate p.Periodics.Length
+              VitalsSeen = []
               Gained = Array.zeroCreate gainedNames.Length
               GainedSeen = Array.create gainedNames.Length false }
         for c in p.Charms do
