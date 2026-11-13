@@ -137,7 +137,12 @@ module Flat =
     type private Query =
         { Items: Item[]
           Start: int
-          Init: float }
+          Init: float
+          /// Whether the answer can change with the buffs, and with the enemy's statuses.
+          OnBuffs: bool
+          OnStatus: bool
+          /// Whether buffs' mods have a part in it (they can have conditions on anything).
+          HasSlot: bool }
 
     /// What the conditions are tested against: the buffs and statuses as they were when the
     /// hit (or the use) began, whatever it has changed since.
@@ -170,6 +175,16 @@ module Flat =
         /// Rage's more attack damage for the skill (NaN: none).
         member val RageMore = nan with get, set
         member val Found = false with get, set
+        // answers kept from hit to hit (see `keepAnswers`): the answers by question (and
+        // again for critical hits), each with the counts of changes it was worked out at
+        member val Keeping = false with get, set
+        /// Whether a buff's mod has a condition on the enemy.
+        member val DynOnStatus = false with get, set
+        member val KVal : float[] = [||] with get, set
+        member val KBuffs : int[] = [||] with get, set
+        member val KStatus : int[] = [||] with get, set
+        member val GBuffs = 0 with get, set
+        member val GStatus = 0 with get, set
         // a hit's numbers, by damage type
         member val RMin : float[] = Array.zeroCreate 5 with get
         member val RMax : float[] = Array.zeroCreate 5 with get
@@ -280,11 +295,60 @@ module Flat =
                         ev.Found <- true
         v
 
-    let inline private sumQ (ev: Ev) (i: int) = qSum ev ev.Q.[i]
-    let inline private flagQ (ev: Ev) (i: int) = qFlag ev ev.Q.[i]
-    let inline private incQ (ev: Ev) (i: int) = 1.0 + qSum ev ev.Q.[i] / 100.0
+    /// The place of a kept answer, if it is still good (-1 - place if it must be worked out).
+    let inline private kept (ev: Ev) (q: Query) (i: int) : int =
+        let k = if ev.Crit then i + ev.Q.Length else i
+        if ev.KBuffs.[k] >= 0 && (not q.OnBuffs || ev.KBuffs.[k] = ev.GBuffs) && (not (q.OnStatus || (q.HasSlot && ev.DynOnStatus)) || ev.KStatus.[k] = ev.GStatus) then k
+        else
+            ev.KBuffs.[k] <- ev.GBuffs
+            ev.KStatus.[k] <- ev.GStatus
+            -1 - k
+
+    let private sumQ (ev: Ev) (i: int) : float =
+        let q = ev.Q.[i]
+        if q.Items.Length = 0 then q.Init
+        elif not ev.Keeping then qSum ev q
+        else
+            let k = kept ev q i
+            if k >= 0 then ev.KVal.[k]
+            else
+                let v = qSum ev q
+                ev.KVal.[-1 - k] <- v
+                v
+
+    let private moreQ (ev: Ev) (i: int) : float =
+        let q = ev.Q.[i]
+        if q.Items.Length = 0 then q.Init
+        elif not ev.Keeping then qMore ev q
+        else
+            let k = kept ev q i
+            if k >= 0 then ev.KVal.[k]
+            else
+                let v = qMore ev q
+                ev.KVal.[-1 - k] <- v
+                v
+
+    let private flagQ (ev: Ev) (i: int) : bool =
+        let q = ev.Q.[i]
+        if q.Items.Length = 0 then q.Init <> 0.0
+        elif not ev.Keeping then qFlag ev q
+        else
+            let k = kept ev q i
+            if k >= 0 then ev.KVal.[k] <> 0.0
+            else
+                let v = qFlag ev q
+                ev.KVal.[-1 - k] <- (if v then 1.0 else 0.0)
+                v
+
+    let inline private incQ (ev: Ev) (i: int) = 1.0 + sumQ ev i / 100.0
     /// increased x more of a question asked as two (`Mods.mult`): the increased at i, the more at i + 1.
-    let inline private multQ (ev: Ev) (i: int) = max 0.0 ((1.0 + qSum ev ev.Q.[i] / 100.0) * qMore ev ev.Q.[i + 1])
+    let inline private multQ (ev: Ev) (i: int) = max 0.0 ((1.0 + sumQ ev i / 100.0) * moreQ ev (i + 1))
+
+    let rec private ofEnemy (c: CC) =
+        match c with
+        | CStatus _ | CPerEnemy _ -> true
+        | CNot inner -> ofEnemy inner
+        | _ -> false
 
     let rec private ofSkill (c: CC) =
         match c with
@@ -345,16 +409,25 @@ module Flat =
     let private makeQuery (kind: ModKind) (items: Item list) : Query =
         let items = Array.ofList items
         let fixed' (it: Item) = it.Slot < 0 && it.Conds.Length = 0
+        let rec onBuffs (c: CC) = match c with CBuff _ | CPerStack _ -> true | CNot inner -> onBuffs inner | _ -> false
+        let rec onStatus (c: CC) = match c with CStatus _ | CPerEnemy _ -> true | CNot inner -> onStatus inner | _ -> false
+        // (a buff's mods can have conditions on anything)
+        let deps (q: Query) =
+            { q with
+                OnBuffs = q.Items |> Array.exists (fun it -> it.Slot >= 0 || it.Conds |> Array.exists onBuffs)
+                OnStatus = q.Items |> Array.exists (fun it -> it.Conds |> Array.exists onStatus)
+                HasSlot = q.Items |> Array.exists (fun it -> it.Slot >= 0) }
+        deps <|
         match kind with
         | Flag ->
-            if items |> Array.exists (fun it -> fixed' it && it.V <> 0.0) then { Items = [||]; Start = 0; Init = 1.0 }
-            else { Items = items |> Array.filter (fun it -> not (fixed' it)); Start = 0; Init = 0.0 }
+            if items |> Array.exists (fun it -> fixed' it && it.V <> 0.0) then { Items = [||]; Start = 0; Init = 1.0; OnBuffs = false; OnStatus = false; HasSlot = false }
+            else { Items = items |> Array.filter (fun it -> not (fixed' it)); Start = 0; Init = 0.0; OnBuffs = false; OnStatus = false; HasSlot = false }
         | Override ->
             // (the last one that holds is the answer: nothing before the last sure one matters)
             let mutable from = 0
             for i in 0 .. items.Length - 1 do
                 if fixed' items.[i] then from <- i
-            { Items = (if items.Length = 0 then items else items.[from..]); Start = 0; Init = 0.0 }
+            { Items = (if items.Length = 0 then items else items.[from..]); Start = 0; Init = 0.0; OnBuffs = false; OnStatus = false; HasSlot = false }
         | _ ->
             // the mods without conditions are worked out now, whatever comes between them (the
             // reference takes each in its turn: the same but for rounding where a conditional
@@ -362,7 +435,7 @@ module Flat =
             let mutable acc = if kind = More then 1.0 else 0.0
             for it in items do
                 if fixed' it then acc <- (if kind = More then acc * (1.0 + it.V / 100.0) else acc + it.V)
-            { Items = items |> Array.filter (fun it -> not (fixed' it)); Start = 0; Init = acc }
+            { Items = items |> Array.filter (fun it -> not (fixed' it)); Start = 0; Init = acc; OnBuffs = false; OnStatus = false; HasSlot = false }
 
     // ---- the questions the engine asks of a skill ----
 
@@ -1701,6 +1774,7 @@ module Flat =
           /// Whether a buff's mod has a condition on the skill; the mods with that decided, per
           /// skill and way of asking (as the skill, with nothing known, as damage over time).
           mutable DynOfSkill: bool
+          mutable DynOnStatus: bool
           DynFor: Item[][][]
           DynForVer: int[]
           BComp: (int * Item)[][]
@@ -1708,6 +1782,18 @@ module Flat =
           RageMore: float[]
           RageVer: int[]
           Evs: ResizeArray<Ev>
+          /// Per skill: a hit's answers kept from hit to hit, with what they were worked out
+          /// for (see `keepAnswers`).
+          KVal: float[][]
+          KBuffs: int[][]
+          KStatus: int[][]
+          KGBuffs: int[]
+          KGStatus: int[]
+          KSnap: int[]
+          KDyn: int[]
+          KFoe: int[]
+          KHas: bool[][]
+          KFlags: int[]
           mutable EvDepth: int
           Dbs: ModDb[]
           DbVersion: int[]
@@ -2629,6 +2715,7 @@ module Flat =
                             counts.[slot] <- counts.[slot] + 1
                 s.Dyn <- table
             s.DynOfSkill <- s.Dyn |> Array.exists (fun items -> items |> Array.exists (fun it -> it.Conds |> Array.exists ofSkill))
+            s.DynOnStatus <- s.Dyn |> Array.exists (fun items -> items |> Array.exists (fun it -> it.Conds |> Array.exists ofEnemy))
             s.DynVersion <- s.ModsVersion
         s.Dyn
 
@@ -2661,6 +2748,7 @@ module Flat =
         ev.BOn <- false
         ev.SOn <- false
         ev.Extra <- -1
+        ev.Keeping <- false
         ev.AsAttack <- false
         ev.Iso <- false
         ev.Close <- false
@@ -2714,6 +2802,33 @@ module Flat =
         if extra && info.StackExtra > 0 then
             ev.Extra <- info.StackBuff
             ev.ExtraN <- info.StackExtra
+
+    /// A hit's answers are kept for the skill's next hit: an answer is good while what it
+    /// can change with is what it was (the buffs and their mods; the enemy and its statuses).
+    /// Asked once the ev has its buffs and its enemy.
+    let private keepAnswers (s: State) (ev: Ev) (sid: int) (foe: int) =
+        if s.KVal.[sid].Length = 0 then
+            let n = ev.Q.Length * 2
+            s.KVal.[sid] <- Array.zeroCreate n
+            s.KBuffs.[sid] <- Array.create n -1
+            s.KStatus.[sid] <- Array.create n -1
+        if s.KSnap.[sid] <> s.SnapVersion || s.KDyn.[sid] <> s.DynVersion then
+            s.KSnap.[sid] <- s.SnapVersion
+            s.KDyn.[sid] <- s.DynVersion
+            s.KGBuffs.[sid] <- s.KGBuffs.[sid] + 1
+        let flags = (if ev.Iso then 1 else 0) + (if ev.Close then 2 else 0) + (if ev.Open then 4 else 0)
+        if s.KFoe.[sid] <> foe || s.KFlags.[sid] <> flags || not (obj.ReferenceEquals(s.KHas.[sid], ev.SHas)) then
+            s.KFoe.[sid] <- foe
+            s.KFlags.[sid] <- flags
+            s.KHas.[sid] <- ev.SHas
+            s.KGStatus.[sid] <- s.KGStatus.[sid] + 1
+        ev.KVal <- s.KVal.[sid]
+        ev.KBuffs <- s.KBuffs.[sid]
+        ev.KStatus <- s.KStatus.[sid]
+        ev.GBuffs <- s.KGBuffs.[sid]
+        ev.GStatus <- s.KGStatus.[sid]
+        ev.DynOnStatus <- s.DynOnStatus
+        ev.Keeping <- true
 
     let private useStatus (s: State) (ev: Ev) (e: Foe) =
         refreshStatus s e
@@ -3389,6 +3504,7 @@ module Flat =
                 let c, m = Constants.revealedWeaknessLifeShare, 1.0 + more / 100.0
                 if rng.Float() < (c / m) / (1.0 - c + c / m) then ev.Open <- true
              release s)
+            keepAnswers s ev sid target
             let hitChance =
                 let v = qOver ev ev.Q.[qHitChance]
                 if ev.Found then v
@@ -4285,6 +4401,7 @@ module Flat =
               Dyn = p.NoDyn
               DynVersion = -1
               DynOfSkill = false
+              DynOnStatus = false
               DynFor = Array.create (nk * 3) p.NoDyn
               DynForVer = Array.create (nk * 3) -1
               BComp = Array.create nb [||]
@@ -4292,6 +4409,16 @@ module Flat =
               RageMore = Array.create nk nan
               RageVer = Array.create nk -1
               Evs = ResizeArray()
+              KVal = Array.create nk [||]
+              KBuffs = Array.create nk [||]
+              KStatus = Array.create nk [||]
+              KGBuffs = Array.zeroCreate nk
+              KGStatus = Array.zeroCreate nk
+              KSnap = Array.create nk -1
+              KDyn = Array.create nk -1
+              KFoe = Array.create nk -1
+              KHas = Array.create nk [||]
+              KFlags = Array.create nk -1
               EvDepth = 0
               Dbs = p.Skills |> Array.map (fun k -> k.Db)
               DbVersion = Array.create nk -1
