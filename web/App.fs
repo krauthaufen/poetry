@@ -1592,7 +1592,7 @@ let rec private step (msg : Msg) (m : Model) : Model =
         | 200, Ok j when Json.string (Json.field "error" j) <> "" -> { m with Status = "the character could not be read: " + Json.string (Json.field "error" j) }
         | 200, Ok j ->
             let n (path : string list) = path |> List.fold (fun x k -> Json.field k x) j |> Json.number
-            let named key = Json.field key j |> Json.list |> List.map (fun x -> { Label = Json.string (Json.field "name" x); Value = sprintf "%.0f" (Json.number (Json.field (if key = "minions" then "count" else "value") x)) })
+            let named key = Json.field key j |> Json.list |> List.map (fun x -> { Label = Json.string (Json.field "name" x); Value = (if key = "minions" then sprintf "×%.0f" (Json.number (Json.field "count" x)) else sprintf "%.0f" (Json.number (Json.field "value" x))) })
             let missing = [ "unmapped"; "unsimulated"; "unknown"; "minions" ] |> List.sumBy (fun k -> Json.field "notUnderstood" j |> Json.field k |> Json.list |> List.length)
             (fun x -> settle (weigh x))
                 { m with
@@ -2131,9 +2131,8 @@ let frame (m : Model) (p : Passive) : Scene<Msg> =
 /// The fight's picture: a small field seen from above, the player in the middle.
 let arena (m : Model) : Node<Msg> =
     renderControl {
-        Dom.Style [ Css.Position "fixed"; Css.Prop ("right", "12px"); Css.Prop ("bottom", "12px"); Css.Width "min(180px, 34vw)"; Css.Height "min(180px, 34vw)"
-                    Css.Prop ("border", "1px solid #3b3024"); Css.Prop ("z-index", "4"); Css.Prop ("pointer-events", "none")
-                    Css.Prop ("visibility", (if m.Happened.IsEmpty || m.Tab <> "character" then "hidden" else "visible")) ]
+        Dom.Style [ Css.Prop ("display", "block"); Css.Width "100%"; Css.Height "min(300px, 62vw)"; Css.Prop ("pointer-events", "none")
+                    Css.Prop ("visibility", (if m.Happened.IsEmpty then "hidden" else "visible")) ]
         RenderControl.Orthographic (m.Field, 1.0, 400.0)
         RenderControl.Camera { Sky = V3d (0.0, 1.0, 0.0); Location = V3d (m.Middle.X, m.Middle.Y, 200.0); Forward = V3d (0.0, 0.0, -1.0); Up = V3d (0.0, 1.0, 0.0); Right = V3d (1.0, 0.0, 0.0) }
         RenderControl.OnRendered Tick
@@ -2142,7 +2141,7 @@ let arena (m : Model) : Node<Msg> =
             Sg.Shader { Shaders.flat }
             Sg.NoEvents true
             sg {
-                Sg.Uniform ("Color", V4d (0.035, 0.033, 0.03, 1.0))
+                Sg.Uniform ("Color", V4d (0.047, 0.036, 0.027, 1.0))
                 Sg.Translate (0.0, 0.0, -1.0)
                 Sg.Scale (100000.0)
                 quad
@@ -2397,7 +2396,6 @@ let view (m : Model) : Node<Msg> =
         // anew on every change (for a render control: a new canvas and every draw again).
         // Being fixed in FableCube; see its dogfood/poetry.md.
         tree m
-        arena m
         div {
             if m.Build <> "" then span { Dom.Fetch (sheetUrl m, Sheet) }
             if m.Title <> "" then span { Dom.Fetch (fightUrl m, Fought) }
@@ -2556,6 +2554,11 @@ let view (m : Model) : Node<Msg> =
                             switch m "self" "Cast on self"
                             switch m "immortal" "Takes no damage, pays no costs"
                         }
+                    }
+                    section {
+                        Dom.Class "panel fight"
+                        h3 { "The fight" }
+                        arena m
                     }
                     if m.Gem <> "" then div { Dom.Class "pressing"; Dom.Attr ("data-check", "gem"); "pressing " + m.Gem }
                     pressing m

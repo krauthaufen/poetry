@@ -121,6 +121,15 @@ module Report =
                                 "icon", JStr ""; "w", num 1.0; "h", num 1.0; "props", strs []; "requires", JStr ""
                                 "mods", JArr(rest |> List.map (line "explicit")); "sockets", JArr []; "grants", JArr []; "corrupted", JBool(rest |> List.contains "Corrupted") ] ]
 
+    /// What a minion is, without the number that tells it from the others of its kind
+    /// ("Wolf Companion 3 (2)", "Skeletal Warrior 4": the name before the numbers).
+    let rec private kindOf (name: string) : string =
+        let digits = [| '0'; '1'; '2'; '3'; '4'; '5'; '6'; '7'; '8'; '9' |]
+        let t = name.TrimEnd().TrimEnd(digits).TrimEnd()
+        let cut = t.LastIndexOf " ("
+        let t = if t.EndsWith ")" && cut > 0 && t.Substring(cut + 2, t.Length - cut - 3).Trim(digits) = "" then t.Substring(0, cut) else t
+        if t = name then name else kindOf t
+
     /// (`groups`: the build's socket groups before any gem was turned off, `icons`: see `gemIcons`.)
     let character (slots: int list) (anointed: int list) (groups: PobGroup list) (levelsWithSupports: bool) (icons: Map<string, string>) (c: Loaded) : Json =
         let sheetMods = ModDb.ofList c.Sheet.Mods
@@ -242,7 +251,8 @@ module Report =
                                                                        "persistent", JBool(not x.IsSupport && (Gems.isPersistentBuff c.Db x.Name || Gems.isMeta c.Db x.Name)) ] ] ] ]
               "minions",
               JArr
-                  [ for (name, n) in c.Minions |> List.countBy (fun m -> m.Name.TrimEnd([| '0'; '1'; '2'; '3'; '4'; '5'; '6'; '7'; '8'; '9' |]).TrimEnd()) do
+                  // (several of a kind are one line: "Wolf Companion 3 (2)" is a Wolf Companion)
+                  [ for (name, n) in c.Minions |> List.countBy (fun m -> kindOf m.Name) do
                       yield obj [ "name", JStr name; "count", num (float n) ] ]
               "notUnderstood",
               obj [ "unmapped", strs (cov.Unmapped |> List.map fst |> List.distinct)
