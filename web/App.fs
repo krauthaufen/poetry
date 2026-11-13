@@ -19,7 +19,9 @@ type Socketed = { Rune : string; Pic : string; Does : string list }
 type Granted = { Grant : string; Shows : string }
 type Item =
     { Place : int; Worn : string; Col : int; Headed : string; Type : string; Grade : string; Picture : string
-      Says : string list; Requires : string; Lines : ItemLine list; Holds : Socketed list; Grants : Granted list; Spoiled : bool }
+      Says : string list; Requires : string; Lines : ItemLine list; Holds : Socketed list; Grants : Granted list; Spoiled : bool
+      /// A pasted item: its text as the game copies it and its item class ("": the character's own).
+      Class : string; Raw : string }
 type Share = { Name : string; Percent : float; Text : string; Part : bool }
 
 /// A passive as the tree draws it: where, how big, and its art in the sprite sheets (a
@@ -97,6 +99,15 @@ type Msg =
     | Socket of string
     /// The gem whose tooltip stays ("": none).
     | Pin of string
+    /// The inventory: the box to paste an item into opens or closes, what is typed there, the
+    /// item is added; where the pinned one is tried; a pasted item is worn (or taken off
+    /// again), or thrown away.
+    | Paste
+    | Draft of string
+    | Add
+    | Aim of string
+    | Wear of int
+    | Discard of int
     /// What changing the pinned passive does to the damage came back.
     | Compared of Fetched
     | Tab of string
@@ -139,6 +150,18 @@ type Model =
       /// The character's socket groups, and the gems turned off here.
       Groups : GemGroup list
       Items : Item list
+      /// Items pasted in (`Bag`), those of them worn instead of the character's own (by where:
+      /// a place of the doll, or "at:<place>" for a jewel's), where the pinned one is tried
+      /// (`Aim`, "": the first place it fits), and the box to paste one into.
+      Bag : Item list
+      Swapped : Map<string, Item>
+      /// (`Swapped` as a list and as the simulator is told it: made in the update, a map read
+      /// in the view went wrong there)
+      Wearing : (string * Item) list
+      Equip : string
+      Aim : string
+      Pasting : bool
+      Draft : string
       /// What the pinned passive's change does (scenario, percent more damage), and the question that was answered.
       Deltas : (string * float) list
       /// The question about the pinned passive ("": none), asked at once and again for more
@@ -267,7 +290,7 @@ type Model =
 let init : Model =
     { Build = ""; Scenario = "boss"; Status = "locating"; Title = ""; Class = ""; Ascendancy = ""; Tab = "character"
       Pools = []; Defences = []; Resistances = []; Minions = []
-      NotUnderstood = 0; Fighting = false; Gem = ""; Dps = []; Shares = []; Groups = []; Items = []; Dropped = Set.empty; Pinned = ""; Deltas = []; DeltaOf = ""; Ask = ""; AskMore = ""; Anointed = Set.empty; Types = []; Counts = []; Start = Map.empty; Switches = Set.empty
+      NotUnderstood = 0; Fighting = false; Gem = ""; Dps = []; Shares = []; Groups = []; Items = []; Bag = []; Swapped = Map.empty; Wearing = []; Equip = ""; Aim = ""; Pasting = false; Draft = ""; Dropped = Set.empty; Pinned = ""; Deltas = []; DeltaOf = ""; Ask = ""; AskMore = ""; Anointed = Set.empty; Types = []; Counts = []; Start = Map.empty; Switches = Set.empty
       Passives = [||]; Ascendancies = []; Shown = []; AscendancyWeb = Data.pack (Data.ofList ([] : V3f list)); Path = Data.pack (Data.ofList ([] : V3f list))
       Loaded = false; Capacity = 0
       WebUv = Data.pack (Data.ofList ([] : V2f list)); AscendancyWebUv = Data.pack (Data.ofList ([] : V2f list)); PathUv = Data.pack (Data.ofList ([] : V2f list)); Art = ""; Links = [||]; Neighbours = Map.empty; Web = Data.pack (Data.ofList ([] : V3f list)); Allocated = Set.empty; Edited = false
@@ -293,11 +316,99 @@ let private passives (m : Model) =
         + "&choices=" + (m.Choices |> Map.toList |> List.filter (fun (i, _) -> m.Allocated.Contains i) |> List.map (fun (i, c) -> string i + ":" + c) |> String.concat ",")
     else ""
 
+/// Where an item is worn on the doll ("": not on it, a jewel).
+let private area (i : Item) : string =
+    match i.Worn with
+    | "Weapon 1" -> "Weapon" | "Weapon 2" -> "Offhand" | "Helmet" -> "Helm" | "Body Armour" -> "Body"
+    | "Amulet" -> "Amulet" | "Gloves" -> "Gloves" | "Belt" -> "Belt" | "Boots" -> "Boots"
+    | "Ring 1" -> "Ring1" | "Ring 2" -> "Ring2"
+    | "Flask 1" -> "Flask1" | "Flask 2" -> "Flask2" | "Charm 1" -> "Charm1" | "Charm 2" -> "Charm2" | "Charm 3" -> "Charm3"
+    | "Flask" -> (match i.Col with | 0 -> "Flask1" | 1 -> "Flask2" | 2 -> "Charm1" | 3 -> "Charm2" | 4 -> "Charm3" | _ -> "")
+    | _ -> ""
+
+let private places : (string * string) list =
+    [ "Weapon", "Weapon"; "Offhand", "Offhand"; "Helm", "Helmet"; "Body", "Body"; "Amulet", "Amulet"; "Gloves", "Gloves"; "Belt", "Belt"; "Boots", "Boots"
+      "Ring1", "Ring"; "Ring2", "Ring"; "Flask1", "Flask"; "Flask2", "Flask"; "Charm1", "Charm"; "Charm2", "Charm"; "Charm3", "Charm" ]
+
+/// The simulator's name of a place of the doll.
+let private slotOf (spot : string) : string =
+    match spot with
+    | "Weapon" -> "Weapon 1" | "Offhand" -> "Weapon 2" | "Helm" -> "Helmet" | "Body" -> "Body Armour" | "Ring1" -> "Ring 1" | "Ring2" -> "Ring 2"
+    | other -> other
+
+/// A text as part of an address.
+let private esc (t : string) : string =
+    t.Replace("\r", "").Replace("%", "%25").Replace("+", "%2B").Replace("&", "%26").Replace("#", "%23").Replace("\n", "%0A").Replace(" ", "%20")
+
+/// Pasted items worn, as the simulator is told them: for each where (the place among the
+/// character's items of the one it replaces, or the slot's name if that is empty) and its text.
+let private equipText (items : Item list) (swapped : Map<string, Item>) : string =
+    swapped |> Map.toList
+    |> List.map (fun (spot, it) ->
+        let where =
+            if spot.StartsWith "at:" then spot.Substring 3
+            else match items |> List.tryFind (fun i -> area i = spot) with | Some i -> string i.Place | None -> slotOf spot
+        where + "\n" + it.Raw)
+    |> String.concat "\n====\n"
+
+/// A pasted item, read from the text the game (or the trade site) copies: item class, rarity,
+/// name and base, then its properties and its modifiers in parts.
+let private pasted (place : int) (text : string) : Item option =
+    let lines = text.Replace("\r", "").Split('\n') |> List.ofArray |> List.map (fun l -> l.Trim ()) |> List.filter (fun l -> l <> "")
+    let rec parts (acc : string list list) (cur : string list) (ls : string list) =
+        match ls with
+        | [] -> List.rev (List.rev cur :: acc)
+        | l :: rest when l.StartsWith "----" -> parts (List.rev cur :: acc) [] rest
+        | l :: rest -> parts acc (l :: cur) rest
+    match parts [] [] lines |> List.filter (fun p -> not p.IsEmpty) with
+    | head :: rest ->
+        let value (k : string) = head |> List.tryFind (fun l -> l.StartsWith k) |> Option.map (fun l -> l.Substring(k.Length).Trim ()) |> Option.defaultValue ""
+        let names = head |> List.filter (fun l -> not (l.StartsWith "Item Class:") && not (l.StartsWith "Rarity:"))
+        let headed, based = match names with | [ a ] -> "", a | a :: b :: _ -> a, b | [] -> "", ""
+        let about (p : string list) = p |> List.forall (fun l -> (l.Contains ": " && not (l.StartsWith "Grants")) || l.StartsWith "Requires" || l.EndsWith ":")
+        let marks = [ "implicit"; "rune"; "enchant"; "crafted"; "fractured"; "desecrated"; "mutated" ]
+        let line (l : string) =
+            match marks |> List.tryFind (fun k -> l.EndsWith (" (" + k + ")")) with
+            | Some k -> { Mark = k; Reads = l.Substring (0, l.Length - k.Length - 3) }
+            | None -> { Mark = "explicit"; Reads = l }
+        if based = "" then None
+        else
+            Some { Place = place; Worn = ""; Col = 0; Headed = headed; Type = based; Grade = (value "Rarity:").ToLower (); Picture = ""
+                   Says = rest |> List.filter about |> List.concat; Requires = ""
+                   Lines = rest |> List.filter (fun p -> not (about p) && p <> [ "Corrupted" ]) |> List.concat |> List.map line
+                   Holds = []; Grants = []; Spoiled = rest |> List.contains [ "Corrupted" ]; Class = value "Item Class:"; Raw = text }
+    | [] -> None
+
 /// How the character goes into the fight, as the simulator is told it.
 let private knobs (m : Model) =
     (if m.Start.IsEmpty then "" else "&start=" + (m.Start |> Map.toList |> List.map (fun (k, v) -> k + ":" + string v) |> String.concat ","))
     + (m.Switches |> Set.toList |> List.map (fun k -> "&" + k + "=1") |> String.concat "")
     + (if m.Dropped.IsEmpty then "" else "&without=" + (m.Dropped |> Set.toList |> String.concat ",").Replace (" ", "%20"))
+    + (if m.Equip = "" then "" else "&equip=" + m.Equip)
+
+/// Where a pasted item can be worn: places of the doll, or a jewel's ("at:<place>").
+let private fits (m : Model) (i : Item) : string list =
+    match i.Class with
+    | "Helmets" -> [ "Helm" ] | "Body Armours" -> [ "Body" ] | "Gloves" -> [ "Gloves" ] | "Boots" -> [ "Boots" ] | "Belts" -> [ "Belt" ] | "Amulets" -> [ "Amulet" ]
+    | "Rings" -> [ "Ring1"; "Ring2" ]
+    | "Shields" | "Bucklers" | "Foci" | "Quivers" -> [ "Offhand" ]
+    | "Jewels" -> m.Items |> List.filter (fun x -> x.Worn.StartsWith "Jewel") |> List.map (fun x -> "at:" + string x.Place)
+    | "" | "Life Flasks" | "Mana Flasks" | "Charms" -> []
+    | c when c.StartsWith "One Hand" || c = "Wands" || c = "Sceptres" || c = "Daggers" || c = "Claws" || c = "Flails" || c = "Spears" -> [ "Weapon"; "Offhand" ]
+    | c when c.Contains "Gem" || c.Contains "Currency" || c.Contains "Relic" || c.Contains "Tablet" || c.Contains "Waystone" -> []
+    | _ -> [ "Weapon" ]
+
+/// Where the pinned pasted item is tried: where it was aimed, or the first place it fits.
+let private aimOf (m : Model) (i : Item) : string =
+    let f = fits m i
+    if List.contains m.Aim f then m.Aim else f |> List.tryHead |> Option.defaultValue ""
+
+/// What a place is called: the item there, or the place itself.
+let private spotName (m : Model) (spot : string) : string =
+    let there = if spot.StartsWith "at:" then m.Items |> List.tryFind (fun i -> "at:" + string i.Place = spot) else m.Items |> List.tryFind (fun i -> area i = spot)
+    match there with
+    | Some i -> (if i.Headed <> "" then i.Headed else i.Type) + (if spot = "Ring1" then " (left)" elif spot = "Ring2" then " (right)" else "")
+    | None -> slotOf spot + " (empty)"
 
 let private sheetUrl (m : Model) = "__sim?op=character" + knobs m + passives m + "&build=" + m.Build
 let private fightOf (m : Model) (scenario : string) (ask : string) = "__sim?op=fight&runs=32&time=20" + (if scenario = "pack" || scenario = "surrounded" then "" else "&life=1e12") + ask + "&scenario=" + scenario + (if m.Pressing <> "" then "&gem=" + m.Pressing.Replace (" ", "%20") else "") + knobs m + passives m + "&build=" + m.Build
@@ -910,7 +1021,23 @@ let private compareOf (m : Model) (deep : bool) : string =
     match m.Selected with
     // (in the inventory: what taking the pinned item off would do)
     | _ when m.Tab = "items" ->
-        if not (m.Pinned.StartsWith "item:") then ""
+        if m.Pinned.StartsWith "bag:" then
+            // a pasted item: worn where it is tried, or taken off again if it is worn
+            match m.Bag |> List.tryFind (fun i -> "bag:" + string i.Place = m.Pinned) with
+            | None -> ""
+            | Some it ->
+                let then' =
+                    match m.Swapped |> Map.tryFindKey (fun _ x -> x.Place = it.Place) with
+                    | Some k -> Some (Map.remove k m.Swapped)
+                    | None -> (match aimOf m it with | "" -> None | a -> Some (Map.add a it m.Swapped))
+                match then' with
+                | None -> ""
+                | Some swapped ->
+                    let was, wasChosen = listed m
+                    "__sim?op=compare" + (if deep then "&depth=1" else "") + (if m.Gem <> "" then "&gem=" + m.Gem.Replace (" ", "%20") else "") + knobs m
+                    + (if m.Edited then "&base=" + was + "&basechoices=" + wasChosen + "&passives=" + was + "&choices=" + wasChosen else "")
+                    + "&then_equip=" + esc (equipText m.Items swapped) + "&build=" + m.Build
+        elif not (m.Pinned.StartsWith "item:") then ""
         else
             let was, wasChosen = listed m
             "__sim?op=compare" + (if deep then "&depth=1" else "") + (if m.Gem <> "" then "&gem=" + m.Gem.Replace (" ", "%20") else "") + knobs m
@@ -959,11 +1086,34 @@ let rec private step (msg : Msg) (m : Model) : Model =
                     let b, c = Json.number (Json.field "base" x), Json.number (Json.field "changed" x)
                     // (without an item there may be nothing left to fight with)
                     if b > 0.0 && c > 0.0 then Some (Json.string (Json.field "name" x), (c / b - 1.0) * 100.0)
-                    elif b > 0.0 && r.Url.Contains "then_unequip" then Some (Json.string (Json.field "name" x), -100.0)
+                    elif b > 0.0 && (r.Url.Contains "then_unequip" || r.Url.Contains "then_equip") then Some (Json.string (Json.field "name" x), -100.0)
                     else None)
             if deltas.IsEmpty then m else { m with Deltas = deltas; DeltaOf = r.Url }
          | _ -> m)
-    | Pin key -> { m with Pinned = key }
+    | Pin key -> { m with Pinned = key; Aim = "" }
+    | Paste -> { m with Pasting = not m.Pasting; Draft = "" }
+    | Draft text -> { m with Draft = text }
+    | Add ->
+        let place = 1000 + (m.Bag |> List.map (fun i -> i.Place - 999) |> List.fold max 0)
+        (match pasted place m.Draft with
+         | Some it -> { m with Bag = m.Bag @ [ it ]; Pasting = false; Draft = ""; Pinned = "bag:" + string place; Aim = "" }
+         | None -> m)
+    | Aim spot -> { m with Aim = spot }
+    | Wear place ->
+        (match m.Bag |> List.tryFind (fun i -> i.Place = place) with
+         | None -> m
+         | Some it ->
+            let swapped =
+                match m.Swapped |> Map.tryFindKey (fun _ x -> x.Place = place) with
+                | Some k -> Map.remove k m.Swapped
+                | None -> (match aimOf m it with | "" -> m.Swapped | a -> Map.add a it m.Swapped)
+            if swapped = m.Swapped then m
+            else { m with Swapped = swapped; Pressing = ""; Fighting = true; Dps = []; Shares = []; Types = []; Runs = 0; Round = 0; Happened = []; Warm = [] })
+    | Discard place ->
+        let swapped = m.Swapped |> Map.filter (fun _ x -> x.Place <> place)
+        let m = { m with Bag = m.Bag |> List.filter (fun i -> i.Place <> place); Pinned = "" }
+        if swapped = m.Swapped then m
+        else { m with Swapped = swapped; Pressing = ""; Fighting = true; Dps = []; Shares = []; Types = []; Runs = 0; Round = 0; Happened = []; Warm = [] }
     | Socket key ->
         { m with Dropped = (if m.Dropped.Contains key then Set.remove key m.Dropped else Set.add key m.Dropped); Pressing = ""; Fighting = true; Dps = []; Shares = []; Types = []; Runs = 0; Round = 0; Happened = []; Warm = [] }
     | Switch key ->
@@ -1066,7 +1216,7 @@ let rec private step (msg : Msg) (m : Model) : Model =
                               Lines = Json.field "mods" x |> Json.list |> List.map (fun l -> { Mark = Json.string (Json.field "kind" l); Reads = Json.string (Json.field "text" l) })
                               Holds = Json.field "sockets" x |> Json.list |> List.map (fun l -> { Rune = Json.string (Json.field "name" l); Pic = Json.string (Json.field "icon" l); Does = Json.field "lines" l |> Json.list |> List.map Json.string })
                               Grants = Json.field "grants" x |> Json.list |> List.map (fun l -> { Grant = Json.string (Json.field "text" l); Shows = Json.string (Json.field "icon" l) })
-                              Spoiled = Json.bool (Json.field "corrupted" x) })
+                              Spoiled = Json.bool (Json.field "corrupted" x); Class = ""; Raw = "" })
                     Groups =
                         Json.field "groups" j |> Json.list
                         |> List.map (fun g ->
@@ -1126,11 +1276,13 @@ let rec private step (msg : Msg) (m : Model) : Model =
 /// something it depends on is another now.
 let update (msg : Msg) (m : Model) : Model =
     let n = step msg m
+    let n = if n.Swapped = m.Swapped && n.Items.Length = m.Items.Length then n else { n with Wearing = Map.toList n.Swapped; Equip = esc (equipText n.Items n.Swapped) }
     let same =
         n.Selected = m.Selected && n.Gem = m.Gem && n.Edited = m.Edited
         && n.Allocated = m.Allocated && n.Choices = m.Choices && n.Anointed = m.Anointed
         && n.Start = m.Start && n.Switches = m.Switches && n.Dropped = m.Dropped
         && n.Passives.Length = m.Passives.Length && n.Tab = m.Tab && n.Pinned = m.Pinned
+        && n.Swapped = m.Swapped && n.Aim = m.Aim && n.Bag.Length = m.Bag.Length
     let n = if same then n else { n with Ask = compareOf n false; AskMore = compareOf n true }
     // (what the passive looked at would take or give back, drawn on the tree)
     if n.Selected = m.Selected && n.Hovered = m.Hovered && n.Allocated = m.Allocated && n.Passives.Length = m.Passives.Length && n.Ascendancy = m.Ascendancy then n
@@ -1228,34 +1380,28 @@ let private group (m : Model) (g : GemGroup) : Node<Msg> =
         if spirit > 0.0 then div { Dom.Class "spirit"; reserved }
     }
 
-/// Where an item is worn on the doll ("": not on it, a jewel).
-let private area (i : Item) : string =
-    match i.Worn with
-    | "Weapon 1" -> "Weapon" | "Weapon 2" -> "Offhand" | "Helmet" -> "Helm" | "Body Armour" -> "Body"
-    | "Amulet" -> "Amulet" | "Gloves" -> "Gloves" | "Belt" -> "Belt" | "Boots" -> "Boots"
-    | "Ring 1" -> "Ring1" | "Ring 2" -> "Ring2"
-    | "Flask 1" -> "Flask1" | "Flask 2" -> "Flask2" | "Charm 1" -> "Charm1" | "Charm 2" -> "Charm2" | "Charm 3" -> "Charm3"
-    | "Flask" -> (match i.Col with | 0 -> "Flask1" | 1 -> "Flask2" | 2 -> "Charm1" | 3 -> "Charm2" | 4 -> "Charm3" | _ -> "")
-    | _ -> ""
-
-let private places : (string * string) list =
-    [ "Weapon", "Weapon"; "Offhand", "Offhand"; "Helm", "Helmet"; "Body", "Body"; "Amulet", "Amulet"; "Gloves", "Gloves"; "Belt", "Belt"; "Boots", "Boots"
-      "Ring1", "Ring"; "Ring2", "Ring"; "Flask1", "Flask"; "Flask2", "Flask"; "Charm1", "Charm"; "Charm2", "Charm"; "Charm3", "Charm" ]
-
 /// An item in its place: its picture with what is in its sockets. What it says in a tooltip,
 /// under the mouse or once pressed; pressed, the tooltip stays and tells what taking the
 /// item off would do to the damage.
 let private item (m : Model) (i : Item) (where : string) : Node<Msg> =
-    let key = "item:" + string i.Place
+    let own = i.Raw = ""
+    let key = (if own then "item:" else "bag:") + string i.Place
     let pinned = m.Pinned = key
     let asked = if pinned then m.Ask else ""
+    // a pasted one: where it can be worn, where it is tried, whether it is worn
+    let spots = if own then [] else fits m i
+    let aim = if own then "" else aimOf m i
+    let worn = not own && m.Wearing |> List.exists (fun (_, x) -> x.Place = i.Place)
+    let about = if own then "Without it" elif worn then "Taken off again" elif aim = "" then "" else "Worn in place of " + spotName m aim
+    let nowhere = not own && spots.IsEmpty
+    let wear = if worn then "Take off" else "Wear"
     let refined = asked <> "" && m.DeltaOf = m.AskMore
     let known = asked <> "" && (m.DeltaOf = asked || refined)
     let depth = if refined then "10 fights each" else "3 short fights each, refining ..."
     let needs = "Requires " + i.Requires
     let face = if i.Headed <> "" then i.Headed else i.Type
     div {
-        Dom.Class ("item " + i.Grade + (if pinned then " pinned" else "") + (if where = "auto" then " loose" else ""))
+        Dom.Class ("item " + i.Grade + (if pinned then " pinned" else "") + (if where = "auto" then " loose" else "") + (if own then "" else " pasted") + (if worn then " worn" else ""))
         Dom.Style [ Css.Prop ("grid-area", where) ]
         Dom.Attr ("data-item", i.Worn)
         button {
@@ -1311,7 +1457,7 @@ let private item (m : Model) (i : Item) (where : string) : Node<Msg> =
                 if pinned && asked <> "" then
                     div {
                         Dom.Class "deltas"
-                        div { Dom.Class "depth"; "Without it" }
+                        div { Dom.Class "depth"; about }
                         if not known then div { Dom.Class "depth"; "fighting it out ..." }
                         if known then
                             for (name, by) in m.Deltas do
@@ -1322,9 +1468,18 @@ let private item (m : Model) (i : Item) (where : string) : Node<Msg> =
                                 }
                         if known then div { Dom.Class "depth"; depth }
                     }
+                if nowhere then div { Dom.Class "depth"; "nothing here to wear it in place of" }
+                if pinned && not worn && spots.Length > 1 then
+                    div {
+                        Dom.Class "actions spots"
+                        for spot in spots do
+                            button { Dom.Class (if spot = aim then "act active" else "act"); Dom.OnClick (fun _ -> Aim spot); spotName m spot }
+                    }
                 if pinned then
                     div {
                         Dom.Class "actions"
+                        if not own && not nowhere then button { Dom.Class "act"; Dom.OnClick (fun _ -> Wear i.Place); wear }
+                        if not own then button { Dom.Class "act"; Dom.OnClick (fun _ -> Discard i.Place); "Remove" }
                         button { Dom.Class "act close"; Dom.OnClick (fun _ -> Pin ""); "Close" }
                     }
             }
@@ -1334,24 +1489,43 @@ let private item (m : Model) (i : Item) (where : string) : Node<Msg> =
 /// The inventory: what is worn where it is worn, as the game lays it out, and under it the
 /// jewels and whatever else has no place there.
 let private inventory (m : Model) : Node<Msg> =
-    let worn = m.Items |> List.filter (fun i -> area i <> "")
-    let loose = m.Items |> List.filter (fun i -> area i = "")
-    let taken = worn |> List.map area |> Set.ofList
+    // (a pasted item worn is shown where the character's own was)
+    let worn =
+        (m.Items |> List.filter (fun i -> area i <> "" && not (m.Wearing |> List.exists (fun (spot, _) -> spot = area i))) |> List.map (fun i -> area i, i))
+        @ (m.Wearing |> List.filter (fun (spot, _) -> not (spot.StartsWith "at:")))
+    let loose = m.Items |> List.filter (fun i -> area i = "") |> List.map (fun i -> m.Wearing |> List.tryFind (fun (spot, _) -> spot = "at:" + string i.Place) |> Option.map snd |> Option.defaultValue i)
+    let taken = worn |> List.map fst |> Set.ofList
     let empty = places |> List.filter (fun (a, _) -> not (taken.Contains a))
+    let adding = if m.Pasting then "×" else "+"
+    // (one that is worn is on the doll, not here as well)
+    let unworn = m.Bag |> List.filter (fun i -> not (m.Wearing |> List.exists (fun (_, x) -> x.Place = i.Place)))
     div {
         Dom.Class "main items"
         div {
             Dom.Class "doll"
             for (a, label) in empty do
                 div { Dom.Class "item empty"; Dom.Style [ Css.Prop ("grid-area", a) ]; label }
-            for i in worn do
-                item m i (area i)
+            for (spot, i) in worn do
+                item m i spot
         }
         div {
             Dom.Class "loose-items"
             for i in loose do
                 item m i "auto"
         }
+        // items pasted in, to try in place of what is worn
+        div {
+            Dom.Class "bag"
+            for i in unworn do
+                item m i "auto"
+            button { Dom.Class "item loose add"; Dom.Attr ("title", "paste an item"); Dom.OnClick (fun _ -> Paste); adding }
+        }
+        if m.Pasting then
+            div {
+                Dom.Class "paste"
+                textarea { Dom.Class "draft"; Dom.Attr ("placeholder", "paste an item here: copied from the trade site, or Ctrl+C on it in the game"); Dom.Attr ("rows", "8"); Dom.OnInput Draft }
+                button { Dom.Class "act"; Dom.OnClick (fun _ -> Add); "Add" }
+            }
     }
 
 let private scenario (m : Model) (key : string) (name : string) : Node<Msg> =
@@ -1661,6 +1835,9 @@ let private status (m : Model) =
 let view (m : Model) : Node<Msg> =
     // (the game's data names an ascendancy it has no word for as "Mercenary3": the one the
     // character's passives belong to is the one)
+    // (never the head of a list that may be empty: the text is worked out again before the
+    // element that holds it is taken away)
+    let headline = match m.Dps with | d :: _ -> d.Value + " DPS" | [] -> ""
     let named = if m.Title = "" then "" else sprintf "Level %d %s" m.Level (if m.Ascendancy <> "" then m.Ascendancy else m.Class)
     body {
         Dom.OnLocation Located
@@ -1701,7 +1878,7 @@ let view (m : Model) : Node<Msg> =
                 div { Dom.Class "found"; Dom.Attr ("data-check", "found"); string m.Hits + " found" }
             div { Dom.Attr ("data-check", "pointer"); Dom.Style [ Css.Display "none" ]; sprintf "%.0fx%.0f touches %d" m.Page.X m.Page.Y m.Touches.Length }
             if not m.Dps.IsEmpty then
-                div { Dom.Class "headline"; Dom.Attr ("data-check", "dps"); m.Dps.Head.Value + " DPS" }
+                div { Dom.Class "headline"; Dom.Attr ("data-check", "dps"); headline }
             div { Dom.Class "status"; Dom.Attr ("data-check", "status"); status m }
         }
         if m.Tab = "items" then

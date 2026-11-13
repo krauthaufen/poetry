@@ -358,8 +358,8 @@ type Session(read: string -> string) =
 
     /// The character of a build text; `passives` ("" or ids separated by commas) replaces
     /// the passives allocated in it.
-    member _.Load(build: string, passives: string, choices: string, lowLife: bool, start: string, without: string, unequip: string) : Loaded =
-        let key = (if lowLife then "low|" else "") + start + "|" + without + "|" + unequip + "|" + passives + "|" + choices + "|" + build
+    member _.Load(build: string, passives: string, choices: string, lowLife: bool, start: string, without: string, unequip: string, equip: string) : Loaded =
+        let key = (if lowLife then "low|" else "") + start + "|" + without + "|" + unequip + "|" + equip + "|" + passives + "|" + choices + "|" + build
         match last with
         | Some (k, c) when k = key -> c
         | _ ->
@@ -383,6 +383,19 @@ type Session(read: string -> string) =
                     { b with TreeNodes = ids; TreeOverrides = chosen |> Array.fold (fun m (i, s) -> Map.add i s m) b.TreeOverrides }
             // items taken off: their places among the build's items
             let off = unequip.Split(',') |> Array.choose (fun x -> match System.Int32.TryParse(x.Trim()) with | true, v -> Some v | _ -> None) |> Set.ofArray
+            // items worn instead: "<where>\n<the item's text as the game copies it>", several apart
+            // by a line "====". Where: the place among the build's items of the one it replaces,
+            // or the name of a slot that is empty
+            let b =
+                equip.Replace("\r", "").Split([| "\n====\n" |], System.StringSplitOptions.None)
+                |> Array.fold (fun (b: PobBuild) (entry: string) ->
+                    match entry.IndexOf '\n' with
+                    | -1 -> b
+                    | k ->
+                        let where, text = entry.Substring(0, k).Trim(), entry.Substring(k + 1)
+                        match System.Int32.TryParse where with
+                        | true, at -> { b with Items = b.Items |> List.mapi (fun i (slot, t) -> if i = at then slot, text else slot, t) }
+                        | _ -> { b with Items = b.Items @ [ where, text ] }) b
             let b = if off.IsEmpty then b else { b with Items = b.Items |> List.indexed |> List.filter (fun (i, _) -> not (off.Contains i)) |> List.map snd }
             let c = Setup.loadParsed db.Value nodes.Value slots.Value bases.Value b { Options.defaults with LowLife = lowLife; Start = Report.starts start; Without = without.Split(',') |> Array.map (fun x -> x.Trim()) |> Array.filter (fun x -> x <> "") |> List.ofArray }
             last <- Some(key, c)
@@ -413,14 +426,15 @@ type Session(read: string -> string) =
                 | Some (JStr s) -> s
                 | Some (JNum n) -> sprintf "%.0f" n
                 | _ -> ""
+            let equip = Json.strField "equip" j |> Option.defaultValue ""
             match Json.strField "op" j with
             | Some "character" ->
-                let c = this.Load(build, passives, choices, low, start, without, unequip)
+                let c = this.Load(build, passives, choices, low, start, without, unequip, equip)
                 let groups, withSupports = match parsed with Some (_, b) -> b.Groups, Map.containsKey "levelsWithSupports" b.Config | None -> c.Build.Groups, false
                 let sheet = Report.character slots.Value (Pob.itemPassives nodes.Value c.Build) groups withSupports (Report.gemIcons build) c
                 // (the items as the character was built: one taken off here is still listed)
                 Report.write (match sheet, parsed with | JObj m, Some (_, b) -> JObj(Map.add "items" (Report.items build b) m) | _ -> sheet)
-            | Some "fight" -> Report.write (Report.fight (this.Load(build, passives, choices, low, start, without, unequip)) j)
+            | Some "fight" -> Report.write (Report.fight (this.Load(build, passives, choices, low, start, without, unequip, equip)) j)
             | other -> Report.write (JObj(Map.ofList [ "error", JStr(sprintf "unknown op %A" other) ]))
         with e ->
             Report.write (JObj(Map.ofList [ "error", JStr e.Message ]))
