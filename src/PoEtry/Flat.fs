@@ -1782,6 +1782,7 @@ module Flat =
           RageMore: float[]
           RageVer: int[]
           Evs: ResizeArray<Ev>
+          NoHas: bool[]
           /// Per skill: a hit's answers kept from hit to hit, with what they were worked out
           /// for (see `keepAnswers`).
           KVal: float[][]
@@ -2469,8 +2470,16 @@ module Flat =
             let stream (pool: string) =
                 if s.Recoups.IsEmpty then 0.0
                 else
-                    let parts = s.Recoups |> List.filter (fun (_, _, pl) -> pl = pool) |> List.map (fun (until, rate, _) -> rate * overlap until)
-                    if pool.StartsWith "Leech" then (if parts.IsEmpty then 0.0 else List.max parts) else List.sum parts
+                    // (leech: only the instance with the highest rate; the others add up, in their order)
+                    let leech = pool.StartsWith "Leech"
+                    let mutable acc = 0.0
+                    let mutable any = false
+                    for (until, rate, pl) in s.Recoups do
+                        if pl = pool then
+                            let part = rate * overlap until
+                            acc <- (if leech then (if any then max acc part else part) else acc + part)
+                            any <- true
+                    acc
             let leech = stream "LeechMana"
             let regen = v.ManaRegen * dt
             let mana = min v.Mana (s.Mana + regen + leech)
@@ -2748,6 +2757,7 @@ module Flat =
         ev.BOn <- false
         ev.SOn <- false
         ev.Extra <- -1
+        ev.SHas <- s.NoHas
         ev.Keeping <- false
         ev.AsAttack <- false
         ev.Iso <- false
@@ -2806,14 +2816,17 @@ module Flat =
     /// A hit's answers are kept for the skill's next hit: an answer is good while what it
     /// can change with is what it was (the buffs and their mods; the enemy and its statuses).
     /// Asked once the ev has its buffs and its enemy.
-    let private keepAnswers (s: State) (ev: Ev) (sid: int) (foe: int) =
+    let private keepAnswers (s: State) (ev: Ev) (skill: int) (foe: int) (role: int) =
+        // (the answers are kept apart for each way of asking: 0 a hit, 1 how long a use takes, 2 what it costs)
+        let sid = skill * 3 + role
+        let snap = if ev.BOn then s.SnapVersion else -2
         if s.KVal.[sid].Length = 0 then
             let n = ev.Q.Length * 2
             s.KVal.[sid] <- Array.zeroCreate n
             s.KBuffs.[sid] <- Array.create n -1
             s.KStatus.[sid] <- Array.create n -1
-        if s.KSnap.[sid] <> s.SnapVersion || s.KDyn.[sid] <> s.DynVersion then
-            s.KSnap.[sid] <- s.SnapVersion
+        if s.KSnap.[sid] <> snap || s.KDyn.[sid] <> s.DynVersion then
+            s.KSnap.[sid] <- snap
             s.KDyn.[sid] <- s.DynVersion
             s.KGBuffs.[sid] <- s.KGBuffs.[sid] + 1
         let flags = (if ev.Iso then 1 else 0) + (if ev.Close then 2 else 0) + (if ev.Open then 4 else 0)
@@ -3030,8 +3043,9 @@ module Flat =
         let info = s.P.Skills.[sid]
         let ev = acquire s sid
         useBuffs s ev info false
-        (let t = aimed s
-         if t >= 0 then useStatus s ev s.Foes.[t])
+        let t = aimed s
+        if t >= 0 then useStatus s ev s.Foes.[t]
+        keepAnswers s ev sid t 1
         let speed = multQ ev qSpeed
         let time = info.Skill.BaseTime / speed * (1.0 + Constants.longerPerRepeat * 0.0) + sumQ ev qFixedUse
         release s
@@ -3060,6 +3074,7 @@ module Flat =
             let skill = info.Skill
             // (asked with the skill known and nothing else: no buffs, no enemy)
             let ev = acquire s sid
+            keepAnswers s ev sid -1 2
             let extraCost =
                 match p.Vitals with
                 | Some pools -> pools.Mana * sumQ ev qExtraCost / 100.0
@@ -3504,7 +3519,7 @@ module Flat =
                 let c, m = Constants.revealedWeaknessLifeShare, 1.0 + more / 100.0
                 if rng.Float() < (c / m) / (1.0 - c + c / m) then ev.Open <- true
              release s)
-            keepAnswers s ev sid target
+            keepAnswers s ev sid target 0
             let hitChance =
                 let v = qOver ev ev.Q.[qHitChance]
                 if ev.Found then v
@@ -4409,16 +4424,17 @@ module Flat =
               RageMore = Array.create nk nan
               RageVer = Array.create nk -1
               Evs = ResizeArray()
-              KVal = Array.create nk [||]
-              KBuffs = Array.create nk [||]
-              KStatus = Array.create nk [||]
-              KGBuffs = Array.zeroCreate nk
-              KGStatus = Array.zeroCreate nk
-              KSnap = Array.create nk -1
-              KDyn = Array.create nk -1
-              KFoe = Array.create nk -1
-              KHas = Array.create nk [||]
-              KFlags = Array.create nk -1
+              NoHas = [||]
+              KVal = Array.create (nk * 3) [||]
+              KBuffs = Array.create (nk * 3) [||]
+              KStatus = Array.create (nk * 3) [||]
+              KGBuffs = Array.zeroCreate (nk * 3)
+              KGStatus = Array.zeroCreate (nk * 3)
+              KSnap = Array.create (nk * 3) -1
+              KDyn = Array.create (nk * 3) -1
+              KFoe = Array.create (nk * 3) -1
+              KHas = Array.create (nk * 3) [||]
+              KFlags = Array.create (nk * 3) -1
               EvDepth = 0
               Dbs = p.Skills |> Array.map (fun k -> k.Db)
               DbVersion = Array.create nk -1
