@@ -56,21 +56,35 @@ let main paths =
         let mutable sim = 0.0
         let mutable flat = 0.0
         let mutable compile = 0.0
+        let mutable first = 0.0
+        let mutable second = 0.0
+        let mutable tenth = 0.0
         let mutable events = 0
         for fight in fights do
-            compile <- compile + ms (fun () -> Flat.compile fight |> ignore)
+            // (the fast engine has run before, on another program of the fight, so the runtime has compiled it)
+            (match Flat.compile fight with
+             | Ok p -> (for seed in 1u .. 300u do Flat.run p seed |> ignore)
+             | Error _ -> ())
+            for seed in 1u .. 2u do
+                Sim.run fight seed |> ignore
+            let t0 = System.DateTime.UtcNow
             match Flat.compile fight with
             | Ok p ->
-                // (both engines run first, so the runtime has compiled them)
-                for seed in 1u .. 2u do
-                    Sim.run fight seed |> ignore
-                for seed in 1u .. 40u do
-                    Flat.run p seed |> ignore
+                compile <- compile + (System.DateTime.UtcNow - t0).TotalMilliseconds
+                let play = Flat.runner p
+                first <- first + ms (fun () -> play 101u |> ignore)
+                second <- second + ms (fun () -> play 102u |> ignore)
+                for seed in 103u .. 109u do
+                    play seed |> ignore
+                tenth <- tenth + ms (fun () -> play 110u |> ignore)
                 sim <- sim + ms (fun () -> for seed in 1u .. 6u do Sim.run fight seed |> ignore) / 6.0
-                flat <- flat + ms (fun () -> for seed in 1u .. 60u do Flat.run p seed |> ignore) / 60.0
-                Flat.traced (fun _ kind _ _ _ -> if kind <> "hit" && kind <> "crit" then events <- events + 1) p 1u |> ignore
+                flat <- flat + ms (fun () -> for seed in 1u .. 60u do play seed |> ignore) / 60.0
+                let mutable n = 0
+                Flat.traced (fun _ kind _ _ _ -> if kind <> "hit" && kind <> "crit" then n <- n + 1) p 1u |> ignore
+                events <- events + n
             | Error _ -> ()
         let n = float (max 1 fights.Length)
-        printfn "%s, %d fights: reference %.2f ms a fight (%.1f us an event), flat %.3f ms (%.2f us an event), %.1f times as fast; a compile %.2f ms"
-            title fights.Length (sim / n) (sim * 1000.0 / float (max 1 events)) (flat / n) (flat * 1000.0 / float (max 1 events)) (sim / flat) (compile / n)
+        printfn "%s, %d fights: reference %.2f ms a fight (%.1f us an event), flat %.3f ms (%.2f us an event), %.1f times as fast"
+            title fights.Length (sim / n) (sim * 1000.0 / float (max 1 events)) (flat / n) (flat * 1000.0 / float (max 1 events)) (sim / flat)
+        printfn "   a compile %.2f ms; a runner's first run %.2f ms, its second %.2f ms, its tenth %.2f ms" (compile / n) (first / n) (second / n) (tenth / n)
     0

@@ -38,7 +38,7 @@ namespace PoEtry
 /// One thing is taken for granted of a fight: the defences for a set of buffs
 /// (`Actor.VitalsAt`) are a function of the buffs (of those `Actor.VitalsReads` names, if
 /// it names any). They are asked once per set of buffs, where the reference asks at every
-/// hit of a monster; `compile` already asks for the sets it sees come up.
+/// hit of a monster; a `runner` keeps them from one run to the next.
 ///
 /// Nothing here outlives a run: all that changes belongs to the `State` of one `run`, so
 /// several runs of one program can go on at once.
@@ -767,8 +767,6 @@ module Flat =
             { Fight: Fight
               Vitals: PlayerStats option
               BuffNames: string[]
-              /// The defences for sets of buffs (see `compile`): the buffs written out, as `vitalsKey` writes them.
-              VitalsKnown: Dictionary<string, PlayerStats>
               /// The buffs the defences depend on (`Actor.VitalsReads`; all of them where that is not said).
               VitalsOn: int[]
               BuffIds: Dictionary<string, int>
@@ -1444,7 +1442,6 @@ module Flat =
                 { Fight = fight
                   Vitals = player.Vitals
                   BuffNames = buffNames
-                  VitalsKnown = Dictionary()
                   VitalsOn =
                     (match player.VitalsReads with
                      | Some names -> [| for i in 0 .. buffNames.Length - 1 do if names.Contains (at buffNames i) then yield i |]
@@ -1606,6 +1603,12 @@ module Flat =
         member val X = 0.0 with get, set
         member val Y = 0.0 with get, set
         member _.Count = count
+        /// Nothing waits any more (the arrays are kept).
+        member _.Clear() =
+            count <- 0
+            freeCount <- free.Length
+            for i in 0 .. free.Length - 1 do
+                free.[i] <- i
         /// When the earliest is due.
         member _.Next = (at time ((at heap 0)))
         member _.Push(t: float, sq: int, k: int, va: int, vb: int, vx: float, vy: float) =
@@ -4123,15 +4126,12 @@ module Flat =
                         for id in p.VitalsOn do
                             if s.BHas.[id] then key <- key + string id + "=" + string s.BStacks.[id] + ";"
                         let v =
-                            match p.VitalsKnown.TryGetValue key with
+                            match s.VitalsSeen.TryGetValue key with
                             | true, v -> v
                             | _ ->
-                                match s.VitalsSeen.TryGetValue key with
-                                | true, v -> v
-                                | _ ->
-                                    let v = at (buffMap s)
-                                    s.VitalsSeen.[key] <- v
-                                    v
+                                let v = at (buffMap s)
+                                s.VitalsSeen.[key] <- v
+                                v
                         s.VitalsOf <- s.BuffsVersion
                         s.VitalsLast <- Some v
                         v
@@ -4407,7 +4407,18 @@ module Flat =
                 else removeBuff s a
             | _ -> ()
 
-    let private start (p: Program) (seed: uint32) (tell: (float -> string -> string -> string -> float -> unit) option) : State =
+    /// What a runner keeps from one run to the next (see `runner`): the queue's arrays and
+    /// the scratch of the hits, emptied for every run, and the defences per set of buffs
+    /// that the runs so far have asked for (a function of the buffs: knowing them changes no result).
+    type private Kept =
+        { Queue: Queue
+          Evs: ResizeArray<Ev>
+          Vitals: Dictionary<string, PlayerStats> }
+
+    let private newKept () : Kept = { Queue = Queue(); Evs = ResizeArray(); Vitals = Dictionary() }
+
+    let private start (p: Program) (seed: uint32) (tell: (float -> string -> string -> string -> float -> unit) option) (kept: Kept) : State =
+        kept.Queue.Clear()
         let fight = p.Fight
         let player = fight.Player
         let nb = p.BuffNames.Length
@@ -4487,7 +4498,7 @@ module Flat =
             { P = p
               Seed = seed
               Rng = Rng(seed)
-              Queue = Queue()
+              Queue = kept.Queue
               Tell = tell
               Time = 0.0
               Seq = 0
@@ -4522,7 +4533,7 @@ module Flat =
               BCompOf = Array.create nb []
               RageMore = Array.create nk nan
               RageVer = Array.create nk -1
-              Evs = ResizeArray()
+              Evs = kept.Evs
               NoHas = [||]
               KVal = Array.create (nk * 3) [||]
               KBuffs = Array.create (nk * 3) [||]
@@ -4592,7 +4603,7 @@ module Flat =
               PHasEntropy = false
               AttackStream = Array.zeroCreate p.Enemies.Length
               PeriodicStream = Array.zeroCreate p.Periodics.Length
-              VitalsSeen = Dictionary()
+              VitalsSeen = kept.Vitals
               VitalsOf = -1
               VitalsLast = None
               Gained = Array.zeroCreate gainedNames.Length
@@ -4619,8 +4630,8 @@ module Flat =
         s
 
     /// The fight played, for at most so many events.
-    let private played (p: Program) (seed: uint32) (tell: (float -> string -> string -> string -> float -> unit) option) (maxEvents: int) : State =
-        let s = start p seed tell
+    let private played (p: Program) (seed: uint32) (tell: (float -> string -> string -> string -> float -> unit) option) (maxEvents: int) (kept: Kept) : State =
+        let s = start p seed tell kept
         let maxTime = p.Fight.MaxTime
         let mutable n = 0
         let mutable go = true
@@ -4634,9 +4645,9 @@ module Flat =
                 n <- n + 1
         s
 
-    let private play (p: Program) (seed: uint32) (tell: (float -> string -> string -> string -> float -> unit) option) : Outcome =
+    let private play (p: Program) (seed: uint32) (tell: (float -> string -> string -> string -> float -> unit) option) (kept: Kept) : Outcome =
         // a fight that needs more events than this is a runaway (a zero-time loop): stop it
-        let s = played p seed tell 3000000
+        let s = played p seed tell 3000000 kept
         let maxTime = p.Fight.MaxTime
         for i__58 in 0 .. s.Foes.Length - 1 do
             let e = at s.Foes i__58
@@ -4669,28 +4680,25 @@ module Flat =
 
     /// Play a program's fight with a seed: what `Sim.run` gives for the fight and the seed,
     /// but for `Shown`, which stays empty.
-    let run (p: Program) (seed: uint32) : Outcome = play p seed None
+    let run (p: Program) (seed: uint32) : Outcome = play p seed None (newKept ())
+
+    /// The program's fight, to be played with one seed after another: what `run` gives for
+    /// each, faster from the second on. A runner keeps its working memory between runs and
+    /// what it has learned of the player's defences (see `Kept`). One runner is for one
+    /// thread at a time; who plays in parallel makes a runner for each thread.
+    let runner (p: Program) : uint32 -> Outcome =
+        let kept = newKept ()
+        fun seed -> play p seed None kept
 
     /// The same, telling `tell` what `Sim.traced` tells: every event as it is taken from the
     /// queue and every hit that lands.
     let traced (tell: float -> string -> string -> string -> float -> unit) (p: Program) (seed: uint32) : Outcome =
-        play p seed (Some tell)
+        play p seed (Some tell) (newKept ())
 
-    /// A fight as a program for `run`, or what the fight has that is not built here. A fight
-    /// that compiles gives the reference's result, but for rounding.
-    ///
-    /// Where monsters hit a player whose defences depend on its buffs (`Actor.VitalsAt`),
-    /// the fight is played here once, briefly, to see which sets of buffs come up when
-    /// a monster hits, and the defences for those are kept in the program: working them out
-    /// is the costliest thing a fight asks for, and a run then asks only for sets not seen here.
+    /// A fight as a program for `run` and `runner`, or what the fight has that is not built
+    /// here. A fight that compiles gives the reference's result, but for rounding. (Nothing
+    /// of the fight is played here: what can only be learned by playing, a runner learns.)
     let compile (fight: Fight) : Result<Program, string> =
         match build fight with
-        | Ok p ->
-            if p.Attackers.Length > 0 && fight.Player.VitalsAt.IsSome then
-                let known = Dictionary<string, PlayerStats>()
-                for seed in 1u .. 1u do
-                    for KeyValue (key, v) in (played p seed None 5000).VitalsSeen do
-                        known.[key] <- v
-                Ok { p with VitalsKnown = known }
-            else Ok p
+        | Ok p -> Ok p
         | Error reasons -> Error(String.concat "; " reasons)

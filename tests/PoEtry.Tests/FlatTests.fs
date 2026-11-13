@@ -693,6 +693,21 @@ let run (test: string -> (unit -> unit) -> unit) =
         if compiled < 250 then failwithf "only %d of 400 random fights compile" compiled
         if threshold * 1000 > runs then failwithf "%d of %d runs parted at a threshold: more than 1 in 1000" threshold runs)
 
+    test "flat: a runner gives what a fresh run gives, whatever it has played before" (fun () ->
+        let mutable compared = 0
+        for case in 1u .. 60u do
+            let fight, described = randomFight case
+            match Flat.compile fight with
+            | Error _ -> ()
+            | Ok p ->
+                let play = Flat.runner p
+                for seed in [ 3u; 1u; 2u; 1u; 3u ] do
+                    compared <- compared + 1
+                    match differenceWith (fun a b -> a = b || (System.Double.IsNaN a && System.Double.IsNaN b)) (Flat.run p seed) (play seed) with
+                    | Some d -> failwithf "%s\n  seed %d: %s (fresh run first, runner second)" described seed d
+                    | None -> ()
+        if compared < 100 then failwithf "only %d runs compared" compared)
+
     test "flat: how fast (rough; printed, not judged)" (fun () ->
         // a sheet like a character's: many mods of many stats, some conditional
         let sheet =
@@ -725,14 +740,16 @@ let run (test: string -> (unit -> unit) -> unit) =
             Flat.traced (fun _ kind _ _ _ -> if kind <> "hit" && kind <> "crit" then n <- n + 1) p 1u |> ignore
             n
         let measure (what: string) (fights: (Fight * Flat.Program) list) (simRuns: int) (flatRuns: int) =
+            let programs = fights
             // (both engines run first, so the runtime has compiled them)
             for (f, p) in fights do
                 Sim.run f 1u |> ignore
                 for seed in 1u .. 20u do
                     Flat.run p seed |> ignore
+            let fights = fights |> List.map (fun (f, p) -> f, Flat.runner p)
             let sim = ms (fun () -> for (f, _) in fights do (for seed in 1 .. simRuns do Sim.run f (uint32 seed) |> ignore)) / float (simRuns * fights.Length)
-            let flat = ms (fun () -> for (_, p) in fights do (for seed in 1 .. flatRuns do Flat.run p (uint32 seed) |> ignore)) / float (flatRuns * fights.Length)
-            let perFight = float (fights |> List.sumBy (fun (_, p) -> events p)) / float fights.Length
+            let flat = ms (fun () -> for (_, play) in fights do (for seed in 1 .. flatRuns do play (uint32 seed) |> ignore)) / float (flatRuns * fights.Length)
+            let perFight = float (programs |> List.sumBy (fun (_, p) -> events p)) / float fights.Length
             printfn "     flat: %s: reference %.3f ms a fight (%.1f us an event), flat %.4f ms (%.2f us an event), %.1f times as fast" what sim (sim * 1000.0 / perFight) flat (flat * 1000.0 / perFight) (sim / flat)
         (match Flat.compile big with
          | Ok p -> measure "a 240-mod sheet, 30 s" [ big, p ] 10 200

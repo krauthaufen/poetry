@@ -394,7 +394,7 @@ module Report =
             if s "engine" "" = "reference" then Sim.run f, "reference (asked for)"
             else
                 match Flat.compile f with
-                | Ok program -> Flat.run program, "flat"
+                | Ok program -> Flat.runner program, "flat"
                 | Error why -> Sim.run f, "reference: " + why
         { Gem = gem; Scenario = scenario; Steps = steps; Fight = f; Run = run; Engine = engine }
 
