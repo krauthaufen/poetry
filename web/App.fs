@@ -353,7 +353,46 @@ let private equipText (items : Item list) (swapped : Map<string, Item>) : string
 
 /// A pasted item, read from the text the game (or the trade site) copies: item class, rarity,
 /// name and base, then its properties and its modifiers in parts.
-let private pasted (place : int) (text : string) : Item option =
+let rec private pasted (place : int) (text : string) : Item option =
+  // (as plain text off the trade site: name, base and the kind of item on lines of their own,
+  // then properties and modifiers with nothing between them: put into the game's form first)
+  let plain = text.Replace("\r", "").Split('\n') |> List.ofArray |> List.map (fun l -> l.Trim ()) |> List.filter (fun l -> l <> "")
+  if not (text.Contains "Rarity:") && not (text.Contains "--------") && plain.Length >= 2 then
+    let about (l : string) = l.Contains ": " && not (l.StartsWith "Bonded:") && not (l.StartsWith "Grants")
+    let isName (l : string) = not (about l) && not (l |> Seq.exists System.Char.IsDigit)
+    let kinds = [ "Helmet"; "Body Armour"; "Gloves"; "Boots"; "Belt"; "Amulet"; "Ring"; "Shield"; "Buckler"; "Focus"; "Quiver"; "Jewel"; "Wand"; "Sceptre"; "Spear"; "Flail"; "Dagger"; "Claw"; "Quarterstaff"; "Staff"; "Bow"; "Crossbow"; "One Hand Mace"; "Two Hand Mace"; "One Hand Sword"; "Two Hand Sword"; "One Hand Axe"; "Two Hand Axe" ]
+    let names = plain |> List.takeWhile isName
+    let rest = plain |> List.skip names.Length
+    // one name: a magic or normal item's; two: name and base; a third line says what it is
+    let headed, based, kind =
+        match names with
+        | [ a ] -> "", a, ""
+        // (two: a rare's name and base, or a base and what it is)
+        | [ a; b ] -> if List.contains b kinds then "", a, b else a, b, ""
+        | a :: b :: c :: _ -> a, b, c
+        | [] -> "", "", ""
+    let ends (w : string) = based.EndsWith w
+    let has (w : string) = rest |> List.exists (fun l -> l.StartsWith w)
+    let cls =
+        match kind with
+        | "Helmet" -> "Helmets" | "Body Armour" -> "Body Armours" | "Gloves" -> "Gloves" | "Boots" -> "Boots" | "Belt" -> "Belts" | "Amulet" -> "Amulets" | "Ring" -> "Rings"
+        | "Shield" -> "Shields" | "Buckler" -> "Bucklers" | "Focus" -> "Foci" | "Quiver" -> "Quivers" | "Jewel" -> "Jewels"
+        | "Wand" -> "Wands" | "Sceptre" -> "Sceptres" | "Spear" -> "Spears" | "Flail" -> "Flails" | "Dagger" -> "Daggers" | "Claw" -> "Claws"
+        | "" ->
+            if ends "Ring" then "Rings" elif ends "Amulet" then "Amulets" elif ends "Belt" || ends "Sash" then "Belts"
+            elif ends "Ruby" || ends "Emerald" || ends "Sapphire" || ends "Diamond" then "Jewels"
+            elif has "Attacks per Second:" then "Weapon"
+            elif has "Armour:" || has "Evasion Rating:" || has "Energy Shield:" then "Armour"
+            else "Weapon"
+        | other -> other
+    if based = "" then None
+    else
+        let rarity = if headed <> "" then "Rare" else "Magic"
+        let canonical =
+            [ "Item Class: " + cls; "Rarity: " + rarity ] @ (if headed <> "" then [ headed ] else []) @ [ based; "--------" ]
+            @ (rest |> List.filter about) @ [ "--------" ] @ (rest |> List.filter (fun l -> not (about l)))
+        pasted place (String.concat "\n" canonical)
+  else
     let lines = text.Replace("\r", "").Split('\n') |> List.ofArray |> List.map (fun l -> l.Trim ()) |> List.filter (fun l -> l <> "")
     let rec parts (acc : string list list) (cur : string list) (ls : string list) =
         match ls with
@@ -394,6 +433,8 @@ let private fits (m : Model) (i : Item) : string list =
     | "Shields" | "Bucklers" | "Foci" | "Quivers" -> [ "Offhand" ]
     | "Jewels" -> m.Items |> List.filter (fun x -> x.Worn.StartsWith "Jewel") |> List.map (fun x -> "at:" + string x.Place)
     | "" | "Life Flasks" | "Mana Flasks" | "Charms" -> []
+    // (armour that does not say which piece it is: any of them)
+    | "Armour" -> [ "Helm"; "Body"; "Gloves"; "Boots" ]
     | c when c.StartsWith "One Hand" || c = "Wands" || c = "Sceptres" || c = "Daggers" || c = "Claws" || c = "Flails" || c = "Spears" -> [ "Weapon"; "Offhand" ]
     | c when c.Contains "Gem" || c.Contains "Currency" || c.Contains "Relic" || c.Contains "Tablet" || c.Contains "Waystone" -> []
     | _ -> [ "Weapon" ]
