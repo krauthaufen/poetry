@@ -196,6 +196,23 @@ module Report =
               obj [ "armour", num v.Armour; "evasion", num v.Evasion; "deflection", num v.Deflection; "block", num v.Block
                     "stunThreshold", num v.StunThreshold; "ailmentThreshold", num v.AilmentThreshold ]
               "resistances", JArr [ for t in DamageType.all do if t <> Physical then yield obj [ "name", JStr(DamageType.name t); "value", num (Map.tryFind t v.Resist |> Option.defaultValue 0.0) ] ]
+              // what a hit must get through: the largest hit of each type survived from full
+              // pools (-1: immune), how often a monster of level 83 connects, what recovers
+              "defence",
+              (let acc = Constants.monsterAccuracy 83
+               obj [ "maxHit", JArr [ for t in DamageType.all do
+                                        let m = Defence.maxHit v t
+                                        yield obj [ "name", JStr(DamageType.name t); "value", num (if System.Double.IsInfinity m then -1.0 else m) ] ]
+                     "level", num 83.0
+                     "hitChance", num (Vitals.monsterHitChance v.Evasion acc)
+                     "deflectChance", num (Vitals.deflectChance v.Deflection acc)
+                     "deflectEffect", num v.DeflectEffect
+                     "blockLucky", JBool v.LuckyBlock
+                     "blockedTaken", num v.BlockedDamageTaken
+                     "freezeThreshold", num v.FreezeThreshold
+                     "wardRegen", num v.WardRegen
+                     "esDelay", num v.ESRechargeDelay
+                     "esRegen", num v.ESRegen ])
               "recovery", obj [ "lifeRegen", num v.LifeRegen; "manaRegen", num v.ManaRegen; "energyShieldRecharge", num v.EnergyShieldRecharge ]
               "pressable", strs (Setup.pressable c)
               "groups",

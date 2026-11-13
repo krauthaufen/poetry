@@ -138,6 +138,9 @@ type Model =
       Ascendancy : string
       Tab : string
       Pools : Row list
+      /// The defence page: its panels by title, and how the shown fight went for the character.
+      Guards : (string * Row list) list
+      Survival : Row list
       Defences : Row list
       Resistances : Row list
       Minions : Row list
@@ -289,7 +292,7 @@ type Model =
 
 let init : Model =
     { Build = ""; Scenario = "boss"; Status = "locating"; Title = ""; Class = ""; Ascendancy = ""; Tab = "character"
-      Pools = []; Defences = []; Resistances = []; Minions = []
+      Pools = []; Guards = []; Survival = []; Defences = []; Resistances = []; Minions = []
       NotUnderstood = 0; Fighting = false; Gem = ""; Dps = []; Shares = []; Groups = []; Items = []; Bag = []; Swapped = Map.empty; Wearing = []; Equip = ""; Aim = ""; Pasting = false; Draft = ""; Dropped = Set.empty; Pinned = ""; Deltas = []; DeltaOf = ""; Ask = ""; AskMore = ""; Anointed = Set.empty; Types = []; Counts = []; Start = Map.empty; Switches = Set.empty
       Passives = [||]; Ascendancies = []; Shown = []; AscendancyWeb = Data.pack (Data.ofList ([] : V3f list)); Path = Data.pack (Data.ofList ([] : V3f list))
       Loaded = false; Capacity = 0
@@ -1015,6 +1018,31 @@ let private short (v : float) =
 
 let private row (label : string) (v : float) = { Label = label; Value = sprintf "%.0f" v }
 
+/// The defence page's panels, out of the character's sheet.
+let private guards (j : Json) : (string * Row list) list =
+    let n (path : string list) : float = path |> List.fold (fun x k -> Json.field k x) j |> Json.number
+    let d (k : string) : float = n [ "defence"; k ]
+    let pct (label : string) (v : float) : Row = { Label = label; Value = sprintf "%.0f%%" v }
+    let per (label : string) (v : float) : Row = { Label = label; Value = sprintf "%.1f per second" v }
+    let level = sprintf "%.0f" (d "level")
+    let lucky = if Json.bool (Json.field "defence" j |> Json.field "blockLucky") then " (lucky)" else ""
+    let hits =
+        Json.field "defence" j |> Json.field "maxHit" |> Json.list
+        |> List.map (fun x -> let v = Json.number (Json.field "value" x) in { Label = Json.string (Json.field "name" x); Value = (if v < 0.0 then "immune" else short v) })
+    let resists = Json.field "resistances" j |> Json.list |> List.map (fun x -> { Label = Json.string (Json.field "name" x); Value = sprintf "%.0f%%" (Json.number (Json.field "value" x)) })
+    [ "Pools", [ row "Life" (n [ "pools"; "life" ]); row "Energy Shield" (n [ "pools"; "energyShield" ]); row "Runic Ward" (n [ "pools"; "ward" ]); row "Mana" (n [ "pools"; "mana" ]) ]
+      "Largest hit survived", hits
+      "Against a level " + level + " monster",
+      [ pct "Its hits land" (d "hitChance"); pct "Hits deflected" (d "deflectChance"); pct "A deflected hit deals less by" (d "deflectEffect")
+        { Label = "Hits blocked"; Value = sprintf "%.0f%%" (n [ "defences"; "block" ]) + lucky }
+        pct "A blocked hit still deals" (d "blockedTaken") ]
+      "Mitigation", [ row "Armour" (n [ "defences"; "armour" ]); row "Evasion" (n [ "defences"; "evasion" ]); row "Deflection" (n [ "defences"; "deflection" ]) ] @ resists
+      "Recovery",
+      [ per "Life regenerated" (n [ "recovery"; "lifeRegen" ]); per "Mana regenerated" (n [ "recovery"; "manaRegen" ])
+        per "Energy Shield recharge" (n [ "recovery"; "energyShieldRecharge" ]); { Label = "Recharge starts after"; Value = sprintf "%.1f s" (d "esDelay") }
+        per "Energy Shield regenerated" (d "esRegen"); per "Runic Ward regenerated" (d "wardRegen") ]
+      "Thresholds", [ row "Stun" (n [ "defences"; "stunThreshold" ]); row "Ailments" (n [ "defences"; "ailmentThreshold" ]); row "Freeze" (d "freezeThreshold") ] ]
+
 // ---- pointers on the tree ----
 
 /// The tree starts this far down the page (the header above it).
@@ -1269,7 +1297,9 @@ let rec private step (msg : Msg) (m : Model) : Model =
                                     let name = Json.string (Json.field "name" x)
                                     { Key = string index + ":" + name; Named = name; Level = Json.int (Json.field "level" x); Quality = Json.int (Json.field "quality" x)
                                       Support = Json.bool (Json.field "support" x); Icon = Json.string (Json.field "icon" x); Own = Json.string (Json.field "gemIcon" x); Spirit = Json.number (Json.field "spirit" x); Persistent = Json.bool (Json.field "persistent" x) }) })
-                    Pools = [ row "Life" (n [ "pools"; "life" ]); row "Mana" (n [ "pools"; "mana" ]); row "Energy Shield" (n [ "pools"; "energyShield" ]); row "Spirit" (n [ "pools"; "spirit" ]) ]
+                    // (Runic Ward beside life and energy shield, for a character that has any)
+                    Pools = [ row "Life" (n [ "pools"; "life" ]); row "Energy Shield" (n [ "pools"; "energyShield" ]) ] @ (if n [ "pools"; "ward" ] > 0.0 then [ row "Runic Ward" (n [ "pools"; "ward" ]) ] else []) @ [ row "Mana" (n [ "pools"; "mana" ]); row "Spirit" (n [ "pools"; "spirit" ]) ]
+                    Guards = guards j
                     Defences = [ row "Armour" (n [ "defences"; "armour" ]); row "Evasion" (n [ "defences"; "evasion" ]); row "Deflection" (n [ "defences"; "deflection" ]); row "Block" (n [ "defences"; "block" ]) ]
                     Resistances = named "resistances"
                     Minions = named "minions"
@@ -1299,6 +1329,11 @@ let rec private step (msg : Msg) (m : Model) : Model =
             { m with
                 Fighting = false
                 Runs = Json.int (Json.field "runs" j)
+                Survival =
+                    [ { Label = "Died in"; Value = sprintf "%.0f%% of fights" (100.0 * Json.number (Json.field "deathRate" j)) }
+                      { Label = "Damage taken"; Value = short (Json.number (Json.field "damageTakenPerSecond" j)) + " per second" }
+                      { Label = "Lowest life, on average"; Value = sprintf "%.0f%%" (100.0 * (Json.field "lowestLife" j |> Json.field "mean" |> Json.number)) }
+                      { Label = "Lowest life, worst fight"; Value = sprintf "%.0f%%" (100.0 * (Json.field "lowestLife" j |> Json.field "worst" |> Json.number)) } ]
                 More = more
                 Round = (if more then m.Round + 1 else m.Round)
                 Gem = Json.string (Json.field "gem" j)
@@ -1907,6 +1942,7 @@ let view (m : Model) : Node<Msg> =
             div { Dom.Class "title"; Dom.Attr ("data-check", "title"); named }
             nav {
                 tab m "character" "Character"
+                tab m "defence" "Defence"
                 tab m "items" "Items"
                 tab m "gems" "Gems"
                 tab m "tree" "Passive tree"
@@ -1922,6 +1958,22 @@ let view (m : Model) : Node<Msg> =
                 div { Dom.Class "headline"; Dom.Attr ("data-check", "dps"); headline }
             div { Dom.Class "status"; Dom.Attr ("data-check", "status"); status m }
         }
+        if m.Tab = "defence" then
+            div {
+                Dom.Class "main defence"
+                for (title, rows) in m.Guards do
+                    panel title rows
+                div {
+                    Dom.Class "survival"
+                    nav {
+                        scenario m "boss" "Boss"
+                        scenario m "pinnacle" "Pinnacle"
+                        scenario m "pack" "Pack"
+                        scenario m "surrounded" "Surrounded"
+                    }
+                    panel "In this fight" m.Survival
+                }
+            }
         if m.Tab = "items" then
             inventory m
         if m.Tab = "gems" then
