@@ -2,15 +2,23 @@ namespace PoEtry
 
 /// The fast fight engine. `Sim` is the reference: it says what a fight is, and it stays the
 /// way to get a replay (`Sim.shown`). This one plays the same fight with the same random
-/// numbers and gives the same `Outcome`, for the fights it can play: `compile` turns a fight
-/// into a program (names become numbers, what does not change is worked out once) or says
-/// what the fight has that is not built here yet; `run` plays a program with a seed.
+/// numbers: `compile` turns a fight into a program (names become numbers, what does not
+/// change is worked out once) or says what the fight has that is not built here yet; `run`
+/// plays a program with a seed.
 ///
-/// What a hit deals, what it inflicts and what a modifier is worth are the reference's own
-/// functions (`Hit`, `Ailments`, `Mods`, `Geometry`), asked with the same values in the same
-/// order. What is new is the bookkeeping around them: the state is a set of arrays that are
-/// changed in place, the events wait in a heap, and what is asked again and again (an actor's
-/// modifiers with its buffs, an enemy's statuses) is kept until what it was made from changes.
+/// The outcome is the reference's but for rounding: what is counted (events, kills, who
+/// died) is the same, numbers agree to about 1e-9. Sums are not always taken in the
+/// reference's order here (unconditional modifiers are added up ahead of the fight, time and
+/// damage over time are added when a state ends, not event by event). A fight is chaotic,
+/// so a last-bit difference can in principle flip a roll or a threshold and send the two
+/// engines different ways; the tests look for that (`FlatTests.verdict`) and have not met it.
+///
+/// What makes it fast: the state is a set of arrays changed in place and the events wait in
+/// a heap; a skill's modifiers are resolved ahead of the fight into numbers and short lists
+/// of conditions on numbered buffs and statuses (see `Query`), and a hit's answers are kept
+/// from hit to hit while what they depend on is the same; an enemy's modifiers as a defender
+/// are a short list of its own. The arithmetic of a hit follows `Hit` and `Ailments` line by
+/// line; who is hit is `Geometry`'s own code.
 ///
 /// Played: one player (no minions, no totems) against any number of enemies that are not
 /// replaced; skills with parts, cooldowns, costs and charges; the rules whose reactions are
