@@ -1,0 +1,2247 @@
+namespace PoEtry
+
+/// The fast fight engine. `Sim` is the reference: it says what a fight is, and it stays the
+/// way to get a replay (`Sim.shown`). This one plays the same fight with the same random
+/// numbers and gives the same `Outcome`, for the fights it can play: `compile` turns a fight
+/// into a program (names become numbers, what does not change is worked out once) or says
+/// what the fight has that is not built here yet; `run` plays a program with a seed.
+///
+/// What a hit deals, what it inflicts and what a modifier is worth are the reference's own
+/// functions (`Hit`, `Ailments`, `Mods`), asked with the same values in the same order. What
+/// is new is the bookkeeping around them: the state is a set of arrays that are changed in
+/// place, the events wait in a heap, and what is asked again and again (an actor's
+/// modifiers with its buffs, an enemy's statuses) is kept until what it was made from changes.
+///
+/// Nothing here outlives a run: all that changes belongs to the `State` of one `run`, so
+/// several runs of one program can go on at once.
+module Flat =
+    open System.Collections.Generic
+
+    // ---- the kinds of event (see `Sim.Event`) ----
+
+    [<Literal>]
+    let private EReady = 0
+    [<Literal>]
+    let private EStrike = 1
+    [<Literal>]
+    let private EPassing = 2
+    [<Literal>]
+    let private EDirect = 3
+    [<Literal>]
+    let private EConsume = 4
+    [<Literal>]
+    let private ECycle = 5
+    [<Literal>]
+    let private EGainStacks = 6
+    [<Literal>]
+    let private EExpose = 7
+    [<Literal>]
+    let private ESpendBuff = 8
+    [<Literal>]
+    let private EExpire = 9
+    [<Literal>]
+    let private EPeriodic = 10
+
+    let private kindName kind =
+        match kind with
+        | EReady -> "Ready"
+        | EStrike -> "Strike"
+        | EPassing -> "PassingStrike"
+        | EDirect -> "DirectHit"
+        | EConsume -> "ConsumeCharges"
+        | ECycle -> "CycleTick"
+        | EGainStacks -> "GainStacks"
+        | EExpose -> "Expose"
+        | ESpendBuff -> "SpendBuff"
+        | EPeriodic -> "PeriodicTick"
+        | _ -> "Expire"
+
+    let private ailmentIndex (a: Ailment) =
+        match a with
+        | Ignite -> 0
+        | Bleed -> 1
+        | Poison -> 2
+        | Shock -> 3
+        | Chill -> 4
+        | Freeze -> 5
+        | Electrocute -> 6
+        | HeavyStun -> 7
+        | Pin -> 8
+        | Daze -> 9
+        | Maim -> 10
+        | Blind -> 11
+        | Hinder -> 12
+
+    let private allAilments =
+        [ Ignite; Bleed; Poison; Shock; Chill; Freeze; Electrocute; HeavyStun; Pin; Daze; Maim; Blind; Hinder ]
+
+    let private typeIndex (t: DamageType) =
+        match t with
+        | Physical -> 0
+        | Lightning -> 1
+        | Cold -> 2
+        | Fire -> 3
+        | Chaos -> 4
+
+    // ---- a program ----
+
+    /// A reaction with its names as numbers (see `Reaction`).
+    type private Re =
+        | RGrantBuff of buff: int * duration: float * maxStacks: int * mods: Mod list
+        /// `blocked`: by skill, whether the skill cannot inflict it.
+        | RApplyDebuff of status: int * duration: float * maxStacks: int * mods: Mod list * blocked: bool[]
+        /// `mods`: by enemy, scaled by its curse effect. `others`: the statuses of the same
+        /// kind (curses, or marks), in the order of their names. `limit`: how many of the kind
+        /// an enemy can have.
+        | RApplyCurse of status: int * duration: float * mods: Mod list[] * others: int[] * limit: int * count: int
+        | RApplyExposure of damageType: DamageType * amount: float * duration: float
+        | RGrowExposure of damageType: DamageType * start: float * perPulse: float * cap: float * every: float * pulses: int * duration: float
+        | RTrigger of skill: int
+        | RRemoveBuff of buff: int
+        | RRemoveDebuff of status: int
+        | RGainResource of buff: int * count: int
+        | RDropRemnant of buff: int * delay: float * extraChance: float * count: int
+        | RSpendStack of buff: int * next: Re
+        | RSetStacks of buff: int * stacks: int
+        | RIfEnemyHas of status: string * next: Re
+        | RIfBuff of buff: int * next: Re
+        | RNone
+
+    type private CRule =
+        { /// By skill: whether the rule's filter lets the skill through.
+          Applies: bool[]
+          Chance: float
+          Re: Re
+          /// Of a rule for kills of enemies in some state: the state.
+          Killed: string }
+
+    type private SkillInfo =
+        { Skill: Skill
+          /// The character's mods and the skill's (`Sim.Env.SkillDbs`).
+          Db: ModDb
+          /// The skill and its parts.
+          Parts: int[]
+          /// The buff the skill consumes (-1: none).
+          Consumes: int
+          /// The charge whose stacks the skill counts more of ("N additional consumed"), and
+          /// how many more (see `Sim.skillStacks`).
+          StackCharge: string
+          StackExtra: int
+          Pattern: (HitTiming * float) list
+          CostCtx: Ctx
+          // where its numbers go
+          Source: int
+          CUses: int
+          CHits: int
+          CCrits: int
+          CMiss: int
+          CTrigger: int
+          CAftershock: int
+          CCannotAfford: int
+          CKept: int
+          CConsumed: int
+          /// The "Consumed<charge>Recently" buff of what it consumes.
+          ConsumedRecently: int
+          // the names of its streams of random numbers
+          StrikeKey: string
+          ConsumeKey: string
+          RollKey: string
+          Sustained: bool
+          IsAttack: bool
+          IsSlam: bool
+          Passing: bool
+          /// Its damage over time: type, per second, label, where the damage goes.
+          Dots: (DamageType * float * string * int) list
+          // what a part needs to happen (see `Sim.startUse`)
+          OncePerUse: bool
+          OnlyTriggered: bool
+          NotEnraged: bool
+          NotWithCharge: bool
+          WithCharge: bool
+          Explosion: bool
+          HasChargedPart: bool
+          NeedsCharge: bool }
+
+    type private EnemyInfo =
+        { Def: EnemyDef
+          Db: ModDb
+          CurseK: float
+          ExposureK: float
+          Evasion: float
+          BaseArmour: float
+          CullLife: float
+          Close: bool
+          /// The debuffs it has for the whole fight: status, stacks, mods.
+          Auras: (int * int * Mod list) list }
+
+    type private CycleInfo =
+        { Buff: int
+          Period: float
+          Variants: Mod list[]
+          Picked: int[] }
+
+    type private ArchonInfo =
+        { Buff: int
+          Stat: string
+          Duration: float
+          Recovery: float
+          AMods: Mod list
+          Gained: int }
+
+    /// A fight made ready to be played. Nothing in it changes.
+    type Program =
+        private
+            { Fight: Fight
+              Vitals: PlayerStats option
+              BuffNames: string[]
+              /// The buffs in the order of their names (the order the reference's maps go through them).
+              BuffOrder: int[]
+              StatusNames: string[]
+              StatusOrder: int[]
+              StatusIds: Dictionary<string, int>
+              StatusCurse: bool[]
+              StatusMark: bool[]
+              StatusExposure: bool[]
+              CountNames: string[]
+              SourceNames: string[]
+              Skills: SkillInfo[]
+              /// The skill the mods of a gained charge are asked of (the actor's first).
+              FirstSkill: int
+              Rotation: (int * (View -> bool))[]
+              OnUse: CRule[]
+              OnHit: CRule[]
+              OnCrit: CRule[]
+              OnKill: CRule[]
+              OnKillOf: CRule[]
+              /// By ailment.
+              OnInflict: CRule[][]
+              Enemies: EnemyInfo[]
+              EnemyIds: Dictionary<string, int>
+              Cycles: CycleInfo[]
+              Archons: ArchonInfo[]
+              /// The resources the fight starts with: buff, stacks, seconds they last (if they do).
+              Resources: (int * int * float option) list
+              /// By buff: seconds its stacks last (NaN: for ever), the most stacks (the least int: not said).
+              ResourceSeconds: float[]
+              ResourceMax: int[]
+              /// The resources with a duration, in the order of their names.
+              Timed: int[]
+              /// By buff: the "Gained<buff>Recently" buff, whether its name ends with "Charge",
+              /// what is asked for a chance of one more, where its counts go.
+              GainedRecently: int[]
+              IsCharge: bool[]
+              ExtraChance: Stat list[]
+              CGained: int[]
+              CExpired: int[]
+              /// Ailments: where their damage goes, their statuses, their counts.
+              AilmentSource: int[]
+              AilmentStatus: int[]
+              AilmentResistant: int[]
+              CInflict: int[]
+              ExposureStatus: int[]
+              // buffs and statuses the engine itself reads and writes
+              BRage: int
+              BHit: int
+              BNonCrit: int
+              BCrit: int
+              BCrit8: int
+              BKilled: int
+              BTriggered: int
+              /// The player's own states (full life, low mana...), in the reference's order.
+              BStates: int[]
+              BCharges: int[]
+              BConstantMana: int
+              BConstantLife: int
+              SShocked: int
+              SChilled: int
+              SArmourBreak: int
+              SFullyBroken: int
+              CFlaskMana: int
+              CPoolLoss: int
+              CAborted: int
+              HasKillOf: bool }
+
+    /// Names that get numbers as they are first asked for.
+    type private Names() =
+        let ids = Dictionary<string, int>()
+        let names = ResizeArray<string>()
+        member _.Id(name: string) : int =
+            match ids.TryGetValue name with
+            | true, i -> i
+            | _ ->
+                let i = names.Count
+                ids.[name] <- i
+                names.Add name
+                i
+        member _.Names = names.ToArray()
+        member _.Ids = ids
+        /// The numbers in the order of their names: the order a map keyed by the names has.
+        member _.Order =
+            names.ToArray() |> Array.mapi (fun i n -> n, i) |> Array.sortBy fst |> Array.map snd
+
+    // ---- what a fight may not have ----
+
+    /// Stats that make the reference do something that is not built here. A fight with a mod
+    /// of one of them, wherever the mod is, is not compiled.
+    let private unbuiltStats =
+        [ "CascadesPerSide", "Spell Cascade"
+          "TriskelionArms", "Triskelion Cascade"
+          "TrinityGain", "Trinity"
+          "SigilMaxStages", "Sigil of Power"
+          "DetonatedByDamage", "seeds set off by damage (Living Bomb)"
+          "DetonatesCurse", "curse detonation (Hexblast)"
+          "NoCooldownWithCharge", "skills that skip their cooldown when empowered"
+          "Crystals", "Ice Crystals"
+          "ConsumesVs", "parts against an enemy state"
+          "SeqLength", "chained attacks"
+          "SeqHits", "chained attacks"
+          "MaxSeals", "sealed skills"
+          "BarrageRepeats", "Barrage"
+          "WindowSeconds", "skills with a window (Requiem)"
+          "SpendsRage", "parts that spend Rage"
+          "RecordsDamage", "debuffs that record damage (Inevitable Agony)" ]
+
+    let private unbuiltPrefixes =
+        [ "DetonatedBy:", "parts set off by another skill"
+          "OnlyInfused:", "infusions"
+          "SeqSteps:", "chained attacks"
+          "WarpsInto:", "warps into projectiles"
+          "ToggleBuff:", "forms that are switched on"
+          "OnlyVs:", "parts against an enemy state"
+          "NotVs:", "parts against an enemy state"
+          "Takes:", "hits that consume an enemy state"
+          "NeedsEnemyStacks:", "skills that wait for stacks on the enemy"
+          "Requires:", "Glory and Combo" ]
+
+    /// Buffs the reference treats in a way of its own that is not built here.
+    let private unbuiltBuffs = [ "Demon Form", "Demon Form"; "Barrage", "Barrage" ]
+    let private unbuiltBuffPrefixes =
+        [ "Warped:", "warps into projectiles"; "EmpoweredAttacks", "empowered attacks"; "EmpoweredRepeatable:", "empowered repeats" ]
+
+    let private recentlyNames = [ "HitRecently"; "NonCritRecently"; "CritRecently"; "CritInPast8Seconds"; "KilledRecently" ]
+
+    let private stateNames =
+        [ "FullLife"; "LowLife"; "FullMana"; "LowMana"; "HasEnergyShield"; "ManaFlaskEffect"; "LifeFlaskEffect"; "FlaskEffect"; "Leeching"; "Surrounded" ]
+        @ [ for kind in [ "Power"; "Frenzy"; "Endurance" ] do
+                yield "AtMaximum" + kind + "Charges"
+                yield "No" + kind + "Charges"
+                yield "YouHaveNo" + kind + "Charges" ]
+
+    let private derivedStatuses =
+        [ "Moving"; "Cullable"; "AnyAilment"; "Cursed"; "Marked"; "Immobilised"; "ElementalAilments"; "Exposed"; "RareOrUnique"; "LowLife"; "FullLife" ]
+
+    let private matches filter (skill: Skill) =
+        match filter with
+        | AnySkill -> true
+        | WithTag t -> Set.contains t skill.Tags
+        | WithTagNot (t, n) -> Set.contains t skill.Tags && not (Set.contains n skill.Tags)
+        | WithTags (has, hasNot) -> has |> List.forall skill.Tags.Contains && not (hasNot |> List.exists skill.Tags.Contains)
+        | Called n -> skill.Name = n
+
+    let private reactionName (r: Reaction) =
+        match r with
+        | GrantBuff _ -> "GrantBuff"
+        | ApplyDebuff _ -> "ApplyDebuff"
+        | ApplyCurse _ -> "ApplyCurse"
+        | ApplyExposure _ -> "ApplyExposure"
+        | GrowExposure _ -> "GrowExposure"
+        | TriggerSkill _ -> "TriggerSkill"
+        | GainEnergy _ -> "GainEnergy"
+        | RemoveBuff _ -> "RemoveBuff"
+        | GrantMinionBuff _ -> "GrantMinionBuff"
+        | Summon _ -> "Summon"
+        | SummonEmpowered _ -> "SummonEmpowered"
+        | WithCorpse _ -> "WithCorpse"
+        | SummonPerCorpse _ -> "SummonPerCorpse"
+        | SummonPerWard _ -> "SummonPerWard"
+        | GrantOneOf _ -> "GrantOneOf"
+        | AttachPustule _ -> "AttachPustule"
+        | NoReaction -> "NoReaction"
+        | RemoveDebuff _ -> "RemoveDebuff"
+        | GainResource _ -> "GainResource"
+        | DropRemnant _ -> "DropRemnant"
+        | ChargeBuff _ -> "ChargeBuff"
+        | SpendStack _ -> "SpendStack"
+        | SetStacks _ -> "SetStacks"
+        | IfEnemyHas _ -> "IfEnemyHas"
+        | IfBuff _ -> "IfBuff"
+        | RegenES _ -> "RegenES"
+        | Empower _ -> "Empower"
+
+    /// The program of a fight, or everything about the fight that is not built here (each
+    /// thing once, in no particular order).
+    let private build (fight: Fight) : Result<Program, string list> =
+        let player = fight.Player
+        let no = ResizeArray<string>()
+        let reject (what: string) = if not (no.Contains what) then no.Add what
+        let buffs = Names()
+        let statuses = Names()
+        let counts = Names()
+        let sources = Names()
+
+        // ---- the fight ----
+        if not fight.Minions.IsEmpty then reject "minions and totems"
+        if fight.Replace then reject "enemies that are replaced"
+        if fight.Enemies.IsEmpty then reject "a fight without enemies"
+        if (fight.Enemies |> List.map (fun e -> e.Name) |> List.distinct).Length <> fight.Enemies.Length then reject "enemies of the same name"
+        if player.Vitals.IsSome && fight.Enemies |> List.exists (fun e -> e.Attack.IsSome) then reject "monsters hitting back"
+
+        // ---- the player ----
+        if not player.Metas.IsEmpty then reject "meta gems and energy"
+        if not player.Periodics.IsEmpty then reject "periodic actions"
+        if (Map.tryFind "Rage" player.MaxResources |> Option.defaultValue 0) > 0 then reject "rage"
+        if player.WardRemnants.IsSome then reject "Runic Ward remnants"
+        if player.ManaRemnants.IsSome then reject "mana remnants"
+        if not player.Banners.IsEmpty then reject "banners"
+        if player.ActiveWhile.IsSome || player.Body.IsSome || player.Pool.IsSome then reject "a player that is a minion"
+        if player.Infusions.IsSome then reject "infusions"
+        if not player.Charms.IsEmpty then reject "charms"
+        if not player.OverkillBurns.IsEmpty then reject "overkill explosions (Herald of Ash)"
+        if player.Vitals |> Option.exists (fun v -> v.CostsInfernalFlame) then reject "Infernal Flame"
+
+        // ---- its skills ----
+        let all = player.Skills @ (player.Skills |> List.collect (fun s -> s.Parts))
+        if (all |> List.map (fun s -> s.Name) |> List.distinct).Length <> all.Length then reject "skills or parts of the same name"
+        if player.Skills |> List.exists (fun s -> s.Parts |> List.exists (fun p -> not p.Parts.IsEmpty)) then reject "parts that have parts"
+        if all |> List.exists (fun s -> s.Clip > 0) then reject "crossbow ammunition"
+        if all |> List.exists (fun s -> s.Tags.Contains(Tag "Type:TargetsDestructibleCorpses")) then reject "corpse skills"
+        let skillIds = Dictionary<string, int>()
+        all |> List.iteri (fun i s -> if not (skillIds.ContainsKey s.Name) then skillIds.[s.Name] <- i)
+        let skillId (what: string) (name: string) =
+            match skillIds.TryGetValue name with
+            | true, i -> i
+            | _ ->
+                reject (what + " of a skill the player does not have")
+                0
+
+        // ---- every mod there can be ----
+        let checkMods (mods: Mod list) =
+            for m in mods do
+                match m.Stat with
+                | Named n ->
+                    for (stat, what) in unbuiltStats do
+                        if n = stat then reject what
+                    for (prefix, what) in unbuiltPrefixes do
+                        if n.StartsWith prefix then reject what
+                | _ -> ()
+        checkMods player.Mods
+        for s in all do
+            checkMods s.Mods
+        let buff (name: string) =
+            for (b, what) in unbuiltBuffs do
+                if name = b then reject what
+            for (prefix, what) in unbuiltBuffPrefixes do
+                if name.StartsWith prefix then reject what
+            buffs.Id name
+
+        // ---- names the engine itself uses ----
+        let bRage = buffs.Id "Rage"
+        let bRecently = recentlyNames |> List.map buffs.Id |> Array.ofList
+        let bTriggered = buffs.Id "TriggeredRecently"
+        let bStates = stateNames |> List.map buffs.Id |> Array.ofList
+        let bCharges = [ "PowerCharge"; "FrenzyCharge"; "EnduranceCharge" ] |> List.map buffs.Id |> Array.ofList
+        let bConstantMana = buffs.Id "ConstantManaFlask"
+        let bConstantLife = buffs.Id "ConstantLifeFlask"
+        let ailmentStatus = allAilments |> List.map (fun a -> statuses.Id(Ailment.status a)) |> Array.ofList
+        let ailmentResistant = allAilments |> List.map (fun a -> statuses.Id(Ailment.name a + "Resistant")) |> Array.ofList
+        let ailmentSource = allAilments |> List.map (fun a -> sources.Id(Ailment.name a)) |> Array.ofList
+        let cInflict = allAilments |> List.map (fun a -> counts.Id("inflict:" + Ailment.name a)) |> Array.ofList
+        let exposureStatus = DamageType.all |> List.map (fun t -> statuses.Id("Exposure:" + DamageType.name t)) |> Array.ofList
+        for n in derivedStatuses do
+            statuses.Id n |> ignore
+        let sArmourBreak = statuses.Id "ArmourBreak"
+        let sFullyBroken = statuses.Id "FullyBrokenArmour"
+
+        // ---- resources ----
+        let resources =
+            player.Resources
+            |> List.filter (fun (_, n) -> n > 0)
+            |> List.map (fun (k, n) -> buff k, n, Map.tryFind k player.ResourceDurations)
+        for KeyValue (k, _) in player.ResourceDurations do
+            buff k |> ignore
+        for KeyValue (k, _) in player.MaxResources do
+            buffs.Id k |> ignore
+
+        // ---- rules ----
+        let sheet = ModDb.ofList player.Mods
+        let maxCurses = 1 + int (Mods.sumBase Ctx.empty [ Named "MaxCurses" ] sheet)
+        let enemies = fight.Enemies |> List.sortBy (fun e -> e.Name) |> Array.ofList
+        let curseK (e: EnemyDef) = Mods.more Ctx.empty [ Named "CurseEffectOnSelf" ] (ModDb.ofList e.Mods)
+        // (curses name the others of their kind, which are only all known once every rule
+        // has been read: they are filled in below)
+        let curses = ResizeArray<string * int>()
+        let rec reaction (r: Reaction) : Re =
+            match r with
+            | GrantBuff (name, duration, maxStacks, mods) ->
+                checkMods mods
+                RGrantBuff(buff name, duration, maxStacks, mods)
+            | ApplyDebuff (name, duration, maxStacks, mods) ->
+                let blocked = all |> List.map (fun s -> s.Mods |> List.exists (fun m -> m.Stat = Named("CannotInflict:" + name))) |> Array.ofList
+                RApplyDebuff(statuses.Id name, duration, maxStacks, mods, blocked)
+            | ApplyCurse (name, duration, mods) ->
+                let full = if name.StartsWith "Curse:" || name.StartsWith "Mark:" then name else "Curse:" + name
+                let prefix = full.Substring(0, full.IndexOf ':' + 1)
+                let id = statuses.Id full
+                curses.Add(prefix, id)
+                RApplyCurse(id, duration, enemies |> Array.map (fun e -> let k = curseK e in mods |> List.map (Mod.scaled k)), [||], (if prefix = "Mark:" then 1 else maxCurses), counts.Id("apply:" + full))
+            | ApplyExposure (dt, amount, duration) -> RApplyExposure(dt, amount, duration)
+            | GrowExposure (dt, start, perPulse, cap, every, pulses, duration) -> RGrowExposure(dt, start, perPulse, cap, every, pulses, duration)
+            | TriggerSkill name -> RTrigger(skillId "a trigger" name)
+            | RemoveBuff name -> RRemoveBuff(buffs.Id name)
+            | RemoveDebuff name -> RRemoveDebuff(statuses.Id name)
+            | GainResource (r, n) -> RGainResource(buff r, n)
+            | DropRemnant (r, delay, extra) -> RDropRemnant(buff r, delay, extra, counts.Id("remnant:" + r))
+            | SpendStack (b, next) -> RSpendStack(buffs.Id b, reaction next)
+            | SetStacks (b, n) -> RSetStacks(buff b, n)
+            | IfEnemyHas (st, next) -> RIfEnemyHas(st, reaction next)
+            | IfBuff (b, next) -> RIfBuff(buffs.Id b, reaction next)
+            | NoReaction -> RNone
+            | other ->
+                reject ("the reaction " + reactionName other)
+                RNone
+        // (a charge buff is up when the fight starts, whatever its rule's hook is)
+        if player.Rules |> List.exists (fun r -> match r.Reaction with ChargeBuff _ -> true | _ -> false) then reject "the reaction ChargeBuff"
+        let rule (r: Rule) : CRule =
+            { Applies = all |> List.map (matches r.Filter) |> Array.ofList
+              Chance = r.Chance
+              Re = reaction r.Reaction
+              Killed = (match r.Hook with OnKillOf st -> st | _ -> "") }
+        let rulesOf (pick: Hook -> bool) = player.Rules |> List.filter (fun r -> pick r.Hook) |> List.map rule |> Array.ofList
+        let onUse = rulesOf (fun h -> h = OnUse)
+        let onHit = rulesOf (fun h -> h = OnHit)
+        let onCrit = rulesOf (fun h -> h = OnCrit)
+        let onKill = rulesOf (fun h -> h = OnKill)
+        let onKillOf = rulesOf (fun h -> match h with OnKillOf _ -> true | _ -> false)
+        let onInflict = allAilments |> List.map (fun a -> rulesOf (fun h -> h = OnInflict a)) |> Array.ofList
+        // (rules for being hit and for blocking never come up: no monster hits back here)
+
+        // ---- cycles, archons ----
+        let cycles =
+            player.Cycles
+            |> List.map (fun c ->
+                if c.Variants.IsEmpty then reject "a cycle without variants"
+                for v in c.Variants do
+                    checkMods v
+                ({ Buff = buff c.Name
+                   Period = c.Period
+                   Variants = Array.ofList c.Variants
+                   Picked = c.Variants |> List.mapi (fun i _ -> counts.Id(sprintf "cycle:%s:%d" c.Name i)) |> Array.ofList }: CycleInfo))
+            |> Array.ofList
+        let archons =
+            player.Archons
+            |> List.map (fun a ->
+                checkMods a.Mods
+                ({ Buff = buff a.Name
+                   Stat = a.OnIgniteStat
+                   Duration = a.Duration
+                   Recovery = a.Recovery
+                   AMods = a.Mods
+                   Gained = counts.Id("archon:" + a.Name) }: ArchonInfo))
+            |> Array.ofList
+
+        // ---- enemies ----
+        for (name, _, _) in fight.EnemyAuras do
+            statuses.Id name |> ignore
+        let exposureEffect = Mods.inc Ctx.empty [ Named "ExposureEffect" ] sheet
+        let enemyInfos =
+            enemies
+            |> Array.map (fun d ->
+                let db = ModDb.ofList d.Mods
+                { Def = d
+                  Db = db
+                  CurseK = curseK d
+                  ExposureK = Mods.more Ctx.empty [ Named "ExposureEffectOnSelf" ] db * exposureEffect
+                  Evasion = Constants.monsterEvasion d.Level * Mods.mult Ctx.empty [ Evasion ] db
+                  BaseArmour = max 0.0 (Mods.total Ctx.empty [ Armour ] db)
+                  CullLife = d.Life * Constants.cullingThreshold (Rarity.name d.Rarity) / 100.0
+                  Close = Vec.length d.Position - d.Size <= 20.0
+                  // (as `Sim.runWith` makes them: of two of one name the later stays)
+                  Auras =
+                    fight.EnemyAuras
+                    |> List.map (fun (name, stacks, mods) ->
+                        let k = if name.StartsWith "Curse:" then Mods.more Ctx.empty [ Named "CurseEffectOnSelf" ] db else 1.0
+                        statuses.Id name, stacks, mods |> List.map (Mod.scaled k)) })
+        let enemyIds = Dictionary<string, int>()
+        enemies |> Array.iteri (fun i e -> enemyIds.[e.Name] <- i)
+
+        // ---- skills ----
+        let consumed = all |> List.choose (fun s -> s.Consumes) |> List.distinct
+        for charge in consumed do
+            buff charge |> ignore
+            buffs.Id("Consumed" + charge + "Recently") |> ignore
+        let skills =
+            all
+            |> List.map (fun s ->
+                let flag (name: string) = s.Mods |> List.exists (fun m -> m.Stat = Named name)
+                // (as `Sim.skillStacks`: a part counts like the skill it belongs to)
+                let stackCharge =
+                    s.Consumes
+                    |> Option.orElse (player.Skills |> List.tryPick (fun o -> if o.Parts |> List.exists (fun p -> p.Name = s.Name) then o.Consumes else None))
+                let stackExtra =
+                    match stackCharge with
+                    | Some charge ->
+                        let ctx = { Ctx.empty with SkillName = s.Name; SkillTags = s.Tags }
+                        int (Mods.sumBase ctx [ Named("Extra" + charge + "sConsumed") ] (ModDb.ofList (player.Mods @ s.Mods)))
+                    | None -> 0
+                { Skill = s
+                  Db = ModDb.ofList (player.Mods @ s.Mods)
+                  Parts = (s :: s.Parts) |> List.map (fun p -> skillIds.[p.Name]) |> Array.ofList
+                  Consumes = (match s.Consumes with Some c -> buffs.Id c | None -> -1)
+                  StackCharge = stackCharge |> Option.defaultValue ""
+                  StackExtra = stackExtra
+                  Pattern = Map.tryFind s.Name player.HitPattern |> Option.defaultValue (s.Hits |> List.map (fun (f, m) -> DuringUse f, m))
+                  CostCtx = { Ctx.empty with SkillTags = s.Tags; SkillName = s.Name }
+                  Source = sources.Id(s.Name + " (hit)")
+                  CUses = counts.Id("uses:" + s.Name)
+                  CHits = counts.Id("hits:" + s.Name)
+                  CCrits = counts.Id("crits:" + s.Name)
+                  CMiss = counts.Id("miss:" + s.Name)
+                  CTrigger = counts.Id("trigger:" + s.Name)
+                  CAftershock = counts.Id("aftershock:" + s.Name)
+                  CCannotAfford = counts.Id("cannot afford:" + s.Name)
+                  CKept = (match s.Consumes with Some c -> counts.Id("kept:" + c) | None -> -1)
+                  CConsumed = (match s.Consumes with Some c -> counts.Id("consumed:" + c) | None -> -1)
+                  ConsumedRecently = (match s.Consumes with Some c -> buffs.Id("Consumed" + c + "Recently") | None -> -1)
+                  StrikeKey = "S|" + player.Name + "|" + s.Name
+                  ConsumeKey = "C|" + player.Name + "|" + s.Name
+                  RollKey = player.Name + "|" + s.Name
+                  Sustained = s.Tags.Contains(Tag "Type:Sustained")
+                  IsAttack = s.Tags.Contains Attack
+                  IsSlam = s.Tags.Contains Slam
+                  Passing = (match s.Delivery with Projectiles p -> p.Passing > 0.0 && p.HitInterval <= 0.0 | _ -> false)
+                  Dots =
+                    s.Dots |> Map.toList |> List.map (fun (t, perSecond) ->
+                        let label = sprintf "%s (%s over time)" s.Name ((DamageType.name t).ToLowerInvariant())
+                        t, perSecond, label, sources.Id label)
+                  OncePerUse = flag "OncePerUse"
+                  OnlyTriggered = flag "OnlyTriggered"
+                  NotEnraged = flag "NotEnraged"
+                  NotWithCharge = flag "NotWithCharge"
+                  WithCharge = s.Name.EndsWith "-Charged" || flag "OnlyWithCharge"
+                  Explosion = s.Name.EndsWith ": Explosion"
+                  HasChargedPart = s.Parts |> List.exists (fun p -> p.Name.EndsWith "-Charged")
+                  NeedsCharge = flag "NeedsCharge" })
+            |> Array.ofList
+        let rotation = player.Rotation |> List.map (fun step -> skillId "a step" step.Use, step.When) |> Array.ofList
+
+        // ---- the names are all known now ----
+        let gainedRecently = buffs.Names |> Array.map (fun n -> if n.EndsWith "Charge" then buffs.Id("Gained" + n + "Recently") else -1)
+        let buffNames = buffs.Names
+        let gainedRecently = Array.init buffNames.Length (fun i -> if i < gainedRecently.Length then gainedRecently.[i] else -1)
+        let cGained = buffNames |> Array.map (fun n -> counts.Id("gained:" + n))
+        let cExpired = buffNames |> Array.map (fun n -> if n.EndsWith "Charge" then counts.Id("expired:" + n) else -1)
+        let cFlaskMana = counts.Id "flask:mana"
+        let cPoolLoss = counts.Id "pool loss on use"
+        let cAborted = counts.Id "aborted: too many events"
+        let statusNames = statuses.Names
+        let fixCurses (r: CRule) =
+            let rec fix (re: Re) =
+                match re with
+                | RApplyCurse (id, duration, mods, _, limit, count) ->
+                    let prefix = curses |> Seq.find (fun (_, i) -> i = id) |> fst
+                    let others = statuses.Order |> Array.filter (fun i -> i <> id && statusNames.[i].StartsWith prefix)
+                    RApplyCurse(id, duration, mods, others, limit, count)
+                | RSpendStack (b, next) -> RSpendStack(b, fix next)
+                | RIfEnemyHas (st, next) -> RIfEnemyHas(st, fix next)
+                | RIfBuff (b, next) -> RIfBuff(b, fix next)
+                | other -> other
+            { r with Re = fix r.Re }
+        if no.Count > 0 then Error(List.ofSeq no)
+        else
+            let program : Program =
+                { Fight = fight
+                  Vitals = player.Vitals
+                  BuffNames = buffNames
+                  BuffOrder = buffs.Order
+                  StatusNames = statusNames
+                  StatusOrder = statuses.Order
+                  StatusIds = statuses.Ids
+                  StatusCurse = statusNames |> Array.map (fun n -> n.StartsWith "Curse:")
+                  StatusMark = statusNames |> Array.map (fun n -> n.StartsWith "Mark:")
+                  StatusExposure = statusNames |> Array.map (fun n -> n.StartsWith "Exposure:")
+                  Skills = skills
+                  FirstSkill = (if player.Skills.IsEmpty then -1 else 0)
+                  Rotation = rotation
+                  OnUse = onUse |> Array.map fixCurses
+                  OnHit = onHit |> Array.map fixCurses
+                  OnCrit = onCrit |> Array.map fixCurses
+                  OnKill = onKill |> Array.map fixCurses
+                  OnKillOf = onKillOf |> Array.map fixCurses
+                  OnInflict = onInflict |> Array.map (Array.map fixCurses)
+                  Enemies = enemyInfos
+                  EnemyIds = enemyIds
+                  Cycles = cycles
+                  Archons = archons
+                  Resources = resources
+                  ResourceSeconds = buffNames |> Array.map (fun n -> Map.tryFind n player.ResourceDurations |> Option.defaultValue nan)
+                  ResourceMax = buffNames |> Array.map (fun n -> Map.tryFind n player.MaxResources |> Option.defaultValue System.Int32.MinValue)
+                  Timed = buffs.Order |> Array.filter (fun i -> player.ResourceDurations.ContainsKey buffNames.[i])
+                  GainedRecently = gainedRecently
+                  IsCharge = buffNames |> Array.map (fun n -> n.EndsWith "Charge")
+                  ExtraChance = buffNames |> Array.map (fun n -> [ Named("ExtraChargeChance:" + n); Named "ExtraChargeChance:Any" ])
+                  CGained = cGained
+                  CExpired = cExpired
+                  AilmentSource = ailmentSource
+                  AilmentStatus = ailmentStatus
+                  AilmentResistant = ailmentResistant
+                  CInflict = cInflict
+                  ExposureStatus = exposureStatus
+                  BRage = bRage
+                  BHit = bRecently.[0]
+                  BNonCrit = bRecently.[1]
+                  BCrit = bRecently.[2]
+                  BCrit8 = bRecently.[3]
+                  BKilled = bRecently.[4]
+                  BTriggered = bTriggered
+                  BStates = bStates
+                  BCharges = bCharges
+                  BConstantMana = bConstantMana
+                  BConstantLife = bConstantLife
+                  SShocked = ailmentStatus.[ailmentIndex Shock]
+                  SChilled = ailmentStatus.[ailmentIndex Chill]
+                  SArmourBreak = sArmourBreak
+                  SFullyBroken = sFullyBroken
+                  CFlaskMana = cFlaskMana
+                  CPoolLoss = cPoolLoss
+                  CAborted = cAborted
+                  HasKillOf = onKillOf.Length > 0
+                  CountNames = counts.Names
+                  SourceNames = sources.Names }
+            Ok program
+
+    /// Everything about a fight that this engine does not play yet (empty: it compiles).
+    let unsupported (fight: Fight) : string list =
+        match build fight with
+        | Ok _ -> []
+        | Error reasons -> reasons
+
+    /// A fight as a program for `run`, or what the fight has that is not built here. A fight
+    /// that compiles gives the reference's result exactly.
+    let compile (fight: Fight) : Result<Program, string> =
+        match build fight with
+        | Ok p -> Ok p
+        | Error reasons -> Error(String.concat "; " reasons)
+
+    // ---- a run ----
+
+    let private growInts (xs: int[]) : int[] =
+        let ys = Array.zeroCreate (xs.Length * 2)
+        for i in 0 .. xs.Length - 1 do
+            ys.[i] <- xs.[i]
+        ys
+
+    let private growFloats (xs: float[]) : float[] =
+        let ys = Array.zeroCreate (xs.Length * 2)
+        for i in 0 .. xs.Length - 1 do
+            ys.[i] <- xs.[i]
+        ys
+
+    /// The events that wait, the earliest first (of two at the same time, the one that was
+    /// put in first): a binary heap of slots, an event's values in the slot's place of each array.
+    type private Queue() =
+        let mutable heap : int[] = Array.zeroCreate 64
+        let mutable count = 0
+        let mutable time : float[] = Array.zeroCreate 64
+        let mutable seq : int[] = Array.zeroCreate 64
+        let mutable kind : int[] = Array.zeroCreate 64
+        let mutable a : int[] = Array.zeroCreate 64
+        let mutable b : int[] = Array.zeroCreate 64
+        let mutable x : float[] = Array.zeroCreate 64
+        let mutable y : float[] = Array.zeroCreate 64
+        let mutable free : int[] = Array.init 64 id
+        let mutable freeCount = 64
+        let before i j = time.[i] < time.[j] || (time.[i] = time.[j] && seq.[i] < seq.[j])
+        // the event that was taken last
+        member val Time = 0.0 with get, set
+        member val Seq = 0 with get, set
+        member val Kind = 0 with get, set
+        member val A = 0 with get, set
+        member val B = 0 with get, set
+        member val X = 0.0 with get, set
+        member val Y = 0.0 with get, set
+        member _.Count = count
+        /// When the earliest is due.
+        member _.Next = time.[heap.[0]]
+        member _.Push(t: float, sq: int, k: int, va: int, vb: int, vx: float, vy: float) =
+            if freeCount = 0 then
+                let n = time.Length
+                time <- growFloats time
+                seq <- growInts seq
+                kind <- growInts kind
+                a <- growInts a
+                b <- growInts b
+                x <- growFloats x
+                y <- growFloats y
+                heap <- growInts heap
+                free <- growInts free
+                for i in 0 .. n - 1 do
+                    free.[i] <- n + i
+                freeCount <- n
+            freeCount <- freeCount - 1
+            let slot = free.[freeCount]
+            time.[slot] <- t
+            seq.[slot] <- sq
+            kind.[slot] <- k
+            a.[slot] <- va
+            b.[slot] <- vb
+            x.[slot] <- vx
+            y.[slot] <- vy
+            let mutable i = count
+            count <- count + 1
+            heap.[i] <- slot
+            let mutable go = true
+            while go && i > 0 do
+                let parent = (i - 1) / 2
+                if before heap.[i] heap.[parent] then
+                    let h = heap.[i]
+                    heap.[i] <- heap.[parent]
+                    heap.[parent] <- h
+                    i <- parent
+                else go <- false
+        member this.Pop() =
+            let slot = heap.[0]
+            this.Time <- time.[slot]
+            this.Seq <- seq.[slot]
+            this.Kind <- kind.[slot]
+            this.A <- a.[slot]
+            this.B <- b.[slot]
+            this.X <- x.[slot]
+            this.Y <- y.[slot]
+            free.[freeCount] <- slot
+            freeCount <- freeCount + 1
+            count <- count - 1
+            if count > 0 then
+                heap.[0] <- heap.[count]
+                let mutable i = 0
+                let mutable go = true
+                while go do
+                    let l = 2 * i + 1
+                    let r = l + 1
+                    let mutable least = i
+                    if l < count && before heap.[l] heap.[least] then least <- l
+                    if r < count && before heap.[r] heap.[least] then least <- r
+                    if least <> i then
+                        let h = heap.[i]
+                        heap.[i] <- heap.[least]
+                        heap.[least] <- h
+                        i <- least
+                    else go <- false
+
+    /// Damage over time on an enemy (`DotInstance`, its label a number).
+    type private FDot =
+        { Ailing: Ailment option
+          Label: int
+          Of: DamageType
+          Dps: float
+          Until: float
+          Most: int }
+
+    type private Foe =
+        { Info: EnemyInfo
+          Index: int
+          mutable Life: float
+          // its debuffs, by status
+          Has: bool[]
+          Stacks: int[]
+          Expires: float[]
+          DMods: Mod list[]
+          /// Nothing of its debuffs and damage over time runs out before this.
+          mutable Soonest: float
+          mutable Dots: FDot list
+          /// The damage over time that counts (`Sim.activeDots`), and the list it was worked out from.
+          mutable Active: FDot list
+          mutable ActiveOf: FDot list
+          Buildup: float[]
+          mutable StunBuildupAt: float
+          mutable Flammability: (float * float) list
+          mutable Entropy: float
+          mutable EntropyAt: float
+          mutable HasEntropy: bool
+          /// Its statuses (`Sim.status`) with their numbers, good until a debuff or the damage
+          /// over time changes, or its life crosses one of the marks that are statuses.
+          mutable Status: Map<string, int>
+          mutable StatusKeys: int[]
+          mutable StatusStale: bool
+          /// The damage over time the statuses were worked out with.
+          mutable StatusDots: FDot list
+          mutable WasCullable: bool
+          mutable WasLow: bool
+          mutable WasFull: bool
+          /// The statuses as a hit sees them (with "Isolated" and "Close"), and what they were made from.
+          mutable HitStatus: Map<string, int>
+          mutable HitStatusOf: Map<string, int>
+          mutable HitIsolated: bool
+          mutable HitStatusMade: bool
+          /// The enemy as a defender (`Sim.defender`), good until a debuff's mods or stacks change.
+          mutable Defender: Defender
+          mutable DefenderStale: bool
+          /// By damage type: what it takes of damage over time (NaN: not worked out for this defender).
+          DotTaken: float[] }
+
+    type private State =
+        { P: Program
+          Seed: uint32
+          Rng: Rng
+          Queue: Queue
+          Tell: (float -> string -> string -> string -> float -> unit) option
+          mutable Time: float
+          mutable Seq: int
+          Foes: Foe[]
+          mutable AliveCount: int
+          /// The living enemies' definitions in the order of their names, and the one aimed at
+          /// (-1: none), good until one dies.
+          mutable Living: EnemyDef list
+          mutable Aimed: int
+          mutable AliveStale: bool
+          Kills: ResizeArray<string * Rarity * float>
+          // the player's buffs, by buff
+          BHas: bool[]
+          BStacks: int[]
+          BExpires: float[]
+          BMods: Mod list[]
+          BPaused: float[]
+          mutable BSoonest: float
+          /// The buffs' stacks as a map, good until a buff comes, goes or changes its stacks.
+          mutable BuffMap: Map<string, int>
+          mutable BuffMapStale: bool
+          /// Counts the changes to what the buffs' mods are: a skill's mods with the buffs
+          /// (`Sim.skillDb`) are good while this is what it was when they were made.
+          mutable ModsVersion: int
+          Dbs: ModDb[]
+          DbVersion: int[]
+          Cooldowns: float[]
+          Recharges: float list[]
+          mutable ArchonRecovery: float
+          mutable Energy: Map<string, float>
+          mutable LastUsed: int
+          CritRoll: float[]
+          HasCritRoll: bool[]
+          Rolled: int[]
+          StrikeStream: int[]
+          ConsumeStream: int[]
+          // the results
+          mutable Evened: float
+          Damage: float[]
+          DamageSeen: bool[]
+          ByType: float[]
+          ByTypeSeen: bool[]
+          Counts: int[]
+          Uptime: float[]
+          UptimeSeen: bool[]
+          // the player's pools (only with vitals)
+          mutable Life: float
+          mutable Shield: float
+          mutable Mana: float
+          mutable LastHit: float
+          mutable Starved: float
+          mutable FlaskCharges: float
+          mutable FlaskUntil: float
+          mutable FlaskRate: float
+          mutable StrikeLeech: float
+          mutable StrikeLifeLeech: float
+          mutable Ward: float
+          mutable LifeFlaskCharges: float
+          mutable LifeFlaskUntil: float
+          mutable LifeFlaskRate: float
+          mutable Recoups: (float * float * string) list
+          /// Mana gained: regen, leech, flask, recoup, hit, kill, consume.
+          Gained: float[]
+          GainedSeen: bool[] }
+
+    let private gainedNames = [| "regen"; "leech"; "flask"; "recoup"; "hit"; "kill"; "consume" |]
+
+    let private schedule (s: State) (t: float) kind a b x y =
+        s.Queue.Push(t, s.Seq, kind, a, b, x, y)
+        s.Seq <- s.Seq + 1
+
+    let private expireAt (s: State) (t: float) = schedule s t EExpire 0 0 0.0 0.0
+
+    let inline private bump (s: State) (count: int) = s.Counts.[count] <- s.Counts.[count] + 1
+
+    let private addDamage (s: State) (source: int) (v: float) =
+        s.Damage.[source] <- s.Damage.[source] + v
+        s.DamageSeen.[source] <- true
+
+    let private addByType (s: State) (t: int) (v: float) =
+        s.ByType.[t] <- s.ByType.[t] + v
+        s.ByTypeSeen.[t] <- true
+
+    let private addGained (s: State) (slot: int) (v: float) =
+        s.Gained.[slot] <- s.Gained.[slot] + v
+        s.GainedSeen.[slot] <- true
+
+    // ---- the player's buffs ----
+
+    let private setBuff (s: State) (id: int) (stacks: int) (expires: float) (mods: Mod list) =
+        let had = s.BHas.[id]
+        if not had || s.BStacks.[id] <> stacks then s.BuffMapStale <- true
+        if not (had && s.BStacks.[id] = stacks && obj.ReferenceEquals(s.BMods.[id], mods)) then
+            if not mods.IsEmpty || (had && not s.BMods.[id].IsEmpty) || id = s.P.BRage then s.ModsVersion <- s.ModsVersion + 1
+        s.BHas.[id] <- true
+        s.BStacks.[id] <- stacks
+        s.BExpires.[id] <- expires
+        s.BMods.[id] <- mods
+        if not (expires >= s.BSoonest) then s.BSoonest <- expires
+
+    let private removeBuff (s: State) (id: int) =
+        if s.BHas.[id] then
+            s.BuffMapStale <- true
+            if not s.BMods.[id].IsEmpty || id = s.P.BRage then s.ModsVersion <- s.ModsVersion + 1
+            s.BHas.[id] <- false
+            s.BStacks.[id] <- 0
+            s.BMods.[id] <- []
+
+    /// A buff's stacks, whether its time is up or not (`Sim.stacksOf`).
+    let inline private stacksOf (s: State) (id: int) = if s.BHas.[id] then s.BStacks.[id] else 0
+
+    /// Whether a buff has stacks and time left.
+    let inline private held (s: State) (id: int) = s.BHas.[id] && s.BStacks.[id] > 0 && s.BExpires.[id] > s.Time
+
+    let private buffMap (s: State) : Map<string, int> =
+        if s.BuffMapStale then
+            let mutable m = Map.empty
+            for id in 0 .. s.BHas.Length - 1 do
+                if s.BHas.[id] then m <- Map.add s.P.BuffNames.[id] s.BStacks.[id] m
+            s.BuffMap <- m
+            s.BuffMapStale <- false
+        s.BuffMap
+
+    /// Buff stacks as a skill sees them (`Sim.skillStacks`).
+    let private skillStacks (s: State) (sid: int) : Map<string, int> =
+        let stacks = buffMap s
+        let info = s.P.Skills.[sid]
+        if info.StackExtra > 0 then
+            match Map.tryFind info.StackCharge stacks with
+            | Some n when n > 0 -> Map.add info.StackCharge (n + info.StackExtra) stacks
+            | _ -> stacks
+        else stacks
+
+    /// The player's mods while using a skill (`Sim.skillDb`): made the way the reference
+    /// makes them, so that every sum over them adds in the same order.
+    let private skillDb (s: State) (sid: int) : ModDb =
+        if s.DbVersion.[sid] = s.ModsVersion then s.Dbs.[sid]
+        else
+            let p = s.P
+            let buffMods =
+                [ for id in p.BuffOrder do
+                    if s.BHas.[id] && not s.BMods.[id].IsEmpty then
+                        let k = float s.BStacks.[id]
+                        for m in s.BMods.[id] -> Mod.scaled k m ]
+            let db = ModDb.addList buffMods p.Skills.[sid].Db
+            let db =
+                if s.BHas.[p.BRage] && s.BStacks.[p.BRage] > 0 then
+                    let effect = Mods.mult Ctx.empty [ Named "RageEffect" ] db
+                    let more = floor (float s.BStacks.[p.BRage] * effect) * Constants.moreAttackDamagePerRage
+                    ModDb.add db (Mod.more (Damage AllDamage) more |> Mod.whenever (SkillIs Attack) |> Mod.from "Rage")
+                else db
+            s.Dbs.[sid] <- db
+            s.DbVersion.[sid] <- s.ModsVersion
+            db
+
+    // ---- enemies ----
+
+    let private setDebuff (e: Foe) (id: int) (stacks: int) (expires: float) (mods: Mod list) =
+        let had = e.Has.[id]
+        if not had || e.Stacks.[id] <> stacks then e.StatusStale <- true
+        if not (had && e.Stacks.[id] = stacks && obj.ReferenceEquals(e.DMods.[id], mods)) then
+            if not mods.IsEmpty || (had && not e.DMods.[id].IsEmpty) then e.DefenderStale <- true
+        e.Has.[id] <- true
+        e.Stacks.[id] <- stacks
+        e.Expires.[id] <- expires
+        e.DMods.[id] <- mods
+        if not (expires >= e.Soonest) then e.Soonest <- expires
+
+    let private removeDebuff (e: Foe) (id: int) =
+        if e.Has.[id] then
+            e.StatusStale <- true
+            if not e.DMods.[id].IsEmpty then e.DefenderStale <- true
+            e.Has.[id] <- false
+            e.Stacks.[id] <- 0
+            e.DMods.[id] <- []
+
+    /// A debuff comes or stacks, for so long (`Sim.addDebuff`).
+    let private addDebuff (s: State) (e: Foe) (id: int) (duration: float) (maxStacks: int) (mods: Mod list) =
+        let stacks = if e.Has.[id] && e.Expires.[id] > s.Time then min maxStacks (e.Stacks.[id] + 1) else 1
+        setDebuff e id stacks (s.Time + duration) mods
+        expireAt s (s.Time + duration)
+
+    /// The damage over time that counts: the strongest of each label, as many as may stack
+    /// (`Sim.activeDots`, in its order).
+    let private activeDots (e: Foe) : FDot list =
+        if obj.ReferenceEquals(e.ActiveOf, e.Dots) then e.Active
+        elif e.Dots.IsEmpty then
+            e.Active <- []
+            e.ActiveOf <- e.Dots
+            []
+        else
+            let labels = ResizeArray<int>()
+            let groups = ResizeArray<ResizeArray<FDot>>()
+            for d in e.Dots do
+                let mutable g = -1
+                for i in 0 .. labels.Count - 1 do
+                    if g < 0 && labels.[i] = d.Label then g <- i
+                if g < 0 then
+                    labels.Add d.Label
+                    groups.Add(ResizeArray<FDot>())
+                    g <- labels.Count - 1
+                groups.[g].Add d
+            let active =
+                [ for ds in groups do
+                    let mutable limit = ds.[0].Most
+                    for d in ds do
+                        if d.Most > limit then limit <- d.Most
+                    if limit > 0 then
+                        let top = ResizeArray<FDot>()
+                        for d in ds do
+                            if top.Count < limit || d.Dps > top.[top.Count - 1].Dps then
+                                let mutable at = top.Count
+                                while at > 0 && top.[at - 1].Dps < d.Dps do
+                                    at <- at - 1
+                                top.Insert(at, d)
+                                if top.Count > limit then top.RemoveAt(top.Count - 1)
+                        yield! top ]
+            e.Active <- active
+            e.ActiveOf <- e.Dots
+            active
+
+    /// An enemy's statuses (`Sim.statusOf`).
+    let private status (s: State) (e: Foe) : Map<string, int> =
+        let def = e.Info.Def
+        let cullable = e.Life <= e.Info.CullLife
+        let low = e.Life <= 0.35 * def.Life
+        let full = e.Life >= def.Life
+        if e.StatusStale || not (obj.ReferenceEquals(e.StatusDots, e.Dots)) || cullable <> e.WasCullable || low <> e.WasLow || full <> e.WasFull then
+            let p = s.P
+            let mutable m : Map<string, int> = Map.empty
+            let mutable cursed = false
+            let mutable marked = false
+            let mutable exposed = false
+            for id in 0 .. e.Has.Length - 1 do
+                if e.Has.[id] then
+                    m <- Map.add p.StatusNames.[id] e.Stacks.[id] m
+                    if p.StatusCurse.[id] then cursed <- true
+                    if p.StatusMark.[id] then marked <- true
+                    if p.StatusExposure.[id] then exposed <- true
+            let m =
+                activeDots e
+                |> List.choose (fun d -> d.Ailing |> Option.map Ailment.status)
+                |> List.countBy id
+                |> List.fold (fun m (k, n) -> Map.add k n m) m
+            let ailing = m |> Map.exists (fun k _ -> allAilments |> List.exists (fun a -> Ailment.status a = k))
+            let m =
+                m
+                |> fun m -> if def.Moving then Map.add "Moving" 1 m else m
+                |> fun m -> if cullable then Map.add "Cullable" 1 m else m
+                |> fun m -> if ailing then Map.add "AnyAilment" 1 m else m
+                |> fun m -> if cursed then Map.add "Cursed" 1 m else m
+                |> fun m -> if marked then Map.add "Marked" 1 m else m
+                |> fun m -> if [ "Frozen"; "HeavilyStunned"; "Electrocuted"; "Pinned" ] |> List.exists m.ContainsKey then Map.add "Immobilised" 1 m else m
+                |> fun m ->
+                    match [ "Ignited"; "Chilled"; "Frozen"; "Shocked"; "Electrocuted" ] |> List.filter m.ContainsKey |> List.length with
+                    | 0 -> m
+                    | n -> Map.add "ElementalAilments" n m
+                |> fun m -> if exposed then Map.add "Exposed" 1 m else m
+                |> fun m -> if def.Rarity = Rare || def.Rarity = Unique then Map.add "RareOrUnique" 1 m else m
+                |> fun m -> if low then Map.add "LowLife" 1 m else m
+                |> fun m -> if full then Map.add "FullLife" 1 m else m
+            e.Status <- m
+            e.StatusKeys <- m |> Map.toArray |> Array.map (fun (k, _) -> p.StatusIds.[k])
+            e.StatusStale <- false
+            e.StatusDots <- e.Dots
+            e.WasCullable <- cullable
+            e.WasLow <- low
+            e.WasFull <- full
+        e.Status
+
+    /// An enemy as a defender: its own mods and its debuffs' (`Sim.defender`).
+    let private defender (s: State) (e: Foe) : Defender =
+        if e.DefenderStale then
+            let debuffMods =
+                [ for id in s.P.StatusOrder do
+                    if e.Has.[id] && not e.DMods.[id].IsEmpty then
+                        let k = float e.Stacks.[id]
+                        for m in e.DMods.[id] -> Mod.scaled k m ]
+            e.Defender <- { Level = e.Info.Def.Level; Mods = ModDb.addList debuffMods e.Info.Db }
+            e.DefenderStale <- false
+            for i in 0 .. 4 do
+                e.DotTaken.[i] <- nan
+        e.Defender
+
+    let private kill (s: State) (e: Foe) (at: float) =
+        e.Life <- 0.0
+        s.Kills.Add((e.Info.Def.Name, e.Info.Def.Rarity, at))
+        s.AliveCount <- s.AliveCount - 1
+        s.AliveStale <- true
+
+    let private refreshAlive (s: State) =
+        if s.AliveStale then
+            s.Living <- [ for e in s.Foes do if e.Life > 0.0 then yield e.Info.Def ]
+            s.Aimed <-
+                match Geometry.aim s.P.Fight.Targeting s.Living with
+                | Some d -> s.P.EnemyIds.[d.Name]
+                | None -> -1
+            s.AliveStale <- false
+
+    let private living (s: State) : EnemyDef list =
+        refreshAlive s
+        s.Living
+
+    /// The enemy aimed at (`Sim.aimed`; nothing here aims a trigger at its cause).
+    let private aimed (s: State) : int =
+        refreshAlive s
+        s.Aimed
+
+    // ---- time passing ----
+
+    /// The clock goes to t: damage over time, and how long each status lasted (`Sim.advance`).
+    let private advance (s: State) (t: float) =
+        let dt = t - s.Time
+        if dt > 0.0 then
+            let n = float s.AliveCount
+            for e in s.Foes do
+                if e.Life > 0.0 then
+                    if e.Dots.IsEmpty then
+                        status s e |> ignore
+                        let share = dt / n
+                        for k in e.StatusKeys do
+                            s.Uptime.[k] <- s.Uptime.[k] + share
+                            s.UptimeSeen.[k] <- true
+                    else
+                        let def = defender s e
+                        let bleedK = if e.Info.Def.Moving then Constants.bleedMovingMultiplier else 1.0
+                        let active = activeDots e
+                        let rate (d: FDot) =
+                            let k = if d.Ailing = Some Bleed then bleedK else 1.0
+                            let i = typeIndex d.Of
+                            if System.Double.IsNaN e.DotTaken.[i] then e.DotTaken.[i] <- Ailments.dotTakenMult def d.Of
+                            d.Dps * k * e.DotTaken.[i]
+                        let mutable dps = 0.0
+                        for d in active do
+                            dps <- dps + rate d
+                        let span = if dps > 0.0 && e.Life <= dps * dt then e.Life / dps else dt
+                        let life = e.Life - dps * span
+                        let dead = life <= 1e-9
+                        status s e |> ignore
+                        let keys = e.StatusKeys
+                        for d in active do
+                            addDamage s d.Label (rate d * span)
+                        for d in active do
+                            addByType s (typeIndex d.Of) (rate d * span)
+                        let share = span / n
+                        for k in keys do
+                            s.Uptime.[k] <- s.Uptime.[k] + share
+                            s.UptimeSeen.[k] <- true
+                        if dead then kill s e (s.Time + span) else e.Life <- life
+            s.Time <- t
+
+    /// The player's recovery during dt, ending now (`Sim.recover`; nothing here hurts the
+    /// player, so there is no damage over time on it).
+    let private recover (s: State) (dt: float) =
+        match s.P.Vitals with
+        | Some v when dt > 0.0 ->
+            match s.P.Fight.Player.ManaFlask with
+            | Some f -> s.FlaskCharges <- min f.MaxCharges (s.FlaskCharges + f.ChargesPerSecond * f.ChargeGainMult * dt)
+            | None -> ()
+            let t0 = s.Time - dt
+            let overlap until = max 0.0 (min s.Time until - t0)
+            let stream (pool: string) =
+                if s.Recoups.IsEmpty then 0.0
+                else
+                    let parts = s.Recoups |> List.filter (fun (_, _, pl) -> pl = pool) |> List.map (fun (until, rate, _) -> rate * overlap until)
+                    if pool.StartsWith "Leech" then (if parts.IsEmpty then 0.0 else List.max parts) else List.sum parts
+            let leech = stream "LeechMana"
+            let regen = v.ManaRegen * dt
+            let mana = min v.Mana (s.Mana + regen + leech)
+            let es =
+                (if s.Time - s.LastHit >= v.ESRechargeDelay then s.Shield + v.EnergyShieldRecharge * dt else s.Shield)
+                + v.ESRegen * dt + stream "ES" + stream "ShroudES"
+                |> min (max s.Shield v.EnergyShield)
+            let flask = s.FlaskRate * overlap s.FlaskUntil
+            let recouped = stream "Mana"
+            let mana = min v.Mana (mana + flask + recouped)
+            addGained s 0 (min regen (v.Mana - s.Mana))
+            addGained s 1 leech
+            addGained s 2 flask
+            if recouped > 0.0 then addGained s 3 recouped
+            let lifeLeech = stream "LeechLife"
+            let lifeRecharge = if v.LifeRecharge > 0.0 && s.Time - s.LastHit >= v.ESRechargeDelay then v.LifeRecharge * dt else 0.0
+            let lifeGain = v.LifeRegen * dt + lifeLeech + lifeRecharge + s.LifeFlaskRate * overlap s.LifeFlaskUntil + stream "Life"
+            let lifeCharges =
+                match v.LifeFlask with
+                | Some f -> min f.MaxCharges (s.LifeFlaskCharges + f.ChargesPerSecond * f.ChargeGainMult * dt)
+                | None -> s.LifeFlaskCharges
+            s.Mana <- mana
+            s.Shield <- es
+            s.Life <- min (max s.Life v.Life) (s.Life + lifeGain)
+            s.LifeFlaskCharges <- lifeCharges
+            s.Ward <- (if s.Ward >= v.Ward then s.Ward else min v.Ward (s.Ward + v.WardRegen * dt))
+            if s.Recoups |> List.exists (fun (until, _, _) -> not (until > s.Time)) then
+                s.Recoups <- s.Recoups |> List.filter (fun (until, _, _) -> until > s.Time)
+        | _ -> ()
+
+    let private gainMana (s: State) (v: PlayerStats) (slot: int) (amount: float) =
+        if amount > 0.0 then
+            let m = min v.Mana (s.Mana + amount)
+            addGained s slot (m - s.Mana)
+            s.Mana <- m
+
+    /// What has run out goes (`Sim.prune`).
+    let private prune (s: State) =
+        let p = s.P
+        for e in s.Foes do
+            if not (e.Soonest > s.Time) then
+                let mutable soonest = infinity
+                for id in 0 .. e.Has.Length - 1 do
+                    if e.Has.[id] then
+                        if e.Expires.[id] > s.Time then (if e.Expires.[id] < soonest then soonest <- e.Expires.[id])
+                        else removeDebuff e id
+                if e.Dots |> List.exists (fun d -> not (d.Until > s.Time)) then
+                    e.Dots <- e.Dots |> List.filter (fun d -> d.Until > s.Time)
+                for d in e.Dots do
+                    if d.Until < soonest then soonest <- d.Until
+                e.Soonest <- soonest
+        if not (s.BSoonest > s.Time) then
+            let mutable soonest = infinity
+            for id in 0 .. s.BHas.Length - 1 do
+                if s.BHas.[id] then
+                    if s.BExpires.[id] > s.Time then (if s.BExpires.[id] < soonest then soonest <- s.BExpires.[id])
+                    else
+                        if s.BExpires.[id] < infinity && p.CExpired.[id] >= 0 then bump s p.CExpired.[id]
+                        removeBuff s id
+            s.BSoonest <- soonest
+
+    // ---- effects ----
+
+    /// A buff comes or stacks, for so long (`Sim.stackEffect` on the actor's buffs).
+    let private grantBuff (s: State) (id: int) (duration: float) (maxStacks: int) (mods: Mod list) =
+        let stacks = if s.BHas.[id] && s.BExpires.[id] > s.Time then min maxStacks (s.BStacks.[id] + 1) else 1
+        setBuff s id stacks (s.Time + duration) mods
+        expireAt s (s.Time + duration)
+
+    let private markStatus (s: State) (id: int) =
+        setBuff s id 1 (s.Time + 4.0) []
+        expireAt s (s.Time + 4.0)
+
+    let private mark (s: State) (id: int) (seconds: float) =
+        setBuff s id 1 (s.Time + seconds) []
+        expireAt s (s.Time + seconds)
+
+    /// A resource's stacks are set (`Sim.setStacksWith`).
+    let private setStacks (s: State) (refresh: bool) (id: int) (n: int) =
+        let d = s.P.ResourceSeconds.[id]
+        let lasts = not (System.Double.IsNaN d)
+        if n <= 0 then removeBuff s id
+        else
+            let expires =
+                if lasts && refresh then s.Time + d
+                elif s.BHas.[id] then s.BExpires.[id]
+                elif lasts then s.Time + d
+                else infinity
+            setBuff s id n expires []
+        if lasts && refresh && n > 0 then expireAt s (s.Time + d)
+
+    /// Exposure on an enemy: the strongest applies (`Sim.expose`).
+    let private expose (s: State) (target: int) (dt: DamageType) (amount: float) (duration: float) =
+        let e = s.Foes.[target]
+        if e.Life > 0.0 then
+            let k = e.Info.ExposureK
+            let id = s.P.ExposureStatus.[typeIndex dt]
+            let current =
+                if e.Has.[id] && e.Expires.[id] > s.Time then e.DMods.[id] |> List.sumBy (fun m -> -m.Value) else 0.0
+            if amount * k >= current then addDebuff s e id duration 1 [ Mod.base' (Resist dt) (-amount * k) ]
+
+    /// What a hit inflicts comes onto the enemy (`Sim.inflict`).
+    let private inflict (s: State) (e: Foe) (i: Inflict) =
+        let p = s.P
+        match i with
+        | Dot (a, t, dps, duration, maxStacks) ->
+            let d = { Ailing = Some a; Label = p.AilmentSource.[ailmentIndex a]; Of = t; Dps = dps; Until = s.Time + duration; Most = maxStacks }
+            e.Dots <- d :: e.Dots
+            if not (d.Until >= e.Soonest) then e.Soonest <- d.Until
+            expireAt s d.Until
+        | Status (Shock, magnitude, duration) ->
+            let id = p.SShocked
+            let current = if e.Has.[id] && e.Expires.[id] > s.Time then e.DMods.[id] |> List.sumBy (fun m -> m.Value) else 0.0
+            if magnitude >= current then
+                addDebuff s e id duration 1 [ Mod.inc (DamageTaken AllDamage) magnitude |> Mod.from "Shock" ]
+        | Status (Chill, magnitude, duration) ->
+            addDebuff s e p.SChilled duration 1 [ Mod.base' (Named "ChillMagnitude") magnitude ]
+        | Status (a, _, duration) -> addDebuff s e p.AilmentStatus.[ailmentIndex a] duration 1 []
+        | AddBuildup (a, pct) ->
+            let ai = ailmentIndex a
+            let had =
+                let had = e.Buildup.[ai]
+                let idle = s.Time - e.StunBuildupAt - Constants.stunDecayDelay
+                if a = HeavyStun && idle > 0.0 then max 0.0 (had - Constants.stunDecayPerSecond * idle) else had
+            if a = HeavyStun then e.StunBuildupAt <- s.Time
+            let total = had + pct
+            if total >= 100.0 && not e.Has.[p.AilmentStatus.[ai]] then
+                e.Buildup.[ai] <- 0.0
+                addDebuff s e p.AilmentStatus.[ai] (Constants.buildupDuration a) 1 []
+                let more, seconds = Constants.afterBuildup a
+                if more > 0.0 then
+                    addDebuff s e p.AilmentResistant.[ai] (Constants.buildupDuration a + seconds) 1 [ Mod.more (Named(Ailment.name a + "Threshold")) more ]
+                bump s p.CInflict.[ai]
+            else e.Buildup.[ai] <- min total 100.0
+
+    // ---- using skills ----
+
+    /// Does an attack with this chance to hit land (`Sim.lands`)?
+    let private lands (s: State) (rng: Rng) (e: Foe) (hitChance: float) : bool =
+        if hitChance >= 100.0 then true
+        else
+            let value =
+                if e.HasEntropy && s.Time - e.EntropyAt <= 100.0 * Constants.serverTick then e.Entropy
+                else floor (rng.Float() * 100.0)
+            let value = value + hitChance
+            let hit = value >= 100.0
+            e.Entropy <- (if hit then value - 100.0 else value)
+            e.EntropyAt <- s.Time
+            e.HasEntropy <- true
+            hit
+
+    let private ready (s: State) (sid: int) = s.Cooldowns.[sid] <= s.Time
+
+    let rec private react (s: State) (rng: Rng) (rules: CRule[]) (killed: string) (sid: int) (target: int) =
+        for r in rules do
+            if r.Applies.[sid] && (killed = "" || r.Killed = killed) then
+                if rng.Chance r.Chance then perform s rng sid target r.Re
+
+    and private perform (s: State) (rng: Rng) (sid: int) (target: int) (re: Re) =
+        let onTarget () = target >= 0 && s.Foes.[target].Life > 0.0
+        match re with
+        | RSpendStack (b, next) ->
+            if held s b then
+                if s.BStacks.[b] = 1 then removeBuff s b else setBuff s b (s.BStacks.[b] - 1) s.BExpires.[b] s.BMods.[b]
+                perform s rng sid target next
+        | RSetStacks (b, n) -> setBuff s b n infinity []
+        | RNone -> ()
+        | RIfBuff (b, next) -> if held s b then perform s rng sid target next
+        | RIfEnemyHas (st, next) ->
+            if onTarget () && (status s s.Foes.[target]).ContainsKey st then perform s rng sid target next
+        | RGrantBuff (b, duration, maxStacks, mods) -> grantBuff s b duration maxStacks mods
+        | RRemoveBuff b -> removeBuff s b
+        | RApplyDebuff (id, duration, maxStacks, mods, blocked) ->
+            if not blocked.[sid] && onTarget () then addDebuff s s.Foes.[target] id duration maxStacks mods
+        | RApplyCurse (id, duration, mods, others, limit, count) ->
+            if onTarget () then
+                let e = s.Foes.[target]
+                // one curse (plus "additional curses"), one mark: the oldest give way
+                let there = others |> Array.filter (fun o -> e.Has.[o] && e.Expires.[o] > s.Time) |> List.ofArray |> List.sortBy (fun o -> e.Expires.[o])
+                for o in there |> List.truncate (max 0 (there.Length + 1 - limit)) do
+                    removeDebuff e o
+                addDebuff s e id duration 1 mods.[target]
+                bump s count
+        | RApplyExposure (dt, amount, duration) -> if onTarget () then expose s target dt amount duration
+        | RGrowExposure (dt, start, perPulse, cap, every, pulses, duration) ->
+            if onTarget () then
+                for k in 1 .. pulses do
+                    schedule s (s.Time + every * float k) EExpose target (typeIndex dt) (min cap (start + perPulse * float k)) duration
+        | RRemoveDebuff id -> if onTarget () then removeDebuff s.Foes.[target] id
+        | RTrigger skill -> trigger s rng skill
+        | RGainResource (b, n) -> schedule s s.Time EGainStacks b n 0.0 0.0
+        | RDropRemnant (b, delay, extra, count) ->
+            let n = if rng.Chance extra then 2 else 1
+            bump s count
+            schedule s (s.Time + delay) EGainStacks b n 0.0 0.0
+
+    /// A use of a skill starts now, aimed at the current target (`Sim.startUse`).
+    and private startUse (s: State) (rng: Rng) (sid: int) (useTime: float) =
+        let target = aimed s
+        if target >= 0 then
+            let p = s.P
+            let info = p.Skills.[sid]
+            let skill = info.Skill
+            let foe = s.Foes.[target]
+            // the use's critical hit roll, for the skill and every part of it
+            let r = Rng(Sim.streamSeed s.Seed info.RollKey s.Rolled.[sid]).Float()
+            s.Rolled.[sid] <- s.Rolled.[sid] + 1
+            for part in info.Parts do
+                s.CritRoll.[part] <- r
+                s.HasCritRoll.[part] <- true
+            let ctx = Skill.ctx skill false (skillStacks s sid) (status s foe)
+            let mods = skillDb s sid
+            match skill.Cooldown with
+            | Some cd ->
+                let recovery = Mods.mult ctx [ CooldownRecovery ] mods
+                let uses = skill.StoredUses * (if Mods.sumBase ctx [ Named "DoubleCooldownUses" ] mods > 0.0 then 2 else 1)
+                let pending = s.Recharges.[sid] |> List.filter (fun t -> t > s.Time)
+                let start = if p.Fight.Player.ParallelUses || pending.IsEmpty then s.Time else List.max pending
+                let pending = List.sort (pending @ [ start + cd / recovery ])
+                s.Recharges.[sid] <- pending
+                // blocked once every stored use is recharging; free again when the first is back
+                s.Cooldowns.[sid] <- (if pending.Length >= uses then pending.Head else -infinity)
+            | None -> ()
+            // "Lose X% of maximum Life, Mana and Energy Shield when you use"
+            (match p.Vitals with
+             | Some v ->
+                let lose = Mods.sumBase ctx [ Named "LosePoolsOnUse" ] mods / 100.0
+                if lose > 0.0 && useTime > 0.0 then
+                    s.Life <- max (min 1.0 s.Life) (s.Life - lose * v.Life)
+                    s.Shield <- max 0.0 (s.Shield - lose * v.EnergyShield)
+                    s.Mana <- max 0.0 (s.Mana - lose * v.Mana)
+                    bump s p.CPoolLoss
+             | None -> ())
+            bump s info.CUses
+            if useTime > 0.0 then s.LastUsed <- sid
+            let times =
+                info.Pattern |> List.map (fun (timing, mult) ->
+                    (match timing with
+                     | DuringUse f -> s.Time + f * useTime + skill.HitDelay
+                     | After secs -> s.Time + secs + skill.HitDelay), mult)
+            let first = times |> List.map fst |> List.fold min infinity
+            // (the buffs are what they were when the use began: nothing above changes them)
+            let charged = info.Consumes >= 0 && stacksOf s info.Consumes > 0
+            for (at, mult) in times do
+                for part in info.Parts do
+                    let pi = p.Skills.[part]
+                    let happens =
+                        (at <= first || not pi.OncePerUse)
+                        && (part = sid || not pi.OnlyTriggered)
+                        && (if pi.NotEnraged then true
+                            elif pi.NotWithCharge then not charged
+                            elif pi.WithCharge then charged
+                            else not (info.HasChargedPart && charged && pi.Explosion))
+                    if happens then
+                        if pi.Passing then schedule s at EPassing part target mult (at - s.Time)
+                        else schedule s at EStrike part target mult 0.0
+            if info.Consumes >= 0 then
+                let last = times |> List.map fst |> List.fold max s.Time
+                schedule s (last + 1e-9) EConsume info.Consumes sid 0.0 0.0
+            react s rng p.OnUse "" sid target
+
+    and private trigger (s: State) (rng: Rng) (sid: int) =
+        if ready s sid then
+            bump s s.P.Skills.[sid].CTrigger
+            setBuff s s.P.BTriggered 1 (s.Time + 4.0) []
+            expireAt s (s.Time + 4.0)
+            startUse s rng sid 0.0
+
+    /// How long a use of the skill takes now (`Sim.useTime`).
+    let private useTime (s: State) (sid: int) : float =
+        let skill = s.P.Skills.[sid].Skill
+        let target = (let t = aimed s in if t >= 0 then status s s.Foes.[t] else Map.empty)
+        let ctx = Skill.ctx skill false (buffMap s) target
+        let db = skillDb s sid
+        let speed = Mods.mult ctx [ Speed ] db
+        skill.BaseTime / speed * (1.0 + Constants.longerPerRepeat * 0.0) + Mods.sumBase ctx [ Named "FixedUseTime" ] db
+
+    /// What the player sees when choosing a skill (`Sim.view`).
+    let private view (s: State) : View =
+        let t = aimed s
+        { Time = s.Time
+          Buffs = buffMap s
+          EnemyStatus = (if t >= 0 then status s s.Foes.[t] else Map.empty)
+          EnemyLifeFraction = (if t >= 0 then s.Foes.[t].Life / s.Foes.[t].Info.Def.Life else 0.0)
+          EnemyRarity = (if t >= 0 then s.Foes.[t].Info.Def.Rarity else Normal)
+          EnemiesAlive = s.AliveCount
+          Energy = s.Energy
+          LastUsed = (if s.LastUsed >= 0 then s.P.Skills.[s.LastUsed].Skill.Name else "") }
+
+    /// The player is free to act: the first step of the rotation that can be used and paid
+    /// for is used (`Sim.onReadyUnlocked`).
+    let private onReady (s: State) (rng: Rng) =
+        let p = s.P
+        let v = view s
+        // what a use of the skill costs now: base x increased cost / (1 + cost efficiency)
+        let costAt (sid: int) (seconds: unit -> float) =
+            let info = p.Skills.[sid]
+            let skill = info.Skill
+            let db = skillDb s sid
+            let extraCost =
+                match p.Vitals with
+                | Some pools -> pools.Mana * Mods.sumBase info.CostCtx [ Named "ExtraCostPercentOfMaxMana" ] db / 100.0
+                | None -> 0.0
+            let ownCost = skill.Cost
+            let ownCost =
+                if skill.CostPerSecond <= 0.0 then ownCost
+                else (if s.LastUsed = sid then 0.0 else ownCost) + skill.CostPerSecond * seconds ()
+            (ownCost + extraCost) * Mods.mult info.CostCtx [ ManaCost ] db / Mods.inc info.CostCtx [ ManaCostEfficiency ] db
+        let costOf (sid: int) = costAt sid (fun () -> max Constants.serverTick (useTime s sid))
+        let affordable (sid: int) =
+            match p.Vitals with
+            | Some pools when pools.CostsLife -> (let c = costOf sid in c <= 0.0 || s.Life - c >= 1.0)
+            | Some _ -> s.Mana >= costOf sid
+            | None -> true
+        let mutable firstUsable = -1
+        let mutable choice = -1
+        // (every step's condition is asked, as the reference asks them all)
+        for (sid, cond) in p.Rotation do
+            let info = p.Skills.[sid]
+            let usable = cond v && ready s sid && (not info.NeedsCharge || info.Consumes < 0 || held s info.Consumes)
+            if usable then
+                if firstUsable < 0 then firstUsable <- sid
+                if choice < 0 && affordable sid then choice <- sid
+        let choice = if choice >= 0 then choice else firstUsable
+        if choice >= 0 then
+            let sid = choice
+            let info = p.Skills.[sid]
+            // nothing is faster than a server tick (instant skills)
+            let t = max Constants.serverTick (useTime s sid)
+            let go () =
+                startUse s rng sid t
+                schedule s (s.Time + t + 0.0) EReady 0 0 0.0 0.0
+            match p.Vitals with
+            | None -> go ()
+            | Some pools ->
+                let cost = costAt sid (fun () -> t)
+                // drink the mana flask when mana is getting low and it isn't already running
+                (match p.Fight.Player.ManaFlask with
+                 | Some f when s.Mana < 2.0 * cost && s.Time >= s.FlaskUntil && s.FlaskCharges >= f.ChargesPerUse ->
+                    s.FlaskCharges <- s.FlaskCharges - f.ChargesPerUse
+                    s.FlaskUntil <- s.Time + f.Duration
+                    s.FlaskRate <- f.Amount * (1.0 - f.Instant) / f.Duration
+                    s.Mana <- min (max s.Mana pools.Mana) (s.Mana + f.Amount * f.Instant)
+                    bump s p.CFlaskMana
+                 | _ -> ())
+                if pools.CostsLife then
+                    // Blood Magic: the cost is paid with life; a skill that would kill waits
+                    if s.Life - cost >= 1.0 || cost <= 0.0 then
+                        s.Life <- s.Life - cost
+                        go ()
+                    else
+                        let wait = max Constants.serverTick 0.25
+                        s.Starved <- s.Starved + wait
+                        schedule s (s.Time + wait) EReady 0 0 0.0 0.0
+                elif s.Mana < cost && cost > pools.Mana then
+                    // costs more than the whole mana pool: this skill can never be used
+                    bump s info.CCannotAfford
+                    s.Cooldowns.[sid] <- infinity
+                    schedule s (s.Time + Constants.serverTick) EReady 0 0 0.0 0.0
+                elif s.Mana < cost then
+                    // not enough mana: wait until regeneration and leech have covered it
+                    let rate =
+                        pools.ManaRegen + (s.Recoups |> List.sumBy (fun (until, rate, pool) -> if pool = "LeechMana" && until > s.Time then rate else 0.0))
+                        + (if s.Time < s.FlaskUntil then s.FlaskRate else 0.0)
+                    let wait = max Constants.serverTick (if rate > 0.0 then (cost - s.Mana) / rate else 1.0)
+                    s.Starved <- s.Starved + wait
+                    schedule s (s.Time + wait) EReady 0 0 0.0 0.0
+                else
+                    s.Mana <- s.Mana - cost
+                    go ()
+        else
+            // Nothing usable: wait for the next cooldown, or a server tick.
+            let mutable next = infinity
+            for t in s.Cooldowns do
+                if t > s.Time && t < infinity && t < next then next <- t
+            if s.ArchonRecovery > s.Time && s.ArchonRecovery < infinity && s.ArchonRecovery < next then next <- s.ArchonRecovery
+            schedule s (if next < infinity then next else s.Time + Constants.serverTick) EReady 0 0 0.0 0.0
+
+    /// One hit on one enemy (`Sim.hitEnemy`, in its order).
+    let private hitEnemy (s: State) (rng: Rng) (sid: int) (mult: float) (target: int) =
+        let e = s.Foes.[target]
+        if e.Life > 0.0 then
+            let p = s.P
+            let info = p.Skills.[sid]
+            let skill = info.Skill
+            let def0 = e.Info.Def
+            let mods = skillDb s sid
+            // the enemy as it is before the hit: its life, its statuses
+            let lifeBefore = e.Life
+            let before = status s e
+            // Isolated: none of its allies within 6 m (keyword text)
+            let isolated =
+                let mutable alone = true
+                for o in s.Foes do
+                    if o.Life > 0.0 && o.Index <> e.Index && not (Vec.dist o.Info.Def.Position def0.Position > 60.0) then alone <- false
+                alone
+            // Close Range: within 2 m of the player (keyword text)
+            let enemyStatus =
+                if e.HitStatusMade && obj.ReferenceEquals(e.HitStatusOf, before) && e.HitIsolated = isolated then e.HitStatus
+                else
+                    let m = before |> (fun m -> if isolated then Map.add "Isolated" 1 m else m) |> (fun m -> if e.Info.Close then Map.add "Close" 1 m else m)
+                    e.HitStatus <- m
+                    e.HitStatusOf <- before
+                    e.HitIsolated <- isolated
+                    e.HitStatusMade <- true
+                    m
+            let enemyStatus =
+                let more = Mods.sumBase Ctx.empty [ Named "OpenWeaknessMore" ] mods
+                if def0.Rarity <> Normal && def0.Rarity <> Magic && Mods.flag Ctx.empty (Named "RevealWeakness") mods then
+                    let c, m = Constants.revealedWeaknessLifeShare, 1.0 + more / 100.0
+                    if rng.Float() < (c / m) / (1.0 - c + c / m) then Map.add "OpenWeakness" 1 enemyStatus else enemyStatus
+                else enemyStatus
+            let ctx = Skill.ctx skill false (skillStacks s sid) enemyStatus
+            let hitChance =
+                match Mods.override' ctx HitChance mods with
+                | Some v -> v
+                | None when info.IsAttack ->
+                    let accuracy = Mods.total ctx [ Named "Accuracy" ] mods
+                    if accuracy <= 0.0 then 100.0
+                    else
+                        let evasion =
+                            e.Info.Evasion
+                            * (if enemyStatus.ContainsKey "Blinded" then 1.0 - Constants.blindAccuracyLess / 100.0 else 1.0)
+                            * (if enemyStatus.ContainsKey "Maimed" then 1.0 - Constants.maimEvasionReduced / 100.0 else 1.0)
+                        let distance = max 0.0 (Vec.length def0.Position - def0.Size)
+                        Hit.accuracyHitChance evasion (Hit.accuracyAtDistance distance accuracy)
+                | None -> 100.0
+            if not (lands s rng e hitChance) then bump s info.CMiss
+            else
+                let def = defender s e
+                // "Enemies you Curse / Mark take X% increased Damage": additive with what the enemy already takes
+                let def =
+                    match Mods.sumInc ctx [ Named "EnemyDamageTaken" ] mods with
+                    | 0.0 -> def
+                    | x -> { def with Mods = ModDb.add def.Mods (Mod.inc (DamageTaken AllDamage) x) }
+                let critRoll = if info.Sustained || not s.HasCritRoll.[sid] then None else Some s.CritRoll.[sid]
+                let critRoll = if hitChance < 100.0 && rng.Chance(100.0 - hitChance) then Some 1.0 else critRoll
+                let hit = Hit.rollWith critRoll rng ctx mods skill def
+                // the same hit the other way, rolled apart from the fight's stream (see `Outcome.Evened`)
+                let evenly =
+                    let chance = if critRoll |> Option.exists (fun r -> r >= 1.0) then 0.0 else min 100.0 (max 0.0 (Hit.critChance ctx mods skill))
+                    let was = Dmg.total hit.Dealt
+                    if chance <= 0.0 || chance >= 100.0 || was <= 0.0 || Mods.flag ctx (Named "InevitableCrits") mods || Mods.flag ctx (Named "BifurcateCrits") mods then 1.0
+                    else
+                        let other = Dmg.total (Hit.rollWith (Some(if hit.Crit then 1.0 else 0.0)) (Rng(uint32 (s.Seq % 1000000) + 7919u)) ctx mods skill def).Dealt
+                        let p = chance / 100.0
+                        (if hit.Crit then p * was + (1.0 - p) * other else p * other + (1.0 - p) * was) / was
+                // Culling Strike: an enemy at or below the threshold for its rarity dies, before the hit's damage
+                let hit =
+                    let cctx = { ctx with Crit = hit.Crit }
+                    if Mods.flag cctx (Named "CullingStrike") mods
+                       && lifeBefore <= def0.Life * Constants.cullingThreshold (Rarity.name def0.Rarity) / 100.0 * Mods.inc cctx [ Named "CullingThreshold" ] mods then
+                        { hit with Dealt = Dmg.map (fun _ v -> v + lifeBefore) hit.Dealt }
+                    else hit
+                let mult =
+                    let near, far = Mods.sumBase ctx [ Named "CloseCombatMore" ] mods, Mods.sumBase ctx [ Named "FarCombatMore" ] mods
+                    if near = 0.0 && far = 0.0 then mult
+                    else
+                        let d = max 0.0 (Vec.length def0.Position - def0.Size)
+                        let closeness = max 0.0 (min 1.0 ((35.0 - d) / 25.0))
+                        let farness = max 0.0 (min 1.0 ((d - 35.0) / 35.0))
+                        mult * (1.0 + near * closeness / 100.0) * (1.0 + far * farness / 100.0)
+                let hit =
+                    { hit with
+                        Unmitigated = Dmg.map (fun _ v -> v * mult) hit.Unmitigated
+                        Dealt = Dmg.map (fun _ v -> v * mult) hit.Dealt }
+                // ailments are rolled before the damage lands
+                let flammable = e.Flammability |> List.filter (fun (_, until) -> until > s.Time)
+                let inflicted =
+                    let total = flammable |> List.sumBy fst
+                    Ailments.fromHit rng ctx mods (if total > 0.0 then { def with Mods = ModDb.add def.Mods (Mod.base' (Named "Flammability") total) } else def) hit
+                (match Ailments.flammability ctx mods def hit with
+                 | f when f > 0.0 -> e.Flammability <- (f, s.Time + Constants.flammabilityDuration) :: flammable
+                 | _ -> ())
+                let hit = if Mods.flag ctx (Named "NoHitDamage") mods then { hit with Dealt = Dmg.map (fun _ _ -> 0.0) hit.Dealt; Unmitigated = Dmg.map (fun _ _ -> 0.0) hit.Unmitigated } else hit
+                // a shock the hit applies already counts for the hit itself
+                let hit =
+                    let currentShock =
+                        if e.Has.[p.SShocked] && e.Expires.[p.SShocked] > s.Time then e.DMods.[p.SShocked] |> List.sumBy (fun m -> m.Value) else 0.0
+                    let newShock = inflicted |> List.tryPick (function Status (Shock, m, _) when m > currentShock -> Some m | _ -> None)
+                    match newShock with
+                    | Some m ->
+                        let withoutOld = def.Mods |> ModDb.toList |> List.filter (fun x -> x.Source <> "Shock")
+                        let def' = { def with Mods = ModDb.ofList ((Mod.inc (DamageTaken AllDamage) m |> Mod.from "Shock") :: withoutOld) }
+                        { hit with Dealt = Hit.mitigate ctx mods def' hit.Unmitigated }
+                    | None -> hit
+                let dealt = Dmg.total hit.Dealt
+                let life = lifeBefore - dealt
+                let dead = life <= 1e-9
+                (match s.Tell with Some tell -> tell s.Time (if hit.Crit then "crit" else "hit") def0.Name skill.Name dealt | None -> ())
+                // what the armour break below reads of the enemy as it was before the hit
+                let brokenBefore =
+                    if e.Has.[p.SArmourBreak] && e.Expires.[p.SArmourBreak] > s.Time then -(e.DMods.[p.SArmourBreak] |> List.sumBy (fun m -> m.Value)) else 0.0
+                addDamage s info.Source (min dealt lifeBefore)
+                // (only of a hit the enemy outlives: what a killing hit deals is the life that was left)
+                if not dead then s.Evened <- s.Evened + dealt * (evenly - 1.0)
+                // (a hit that deals more than the enemy has left: each type's share of what was left)
+                (let k = if dealt > lifeBefore && dealt > 0.0 then lifeBefore / dealt else 1.0
+                 hit.Dealt |> Map.iter (fun t v -> if v > 0.0 then addByType s (typeIndex t) (v * k)))
+                bump s info.CHits
+                if hit.Crit then bump s info.CCrits
+                if dead then kill s e s.Time else e.Life <- life
+                // Armour Break: the hit breaks armour by a share of the damage it dealt; armour at
+                // zero is Fully Broken: the enemy takes increased physical damage from hits
+                (let share =
+                    Dmg.get Physical hit.Dealt * Mods.sumBase ctx [ Named "ArmourBreakOfPhysical" ] mods / 100.0
+                    + Dmg.get Fire hit.Dealt * Mods.sumBase ctx [ Named "ArmourBreakOfFire" ] mods / 100.0
+                    + dealt * Mods.sumBase ctx [ Named "ArmourBreakOfDamage" ] mods / 100.0
+                    + Mods.sumBase ctx [ Named "ArmourBreakFlat" ] mods
+                 // "Players Break 3 times Armour against Normal Monsters and 2 times Armour against Magic Monsters"
+                 let broken =
+                    share * Mods.mult ctx [ Named "ArmourBreakAmount" ] mods
+                    * (match def0.Rarity with Normal -> 3.0 | Magic -> 2.0 | _ -> 1.0)
+                 if not (dead || broken <= 0.0) then
+                    let baseArmour = e.Info.BaseArmour
+                    let total = min baseArmour (brokenBefore + broken)
+                    let seconds = Constants.armourBreakDuration * Mods.inc ctx [ Named "ArmourBreakDuration" ] mods
+                    addDebuff s e p.SArmourBreak seconds 1 [ Mod.base' Armour -total |> Mod.from "Armour Break" ]
+                    if total >= baseArmour then
+                        let taken = Constants.fullyBrokenArmourTaken * Mods.inc ctx [ Named "FullyBrokenArmourEffect" ] mods
+                        let scopes =
+                            if Mods.flag ctx (Named "BrokenArmourAllDamage") mods then [ AllDamage ]
+                            else
+                                [ OfType Physical ]
+                                @ (if Mods.flag ctx (Named "BrokenArmourFire") mods then [ OfType Fire ] else [])
+                                @ (if Mods.flag ctx (Named "BrokenArmourColdLightning") mods then [ OfType Cold; OfType Lightning ] else [])
+                        addDebuff s e p.SFullyBroken seconds 1 (scopes |> List.map (fun sc -> Mod.inc (DamageTaken sc) taken |> Mod.from "Fully Broken Armour")))
+                // leech, and what a hit and a kill give back
+                (match p.Vitals with
+                 | Some v ->
+                    let leech = min (Dmg.get Physical hit.Dealt) Constants.effectiveMaxDamageForLeech * Mods.sumBase ctx [ ManaLeech ] mods / 100.0
+                    // leech counts from one enemy per hit event: only the largest instance
+                    let extra = max 0.0 (leech - s.StrikeLeech)
+                    let charges =
+                        match p.Fight.Player.ManaFlask with
+                        | Some f when dead -> min f.MaxCharges (s.FlaskCharges + RarityCharges.flaskChargesPerKill def0.Rarity * f.ChargeGainMult)
+                        | _ -> s.FlaskCharges
+                    let leechMult = Mods.mult ctx [ Named "ManaLeechAmount" ] mods
+                    let extra = extra * leechMult
+                    let lifeLeechFull =
+                        min (Dmg.get Physical hit.Dealt) Constants.effectiveMaxDamageForLeech * Mods.sumBase ctx [ Named "LifeLeech" ] mods / 100.0
+                        * Mods.mult ctx [ Named "LifeLeechAmount" ] mods * v.LifeRecoveryRate
+                    let lifeLeech = max 0.0 (lifeLeechFull - s.StrikeLifeLeech)
+                    let onHit = Mods.sumBase ctx [ Named "LifeOnHit" ] mods * v.LifeRecoveryRate
+                    let manaOnHit = Mods.sumBase ctx [ Named "ManaOnHit" ] mods * v.ManaRecoveryRate
+                    let lifeCharges =
+                        match v.LifeFlask with
+                        | Some f when dead -> min f.MaxCharges (s.LifeFlaskCharges + RarityCharges.flaskChargesPerKill def0.Rarity * f.ChargeGainMult)
+                        | _ -> s.LifeFlaskCharges
+                    if extra > 0.0 || (lifeLeech > 0.0 && v.Life > 1.0) then
+                        s.Recoups <-
+                            (if extra > 0.0 then [ s.Time + Constants.leechSeconds, extra / Constants.leechSeconds, "LeechMana" ] else [])
+                            @ (if lifeLeech > 0.0 && v.Life > 1.0 then
+                                   (let t = Constants.leechSeconds / max 0.05 v.LifeLeechRate
+                                    [ s.Time + t, lifeLeech / t, "LeechLife" ])
+                               else [])
+                            @ s.Recoups
+                    s.StrikeLeech <- max leech s.StrikeLeech
+                    s.StrikeLifeLeech <- max lifeLeechFull s.StrikeLifeLeech
+                    s.FlaskCharges <- charges
+                    s.LifeFlaskCharges <- lifeCharges
+                    s.Life <- min (max s.Life v.Life) (s.Life + (if v.Life > 1.0 then onHit else 0.0) + (if dead then v.LifeOnKill else 0.0))
+                    s.Shield <- min (max s.Shield v.EnergyShield) (s.Shield + (if dead then v.ESOnKill else 0.0))
+                    if manaOnHit > 0.0 then gainMana s v 4 manaOnHit
+                    if dead then
+                        let kill = (Mods.sumBase Ctx.empty [ ManaOnKill ] mods + v.Mana * Mods.sumBase Ctx.empty [ Named "ManaPercentOnKill" ] mods / 100.0) * v.ManaRecoveryRate
+                        gainMana s v 5 kill
+                 | None -> ())
+                // a killing hit's ailments are not inflicted; what the killed enemy was can set things off
+                if dead then
+                    react s rng p.OnKill "" sid -1
+                    if p.HasKillOf then
+                        before |> Map.iter (fun k _ -> react s rng p.OnKillOf k sid -1)
+                else
+                    for i in inflicted do
+                        inflict s e i
+                        match i with
+                        | Dot (a, _, _, _, _) | Status (a, _, _) ->
+                            bump s p.CInflict.[ailmentIndex a]
+                            react s rng p.OnInflict.[ailmentIndex a] "" sid target
+                        | AddBuildup _ -> ()
+                // the skill's own damage over time: one instance per skill and type, the strongest stays
+                if not (dead || info.Dots.IsEmpty) then
+                    // spell (or attack) damage mods only count if the skill says so
+                    let dotCtx = if skill.Tags.Contains(Tag "SpellDot") then ctx else { ctx with SkillTags = ctx.SkillTags |> Set.remove Spell |> Set.remove Attack }
+                    let duration = (if skill.Duration > 0.0 then skill.Duration else 1.0) * Mods.mult ctx [ SkillDuration ] mods
+                    for (t, perSecond, _, label) in info.Dots do
+                        let dps = perSecond * Hit.damageMult dotCtx mods t * Mods.mult dotCtx [ Named "DotDamage" ] mods
+                        let d = { Ailing = None; Label = label; Of = t; Dps = dps; Until = s.Time + duration; Most = 1 }
+                        e.Dots <- d :: (e.Dots |> List.filter (fun x -> x.Label <> label || x.Dps > dps))
+                        if not (d.Until >= e.Soonest) then e.Soonest <- d.Until
+                        expireAt s d.Until
+                // Archon: gained on an ignite by a skill with the chance; none while one is active
+                // or during the recovery period after one ends
+                (let ignited = inflicted |> List.exists (function Dot (Ignite, _, _, _, _) -> true | _ -> false)
+                 if ignited && p.Archons.Length > 0 then
+                    let active = p.Archons |> Array.exists (fun a -> s.BHas.[a.Buff])
+                    let recovering = s.ArchonRecovery > s.Time
+                    if not (active || recovering) then
+                        match p.Archons |> Array.tryFind (fun a -> rng.Chance(Mods.sumBase ctx [ Named a.Stat ] mods)) with
+                        | Some a ->
+                            setBuff s a.Buff 1 (s.Time + a.Duration) a.AMods
+                            s.ArchonRecovery <- s.Time + a.Duration + a.Recovery
+                            expireAt s (s.Time + a.Duration)
+                            bump s a.Gained
+                        | None -> ())
+                // "Only one Hit every 0.5 seconds can cause you to gain Rage": when one last could
+                // is kept, even where there is no Rage to gain
+                (let fresh = s.Time - (Map.tryFind "RageHitAt" s.Energy |> Option.defaultValue -1e9) >= 0.5
+                 let onHit = if fresh then Mods.sumBase ctx [ Named "RageOnHit" ] mods else 0.0
+                 if onHit > 0.0 then s.Energy <- Map.add "RageHitAt" s.Time s.Energy)
+                // what the game tracks for "recently" conditions
+                mark s p.BHit 4.0
+                if not hit.Crit then mark s p.BNonCrit 4.0
+                if hit.Crit then
+                    mark s p.BCrit 4.0
+                    mark s p.BCrit8 8.0
+                if dead then mark s p.BKilled 4.0
+                react s rng p.OnHit "" sid target
+                if hit.Crit then react s rng p.OnCrit "" sid target
+
+    /// A strike lands: who is hit, and each hit (`Sim.onStrike`).
+    let private onStrike (s: State) (rng: Rng) (sid: int) (mult: float) (aimedAt: int) (elapsed: float) (passing: bool) (direct: bool) =
+        let p = s.P
+        let alive = living s
+        // Aim where the use was aimed; if that enemy died meanwhile, at the next one.
+        let primary = if s.Foes.[aimedAt].Life > 0.0 then aimedAt else aimed s
+        if primary >= 0 then
+            let info = p.Skills.[sid]
+            let skill = info.Skill
+            let primaryDef = s.Foes.[primary].Info.Def
+            // (the buffs are the ones the strike began with, whatever its hits change)
+            let stacks = skillStacks s sid
+            let mods = skillDb s sid
+            let shape () =
+                let ctx = Skill.ctx skill false stacks Map.empty
+                let areaMult = Mods.mult ctx [ AreaOfEffect ] mods
+                let delivery =
+                    match skill.Delivery with
+                    | Projectiles p ->
+                        let fromCharges =
+                            match p.PerCharge with
+                            | Some (charge, per) -> per * (Map.tryFind charge stacks |> Option.defaultValue 0)
+                            | None -> 0
+                        Projectiles
+                            { p with
+                                Count =
+                                    p.Count + fromCharges
+                                    + (if p.Count + fromCharges > 0 && not (skill.Tags.Contains(Tag "Type:ProjectilesNumberModifiersNotApplied")) then
+                                           int (Mods.sumBase ctx [ AdditionalProjectiles ] mods)
+                                           + (if rng.Chance(Mods.sumBase ctx [ Named "ExtraProjectileChance2" ] mods) then 2 else 0)
+                                           + (let c = Mods.sumBase ctx [ Named "ExtraProjectileChance1" ] mods
+                                              int (c / 100.0) + (if rng.Chance(c - 100.0 * floor (c / 100.0)) then 1 else 0))
+                                       else 0)
+                                Pierce = p.Pierce + int (Mods.sumBase ctx [ Pierce ] mods) + (if rng.Chance(Mods.sumBase ctx [ Named "PierceChance" ] mods) then 1 else 0)
+                                Chains = p.Chains + int (Mods.sumBase ctx [ Chains ] mods)
+                                TerrainChain = p.TerrainChain + Mods.sumBase ctx [ Named "TerrainChain" ] mods }
+                    | d -> d
+                ctx, areaMult, delivery
+            s.StrikeLeech <- 0.0
+            s.StrikeLifeLeech <- 0.0
+            // (the reference works the shape out twice, and each time rolls what it rolls)
+            shape () |> ignore
+            let ctx, areaMult, delivery = shape ()
+            let hitAll (names: string list) =
+                for name in names do
+                    hitEnemy s rng sid mult p.EnemyIds.[name]
+            let strike () =
+                if direct then
+                    if primary = aimedAt then hitEnemy s rng sid mult aimedAt
+                else
+                    match delivery with
+                    | Projectiles pr when not passing && pr.Passing > 0.0 && pr.HitInterval > 0.0 ->
+                        // what is inside the projectiles as they travel: every hit at its own time
+                        for (t, target) in Geometry.dwellHits rng p.Fight.Walls pr p.Fight.Reach areaMult primaryDef alive do
+                            if t <= 0.0 then hitEnemy s rng sid mult p.EnemyIds.[target]
+                            else schedule s (s.Time + t) EDirect sid p.EnemyIds.[target] mult 0.0
+                    | Projectiles pr when passing && pr.Passing > 0.0 ->
+                        // where the projectile is by now, on its way towards where it was aimed
+                        let at = Vec.scale (pr.Speed * elapsed) (Vec.ofAngle (Vec.angle primaryDef.Position))
+                        alive |> List.filter (Geometry.within at (Geometry.radius pr.Passing areaMult)) |> List.map (fun e -> e.Name) |> hitAll
+                    | Single -> hitEnemy s rng sid mult primary
+                    | _ -> Geometry.targetsFrom rng p.Fight.Walls p.Fight.Reach delivery areaMult primaryDef alive |> hitAll
+            strike ()
+            // Aftershock: a slam has a chance to hit its area once more
+            if info.IsSlam && rng.Chance(Mods.sumBase ctx [ Named "AftershockChance" ] mods) then
+                strike ()
+                bump s info.CAftershock
+
+    /// After a use's hits: the skill consumes its charges, unless they are kept (`Sim.step`).
+    let private onConsume (s: State) (rng: Rng) (charge: int) (sid: int) =
+        let p = s.P
+        let info = p.Skills.[sid]
+        let db = skillDb s sid
+        let skip = Mods.sumBase Ctx.empty [ Named "ChargeSkipConsume" ] db
+        let every = Mods.sumBase Ctx.empty [ Named "ConsumeChargeEveryMs" ] db / 1000.0
+        let spared = every > 0.0 && not (rng.Chance(100.0 * min 1.0 (useTime s sid / every)))
+        if s.BHas.[charge] && not spared then
+            // "still count as consuming": the consumed-recently status starts either way
+            markStatus s info.ConsumedRecently
+            if rng.Chance skip then
+                bump s info.CKept
+                let pause = p.Fight.Player.KeptChargesPause
+                if pause > 0.0 then
+                    // freeze the timer: push expiry back by the part of the pause that
+                    // doesn't overlap an earlier one
+                    let pausedUntil = if System.Double.IsNaN s.BPaused.[charge] then s.Time else s.BPaused.[charge]
+                    let newUntil = s.Time + pause
+                    let extension = max 0.0 (newUntil - max s.Time pausedUntil)
+                    if s.BHas.[charge] && s.BExpires.[charge] < infinity then
+                        let expires = s.BExpires.[charge] + extension
+                        setBuff s charge s.BStacks.[charge] expires s.BMods.[charge]
+                        s.BPaused.[charge] <- newUntil
+                        expireAt s expires
+            else
+                // one charge, a set number, or all of them (0)
+                let count = int (Mods.sumBase Ctx.empty [ Named "ConsumeChargeCount" ] db)
+                if s.BHas.[charge] && count > 0 && s.BStacks.[charge] > count then setBuff s charge (s.BStacks.[charge] - count) s.BExpires.[charge] s.BMods.[charge]
+                else removeBuff s charge
+                bump s info.CConsumed
+
+    /// Stacks of a resource arrive (`Sim.step`, GainStacks).
+    let private onGainStacks (s: State) (rng: Rng) (r: int) (n: int) =
+        let p = s.P
+        let maxR = if p.ResourceMax.[r] <> System.Int32.MinValue then p.ResourceMax.[r] else n
+        // "N% chance to gain an additional (Power) Charge when you gain a Charge"
+        let n =
+            if not p.IsCharge.[r] || p.FirstSkill < 0 then n
+            else
+                let db = skillDb s p.FirstSkill
+                let chance = Mods.sumBase Ctx.empty p.ExtraChance.[r] db
+                if chance > 0.0 && rng.Chance chance then n + 1 else n
+        setStacks s true r (min maxR (stacksOf s r + n))
+        if p.IsCharge.[r] then markStatus s p.GainedRecently.[r]
+        bump s p.CGained.[r]
+
+    /// A cycle picks its next variant (`Sim.step`, CycleTick).
+    let private onCycle (s: State) (rng: Rng) (index: int) =
+        let c = s.P.Cycles.[index]
+        let pick = min (c.Variants.Length - 1) (int (rng.Float() * float c.Variants.Length))
+        setBuff s c.Buff 1 (s.Time + c.Period) c.Variants.[pick]
+        bump s c.Picked.[pick]
+        schedule s (s.Time + c.Period) ECycle index 0 0.0 0.0
+
+    /// The player's life and mana state, as buffs conditions can read (`Sim.step`).
+    let private playerStates (s: State) (v: PlayerStats) =
+        let p = s.P
+        // "Your Life cannot change while you have Energy Shield": no recovery above where it started
+        if v.LifeFrozenWithES && s.Shield > 0.0 && s.Life > v.StartLife * v.Life then s.Life <- v.StartLife * v.Life
+        // reserved life: what is left is the most there can be
+        elif v.LifeReserved > 0.0 && s.Life > (1.0 - v.LifeReserved) * v.Life then s.Life <- (1.0 - v.LifeReserved) * v.Life
+        let set (slot: int) (on: bool) =
+            let id = p.BStates.[slot]
+            if on then (if not s.BHas.[id] then setBuff s id 1 infinity [])
+            else removeBuff s id
+        let manaFlask = s.Time < s.FlaskUntil || stacksOf s p.BConstantMana > 0
+        let lifeFlask = s.Time < s.LifeFlaskUntil || stacksOf s p.BConstantLife > 0
+        set 0 (s.Life >= v.Life)
+        set 1 (v.Life > 1.0 && s.Life <= 0.35 * v.Life)
+        set 2 (s.Mana >= v.Mana)
+        set 3 (s.Mana <= 0.35 * v.Mana)
+        set 4 (s.Shield > 0.0)
+        set 5 manaFlask
+        set 6 lifeFlask
+        set 7 (s.Time < s.FlaskUntil || s.Time < s.LifeFlaskUntil || stacksOf s p.BConstantMana > 0 || stacksOf s p.BConstantLife > 0)
+        set 8 (s.Recoups |> List.exists (fun (until, _, pool) -> pool.StartsWith "Leech" && until > s.Time))
+        // surrounded: at least 5 monsters within 3 m
+        let mutable near = 0
+        for e in s.Foes do
+            if e.Life > 0.0 && Vec.length e.Info.Def.Position - e.Info.Def.Size <= 30.0 then near <- near + 1
+        set 9 (near >= max 1 v.SurroundedAt)
+        // charge states: "while at maximum Power Charges", "while you have no Frenzy Charges"
+        for k in 0 .. 2 do
+            let id = p.BCharges.[k]
+            // (read before the states of this kind are set: a state's name is never a charge's)
+            let n = stacksOf s id
+            let maxN = if p.ResourceMax.[id] <> System.Int32.MinValue then p.ResourceMax.[id] else 0
+            set (10 + 3 * k) (maxN > 0 && n >= maxN)
+            set (11 + 3 * k) (n = 0)
+            set (12 + 3 * k) (n = 0)
+
+    /// The earliest event happens (`Sim.step`).
+    let private step (s: State) =
+        let p = s.P
+        let q = s.Queue
+        q.Pop()
+        let t, kind, a, b, x, y = q.Time, q.Kind, q.A, q.B, q.X, q.Y
+        let dt = t - s.Time
+        (match s.Tell with
+         | Some tell ->
+            let who = p.Fight.Player.Name
+            match kind with
+            | EReady -> tell t "Ready" who "" (float q.Seq)
+            | EStrike | EPassing | EDirect -> tell t (kindName kind) who p.Skills.[a].Skill.Name (float q.Seq)
+            | EConsume | EGainStacks | ESpendBuff -> tell t (kindName kind) who p.BuffNames.[a] (float q.Seq)
+            | ECycle -> tell t "CycleTick" who p.BuffNames.[p.Cycles.[a].Buff] (float q.Seq)
+            | EExpose -> tell t "Expose" who p.Enemies.[a].Def.Name (float q.Seq)
+            | _ -> tell t "Expire" "" "" (float q.Seq)
+         | None -> ())
+        // a skill's hits roll from a stream of that skill alone: its first event, its second, ...
+        let rng =
+            match kind with
+            | EStrike | EPassing | EDirect ->
+                let n = s.StrikeStream.[a]
+                s.StrikeStream.[a] <- n + 1
+                Rng(Sim.streamSeed s.Seed p.Skills.[a].StrikeKey n)
+            | EConsume ->
+                let n = s.ConsumeStream.[b]
+                s.ConsumeStream.[b] <- n + 1
+                Rng(Sim.streamSeed s.Seed p.Skills.[b].ConsumeKey n)
+            | _ -> s.Rng
+        advance s t
+        recover s dt
+        if s.AliveCount > 0 then
+            prune s
+            (match p.Vitals with
+             | Some v -> playerStates s v
+             | None -> ())
+            match kind with
+            | EReady -> onReady s rng
+            | EStrike -> onStrike s rng a x b 0.0 false false
+            | EPassing -> onStrike s rng a x b y true false
+            | EDirect -> onStrike s rng a x b 0.0 false true
+            | EConsume -> onConsume s rng a b
+            | ECycle -> onCycle s rng a
+            | EGainStacks -> onGainStacks s rng a b
+            | EExpose -> expose s a DamageType.all.[b] x y
+            | ESpendBuff ->
+                if s.BHas.[a] && s.BStacks.[a] > 1 then setBuff s a (s.BStacks.[a] - 1) s.BExpires.[a] s.BMods.[a]
+                else removeBuff s a
+            | _ -> ()
+
+    let private start (p: Program) (seed: uint32) (tell: (float -> string -> string -> string -> float -> unit) option) : State =
+        let fight = p.Fight
+        let player = fight.Player
+        let nb = p.BuffNames.Length
+        let ns = p.StatusNames.Length
+        let nk = p.Skills.Length
+        let foes =
+            p.Enemies
+            |> Array.mapi (fun i info ->
+                let e =
+                    { Info = info
+                      Index = i
+                      Life = info.Def.Life
+                      Has = Array.create ns false
+                      Stacks = Array.zeroCreate ns
+                      Expires = Array.zeroCreate ns
+                      DMods = Array.create ns []
+                      Soonest = infinity
+                      Dots = []
+                      Active = []
+                      ActiveOf = []
+                      Buildup = Array.zeroCreate 13
+                      StunBuildupAt = 0.0
+                      Flammability = []
+                      Entropy = 0.0
+                      EntropyAt = 0.0
+                      HasEntropy = false
+                      Status = Map.empty
+                      StatusKeys = [||]
+                      StatusStale = true
+                      StatusDots = []
+                      WasCullable = false
+                      WasLow = false
+                      WasFull = false
+                      HitStatus = Map.empty
+                      HitStatusOf = Map.empty
+                      HitIsolated = false
+                      HitStatusMade = false
+                      Defender = { Level = info.Def.Level; Mods = info.Db }
+                      DefenderStale = true
+                      DotTaken = Array.create 5 nan }
+                for (id, stacks, mods) in info.Auras do
+                    setDebuff e id stacks infinity mods
+                e)
+        let v = p.Vitals
+        let s =
+            { P = p
+              Seed = seed
+              Rng = Rng(seed)
+              Queue = Queue()
+              Tell = tell
+              Time = 0.0
+              Seq = 0
+              Foes = foes
+              AliveCount = foes |> Array.filter (fun e -> e.Life > 0.0) |> Array.length
+              Living = []
+              Aimed = -1
+              AliveStale = true
+              Kills = ResizeArray()
+              BHas = Array.create nb false
+              BStacks = Array.zeroCreate nb
+              BExpires = Array.zeroCreate nb
+              BMods = Array.create nb []
+              BPaused = Array.create nb nan
+              BSoonest = infinity
+              BuffMap = Map.empty
+              BuffMapStale = true
+              ModsVersion = 0
+              Dbs = p.Skills |> Array.map (fun k -> k.Db)
+              DbVersion = Array.create nk -1
+              Cooldowns = Array.create nk -infinity
+              Recharges = Array.create nk []
+              ArchonRecovery = -infinity
+              Energy = Map.empty
+              LastUsed = -1
+              CritRoll = Array.zeroCreate nk
+              HasCritRoll = Array.create nk false
+              Rolled = Array.zeroCreate nk
+              StrikeStream = Array.zeroCreate nk
+              ConsumeStream = Array.zeroCreate nk
+              Evened = 0.0
+              Damage = Array.zeroCreate p.SourceNames.Length
+              DamageSeen = Array.create p.SourceNames.Length false
+              ByType = Array.zeroCreate 5
+              ByTypeSeen = Array.create 5 false
+              Counts = Array.zeroCreate p.CountNames.Length
+              Uptime = Array.zeroCreate ns
+              UptimeSeen = Array.create ns false
+              Life = (match v with Some v -> max 1.0 (v.Life * v.StartLife) | None -> 0.0)
+              Shield = (match v with Some v -> v.EnergyShield | None -> 0.0)
+              Mana = (match v with Some v -> v.Mana | None -> 0.0)
+              LastHit = -1e9
+              Starved = 0.0
+              FlaskCharges = (match v, player.ManaFlask with Some _, Some f -> f.MaxCharges | _ -> 0.0)
+              FlaskUntil = 0.0
+              FlaskRate = 0.0
+              StrikeLeech = 0.0
+              StrikeLifeLeech = 0.0
+              Ward = (match v with Some v -> v.Ward | None -> 0.0)
+              LifeFlaskCharges = (match v |> Option.bind (fun v -> v.LifeFlask) with Some f -> f.MaxCharges | None -> 0.0)
+              LifeFlaskUntil = 0.0
+              LifeFlaskRate = 0.0
+              Recoups = []
+              Gained = Array.zeroCreate gainedNames.Length
+              GainedSeen = Array.create gainedNames.Length false }
+        // the resources the fight starts with: a random part of their duration has already passed
+        for (id, n, lasts) in p.Resources do
+            let expires = match lasts with Some d -> s.Rng.Float() * d | None -> infinity
+            setBuff s id n expires []
+        schedule s 0.0 EReady 0 0 0.0 0.0
+        p.Cycles |> Array.iteri (fun i _ -> schedule s 0.0 ECycle i 0 0.0 0.0)
+        for id in p.Timed do
+            if s.BHas.[id] && s.BExpires.[id] < infinity then expireAt s s.BExpires.[id]
+        expireAt s fight.MaxTime
+        s
+
+    let private play (p: Program) (seed: uint32) (tell: (float -> string -> string -> string -> float -> unit) option) : Outcome =
+        let s = start p seed tell
+        let maxTime = p.Fight.MaxTime
+        // a fight that needs more events than this is a runaway (a zero-time loop): stop it
+        let maxEvents = 3000000
+        let mutable n = 0
+        let mutable go = true
+        while go do
+            if s.AliveCount = 0 || s.Queue.Count = 0 || s.Queue.Next > maxTime then go <- false
+            elif n >= maxEvents then
+                bump s p.CAborted
+                go <- false
+            else
+                step s
+                n <- n + 1
+        let cleared = if s.AliveCount = 0 then s.Kills |> Seq.map (fun (_, _, t) -> t) |> Seq.fold max 0.0 |> Some else None
+        let floats (names: string[]) (values: float[]) (seen: bool[]) =
+            let mutable m = Map.empty
+            for i in 0 .. names.Length - 1 do
+                if seen.[i] then m <- Map.add names.[i] values.[i] m
+            m
+        { Shown = []
+          Ttk = cleared
+          Duration = (match cleared with Some t -> t | None -> min s.Time maxTime)
+          Kills = List.ofSeq s.Kills
+          DamageBy = floats p.SourceNames s.Damage s.DamageSeen
+          DamageByType = floats (DamageType.all |> List.map DamageType.name |> Array.ofList) s.ByType s.ByTypeSeen
+          Counts =
+            (let mutable m = Map.empty
+             for i in 0 .. p.CountNames.Length - 1 do
+                 if s.Counts.[i] > 0 then m <- Map.add p.CountNames.[i] s.Counts.[i] m
+             m)
+          Uptime = floats p.StatusNames s.Uptime s.UptimeSeen
+          Died = None
+          DamageTaken = 0.0
+          ManaStarved = s.Starved
+          Evened = s.Evened
+          MinLife = 1.0
+          ManaGained = (if p.Vitals.IsSome then floats gainedNames s.Gained s.GainedSeen else Map.empty) }
+
+    /// Play a program's fight with a seed: what `Sim.run` gives for the fight and the seed,
+    /// but for `Shown`, which stays empty.
+    let run (p: Program) (seed: uint32) : Outcome = play p seed None
+
+    /// The same, telling `tell` what `Sim.traced` tells: every event as it is taken from the
+    /// queue and every hit that lands.
+    let traced (tell: float -> string -> string -> string -> float -> unit) (p: Program) (seed: uint32) : Outcome =
+        play p seed (Some tell)

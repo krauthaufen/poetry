@@ -1,0 +1,499 @@
+/// The fast engine (`Flat`) against the reference (`Sim`): the same fight with the same seed
+/// must give the same outcome, bit for bit. Fights built by hand, and fights made at random
+/// inside (and a little outside) what `Flat.compile` accepts.
+module PoEtry.FlatTests
+
+open PoEtry
+
+let private sameFloat (a: float) (b: float) = a = b || (System.Double.IsNaN a && System.Double.IsNaN b)
+
+let private mapDifference (field: string) (show: 'v -> string) (same: 'v -> 'v -> bool) (a: Map<string, 'v>) (b: Map<string, 'v>) : string option =
+    let keys = (a |> Map.toList |> List.map fst) @ (b |> Map.toList |> List.map fst) |> List.distinct |> List.sort
+    keys |> List.tryPick (fun k ->
+        match Map.tryFind k a, Map.tryFind k b with
+        | Some x, Some y when same x y -> None
+        | x, y ->
+            let say v = match v with Some v -> show v | None -> "nothing"
+            Some(sprintf "%s[%s]: reference %s, flat %s" field k (say x) (say y)))
+
+/// The first field in which two outcomes differ (every field `Summary` and `Report` read),
+/// with both values; None if they are the same.
+let difference (reference: Outcome) (flat: Outcome) : string option =
+    let float' (field: string) (a: float) (b: float) =
+        if sameFloat a b then None else Some(sprintf "%s: reference %.17g, flat %.17g" field a b)
+    let option' (field: string) (a: float option) (b: float option) =
+        match a, b with
+        | None, None -> None
+        | Some x, Some y when sameFloat x y -> None
+        | _ -> Some(sprintf "%s: reference %A, flat %A" field a b)
+    let showFloat (v: float) = sprintf "%.17g" v
+    [ (fun () -> float' "Duration" reference.Duration flat.Duration)
+      (fun () -> option' "Ttk" reference.Ttk flat.Ttk)
+      (fun () -> if reference.Kills = flat.Kills then None else Some(sprintf "Kills: reference %A, flat %A" reference.Kills flat.Kills))
+      (fun () -> mapDifference "Counts" string (=) reference.Counts flat.Counts)
+      (fun () -> mapDifference "DamageBy" showFloat sameFloat reference.DamageBy flat.DamageBy)
+      (fun () -> mapDifference "DamageByType" showFloat sameFloat reference.DamageByType flat.DamageByType)
+      (fun () -> mapDifference "Uptime" showFloat sameFloat reference.Uptime flat.Uptime)
+      (fun () -> option' "Died" reference.Died flat.Died)
+      (fun () -> float' "DamageTaken" reference.DamageTaken flat.DamageTaken)
+      (fun () -> float' "ManaStarved" reference.ManaStarved flat.ManaStarved)
+      (fun () -> float' "Evened" reference.Evened flat.Evened)
+      (fun () -> float' "MinLife" reference.MinLife flat.MinLife)
+      (fun () -> mapDifference "ManaGained" showFloat sameFloat reference.ManaGained flat.ManaGained) ]
+    |> List.tryPick (fun check -> check ())
+
+/// Where the two engines first part: the first event or hit that one tells differently from
+/// the other, with the few before it.
+let divergence (fight: Fight) (program: Flat.Program) (seed: uint32) : string =
+    let record () =
+        let told = ResizeArray<string>()
+        told, (fun (t: float) (kind: string) (who: string) (what: string) (v: float) -> told.Add(sprintf "%.17g %s %s %s %.17g" t kind who what v))
+    let a, tellA = record ()
+    let b, tellB = record ()
+    Sim.traced tellA fight seed |> ignore
+    Flat.traced tellB program seed |> ignore
+    let n = min a.Count b.Count
+    let mutable at = 0
+    while at < n && a.[at] = b.[at] do
+        at <- at + 1
+    if at = n && a.Count = b.Count then sprintf "the %d events and hits are told the same" n
+    else
+        let before = [ for i in max 0 (at - 4) .. at - 1 -> "    " + a.[i] ] |> String.concat "\n"
+        let line (xs: ResizeArray<string>) = if at < xs.Count then xs.[at] else "(nothing more)"
+        sprintf "event %d differs\n%s\n  reference: %s\n  flat:      %s" at before (line a) (line b)
+
+/// Both engines on one fight and seed: None if the fight does not compile; else whether
+/// the outcomes are the same, and if not, what differs and where it starts.
+let check (fight: Fight) (seed: uint32) : Result<unit, string> option =
+    match Flat.compile fight with
+    | Error _ -> None
+    | Ok program ->
+        match difference (Sim.run fight seed) (Flat.run program seed) with
+        | None -> Some(Ok())
+        | Some d -> Some(Error(sprintf "seed %d: %s\n  %s" seed d (divergence fight program seed)))
+
+// ---- fights made at random ----
+
+/// A fight made from a number: the same number, the same fight. Mostly inside what the fast
+/// engine plays; now and then with something it does not (it must then refuse, or be right).
+let randomFight (case: uint32) : Fight * string =
+    let rng = Rng(case * 2654435761u + 12345u)
+    let chance (p: float) = rng.Float() < p
+    let pick (xs: 'a list) = xs.[min (xs.Length - 1) (int (rng.Float() * float xs.Length))]
+    let between (lo: float) (hi: float) = lo + (hi - lo) * rng.Float()
+    let whole (lo: int) (hi: int) = lo + int (rng.Float() * float (hi - lo + 1)) |> min hi
+    let types = [ Physical; Lightning; Cold; Fire; Chaos ]
+    let notes = ResizeArray<string>()
+    let note (x: string) = notes.Add x
+    // the player's mods
+    let conds () =
+        if chance 0.7 then []
+        else
+            [ pick
+                  [ IsCrit; SkillIs Spell; SkillIs Attack; WhileBuff "Buffed"; WhileBuff "HitRecently"; WhileBuff "CritRecently"; EnemyHas "Shocked"
+                    EnemyHas "Ignited"; EnemyHas "Cursed"; EnemyHas "Isolated"; EnemyHas "LowLife"; PerStack("PowerCharge", 1.0); PerStack("Buffed", 1.0)
+                    PerEnemyStack("Poisoned", 2.0); PerEnemyStack("Marked by pain", 1.0); Not(WhileBuff "FullMana"); WhileBuff "LowMana"; WhileBuff "KilledRecently"
+                    WhileBuff "ConsumedPowerChargeRecently"; WhileBuff "TriggeredRecently"; WhileBuff "Tide"; EnemyHas "Exposed"; EnemyHas "FullyBrokenArmour" ] ]
+    let withConds (m: Mod) = { m with Conds = conds () }
+    let modPool : (unit -> Mod list) list =
+        [ (fun () -> [ Mod.inc (Damage AllDamage) (between 5.0 150.0) |> withConds ])
+          (fun () -> [ Mod.more (Damage AllDamage) (between -20.0 40.0) |> withConds ])
+          (fun () -> [ Mod.inc (Damage(OfType(pick types))) (between 5.0 150.0) |> withConds ])
+          (fun () -> [ Mod.inc (Damage Elemental) (between 5.0 80.0) |> withConds ])
+          (fun () -> [ Mod.inc CritChance (between 10.0 400.0) |> withConds ])
+          (fun () -> [ Mod.base' CritChance (between 1.0 10.0) |> withConds ])
+          (fun () -> [ Mod.base' CritBonus (between 10.0 150.0) |> withConds ])
+          (fun () -> [ Mod.inc Speed (between -10.0 60.0) |> withConds ])
+          (fun () -> [ Mod.more Speed (between -10.0 20.0) |> withConds ])
+          (fun () -> (let t = pick types in Mod.added t (between 1.0 20.0) (between 20.0 90.0)))
+          (fun () -> [ Mod.base' (Penetration(pick types)) (between 5.0 40.0) |> withConds ])
+          (fun () -> [ Mod.base' (AilmentChance(pick [ Bleed; Poison; Ignite; Shock; Daze; Maim; Blind; Hinder ])) (between 5.0 100.0) |> withConds ])
+          (fun () -> [ Mod.inc (AilmentMagnitude(pick [ None; Some Ignite; Some Shock; Some Poison; Some Chill ])) (between 10.0 80.0) ])
+          (fun () -> [ Mod.inc (AilmentDuration(pick [ None; Some Ignite; Some Shock; Some Poison ])) (between -30.0 80.0) ])
+          (fun () -> [ Mod.base' (AilmentStacks(pick [ Poison; Bleed; Ignite ])) (float (whole 1 4)) ])
+          (fun () -> [ Mod.inc (Buildup(pick [ Freeze; HeavyStun; Electrocute; Pin ])) (between 50.0 4000.0) ])
+          (fun () -> [ Mod.flag (Named(pick [ "CanElectrocute"; "CanPin"; "AllDamageIgnites"; "AllDamageShocks"; "AllDamageChills" ])) ])
+          (fun () -> [ Mod.base' (Named "Accuracy") (between 200.0 6000.0) ])
+          (fun () -> [ Mod.base' ManaLeech (between 1.0 12.0) ])
+          (fun () -> [ Mod.base' (Named "LifeLeech") (between 1.0 12.0) ])
+          (fun () -> [ Mod.base' (Named(pick [ "LifeOnHit"; "ManaOnHit" ])) (between 1.0 9.0) ])
+          (fun () -> [ Mod.base' ManaOnKill (between 5.0 30.0) ])
+          (fun () -> [ Mod.flag (Named "CullingStrike") |> withConds ])
+          (fun () -> [ Mod.base' (Named(pick [ "ArmourBreakOfPhysical"; "ArmourBreakOfDamage"; "ArmourBreakFlat" ])) (between 5.0 400.0) ])
+          (fun () -> [ Mod.flag (Named(pick [ "BrokenArmourAllDamage"; "BrokenArmourFire"; "BrokenArmourColdLightning" ])) ])
+          (fun () -> [ Mod.base' (Named(pick [ "CloseCombatMore"; "FarCombatMore" ])) (between 5.0 40.0) ])
+          (fun () -> [ Mod.inc (Named "EnemyDamageTaken") (between 3.0 20.0) |> Mod.whenever (EnemyHas(pick [ "Cursed"; "Marked"; "Shocked" ])) ])
+          (fun () -> [ Mod.base' (Named "ChargeSkipConsume") (between 10.0 70.0) ])
+          (fun () -> [ Mod.base' (Named "ExtraChargeChance:Any") (between 10.0 70.0) ])
+          (fun () -> [ Mod.base' (Named "AftershockChance") (between 10.0 60.0) ])
+          (fun () -> [ Mod.base' (Named "RageOnHit") (between 1.0 5.0) ])
+          (fun () -> [ Mod.flag LuckyDamage |> withConds ])
+          (fun () -> [ Mod.base' (Named "LuckyDamageChance") (between 10.0 60.0) ])
+          (fun () -> [ Mod.base' DoubleDamageChance (between 5.0 40.0) ])
+          (fun () -> (let a = pick types in let b = pick types in if a = b then [] else [ Mod.base' (Convert(a, b)) (between 10.0 100.0) ]))
+          (fun () -> (let a = pick types in let b = pick types in [ Mod.base' (GainAs(a, b)) (between 5.0 50.0) |> withConds ]))
+          (fun () -> [ Mod.inc CooldownRecovery (between 5.0 80.0) ])
+          (fun () -> [ Mod.inc ManaCost (between -30.0 40.0) ])
+          (fun () -> [ Mod.inc ManaCostEfficiency (between 5.0 40.0) ])
+          (fun () -> [ Mod.inc SkillDuration (between -20.0 60.0) ])
+          (fun () -> [ Mod.inc AreaOfEffect (between -20.0 150.0) ])
+          (fun () -> [ Mod.base' AdditionalProjectiles (float (whole 1 3)) ])
+          (fun () -> [ Mod.base' Pierce (float (whole 1 2)); Mod.base' Chains (float (whole 0 2)) ])
+          (fun () -> [ Mod.base' (Named(pick [ "ExtraProjectileChance1"; "ExtraProjectileChance2"; "PierceChance" ])) (between 10.0 180.0) ])
+          (fun () -> [ Mod.flag (Named(pick [ "LuckyCrit"; "InevitableCrits"; "BifurcateCrits" ])) ])
+          (fun () -> [ Mod.base' (Named "NegateEnemyResistChance") (between 10.0 60.0) ])
+          (fun () -> [ Mod.flag (Named "RevealWeakness"); Mod.base' (Named "OpenWeaknessMore") 30.0; Mod.more (Damage AllDamage) 30.0 |> Mod.whenever (EnemyHas "OpenWeakness") ])
+          (fun () -> [ Mod.base' (Named "MaxCurses") 1.0 ])
+          (fun () -> [ Mod.inc (Named "ExposureEffect") (between 10.0 50.0) ])
+          (fun () -> [ Mod.base' (Named "FixedUseTime") (between 0.05 0.3) |> withConds ])
+          (fun () -> [ Mod.base' (Named "ExtraCostPercentOfMaxMana") (between 1.0 6.0) |> Mod.whenever (SkillIs Spell) ])
+          (fun () -> [ Mod.base' (Named "LosePoolsOnUse") (between 1.0 5.0) ])
+          (fun () -> [ Mod.base' (Named "ManaPercentOnKill") (between 1.0 5.0) ])
+          (fun () -> [ Mod.base' (Named "DotDamage") 0.0; Mod.inc (Named "DotDamage") (between 10.0 80.0) ])
+          (fun () -> [ Mod.inc (Named "FasterAilments") (between 10.0 50.0) ])
+          (fun () -> [ Mod.base' (Named "RageEffect") 0.0; Mod.inc (Named "RageEffect") (between 10.0 50.0) ])
+          (fun () -> [ Mod.base' (Named "ConsumeChargeCount") (float (whole 1 2)) ])
+          (fun () -> [ Mod.flag (Named "NoHitDamage") |> Mod.whenever (SkillNamed "Skill 2") ])
+          (fun () -> [ Mod.override' HitChance (between 40.0 100.0) |> Mod.whenever (SkillNamed "Skill 1") ]) ]
+    let mods = [ for _ in 1 .. whole 0 14 do yield! (pick modPool) () ]
+    // its skills
+    let damage () =
+        [ for _ in 1 .. whole 1 2 -> pick types, (let lo = between 5.0 200.0 in { Min = lo; Max = lo + between 0.0 300.0 }) ] |> Map.ofList
+    let delivery () =
+        match whole 0 7 with
+        | 0 | 1 | 2 -> Single
+        | 3 -> AreaAtTarget(between 8.0 40.0)
+        | 4 -> AreaAroundSelf(between 15.0 60.0)
+        | 5 -> Projectiles { ProjectileShape.make (whole 1 5) with Pierce = whole 0 2; Chains = whole 0 2; CanShotgun = chance 0.5; Spread = between 10.0 90.0 }
+        | 6 -> Projectiles { ProjectileShape.make (whole 1 4) with Explosion = Some(between 8.0 20.0); PerCharge = (if chance 0.5 then Some("PowerCharge", 1) else None) }
+        | _ -> Projectiles { ProjectileShape.make (whole 2 6) with Rain = Some(between 15.0 30.0, between 5.0 12.0) }
+    let skill (i: int) (spam: bool) : Skill =
+        let attack = chance 0.4
+        let tags =
+            (if attack then [ Attack ] else [ Spell ])
+            @ (if chance 0.3 then [ Melee ] else []) @ (if chance 0.2 then [ Slam ] else []) @ (if chance 0.2 then [ Area ] else [])
+            @ (if chance 0.1 then [ Tag "Type:Sustained" ] else []) @ (if chance 0.1 then [ Tag "SpellDot" ] else [])
+        { Skill.make (sprintf "Skill %d" i) tags with
+            BaseDamage = (if chance 0.08 then Map.empty else damage ())
+            BaseMultiplier = (if chance 0.3 then between 0.5 2.5 else 1.0)
+            BaseCrit = (if chance 0.2 then 0.0 else between 3.0 30.0)
+            BaseTime = (if chance 0.05 then 0.0 else between 0.25 1.4)
+            Cooldown = (if not spam && chance 0.7 then Some(between 0.5 6.0) else None)
+            StoredUses = (if chance 0.3 then whole 2 3 else 1)
+            Hits =
+                (match whole 0 5 with
+                 | 0 -> [ 0.3, 0.5; 0.6, 0.5; 1.0, 1.0 ]
+                 | 1 -> [ 0.5, 1.0 ]
+                 | 2 -> []
+                 | _ -> [ 1.0, 1.0 ])
+            Delivery = delivery ()
+            Mods =
+                [ if chance 0.3 then yield! (pick modPool) ()
+                  if chance 0.15 then yield Mod.base' (Named "ConsumeChargeEveryMs") (between 300.0 3000.0)
+                  if chance 0.1 then yield Mod.flag (Named "NeedsCharge")
+                  if chance 0.1 then yield Mod.flag (Named "CannotInflict:Marked by pain")
+                  if chance 0.1 then yield Mod.base' (Named "DoubleCooldownUses") 1.0 ]
+            Consumes = (if chance 0.25 then Some(pick [ "PowerCharge"; "FrenzyCharge" ]) else None)
+            Cost = (if chance 0.5 then between 3.0 45.0 else 0.0)
+            CostPerSecond = (if chance 0.1 then between 3.0 30.0 else 0.0)
+            HitDelay = (if chance 0.15 then between 0.1 1.0 else 0.0)
+            Dots = (if chance 0.2 then Map.ofList [ pick types, between 20.0 300.0 ] else Map.empty)
+            Duration = (if chance 0.4 then between 0.5 5.0 else 0.0) }
+    let withParts (s: Skill) : Skill =
+        if chance 0.75 then s
+        else
+            let part (suffix: string) (flags: string list) =
+                { skill 0 true with
+                    Name = s.Name + suffix
+                    Mods = flags |> List.map (fun f -> Mod.flag (Named f)) }
+            let parts =
+                match whole 0 4 with
+                | 0 -> [ part ": Wave" [] ]
+                | 1 -> [ part ": Explosion" []; part "-Charged" [] ]
+                | 2 -> [ part ": Echo" [ "OncePerUse" ]; part ": Spark" [ "OnlyWithCharge" ] ]
+                | 3 -> [ part ": Plain" [ "NotWithCharge" ]; part ": Rest" [ "NotEnraged" ] ]
+                | _ -> [ part ": Hidden" [ "OnlyTriggered" ] ]
+            { s with Parts = parts }
+    let count = whole 1 4
+    let skills = [ for i in 1 .. count -> withParts (skill i (i = count)) ]
+    // (with a cooldown: a skill that triggers itself without one never ends)
+    let triggered = if chance 0.3 then [ { skill 9 false with Name = "Echo"; Tags = Set.ofList [ Spell; Triggered ]; Cooldown = Some(between 0.2 2.0) } ] else []
+    let names = skills |> List.map (fun s -> s.Name)
+    // what it does when
+    let buffMods () = if chance 0.6 then (pick modPool) () else []
+    let reaction () : Reaction =
+        let simple () =
+            match whole 0 13 with
+            | 0 | 1 -> GrantBuff(pick [ "Buffed"; "Tide"; "Onslaught" ], between 0.5 6.0, whole 1 5, buffMods ())
+            | 2 -> ApplyDebuff(pick [ "Marked by pain"; "Weakened"; "Mark:Sniper" ], between 0.5 6.0, whole 1 6, [ Mod.inc (DamageTaken(pick [ AllDamage; Elemental; OfType Fire ])) (between 2.0 15.0) ])
+            | 3 -> ApplyCurse(pick [ "Hex"; "Despair"; "Mark:Sniper"; "Curse:Frailty" ], between 1.0 8.0, [ Mod.base' (Resist(pick types)) (between -40.0 -5.0); Mod.inc (DamageTaken AllDamage) (between 1.0 20.0) ])
+            | 4 -> ApplyExposure(pick types, between 5.0 40.0, between 1.0 8.0)
+            | 5 -> GrowExposure(pick types, 10.0, 5.0, 30.0, 0.25, whole 1 5, between 1.0 6.0)
+            | 6 -> RemoveBuff(pick [ "Buffed"; "Tide"; "PowerCharge" ])
+            | 7 -> RemoveDebuff(pick [ "Marked by pain"; "Shocked"; "Curse:Hex" ])
+            | 8 | 9 -> GainResource(pick [ "PowerCharge"; "FrenzyCharge"; "Mote" ], whole 1 2)
+            | 10 -> DropRemnant(pick [ "PowerCharge"; "Mote" ], between 0.1 1.5, between 0.0 60.0)
+            | 11 -> SetStacks(pick [ "Buffed"; "Readied" ], whole 1 4)
+            | 12 -> (if triggered.IsEmpty then NoReaction else TriggerSkill "Echo")
+            | _ -> NoReaction
+        match whole 0 9 with
+        | 0 -> SpendStack(pick [ "Buffed"; "Readied"; "PowerCharge" ], simple ())
+        | 1 -> IfBuff(pick [ "Buffed"; "Tide"; "CritRecently" ], simple ())
+        | 2 -> IfEnemyHas(pick [ "Shocked"; "Ignited"; "Cursed"; "LowLife"; "Marked by pain"; "FullLife" ], simple ())
+        | _ -> simple ()
+    let rules : Rule list =
+        [ for _ in 1 .. whole 0 6 ->
+            { Hook = pick [ OnUse; OnHit; OnHit; OnCrit; OnKill; OnKillOf(pick [ "Shocked"; "RareOrUnique"; "LowLife" ]); OnInflict(pick [ Ignite; Shock; Poison; Bleed; Chill ]); WhenHit ]
+              Filter = pick [ AnySkill; AnySkill; WithTag Spell; WithTag Attack; WithTagNot(Spell, Triggered); Called(pick names); WithTags([ Spell ], [ Slam ]) ]
+              Chance = pick [ 100.0; 100.0; between 5.0 95.0; 0.0 ]
+              Reaction = reaction () } ]
+    let condition () : View -> bool =
+        match whole 0 8 with
+        | 0 -> fun v -> not (v.Buffs.ContainsKey "Buffed")
+        | 1 -> fun v -> not (v.EnemyStatus.ContainsKey "Cursed")
+        | 2 -> fun v -> v.EnemyLifeFraction < 0.6
+        | 3 -> fun v -> (Map.tryFind "PowerCharge" v.Buffs |> Option.defaultValue 0) >= 2
+        | 4 -> fun v -> v.LastUsed <> "Skill 1"
+        | 5 -> fun v -> v.EnemiesAlive > 1 || v.Time > 2.0
+        | 6 -> fun v -> v.Energy.IsEmpty || v.EnemyRarity = Unique
+        | _ -> fun _ -> true
+    let rotation = [ for s in skills -> { Use = s.Name; When = (if s.Name = List.last names then (fun _ -> true) else condition ()) } ]
+    let vitals =
+        if chance 0.45 then None
+        else
+            Some
+                { PlayerStats.basic (between 500.0 3000.0) (between 60.0 600.0) with
+                    ManaRegen = between 2.0 40.0
+                    LifeRegen = (if chance 0.5 then between 1.0 50.0 else 0.0)
+                    EnergyShield = (if chance 0.4 then between 50.0 800.0 else 0.0)
+                    EnergyShieldRecharge = between 10.0 80.0
+                    ESRegen = (if chance 0.2 then between 1.0 10.0 else 0.0)
+                    StartLife = (if chance 0.2 then between 0.2 0.9 else 1.0)
+                    LifeReserved = (if chance 0.1 then between 0.1 0.5 else 0.0)
+                    LifeFrozenWithES = chance 0.05
+                    CostsLife = chance 0.12
+                    LifeOnKill = (if chance 0.2 then between 5.0 50.0 else 0.0)
+                    ESOnKill = (if chance 0.2 then between 5.0 50.0 else 0.0)
+                    LifeRecoveryRate = (if chance 0.2 then between 0.5 1.5 else 1.0)
+                    ManaRecoveryRate = (if chance 0.2 then between 0.5 1.5 else 1.0)
+                    LifeLeechRate = (if chance 0.2 then between 0.5 2.0 else 1.0)
+                    SurroundedAt = whole 1 5
+                    Ward = (if chance 0.1 then between 10.0 200.0 else 0.0)
+                    WardRegen = 5.0
+                    LifeRecharge = (if chance 0.1 then between 5.0 50.0 else 0.0)
+                    LifeFlask = (if chance 0.3 then Some { Amount = 300.0; Duration = 3.0; ChargesPerUse = 10.0; MaxCharges = 60.0; ChargesPerSecond = 0.2; ChargeGainMult = 1.0; Instant = 0.0 } else None) }
+    let player =
+        { Actor.make "Player" mods (skills @ triggered) with
+            Rotation = rotation
+            Rules = rules
+            Resources =
+                [ if chance 0.5 then yield "PowerCharge", whole 0 4
+                  if chance 0.2 then yield "FrenzyCharge", whole 1 3
+                  if chance 0.1 then yield "Rage", whole 1 30
+                  if chance 0.1 then yield "ConstantManaFlask", 1
+                  if chance 0.1 then yield "Buffed", whole 1 3 ]
+            MaxResources =
+                [ if chance 0.8 then yield "PowerCharge", whole 2 6
+                  if chance 0.5 then yield "FrenzyCharge", whole 1 4
+                  if chance 0.3 then yield "Mote", whole 1 9 ]
+                |> Map.ofList
+            ResourceDurations =
+                [ if chance 0.5 then yield "PowerCharge", between 2.0 12.0
+                  if chance 0.3 then yield "FrenzyCharge", between 2.0 12.0
+                  if chance 0.2 then yield "Mote", between 1.0 4.0 ]
+                |> Map.ofList
+            KeptChargesPause = (if chance 0.3 then between 0.5 3.0 else 0.0)
+            ParallelUses = chance 0.5
+            HitPattern = (if chance 0.15 then Map.ofList [ "Skill 1", [ DuringUse 0.4, 1.0; After 0.8, 0.6 ] ] else Map.empty)
+            Cycles =
+                (if chance 0.15 then
+                    [ { Name = "Conflux"; Period = between 0.7 3.0; Variants = [ for t in DamageType.elemental -> [ Mod.more (Damage(OfType t)) 40.0 ] ] } ]
+                 else [])
+            Archons =
+                (if chance 0.4 then
+                    [ { Name = "Archon"; OnIgniteStat = "ArchonOnIgnite"; Duration = between 1.0 5.0; Recovery = between 0.5 4.0; Mods = [ Mod.more (Damage Elemental) 30.0 ] } ]
+                 else [])
+            Vitals = vitals
+            ManaFlask =
+                (if chance 0.4 then Some { Amount = between 50.0 300.0; Duration = between 1.0 4.0; ChargesPerUse = 20.0; MaxCharges = 60.0; ChargesPerSecond = between 0.0 3.0; ChargeGainMult = 1.0; Instant = (if chance 0.3 then 0.5 else 0.0) }
+                 else None) }
+    let player = if player.Archons.IsEmpty then player else { player with Mods = Mod.base' (Named "ArchonOnIgnite") (between 20.0 100.0) :: player.Mods }
+    // what it fights
+    let enemies =
+        [ for i in 1 .. (if chance 0.5 then 1 else whole 2 5) do
+            let rarity = pick [ Normal; Magic; Rare; Unique ]
+            let d = EnemyDef.make Rarity.defaults (whole 60 83) rarity (sprintf "%s %d" (Rarity.name rarity) i) (Vec.make (between 5.0 60.0) (between -30.0 30.0))
+            yield
+                { d with
+                    Life = (if chance 0.35 then 1e12 else between 300.0 60000.0)
+                    Moving = chance 0.2
+                    Mods = (if chance 0.3 then [ Mod.base' Armour (between 0.0 3000.0) ] else d.Mods @ (if chance 0.3 then [ Mod.inc Evasion (between 50.0 300.0) ] else []))
+                    Attack = (if vitals.IsSome then None else d.Attack) } ]
+    let fight =
+        { Fight.single enemies.Head player (between 3.0 12.0) with
+            Enemies = enemies
+            Targeting = pick [ Strongest; Nearest ]
+            Reach = (if chance 0.3 then between 20.0 50.0 else infinity)
+            EnemyAuras =
+                (if chance 0.2 then [ pick [ "Curse:Aura"; "Withered"; "Mark:Aura" ], whole 1 4, [ Mod.inc (DamageTaken AllDamage) 5.0; Mod.base' (Resist Chaos) -3.0 ] ] else []) }
+    // now and then something the fast engine does not play: it must say so
+    let fight =
+        match (if chance 0.12 then whole 0 6 else -1) with
+        | 0 ->
+            note "meta"
+            { fight with Player = { player with Metas = [ Meta.simple "Cast on Crit" 100.0 names.Head ]; Rules = { Hook = OnCrit; Filter = AnySkill; Chance = 100.0; Reaction = GainEnergy("Cast on Crit", 40.0) } :: player.Rules } }
+        | 1 ->
+            note "minion"
+            { fight with Minions = [ Actor.make "Hound" [] [ { skill 7 true with Name = "Bite" } ] ] }
+        | 2 ->
+            note "monsters hit back"
+            { fight with
+                Player = { player with Vitals = Some(PlayerStats.basic 2000.0 200.0) }
+                Enemies = fight.Enemies |> List.map (fun e -> { e with Attack = Some(EnemyDef.defaultAttack e.Level e.Rarity) }) }
+        | 3 ->
+            note "seals"
+            { fight with Player = { player with Skills = player.Skills |> List.map (fun s -> { s with Mods = Mod.base' (Named "MaxSeals") 2.0 :: Mod.base' (Named "SealIntervalMs") 900.0 :: Mod.base' (Named "SealRepeats") 1.0 :: s.Mods }) } }
+        | 4 ->
+            note "rage"
+            { fight with Player = { player with MaxResources = Map.add "Rage" 30 player.MaxResources; Mods = Mod.base' (Named "RageOnHit") 3.0 :: player.Mods } }
+        | 5 ->
+            note "replace"
+            { fight with Replace = true }
+        | 6 ->
+            note "charge buff"
+            { fight with Player = { player with Rules = { Hook = OnUse; Filter = AnySkill; Chance = 100.0; Reaction = ChargeBuff("Charged", "PowerCharge", [ Mod.more (Damage AllDamage) 10.0 ], 2.0, 20.0) } :: player.Rules } }
+        | _ -> fight
+    let described =
+        sprintf "case %d: %d skills (%s), %d rules (%s), %d mods, %d enemies, vitals %b, %.2f s%s"
+            case fight.Player.Skills.Length
+            (fight.Player.Skills |> List.map (fun s -> sprintf "%s%s%s" s.Name (if s.Cooldown.IsSome then " cd" else "") (if s.Parts.IsEmpty then "" else sprintf " +%d" s.Parts.Length)) |> String.concat ", ")
+            fight.Player.Rules.Length
+            (fight.Player.Rules |> List.map (fun r -> match r.Reaction with GrantBuff _ -> "buff" | ApplyDebuff _ -> "debuff" | ApplyCurse _ -> "curse" | TriggerSkill _ -> "trigger" | GainResource _ -> "resource" | _ -> "other") |> String.concat " ")
+            fight.Player.Mods.Length fight.Enemies.Length fight.Player.Vitals.IsSome fight.MaxTime
+            (if notes.Count = 0 then "" else " [" + String.concat ", " notes + "]")
+    fight, described
+
+let run (test: string -> (unit -> unit) -> unit) =
+    let noIgnite = Mod.more (AilmentChance Ignite) -100.0
+    let boss life = { EnemyDef.atLevel 83 life with Mods = [] }
+    let spell name t lo hi = { Skill.make name [ Spell ] with BaseDamage = Map.ofList [ t, { Min = lo; Max = hi } ]; BaseCrit = 9.0 }
+    let strike name lo hi = { Skill.make name [ Attack; Melee ] with BaseDamage = Map.ofList [ Physical, { Min = lo; Max = hi } ]; BaseCrit = 7.0; BaseTime = 0.7 }
+    /// The same outcome from both engines, for these seeds; the fight must compile.
+    let same (fight: Fight) (seeds: uint32 list) =
+        match Flat.compile fight with
+        | Error why -> failwithf "does not compile: %s" why
+        | Ok _ ->
+            for seed in seeds do
+                match check fight seed with
+                | Some (Error d) -> failwith d
+                | _ -> ()
+    let seeds = [ 1u .. 25u ]
+
+    test "flat: a spell with critical hits against a boss that does not die" (fun () ->
+        let player = Actor.make "Player" [ Mod.inc CritChance 150.0; Mod.base' CritBonus 60.0; Mod.inc (Damage AllDamage) 40.0; Mod.inc Speed 25.0 ] [ spell "Arc Bolt" Lightning 20.0 380.0 ]
+        same (Fight.single (boss 1e12) player 20.0) seeds)
+
+    test "flat: a fight that ends when the enemy dies, with ignite, shock and chill on the way" (fun () ->
+        let player =
+            Actor.make "Player" [ Mod.inc CritChance 200.0; Mod.inc (AilmentMagnitude None) 50.0; Mod.inc (Damage AllDamage) 30.0 |> Mod.whenever (EnemyHas "Shocked") ]
+                [ spell "Fire Bolt" Fire 200.0 900.0; { spell "Arc" Lightning 50.0 1500.0 with Cooldown = Some 2.0 }; { spell "Frost" Cold 400.0 700.0 with Cooldown = Some 3.0; StoredUses = 2 } ]
+        let player = { player with Rotation = [ Actor.always "Arc"; Actor.always "Frost"; Actor.always "Fire Bolt" ] }
+        let enemy = EnemyDef.make Rarity.defaults 83 Unique "Boss" (Vec.make 30.0 0.0)
+        same (Fight.single { enemy with Life = 150000.0 } player 60.0) seeds)
+
+    test "flat: attacks that can miss, bleed, poison stacks, armour break and stun buildup" (fun () ->
+        let player =
+            Actor.make "Player"
+                [ Mod.base' (Named "Accuracy") 900.0; Mod.base' (AilmentChance Bleed) 40.0; Mod.base' (AilmentChance Poison) 60.0; Mod.base' (AilmentStacks Poison) 3.0
+                  Mod.base' (Named "ArmourBreakOfPhysical") 150.0; Mod.inc (Buildup HeavyStun) 3000.0; Mod.base' (AilmentChance Maim) 30.0; noIgnite ]
+                [ strike "Jab" 80.0 160.0; { strike "Smash" 300.0 500.0 with Cooldown = Some 2.5; Tags = Set.ofList [ Attack; Melee; Slam ]; Delivery = AreaAtTarget 20.0 } ]
+        let player = { player with Rotation = [ Actor.always "Smash"; Actor.always "Jab" ] }
+        let enemy = { EnemyDef.make Rarity.defaults 80 Rare "Brute" (Vec.make 12.0 0.0) with Life = 1e12; Moving = true }
+        same (Fight.single enemy player 25.0) seeds)
+
+    test "flat: mana, costs, a flask and leech; a skill that waits for mana" (fun () ->
+        let vitals = { PlayerStats.basic 1000.0 120.0 with ManaRegen = 8.0; EnergyShield = 200.0; EnergyShieldRecharge = 40.0; LifeRegen = 5.0; StartLife = 0.6 }
+        let flask = { Amount = 90.0; Duration = 3.0; ChargesPerUse = 20.0; MaxCharges = 60.0; ChargesPerSecond = 1.0; ChargeGainMult = 1.0; Instant = 0.3 }
+        let player =
+            { Actor.make "Player" [ Mod.base' ManaLeech 6.0; Mod.base' (Named "LifeLeech") 4.0; Mod.inc ManaCost 20.0; Mod.inc (Damage AllDamage) 25.0 |> Mod.whenever (WhileBuff "LowMana"); Mod.base' (Named "Accuracy") 5000.0 ]
+                  [ { spell "Costly" Fire 100.0 200.0 with Cost = 45.0; BaseTime = 0.6 }; { strike "Drain" 100.0 200.0 with Cost = 5.0 } ] with
+                Vitals = Some vitals
+                ManaFlask = Some flask }
+        same (Fight.single { boss 1e12 with Mods = [ Mod.base' Armour 500.0 ] } player 30.0) seeds
+        // Blood Magic: the cost is paid with life
+        same (Fight.single (boss 1e12) { player with Vitals = Some { vitals with CostsLife = true; StartLife = 1.0 } } 20.0) seeds)
+
+    test "flat: buffs and debuffs from rules, with stacks and expiry; a curse, exposure, a triggered skill" (fun () ->
+        let echo = { spell "Echo" Cold 300.0 400.0 with Tags = Set.ofList [ Spell; Triggered ]; Cooldown = Some 0.4 }
+        let player =
+            { Actor.make "Player"
+                  [ Mod.inc (Damage AllDamage) 12.0 |> Mod.whenever (PerStack("Momentum", 1.0)); Mod.inc CritChance 300.0; Mod.more (Damage AllDamage) 20.0 |> Mod.whenever (EnemyHas "Cursed") ]
+                  [ { spell "Hex" Chaos 1.0 2.0 with Cooldown = Some 5.0; Hits = []; BaseTime = 0.5 }; spell "Bolt" Fire 100.0 300.0; echo ] with
+                Rotation = [ { Use = "Hex"; When = fun v -> not (v.EnemyStatus.ContainsKey "Curse:Hex") }; Actor.always "Bolt" ]
+                Rules =
+                    [ { Hook = OnHit; Filter = Called "Bolt"; Chance = 100.0; Reaction = GrantBuff("Momentum", 2.5, 5, []) }
+                      { Hook = OnUse; Filter = Called "Hex"; Chance = 100.0; Reaction = ApplyCurse("Hex", 4.0, [ Mod.base' (Resist Fire) -25.0 ]) }
+                      { Hook = OnHit; Filter = AnySkill; Chance = 50.0; Reaction = ApplyDebuff("Sundered", 3.0, 4, [ Mod.inc (DamageTaken AllDamage) 4.0 ]) }
+                      { Hook = OnCrit; Filter = Called "Bolt"; Chance = 100.0; Reaction = TriggerSkill "Echo" }
+                      { Hook = OnInflict Ignite; Filter = AnySkill; Chance = 100.0; Reaction = ApplyExposure(Fire, 20.0, 4.0) }
+                      { Hook = OnUse; Filter = Called "Hex"; Chance = 100.0; Reaction = GrowExposure(Cold, 10.0, 5.0, 40.0, 0.25, 6, 5.0) } ] }
+        same (Fight.single (EnemyDef.make Rarity.defaults 83 Unique "Boss" (Vec.make 30.0 0.0) |> fun e -> { e with Life = 1e12; Attack = None }) player 30.0) seeds)
+
+    test "flat: charges gained and consumed, parts of a skill, damage over time of a skill" (fun () ->
+        let burst = { spell "Thunder: Burst" Lightning 500.0 900.0 with Mods = [ Mod.flag (Named "OnlyWithCharge") ]; Delivery = AreaAtTarget 25.0 }
+        let thunder = { strike "Thunder" 200.0 300.0 with Consumes = Some "PowerCharge"; Parts = [ burst ]; Cooldown = Some 1.5 }
+        let rot = { spell "Rot" Chaos 10.0 20.0 with Dots = Map.ofList [ Chaos, 400.0 ]; Duration = 3.0; Cooldown = Some 4.0 }
+        let player =
+            { Actor.make "Player" [ Mod.inc CritChance 400.0; Mod.more (Damage AllDamage) 15.0 |> Mod.whenever (PerStack("PowerCharge", 1.0)); Mod.base' (Named "ChargeSkipConsume") 30.0 ]
+                  [ thunder; rot; strike "Jab" 50.0 90.0 ] with
+                Rotation = [ { Use = "Thunder"; When = fun v -> v.Buffs.ContainsKey "PowerCharge" }; Actor.always "Rot"; Actor.always "Jab" ]
+                Rules = [ { Hook = OnCrit; Filter = Called "Jab"; Chance = 100.0; Reaction = GainResource("PowerCharge", 1) } ]
+                Resources = [ "PowerCharge", 2 ]
+                MaxResources = Map.ofList [ "PowerCharge", 3 ]
+                ResourceDurations = Map.ofList [ "PowerCharge", 6.0 ]
+                KeptChargesPause = 1.0 }
+        same (Fight.single (boss 1e12) player 30.0) seeds)
+
+    test "flat: several enemies, areas and projectiles, kills on the way" (fun () ->
+        let pack = Encounter.pack 80 Rarity.defaults [ Normal, 6; Magic, 2; Rare, 1 ] 35.0 25.0 false 7u
+        let shot = { spell "Shards" Cold 300.0 600.0 with Delivery = Projectiles { ProjectileShape.make 5 with Pierce = 1; Chains = 1 }; BaseTime = 0.5 }
+        let nova = { spell "Nova" Fire 500.0 800.0 with Delivery = AreaAroundSelf 45.0; Cooldown = Some 2.0 }
+        let player =
+            { Actor.make "Player" [ Mod.inc AreaOfEffect 30.0; Mod.flag (Named "CullingStrike"); Mod.inc (Damage AllDamage) 40.0 |> Mod.whenever (WhileBuff "KilledRecently") ] [ nova; shot ] with
+                Rules = [ { Hook = OnKill; Filter = AnySkill; Chance = 100.0; Reaction = GrantBuff("Frenzied", 4.0, 3, [ Mod.inc Speed 10.0 ]) } ] }
+        same { Fight.single pack.Head player 30.0 with Enemies = pack } seeds)
+
+    test "flat: what is not built is refused, with every reason" (fun () ->
+        let player = Actor.make "Player" [] [ spell "Bolt" Fire 1.0 2.0 ]
+        let fine = Fight.single (boss 1e9) player 5.0
+        let refused (fight: Fight) (reason: string) =
+            match Flat.compile fight with
+            | Ok _ -> failwithf "compiled, but has %s" reason
+            | Error why -> if not (why.Contains reason) then failwithf "refused for '%s', expected '%s'" why reason
+        if not (Flat.unsupported fine).IsEmpty then failwithf "a plain fight is refused: %A" (Flat.unsupported fine)
+        refused { fine with Minions = [ Actor.make "Hound" [] [ strike "Bite" 1.0 2.0 ] ] } "minions"
+        refused { fine with Player = { player with Metas = [ Meta.simple "Cast on Crit" 100.0 "Bolt" ] } } "meta gems"
+        refused { fine with Player = { player with Vitals = Some(PlayerStats.basic 100.0 100.0) }; Enemies = Encounter.boss 83 Rarity.defaults 30.0 } "monsters hitting back"
+        refused { fine with Player = { player with Skills = [ { spell "Bolt" Fire 1.0 2.0 with Mods = [ Mod.base' (Named "MaxSeals") 2.0 ] } ] } } "sealed skills"
+        refused { fine with Player = { player with Rules = [ { Hook = OnHit; Filter = AnySkill; Chance = 100.0; Reaction = Summon("Wolves", 1, 5.0) } ] } } "the reaction Summon"
+        // both reasons of a fight with two
+        let two = { fine with Replace = true; Player = { player with Charms = [ { Name = "c"; Trigger = "Frozen"; Buff = "Charm1"; Prevents = true; Duration = 1.0; ChargesPerUse = 1.0; MaxCharges = 1.0; ChargesPerSecond = 0.0; ChargeOnKillChance = 0.0; ChargeGainMult = 1.0; LifeOnUse = 0.0; ManaOnUse = 0.0; StartsRecharge = false } ] } }
+        if (Flat.unsupported two).Length <> 2 then failwithf "expected two reasons, got %A" (Flat.unsupported two))
+
+    test "flat: random fights give the reference's outcome, or are refused" (fun () ->
+        let mutable compared = 0
+        let mutable compiled = 0
+        let mutable refused = 0
+        for case in 1u .. 400u do
+            let fight, described = randomFight case
+            match Flat.compile fight with
+            | Error _ -> refused <- refused + 1
+            | Ok _ ->
+                compiled <- compiled + 1
+                for seed in [ case; case * 7919u + 1u; 4000000000u - case ] do
+                    compared <- compared + 1
+                    match check fight seed with
+                    | Some (Error d) -> failwithf "%s\n  %s" described d
+                    | _ -> ()
+        printfn "     flat: %d random fights compiled (%d refused), %d runs the same as the reference's" compiled refused compared
+        if compiled < 250 then failwithf "only %d of 400 random fights compile" compiled)

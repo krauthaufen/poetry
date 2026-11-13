@@ -1226,5 +1226,7 @@ let main _ =
 
     DataTests.run test near (fun a b -> equal a b)
 
+    FlatTests.run test
+
     printfn "%d passed, %d failed" passed failures
     if failures = 0 then 0 else 1

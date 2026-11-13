@@ -21,6 +21,7 @@
     <Compile Include="Encounter.fs" />
     <Compile Include="Vitals.fs" />
     <Compile Include="Sim.fs" />
+    <Compile Include="Flat.fs" />
     <Compile Include="Summary.fs" />
     <Compile Include="Json.fs" />
     <Compile Include="GameData.fs" />

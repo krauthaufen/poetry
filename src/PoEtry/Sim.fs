@@ -656,6 +656,10 @@ module Sim =
           WithBuffs: System.Collections.Generic.Dictionary<string, System.Collections.Generic.Dictionary<string, Map<string, Effect> * ModDb>>
           /// Percent of maximum life lost per minute per Rage (Berserk).
           BerserkLoss: float
+          /// Told what happens, if anyone listens (`traced`): time, kind, who, what, a number
+          /// (an event: its place in the queue's order; a hit: what it dealt). Nothing in the
+          /// fight depends on it.
+          Trace: (float -> string -> string -> string -> float -> unit) option
           /// The player's rage upkeep: regeneration per second, loss per second, seconds without
           /// gaining before it is lost, rage when hit, rage on kill.
           Rage: float * float * float * float * float }
@@ -670,7 +674,7 @@ module Sim =
         Map.add key ((Map.tryFind key m |> Option.defaultValue 0.0) + v) m
 
     /// The seed of the n-th draw of a stream of its own, named by `key`, in a fight of this seed.
-    let private streamSeed (seed: uint32) (key: string) (n: int) : uint32 =
+    let streamSeed (seed: uint32) (key: string) (n: int) : uint32 =
         let mutable h = 5381u
         for ch in key do
             h <- (((h <<< 5) &&& 0xFFFFFFFFu) + h + uint32 ch) &&& 0xFFFFFFFFu
@@ -2420,6 +2424,7 @@ module Sim =
                 let dealt = Dmg.total hit.Dealt
                 let life = e.Life - dealt
                 let dead = life <= 1e-9
+                (match env.Trace with Some tell -> tell w.Time (if hit.Crit then "crit" else "hit") target skill.Name dealt | None -> ())
                 let w =
                     { w with
                         // the enemy as it is now: what the hit consumed stays consumed
@@ -3343,6 +3348,28 @@ module Sim =
     let private step env rng (w: World) =
         let (KeyValue ((t, sq), ev)) = Seq.head w.Queue
         let dt = t - w.Time
+        (match env.Trace with
+         | Some tell ->
+             match ev with
+             | Ready a -> tell t "Ready" a "" (float sq)
+             | Strike (a, s, _, _) -> tell t "Strike" a s (float sq)
+             | PassingStrike (a, s, _, _, _) -> tell t "PassingStrike" a s (float sq)
+             | DirectHit (a, s, _, _) -> tell t "DirectHit" a s (float sq)
+             | ConsumeCharges (a, c, _) -> tell t "ConsumeCharges" a c (float sq)
+             | CycleTick (a, c) -> tell t "CycleTick" a c (float sq)
+             | EnemyAttack e -> tell t "EnemyAttack" e "" (float sq)
+             | ReviveMinions _ -> tell t "ReviveMinions" "" "" (float sq)
+             | MinionLeaves (a, _) -> tell t "MinionLeaves" a "" (float sq)
+             | PeriodicTick (a, p) -> tell t "PeriodicTick" a p (float sq)
+             | WardArrives _ -> tell t "WardArrives" "" "" (float sq)
+             | ManaArrives _ -> tell t "ManaArrives" "" "" (float sq)
+             | GainStacks (a, r, _) -> tell t "GainStacks" a r (float sq)
+             | Expose (a, e, _, _, _) -> tell t "Expose" a e (float sq)
+             | PlantCrystals (a, p, _, _, _, _, _) -> tell t "PlantCrystals" a p (float sq)
+             | SpendBuff (a, b) -> tell t "SpendBuff" a b (float sq)
+             | EnergyArrives (a, m, _) -> tell t "EnergyArrives" a m (float sq)
+             | Expire -> tell t "Expire" "" "" (float sq)
+         | None -> ())
         // What a skill's hits roll comes from a stream of that skill alone (who strikes with
         // what: its first event, its second, ...), not from the one stream of the fight: its
         // tenth strike rolls the same whatever else happened before. Two fights of one seed
@@ -3625,8 +3652,9 @@ module Sim =
                     | _ -> { st with Buffs = Map.remove buff st.Buffs }) w
             | Expire -> w
 
-    let private envOf (fight: Fight) =
+    let private envOf (trace: (float -> string -> string -> string -> float -> unit) option) (fight: Fight) =
         { Fight = fight
+          Trace = trace
           Rage =
             (let db = ModDb.ofList fight.Player.Mods
              let c = Ctx.empty
@@ -3643,8 +3671,8 @@ module Sim =
                       for s in allSkills a -> (a.Name, s.Name), ModDb.ofList (a.Mods @ s.Mods) ] }
 
     /// Simulate one fight with the given seed.
-    let private runWith (tracing: bool) (fight: Fight) (seed: uint32) : Outcome =
-        let env = envOf fight
+    let private runWith (trace: (float -> string -> string -> string -> float -> unit) option) (tracing: bool) (fight: Fight) (seed: uint32) : Outcome =
+        let env = envOf trace fight
         let rng = Rng(seed)
         /// Expiry events for the resources an actor starts with.
         let scheduleResourceTimers (w: World) (a: Actor) =
@@ -3855,7 +3883,14 @@ module Sim =
           ManaGained = w.Player |> Option.map (fun p -> p.ManaGained) |> Option.defaultValue Map.empty }
 
     /// Simulate one fight with the given seed.
-    let run (fight: Fight) (seed: uint32) : Outcome = runWith false fight seed
+    let run (fight: Fight) (seed: uint32) : Outcome = runWith None false fight seed
 
     /// The same fight (the same numbers), with what happened kept for showing it.
-    let shown (fight: Fight) (seed: uint32) : Outcome = runWith true fight seed
+    let shown (fight: Fight) (seed: uint32) : Outcome = runWith None true fight seed
+
+    /// The same fight (the same numbers), telling `tell` every event as it is taken from the
+    /// queue (time, kind, who, what, its number in the queue's order) and every hit that lands
+    /// (time, "hit" or "crit", the enemy, the skill, the damage dealt): for comparing another
+    /// engine with this one, event by event.
+    let traced (tell: float -> string -> string -> string -> float -> unit) (fight: Fight) (seed: uint32) : Outcome =
+        runWith (Some tell) false fight seed
