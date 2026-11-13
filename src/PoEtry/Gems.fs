@@ -747,8 +747,9 @@ module Gems =
                         Explosion = if data.Types.Contains "Area" && not (List.contains "is_area_damage" set.Stats) then radius else None }
             else
                 match radius with
-                // "ice_nova_number_of_frost_bolts_to_cast_on": cast on a Frostbolt near the target
-                | Some r when (statOf "ice_nova_number_of_frost_bolts_to_cast_on" |> Option.defaultValue 0.0) > 0.0 -> AreaAtTarget r
+                // a nova is around the caster (Ice Nova too: it is cast on a Frostbolt only when one
+                // is flying, user observation), unless Astral Projection puts it at the target
+                | Some r when data.Types.Contains "Nova" && flagAny "nova_skills_cast_at_target_location" -> AreaAtTarget r
                 | Some r when data.Types.Contains "Nova" -> AreaAroundSelf r
                 | Some r -> AreaAtTarget r
                 | _ -> Single
@@ -897,6 +898,32 @@ module Gems =
             let data = { data with StatSets = data.StatSets |> List.map atLevel }
             skillFromData db ownerMods weapon { Gem = skillId; Level = 1; Quality = 0; StatSet = 1; Supports = supports } data
 
+    /// Levels a skill gets from its supports: a Mastery's "+1 Level of supported Cold Skills",
+    /// Dialla's Desire, Uhtred's lineage supports (those count the other supports beside them).
+    and supportLevels (db: GameDb) (setup: GemSetup) : int =
+        let others = setup.Supports.Length - 1
+        let types = skillOfGem db setup.Gem |> Option.map (fun d -> d.Types) |> Option.defaultValue Set.empty
+        // ("supported_cold_skill_gem_level_+": for skills of that type only)
+        let fits (id: string) =
+            [ "cold", "Cold"; "fire", "Fire"; "lightning", "Lightning"; "chaos", "Chaos"; "physical", "Physical"; "minion", "Minion" ]
+            |> List.forall (fun (word, t) -> not (id.StartsWith("supported_" + word + "_")) || types.Contains t)
+        setup.Supports
+        |> List.sumBy (fun (name, lvl) ->
+            match supportOfGem db name with
+            | Some s when s.Support ->
+                s.StatSets |> List.tryHead
+                |> Option.map (fun set ->
+                    stats s set lvl 0
+                    |> List.sumBy (fun (id, v) ->
+                        if not (id.StartsWith "supported_" && id.Contains "_skill_gem_level_+") || not (fits id) then 0.0
+                        elif id.EndsWith "_if_no_other_supports" then (if others = 0 then v else 0.0)
+                        elif id.EndsWith "_if_one_other_support" then (if others = 1 then v else 0.0)
+                        elif id.EndsWith "_if_two_other_supports" then (if others = 2 then v else 0.0)
+                        else v))
+                |> Option.defaultValue 0.0
+            | _ -> 0.0)
+        |> int
+
     and private skillFromData (db: GameDb) (characterMods: ModDb) (weapon: Weapon option) (setup: GemSetup) (data: SkillData) : Result<Skill * Coverage, string> =
             match List.tryItem (setup.StatSet - 1) data.StatSets with
             | None -> Error(sprintf "%s has no stat set %d" setup.Gem setup.StatSet)
@@ -920,7 +947,7 @@ module Gems =
                     @ (if set.Stats |> List.contains "spell_damage_modifiers_apply_to_skill_dot" then [ Tag "SpellDot" ] else [])
                     |> Set.ofList
                 let ctx = { Ctx.empty with SkillName = data.Name; SkillTags = tags }
-                let level = setup.Level + int (Mods.sumBase ctx [ Named "GemLevel" ] characterMods)
+                let level = setup.Level + int (Mods.sumBase ctx [ Named "GemLevel" ] characterMods) + supportLevels db setup
                 let maxLevel = data.Levels |> Map.toList |> List.map fst |> List.fold max 1
                 let level = min level maxLevel
                 let quality = setup.Quality + int (Mods.sumBase ctx [ Named "GemQuality" ] characterMods)
@@ -991,6 +1018,14 @@ module Gems =
             | None -> []
         { Ctx.empty with SkillName = gem; SkillTags = Set.ofList tags }
 
+    /// The level a socketed gem really has: its own, what the character adds and what its supports add.
+    let level (db: GameDb) (characterMods: ModDb) (setup: GemSetup) : int =
+        match skillOfGem db setup.Gem with
+        | None -> setup.Level
+        | Some data ->
+            let maxLevel = data.Levels |> Map.toList |> List.map fst |> List.fold max 1
+            min maxLevel (setup.Level + int (Mods.sumBase (ctxOf db setup.Gem) [ Named "GemLevel" ] characterMods) + supportLevels db setup)
+
     /// Levels the character's mods add to a gem ("+ to Level of all Spell Skills").
     let bonusLevels (db: GameDb) (characterMods: ModDb) (gem: string) =
         int (Mods.sumBase (ctxOf db gem) [ Named "GemLevel" ] characterMods)
@@ -1005,7 +1040,7 @@ module Gems =
                 let tags = (data.Types |> Set.toList |> List.choose tagOfType) @ (data.Types |> Set.toList |> List.map (fun t -> Tag("Type:" + t))) @ [ Tag("Gem:" + data.Name) ] |> Set.ofList
                 let ctx = { Ctx.empty with SkillName = data.Name; SkillTags = tags }
                 let maxLevel = data.Levels |> Map.toList |> List.map fst |> List.fold max 1
-                let level = min maxLevel (setup.Level + int (Mods.sumBase ctx [ Named "GemLevel" ] characterMods))
+                let level = min maxLevel (setup.Level + int (Mods.sumBase ctx [ Named "GemLevel" ] characterMods) + supportLevels db setup)
                 let quality = setup.Quality + int (Mods.sumBase ctx [ Named "GemQuality" ] characterMods)
                 let alt = Mods.flag ctx (Named "AltQuality") characterMods
                 let supports =

@@ -128,6 +128,23 @@ module Setup =
                 | _ -> d = name)
         { build with Groups = build.Groups |> List.mapi (fun gi g -> { g with Gems = g.Gems |> List.filter (fun x -> not (drops gi x.Name)) }) }
 
+    /// The game's own character data gives a skill gem's level with what its supports add
+    /// (a Mastery's level, Dialla's Desire): here a gem has its own level, and the supports'
+    /// levels are added where the skill is built (so a support turned off takes its level along).
+    let private ownLevels (db: GameDb) (build: PobBuild) =
+        if not (Map.containsKey "levelsWithSupports" build.Config) then build
+        else
+            { build with
+                Config = Map.remove "levelsWithSupports" build.Config
+                Groups =
+                    build.Groups |> List.map (fun g ->
+                        let supports = g.Gems |> List.filter (fun x -> x.Enabled && x.IsSupport) |> List.map (fun x -> x.Name, x.Level)
+                        { g with
+                            Gems =
+                                g.Gems |> List.map (fun x ->
+                                    if x.IsSupport then x
+                                    else { x with Level = max 1 (x.Level - Gems.supportLevels db { Gem = x.Name; Level = x.Level; Quality = x.Quality; StatSet = 1; Supports = supports }) }) }) }
+
     /// Build the character. `read` reads a game data file by name ("tree.json").
     let rec load (read: string -> string) (build: PobBuild) (o: Options) : Loaded =
         loadWith (GameDb.load read) (read "tree.json") build o
@@ -139,6 +156,7 @@ module Setup =
     /// The same with the tree read already (one character loaded again and again: a front end).
     and loadParsed (db: GameDb) (tree: Map<int, TreeNode>) (jewelSlots: int list) (classBases: Map<string, float * float * float>) (build: PobBuild) (o: Options) : Loaded =
         let build = if o.Bonded then { build with Config = Map.add "bonded" "1" build.Config } else build
+        let build = ownLevels db build
         let build = dropGems o.Without build
         let sheet = Pob.character db tree jewelSlots build |> fun s -> Pob.withPersistentBuffs db s build
         // charms: their effects are sheet mods that hold while the charm lasts

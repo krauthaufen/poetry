@@ -55,7 +55,8 @@ module Report =
             gems (Json.list (Json.field "skills" c)) |> Map.ofList
 
     /// (`groups`: the build's socket groups before any gem was turned off, `icons`: see `gemIcons`.)
-    let character (slots: int list) (anointed: int list) (groups: PobGroup list) (icons: Map<string, string>) (c: Loaded) : Json =
+    let character (slots: int list) (anointed: int list) (groups: PobGroup list) (levelsWithSupports: bool) (icons: Map<string, string>) (c: Loaded) : Json =
+        let sheetMods = ModDb.ofList c.Sheet.Mods
         // a jewel in a socket of the tree: its item text is rarity, name, base, properties, mods
         let jewel (slot: string, text: string) =
             if not (slot.StartsWith "Jewel ") then None
@@ -139,7 +140,17 @@ module Report =
                                       "index", num (float (i + 1))
                                       "gems", JArr [ for x in g.Gems do
                                                        if x.Enabled then
-                                                           yield obj [ "name", JStr x.Name; "level", num (float x.Level); "quality", num (float x.Quality); "support", JBool x.IsSupport
+                                                           // (a skill's level with what gear, passives and its supports add)
+                                                           let level =
+                                                               if x.IsSupport then x.Level
+                                                               else
+                                                                   let setup supports = { Gem = x.Name; Level = x.Level; Quality = x.Quality; StatSet = 1; Supports = supports }
+                                                                   let all = g.Gems |> List.filter (fun y -> y.Enabled && y.IsSupport) |> List.map (fun y -> y.Name, y.Level)
+                                                                   // (the supports still on: those of the group as the character was built)
+                                                                   let on = List.tryItem i c.Build.Groups |> Option.map (fun h -> h.Gems |> List.filter (fun y -> y.Enabled && y.IsSupport) |> List.map (fun y -> y.Name, y.Level)) |> Option.defaultValue all
+                                                                   let own = if levelsWithSupports then max 1 (x.Level - Gems.supportLevels c.Db (setup all)) else x.Level
+                                                                   Gems.level c.Db sheetMods { setup on with Level = own }
+                                                           yield obj [ "name", JStr x.Name; "level", num (float level); "socketed", num (float x.Level); "quality", num (float x.Quality); "support", JBool x.IsSupport
                                                                        "icon", JStr((Map.tryFind x.Name icons |> Option.defaultValue "|").Split('|').[0])
                                                                        "gemIcon", JStr((Map.tryFind x.Name icons |> Option.defaultValue "|").Split('|').[1])
                                                                        // kept up by Spirit: a persistent buff, a meta gem, a minion
@@ -325,8 +336,8 @@ type Session(read: string -> string) =
             match Json.strField "op" j with
             | Some "character" ->
                 let c = this.Load(build, passives, choices, low, start, without)
-                let groups = match parsed with Some (_, b) -> b.Groups | None -> c.Build.Groups
-                Report.write (Report.character slots.Value (Pob.itemPassives nodes.Value c.Build) groups (Report.gemIcons build) c)
+                let groups, withSupports = match parsed with Some (_, b) -> b.Groups, Map.containsKey "levelsWithSupports" b.Config | None -> c.Build.Groups, false
+                Report.write (Report.character slots.Value (Pob.itemPassives nodes.Value c.Build) groups withSupports (Report.gemIcons build) c)
             | Some "fight" -> Report.write (Report.fight (this.Load(build, passives, choices, low, start, without)) j)
             | other -> Report.write (JObj(Map.ofList [ "error", JStr(sprintf "unknown op %A" other) ]))
         with e ->

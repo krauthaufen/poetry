@@ -244,7 +244,8 @@ module Api =
           TreeNodesSet2 = setNodes "set2"
           Groups = groups
           MainGroup = 1
-          Config = Map.empty
+          // (the game shows a gem's level with what its supports add: see Setup.ownLevels)
+          Config = Map.ofList [ "levelsWithSupports", "1" ]
           TreeOverrides = Map.ofList overrides
           ExtraLines = quests },
         displayed
