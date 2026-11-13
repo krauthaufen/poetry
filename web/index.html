@@ -254,6 +254,19 @@
     #app .share.physical .bar { background: linear-gradient(90deg, rgba(140,130,120,.8), rgba(140,130,120,.4)); }
     #app .seek { width: 150px; padding: 5px 8px; border: 1px solid #2a221c; background: #171310; color: var(--ink); font: inherit; font-size: 13px; }
     #app .found { color: #ff5fd8; font-size: 13px; white-space: nowrap; }
+    #app .main.gems { flex-direction: column; gap: 10px; }
+    #app .main.gems .hint { color: #9a8f80; font-size: 13px; }
+    #app .group { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; max-width: 1100px; }
+    #app .gem { display: flex; align-items: center; gap: 8px; padding: 4px 10px 4px 4px; border: 1px solid #2a221c; background: #171310; color: var(--ink); cursor: pointer; font: inherit; text-align: left; }
+    #app .gem img { width: 40px; height: 40px; object-fit: contain; }
+    #app .gem.support img { width: 28px; height: 28px; }
+    #app .gem .text { display: flex; flex-direction: column; }
+    #app .gem .name { color: var(--gem); font-size: 15px; }
+    #app .gem.support .name { color: #7f9fd0; font-size: 13px; }
+    #app .gem.persistent { border-color: #3d5a57; }
+    #app .gem .detail { color: #9a8f80; font-size: 11px; }
+    #app .gem.off { opacity: .4; }
+    #app .gem.off .name { text-decoration: line-through; }
     #app .knob { display: flex; align-items: center; gap: 4px; margin: 3px 0; }
     #app .knob .what { flex: 1; color: var(--ink); }
     #app .knob button { min-width: 30px; padding: 3px 8px; border: 1px solid #2a221c; background: #171310; color: var(--ink); cursor: pointer; font: inherit; }

@@ -8,6 +8,9 @@ open FableCube
 open Pure
 
 type Row = { Label : string; Value : string }
+/// A socketed gem (`Key`: how the simulator is told to leave it out) and a group of them.
+type Gem = { Key : string; Named : string; Level : int; Quality : int; Support : bool; Icon : string; Spirit : float; Persistent : bool }
+type GemGroup = { Slot : string; Gems : Gem list }
 type Share = { Name : string; Percent : float; Text : string; Part : bool }
 
 /// A passive as the tree draws it: where, how big, and its art in the sprite sheets (a
@@ -81,6 +84,8 @@ type Msg =
     /// A count the character begins the fight with (below zero: as the fight decides).
     | Begin of string * int
     | Switch of string
+    /// A gem is turned off, or on again.
+    | Socket of string
     | Tab of string
     | TreeData of Fetched
     | Toggle of int
@@ -118,6 +123,9 @@ type Model =
       Gem : string
       Dps : Row list
       Shares : Share list
+      /// The character's socket groups, and the gems turned off here.
+      Groups : GemGroup list
+      Dropped : Set<string>
       /// The passives the items allocate (an anoint, a jewel): shown as allocated, not to be refunded.
       Anointed : Set<int>
       /// The damage by damage type.
@@ -229,7 +237,7 @@ type Model =
 let init : Model =
     { Build = ""; Scenario = "boss"; Status = "locating"; Title = ""; Class = ""; Ascendancy = ""; Tab = "character"
       Pools = []; Defences = []; Resistances = []; Minions = []
-      NotUnderstood = 0; Fighting = false; Gem = ""; Dps = []; Shares = []; Anointed = Set.empty; Types = []; Counts = []; Start = Map.empty; Switches = Set.empty
+      NotUnderstood = 0; Fighting = false; Gem = ""; Dps = []; Shares = []; Groups = []; Dropped = Set.empty; Anointed = Set.empty; Types = []; Counts = []; Start = Map.empty; Switches = Set.empty
       Passives = [||]; Ascendancies = []; Shown = []; AscendancyWeb = Data.pack (Data.ofList ([] : V3f list)); Path = Data.pack (Data.ofList ([] : V3f list))
       Loaded = false; Capacity = 0
       WebUv = Data.pack (Data.ofList ([] : V2f list)); AscendancyWebUv = Data.pack (Data.ofList ([] : V2f list)); PathUv = Data.pack (Data.ofList ([] : V2f list)); Art = ""; Links = [||]; Neighbours = Map.empty; Web = Data.pack (Data.ofList ([] : V3f list)); Allocated = Set.empty; Edited = false
@@ -259,6 +267,7 @@ let private passives (m : Model) =
 let private knobs (m : Model) =
     (if m.Start.IsEmpty then "" else "&start=" + (m.Start |> Map.toList |> List.map (fun (k, v) -> k + ":" + string v) |> String.concat ","))
     + (m.Switches |> Set.toList |> List.map (fun k -> "&" + k + "=1") |> String.concat "")
+    + (if m.Dropped.IsEmpty then "" else "&without=" + (m.Dropped |> Set.toList |> String.concat ",").Replace (" ", "%20"))
 
 let private sheetUrl (m : Model) = "__sim?op=character" + knobs m + passives m + "&build=" + m.Build
 let private fightOf (m : Model) (scenario : string) (ask : string) = "__sim?op=fight&runs=32&time=20" + (if scenario = "pack" || scenario = "surrounded" then "" else "&life=1e12") + ask + "&scenario=" + scenario + (if m.Pressing <> "" then "&gem=" + m.Pressing.Replace (" ", "%20") else "") + knobs m + passives m + "&build=" + m.Build
@@ -858,6 +867,8 @@ let rec update (msg : Msg) (m : Model) : Model =
     | Begin (name, count) ->
         let most = m.Counts |> List.tryFind (fun (k, _) -> k = name) |> Option.map snd |> Option.defaultValue 0
         { m with Start = (if count < 0 || count > most then Map.remove name m.Start else Map.add name count m.Start); Fighting = true; Dps = []; Shares = []; Types = []; Runs = 0; Round = 0; Happened = []; Warm = [] }
+    | Socket key ->
+        { m with Dropped = (if m.Dropped.Contains key then Set.remove key m.Dropped else Set.add key m.Dropped); Pressing = ""; Fighting = true; Dps = []; Shares = []; Types = []; Runs = 0; Round = 0; Happened = []; Warm = [] }
     | Switch key ->
         { m with Switches = (if m.Switches.Contains key then Set.remove key m.Switches else Set.add key m.Switches); Fighting = true; Dps = []; Shares = []; Types = []; Runs = 0; Round = 0; Happened = []; Warm = [] }
     | Tab t -> { m with Tab = t }
@@ -949,6 +960,17 @@ let rec update (msg : Msg) (m : Model) : Model =
                                                               Centres = Json.field "centres" x |> Json.list |> List.map Json.string })
                         |> Map.ofList
                     Counts = Json.field "resources" j |> Json.list |> List.map (fun x -> Json.string (Json.field "name" x), Json.int (Json.field "max" x)) |> List.filter (fun (_, most) -> most > 0)
+                    Groups =
+                        Json.field "groups" j |> Json.list
+                        |> List.map (fun g ->
+                            let index = Json.int (Json.field "index" g)
+                            { Slot = Json.string (Json.field "slot" g)
+                              Gems =
+                                Json.field "gems" g |> Json.list
+                                |> List.map (fun x ->
+                                    let name = Json.string (Json.field "name" x)
+                                    { Key = string index + ":" + name; Named = name; Level = Json.int (Json.field "level" x); Quality = Json.int (Json.field "quality" x)
+                                      Support = Json.bool (Json.field "support" x); Icon = Json.string (Json.field "icon" x); Spirit = Json.number (Json.field "spirit" x); Persistent = Json.bool (Json.field "persistent" x) }) })
                     Pools = [ row "Life" (n [ "pools"; "life" ]); row "Mana" (n [ "pools"; "mana" ]); row "Energy Shield" (n [ "pools"; "energyShield" ]); row "Spirit" (n [ "pools"; "spirit" ]) ]
                     Defences = [ row "Armour" (n [ "defences"; "armour" ]); row "Evasion" (n [ "defences"; "evasion" ]); row "Deflection" (n [ "defences"; "deflection" ]); row "Block" (n [ "defences"; "block" ]) ]
                     Resistances = named "resistances"
@@ -1029,6 +1051,25 @@ let private switch (m : Model) (key : string) (name : string) : Node<Msg> =
         Dom.Class (if m.Switches.Contains key then "tab active" else "tab")
         Dom.OnClick (fun _ -> Switch key)
         name
+    }
+
+/// A gem: its picture and name, level and quality, what it reserves; pressed, it is turned
+/// off (and the fights fought again), pressed again on.
+let private gem (m : Model) (g : Gem) : Node<Msg> =
+    let off = m.Dropped.Contains g.Key
+    let kind = if g.Support then "gem support" elif g.Persistent then "gem persistent" else "gem"
+    let detail = "level " + string g.Level + (if g.Quality > 0 then ", " + string g.Quality + "% quality" else "") + (if g.Spirit > 0.0 then sprintf ", %.0f spirit" g.Spirit else "")
+    let shown = if off then "turned off" else detail
+    button {
+        Dom.Class (if off then kind + " off" else kind)
+        Dom.Attr ("data-gem", g.Named)
+        Dom.OnClick (fun _ -> Socket g.Key)
+        if g.Icon <> "" then img { Dom.Attr ("src", g.Icon); Dom.Attr ("alt", "") }
+        span {
+            Dom.Class "text"
+            span { Dom.Class "name"; g.Named }
+            span { Dom.Class "detail"; shown }
+        }
     }
 
 let private scenario (m : Model) (key : string) (name : string) : Node<Msg> =
@@ -1322,6 +1363,7 @@ let view (m : Model) : Node<Msg> =
             div { Dom.Class "title"; Dom.Attr ("data-check", "title"); m.Title }
             nav {
                 tab m "character" "Character"
+                tab m "gems" "Gems"
                 tab m "tree" "Passive tree"
             }
             if m.Tab = "tree" then
@@ -1335,6 +1377,17 @@ let view (m : Model) : Node<Msg> =
                 div { Dom.Class "headline"; Dom.Attr ("data-check", "dps"); m.Dps.Head.Value + " DPS" }
             div { Dom.Class "status"; Dom.Attr ("data-check", "status"); status m }
         }
+        if m.Tab = "gems" then
+            div {
+                Dom.Class "main gems"
+                div { Dom.Class "hint"; "Press a gem to turn it off or on. Every change fights again." }
+                for g in m.Groups do
+                    section {
+                        Dom.Class "panel group"
+                        for x in g.Gems do
+                            gem m x
+                    }
+            }
         if m.Tab = "character" then
             div {
                 Dom.Class "main"

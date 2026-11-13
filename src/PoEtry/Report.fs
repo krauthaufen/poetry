@@ -38,7 +38,22 @@ module Report =
     /// The character sheet: who it is, pools, defences, resistances, what can be pressed, the
     /// socket groups, the minions, and what was not understood.
     /// (`slots`: the tree's jewel sockets in the order a character's jewels are numbered.)
-    let character (slots: int list) (anointed: int list) (c: Loaded) : Json =
+    /// The pictures of a character's gems (their skill's where the gem shows one), by gem name:
+    /// out of the game's own character JSON; a PoB build has none.
+    let gemIcons (build: string) : Map<string, string> =
+        if not (build.TrimStart().StartsWith "{") then Map.empty
+        else
+            let root = Json.parse build
+            let c = Json.field "character" root |> Option.defaultValue root
+            let rec gems (items: Json list) =
+                items |> List.collect (fun g ->
+                    let name = Json.strField "typeLine" g |> Option.defaultValue ""
+                    let icon = Json.strField "gemSkill" g |> Option.orElse (Json.strField "icon" g) |> Option.defaultValue ""
+                    (if name <> "" && icon <> "" then [ name, icon ] else []) @ gems (Json.list (Json.field "socketedItems" g)))
+            gems (Json.list (Json.field "skills" c)) |> Map.ofList
+
+    /// (`groups`: the build's socket groups before any gem was turned off, `icons`: see `gemIcons`.)
+    let character (slots: int list) (anointed: int list) (groups: PobGroup list) (icons: Map<string, string>) (c: Loaded) : Json =
         // a jewel in a socket of the tree: its item text is rarity, name, base, properties, mods
         let jewel (slot: string, text: string) =
             if not (slot.StartsWith "Jewel ") then None
@@ -115,10 +130,18 @@ module Report =
               "pressable", strs (Setup.pressable c)
               "groups",
               JArr
-                  [ for g in c.Build.Groups do
+                  [ for (i, g) in List.indexed groups do
                       if g.Enabled then
                           yield obj [ "slot", JStr g.Slot
-                                      "gems", JArr [ for x in g.Gems do if x.Enabled then yield obj [ "name", JStr x.Name; "level", num (float x.Level); "quality", num (float x.Quality); "support", JBool x.IsSupport ] ] ] ]
+                                      // (the group's number, as "without" names it)
+                                      "index", num (float (i + 1))
+                                      "gems", JArr [ for x in g.Gems do
+                                                       if x.Enabled then
+                                                           yield obj [ "name", JStr x.Name; "level", num (float x.Level); "quality", num (float x.Quality); "support", JBool x.IsSupport
+                                                                       "icon", JStr(Map.tryFind x.Name icons |> Option.defaultValue "")
+                                                                       // kept up by Spirit: a persistent buff, a meta gem, a minion
+                                                                       "spirit", num (c.SpiritUses |> List.tryFind (fun u -> u.Gem = x.Name) |> Option.map (fun u -> u.Flat + u.PerMinion) |> Option.defaultValue 0.0)
+                                                                       "persistent", JBool(not x.IsSupport && (Gems.isPersistentBuff c.Db x.Name || Gems.isMeta c.Db x.Name)) ] ] ] ]
               "minions",
               JArr
                   [ for (name, n) in c.Minions |> List.countBy (fun m -> m.Name.TrimEnd([| '0'; '1'; '2'; '3'; '4'; '5'; '6'; '7'; '8'; '9' |]).TrimEnd()) do
@@ -247,8 +270,8 @@ type Session(read: string -> string) =
 
     /// The character of a build text; `passives` ("" or ids separated by commas) replaces
     /// the passives allocated in it.
-    member _.Load(build: string, passives: string, choices: string, lowLife: bool, start: string) : Loaded =
-        let key = (if lowLife then "low|" else "") + start + "|" + passives + "|" + choices + "|" + build
+    member _.Load(build: string, passives: string, choices: string, lowLife: bool, start: string, without: string) : Loaded =
+        let key = (if lowLife then "low|" else "") + start + "|" + without + "|" + passives + "|" + choices + "|" + build
         match last with
         | Some (k, c) when k = key -> c
         | _ ->
@@ -270,7 +293,7 @@ type Session(read: string -> string) =
                             | [| i; a |] -> (match System.Int32.TryParse(i.Trim()) with | true, v -> Some(v, [ "+5 to " + a.Trim() ]) | _ -> None)
                             | _ -> None)
                     { b with TreeNodes = ids; TreeOverrides = chosen |> Array.fold (fun m (i, s) -> Map.add i s m) b.TreeOverrides }
-            let c = Setup.loadWith db.Value tree.Value b { Options.defaults with LowLife = lowLife; Start = Report.starts start }
+            let c = Setup.loadWith db.Value tree.Value b { Options.defaults with LowLife = lowLife; Start = Report.starts start; Without = without.Split(',') |> Array.map (fun x -> x.Trim()) |> Array.filter (fun x -> x <> "") |> List.ofArray }
             last <- Some(key, c)
             c
 
@@ -287,10 +310,14 @@ type Session(read: string -> string) =
             let choices = Json.strField "choices" j |> Option.defaultValue ""
             let low = Json.numField "lowlife" j |> Option.exists (fun v -> v > 0.0)
             let start = Json.strField "start" j |> Option.defaultValue ""
+            // gems turned off: "Name" everywhere, "3:Name" in the third group only
+            let without = Json.strField "without" j |> Option.defaultValue ""
             match Json.strField "op" j with
-            | Some "character" -> (let c = this.Load(build, passives, choices, low, start)
-                                   Report.write (Report.character (Tree.jewelSlots tree.Value) (Pob.itemPassives nodes.Value c.Build) c))
-            | Some "fight" -> Report.write (Report.fight (this.Load(build, passives, choices, low, start)) j)
+            | Some "character" ->
+                let c = this.Load(build, passives, choices, low, start, without)
+                let groups = match parsed with Some (_, b) -> b.Groups | None -> c.Build.Groups
+                Report.write (Report.character (Tree.jewelSlots tree.Value) (Pob.itemPassives nodes.Value c.Build) groups (Report.gemIcons build) c)
+            | Some "fight" -> Report.write (Report.fight (this.Load(build, passives, choices, low, start, without)) j)
             | other -> Report.write (JObj(Map.ofList [ "error", JStr(sprintf "unknown op %A" other) ]))
         with e ->
             Report.write (JObj(Map.ofList [ "error", JStr e.Message ]))
