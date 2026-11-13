@@ -692,3 +692,55 @@ let run (test: string -> (unit -> unit) -> unit) =
         if example <> "" then printfn "     for example %s" example
         if compiled < 250 then failwithf "only %d of 400 random fights compile" compiled
         if threshold * 1000 > runs then failwithf "%d of %d runs parted at a threshold: more than 1 in 1000" threshold runs)
+
+    test "flat: how fast (rough; printed, not judged)" (fun () ->
+        // a sheet like a character's: many mods of many stats, some conditional
+        let sheet =
+            [ for i in 1 .. 40 do
+                yield Mod.inc (Damage AllDamage) (float i)
+                yield Mod.inc (Damage(OfType Fire)) 5.0 |> Mod.whenever (WhileBuff "HitRecently")
+                yield Mod.inc CritChance 10.0
+                yield Mod.base' (Named(sprintf "Other%d" i)) 1.0
+                yield Mod.inc Speed 1.0 |> Mod.whenever (EnemyHas "Shocked")
+                yield Mod.base' (Resist Fire) 1.0 ]
+        let echo = { spell "Echo" Cold 300.0 400.0 with Tags = Set.ofList [ Spell; Triggered ]; Cooldown = Some 0.4 }
+        let player =
+            { Actor.make "Player"
+                  (sheet @ [ Mod.inc (Damage AllDamage) 12.0 |> Mod.whenever (PerStack("Momentum", 1.0)); Mod.inc CritChance 300.0; Mod.more (Damage AllDamage) 20.0 |> Mod.whenever (EnemyHas "Cursed"); Mod.base' (AilmentChance Poison) 40.0 ])
+                  [ { spell "Hex" Chaos 1.0 2.0 with Cooldown = Some 5.0; Hits = []; BaseTime = 0.5 }; { spell "Bolt" Fire 100.0 300.0 with BaseTime = 0.5; Cost = 10.0 }; echo ] with
+                Rotation = [ { Use = "Hex"; When = fun v -> not (v.EnemyStatus.ContainsKey "Curse:Hex") }; Actor.always "Bolt" ]
+                Vitals = Some { PlayerStats.basic 1000.0 300.0 with ManaRegen = 30.0 }
+                Rules =
+                    [ { Hook = OnHit; Filter = Called "Bolt"; Chance = 100.0; Reaction = GrantBuff("Momentum", 2.5, 5, []) }
+                      { Hook = OnUse; Filter = Called "Hex"; Chance = 100.0; Reaction = ApplyCurse("Hex", 4.0, [ Mod.base' (Resist Fire) -25.0 ]) }
+                      { Hook = OnHit; Filter = AnySkill; Chance = 50.0; Reaction = ApplyDebuff("Sundered", 3.0, 4, [ Mod.inc (DamageTaken AllDamage) 4.0 ]) }
+                      { Hook = OnCrit; Filter = Called "Bolt"; Chance = 100.0; Reaction = TriggerSkill "Echo" } ] }
+        let big = Fight.single (EnemyDef.make Rarity.defaults 83 Unique "Boss" (Vec.make 30.0 0.0) |> fun e -> { e with Life = 1e12; Attack = None }) player 30.0
+        let ms (f: unit -> unit) =
+            let t0 = System.DateTime.UtcNow
+            f ()
+            (System.DateTime.UtcNow - t0).TotalMilliseconds
+        let events (p: Flat.Program) =
+            let mutable n = 0
+            Flat.traced (fun _ kind _ _ _ -> if kind <> "hit" && kind <> "crit" then n <- n + 1) p 1u |> ignore
+            n
+        let measure (what: string) (fights: (Fight * Flat.Program) list) (simRuns: int) (flatRuns: int) =
+            // (both engines run first, so the runtime has compiled them)
+            for (f, p) in fights do
+                Sim.run f 1u |> ignore
+                for seed in 1u .. 20u do
+                    Flat.run p seed |> ignore
+            let sim = ms (fun () -> for (f, _) in fights do (for seed in 1 .. simRuns do Sim.run f (uint32 seed) |> ignore)) / float (simRuns * fights.Length)
+            let flat = ms (fun () -> for (_, p) in fights do (for seed in 1 .. flatRuns do Flat.run p (uint32 seed) |> ignore)) / float (flatRuns * fights.Length)
+            let perFight = float (fights |> List.sumBy (fun (_, p) -> events p)) / float fights.Length
+            printfn "     flat: %s: reference %.3f ms a fight (%.1f us an event), flat %.4f ms (%.2f us an event), %.1f times as fast" what sim (sim * 1000.0 / perFight) flat (flat * 1000.0 / perFight) (sim / flat)
+        (match Flat.compile big with
+         | Ok p -> measure "a 240-mod sheet, 30 s" [ big, p ] 10 200
+         | Error why -> failwith why)
+        let random =
+            [ 1u .. 120u ] |> List.choose (fun case ->
+                let f, _ = randomFight case
+                match Flat.compile f with
+                | Ok p -> Some(f, p)
+                | Error _ -> None)
+        measure (sprintf "%d random fights" random.Length) random 2 20)
