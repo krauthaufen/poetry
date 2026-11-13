@@ -8,7 +8,7 @@ open FableCube
 open Pure
 
 type Row = { Label : string; Value : string }
-type Share = { Name : string; Percent : float; Text : string }
+type Share = { Name : string; Percent : float; Text : string; Part : bool }
 
 /// A passive as the tree draws it: where, how big, and its art in the sprite sheets (a
 /// sheet's url and the sprite's rectangle there as u, v, width, height).
@@ -389,6 +389,30 @@ let private stage (m : Model) (c : float) : Layer list =
       layer 1.0 1.0 1.0 flashes ]
 
 /// The fight to show, out of a fight's answer (none: what is shown stays).
+/// Damage by skill: a skill's lines (infused or not, each gem that triggers it) are one line,
+/// and under it what it came from when that is more than one thing.
+let private shares (lines : (string * float) list) : Share list =
+    let skill (n : string) =
+        let cut = n.IndexOf " ("
+        (if cut < 0 then n else n.Substring(0, cut)).Replace(" infused", "")
+    let from (n : string) =
+        let a = n.IndexOf " ("
+        let b = n.IndexOf " #"
+        if a >= 0 && b > a then "triggered by " + n.Substring(a + 2, b - a - 2) else "pressed"
+    let line part name v = { Name = name; Percent = v; Text = sprintf "%.1f%%" v; Part = part }
+    lines
+    |> List.groupBy (fun (n, _) -> skill n)
+    |> List.map (fun (name, ls) -> name, List.sumBy snd ls, ls)
+    |> List.sortByDescending (fun (_, v, _) -> v)
+    |> List.filter (fun (_, v, _) -> v >= 0.5)
+    |> List.collect (fun (name, v, ls) ->
+        let parts =
+            ls |> List.groupBy (fun (n, _) -> from n)
+            |> List.map (fun (f, xs) -> f, List.sumBy snd xs)
+            |> List.sortByDescending snd
+        line false name v
+        :: (if parts.Length > 1 then parts |> List.filter (fun (_, x) -> x >= 0.5) |> List.map (fun (f, x) -> line true f x) else []))
+
 let private readReplay (j : Json) (m : Model) : Model =
     let r = Json.field "replay" j
     let events = Json.field "events" r |> Json.list
@@ -864,10 +888,8 @@ let rec update (msg : Msg) (m : Model) : Model =
                 Dps = [ { Label = "DPS"; Value = short (dps "mean") }; { Label = "one in ten below"; Value = short (dps "p10") }; { Label = "median"; Value = short (dps "p50") }; { Label = "one in ten above"; Value = short (dps "p90") } ]
                 Shares =
                     Json.field "damageShare" j |> Json.list
-                    |> List.map (fun x ->
-                        let v = Json.number (Json.field "value" x) * 100.0
-                        { Name = Json.string (Json.field "name" x); Percent = v; Text = sprintf "%.1f%%" v })
-                    |> List.filter (fun s -> s.Percent >= 0.5) }
+                    |> List.map (fun x -> Json.string (Json.field "name" x), Json.number (Json.field "value" x) * 100.0)
+                    |> shares }
         | s, _ -> { m with Fighting = false; Status = "the fight did not come back (status " + string s + ")" }
 
 let private panel (title : string) (rows : Row list) : Node<Msg> =
@@ -1205,7 +1227,7 @@ let view (m : Model) : Node<Msg> =
                         h3 { "Who deals it" }
                         for s in m.Shares do
                             div {
-                                Dom.Class "share"
+                                Dom.Class (if s.Part then "share part" else "share")
                                 div { Dom.Class "bar"; Dom.Style [ Css.Width (sprintf "%.1f%%" s.Percent) ] }
                                 span { Dom.Class "name"; s.Name }
                                 span { Dom.Class "pct"; s.Text }
