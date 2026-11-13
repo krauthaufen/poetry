@@ -209,7 +209,8 @@ type Model =
       Pasting : bool
       Draft : string
       /// What the pinned passive's change does (scenario, percent more damage), and the question that was answered.
-      Deltas : (string * float) list
+      /// (scenario, percent more damage, and how far that may be off by chance)
+      Deltas : (string * float * float) list
       /// The question about the pinned passive ("": none), asked at once and again for more
       /// fights: worked out when what it depends on changes, not whenever it is looked at.
       Ask : string
@@ -1424,8 +1425,8 @@ let rec private step (msg : Msg) (m : Model) : Model =
                 Json.field "scenarios" j |> Json.list |> List.choose (fun x ->
                     let b, c = Json.number (Json.field "base" x), Json.number (Json.field "changed" x)
                     // (without an item there may be nothing left to fight with)
-                    if b > 0.0 && c > 0.0 then Some (Json.string (Json.field "name" x), (c / b - 1.0) * 100.0)
-                    elif b > 0.0 && (r.Url.Contains "then_unequip" || r.Url.Contains "then_equip") then Some (Json.string (Json.field "name" x), -100.0)
+                    if b > 0.0 && c > 0.0 then Some (Json.string (Json.field "name" x), (c / b - 1.0) * 100.0, Json.number (Json.field "noise" x))
+                    elif b > 0.0 && (r.Url.Contains "then_unequip" || r.Url.Contains "then_equip") then Some (Json.string (Json.field "name" x), -100.0, 0.0)
                     else None)
             if deltas.IsEmpty then m else { m with Deltas = deltas; DeltaOf = r.Url }
          | _ -> m)
@@ -1763,6 +1764,9 @@ let private switch (m : Model) (key : string) (name : string) : Node<Msg> =
         name
     }
 
+/// How far a difference may be off by chance, as it is written beside it.
+let private margin (off : float) : string = if off >= 0.05 then sprintf "±%.1f" (2.0 * off) else ""
+
 /// How much of the damage something is worth, as a class: "w" and how much ("0": nothing to
 /// speak of, up to "3"), "wneg" where the damage is higher without it; "" while unknown.
 let private worthClass (v : float) : string =
@@ -1933,7 +1937,7 @@ let private item (m : Model) (i : Item) (where : string) : Node<Msg> =
     let wear = if worn then "Take off" else "Wear"
     let refined = asked <> "" && m.DeltaOf = m.AskMore
     let known = asked <> "" && (m.DeltaOf = asked || refined)
-    let depth = if refined then "10 fights each" else "3 short fights each, refining ..."
+    let depth = if refined then "10 fights each; grey: not told apart from chance" else "3 short fights each, refining ..."
     let needs = "Requires " + i.Requires
     let face = if i.Headed <> "" then i.Headed else i.Type
     let weighed = not (System.Double.IsNaN i.Weighs)
@@ -2008,11 +2012,12 @@ let private item (m : Model) (i : Item) (where : string) : Node<Msg> =
                         div { Dom.Class "depth"; about }
                         if not known then div { Dom.Class "depth"; "fighting it out ..." }
                         if known then
-                            for (name, by) in m.Deltas do
+                            for (name, by, off) in m.Deltas do
                                 div {
-                                    Dom.Class (if by > 0.05 then "delta up" elif by < -0.05 then "delta down" else "delta")
+                                    Dom.Class (if abs by <= 2.0 * off then "delta unsure" elif by > 0.05 then "delta up" elif by < -0.05 then "delta down" else "delta")
                                     span { name }
                                     span { Dom.Class "by"; Dom.Attr ("data-check", "delta"); sprintf "%+.1f%% damage" by }
+                                    span { Dom.Class "pm"; margin off }
                                 }
                         if known then div { Dom.Class "depth"; depth }
                     }
@@ -2299,7 +2304,7 @@ let private tooltip (m : Model) : Node<Msg> =
         let asked = if pinned then m.Ask else ""
         let refined = asked <> "" && m.DeltaOf = m.AskMore
         let known = asked <> "" && (m.DeltaOf = asked || refined)
-        let depth = if refined then "10 fights each" else "3 short fights each, refining ..."
+        let depth = if refined then "10 fights each; grey: not told apart from chance" else "3 short fights each, refining ..."
         let title = match Map.tryFind p.Id m.Choices with Some c when has -> c | _ -> p.Name
         // beside the passive where it is drawn (an ascendancy's: around the middle), kept on the page
         let q = m.Shown |> List.tryFind (fun s -> s.Id = p.Id) |> Option.defaultValue p
@@ -2369,11 +2374,12 @@ let private tooltip (m : Model) : Node<Msg> =
                     Dom.Class "deltas"
                     if not known then div { Dom.Class "depth"; "fighting it out ..." }
                     if known then
-                        for (name, by) in m.Deltas do
+                        for (name, by, off) in m.Deltas do
                             div {
-                                Dom.Class (if by > 0.05 then "delta up" elif by < -0.05 then "delta down" else "delta")
+                                Dom.Class (if abs by <= 2.0 * off then "delta unsure" elif by > 0.05 then "delta up" elif by < -0.05 then "delta down" else "delta")
                                 span { name }
                                 span { Dom.Class "by"; Dom.Attr ("data-check", "delta"); sprintf "%+.1f%% damage" by }
+                                span { Dom.Class "pm"; margin off }
                             }
                     if known then div { Dom.Class "depth"; Dom.Attr ("data-check", "depth"); depth }
                 }

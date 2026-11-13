@@ -144,8 +144,10 @@
         const of = (scene, tree, seed) => ({ ...rest, ...tree, op: "fight", scenario: scene[0], time: scene[1], runs: 1, seed: seed || 1, ...(scene[2] ? { life: scene[2] } : {}) });
         // (a fight a job: whatever is asked next need not wait for more than one)
         const seeds = (scene) => Array.from({ length: scene[3] }, (_, i) => scene[3] - i);
+        // (every fight's damage, in the order of the seeds: the same fights with and without the
+        // change are told apart pair by pair)
         const several = (scene, tree, kind) => Promise.all(seeds(scene).map((seed) => ask(of(scene, tree, seed), kind, true).then(dps)))
-          .then((xs) => (xs.some((x) => x == null) ? null : mean(xs)));
+          .then((xs) => (xs.some((x) => x == null) ? null : xs));
         const was = base === undefined || base === "" ? {} : { passives: base, choices: basechoices || "" };
         const baseKey = (scene) => scene[3] + "|" + JSON.stringify({ ...of(scene, was), build: undefined });
         if (bases.size > 64) bases.clear();
@@ -161,7 +163,15 @@
         [...missing].reverse().forEach((scene) => bases.set(baseKey(scene), several(scene, was, "base")));
         const changed = [...list].reverse().map((scene) => several(scene, { ...(passives === undefined ? {} : { passives, choices: choices || "" }), ...then }, "compare")).reverse();
         const out = [];
-        for (let i = 0; i < list.length; i++) out.push({ name: list[i][0], base: await bases.get(baseKey(list[i])), changed: await changed[i] });
+        for (let i = 0; i < list.length; i++) {
+          const b = await bases.get(baseKey(list[i])), c = await changed[i];
+          if (!b || !c) { out.push({ name: list[i][0], base: null, changed: null, noise: 0 }); continue; }
+          // how far the mean of the differences may be off by chance (its standard error), in
+          // percent of the damage: a difference within twice that is not told apart from none
+          const d = c.map((x, k) => x - b[k]), m = mean(d);
+          const noise = d.length > 1 ? Math.sqrt(d.reduce((a, x) => a + (x - m) * (x - m), 0) / (d.length - 1) / d.length) / Math.max(1e-9, mean(b)) * 100 : 0;
+          out.push({ name: list[i][0], base: mean(b), changed: mean(c), noise });
+        }
         return JSON.stringify({ runs: list[0][3], scenarios: out });
       };
 
@@ -784,6 +794,7 @@
     #app header .status, #app header:not(:has(.headline)) .status { text-align: right; padding-left: 130px; }
     @media (max-width: 780px) { #app header .headline { font-size: 13px; } }
     @media (max-width: 780px) { #app .treebar { flex-wrap: wrap; gap: 6px 10px; padding: 5px 10px; } #app .treebar .points { flex: 1 1 100%; font-size: 12px; } #app .treebar .seek { max-width: none; } #app .treebar button.act { padding: 5px 12px; } }
+    #app .delta.unsure .by { color: #8a7a64 !important; } #app .delta .pm { color: #8a7a64; font-size: 12px; margin-left: 6px; }
   </style>
 </head>
 <body>
