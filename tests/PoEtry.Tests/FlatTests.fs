@@ -5,7 +5,13 @@ module PoEtry.FlatTests
 
 open PoEtry
 
-let private sameFloat (a: float) (b: float) = a = b || (System.Double.IsNaN a && System.Double.IsNaN b)
+/// Numbers are the same within this: relative, and absolute near zero. (The fast engine may
+/// add and multiply in another order than the reference where that is faster.)
+let tolerance = 1e-9
+
+let private exactFloat (a: float) (b: float) = a = b || (System.Double.IsNaN a && System.Double.IsNaN b)
+let private nearFloat (a: float) (b: float) =
+    exactFloat a b || abs (a - b) <= tolerance || abs (a - b) <= tolerance * max (abs a) (abs b)
 
 let private mapDifference (field: string) (show: 'v -> string) (same: 'v -> 'v -> bool) (a: Map<string, 'v>) (b: Map<string, 'v>) : string option =
     let keys = (a |> Map.toList |> List.map fst) @ (b |> Map.toList |> List.map fst) |> List.distinct |> List.sort
@@ -17,60 +23,105 @@ let private mapDifference (field: string) (show: 'v -> string) (same: 'v -> 'v -
             Some(sprintf "%s[%s]: reference %s, flat %s" field k (say x) (say y)))
 
 /// The first field in which two outcomes differ (every field `Summary` and `Report` read),
-/// with both values; None if they are the same.
-let difference (reference: Outcome) (flat: Outcome) : string option =
+/// with both values; None if they are the same. `same`: when two numbers are the same;
+/// what is counted or named must be identical either way.
+let differenceWith (same: float -> float -> bool) (reference: Outcome) (flat: Outcome) : string option =
     let float' (field: string) (a: float) (b: float) =
-        if sameFloat a b then None else Some(sprintf "%s: reference %.17g, flat %.17g" field a b)
+        if same a b then None else Some(sprintf "%s: reference %.17g, flat %.17g" field a b)
     let option' (field: string) (a: float option) (b: float option) =
         match a, b with
         | None, None -> None
-        | Some x, Some y when sameFloat x y -> None
+        | Some x, Some y when same x y -> None
         | _ -> Some(sprintf "%s: reference %A, flat %A" field a b)
     let showFloat (v: float) = sprintf "%.17g" v
+    let kills () =
+        let alike = reference.Kills.Length = flat.Kills.Length && List.forall2 (fun (n, r, t) (n', r', t') -> n = n' && r = r' && same t t') reference.Kills flat.Kills
+        if alike then None else Some(sprintf "Kills: reference %A, flat %A" reference.Kills flat.Kills)
     [ (fun () -> float' "Duration" reference.Duration flat.Duration)
       (fun () -> option' "Ttk" reference.Ttk flat.Ttk)
-      (fun () -> if reference.Kills = flat.Kills then None else Some(sprintf "Kills: reference %A, flat %A" reference.Kills flat.Kills))
+      kills
       (fun () -> mapDifference "Counts" string (=) reference.Counts flat.Counts)
-      (fun () -> mapDifference "DamageBy" showFloat sameFloat reference.DamageBy flat.DamageBy)
-      (fun () -> mapDifference "DamageByType" showFloat sameFloat reference.DamageByType flat.DamageByType)
-      (fun () -> mapDifference "Uptime" showFloat sameFloat reference.Uptime flat.Uptime)
+      (fun () -> mapDifference "DamageBy" showFloat same reference.DamageBy flat.DamageBy)
+      (fun () -> mapDifference "DamageByType" showFloat same reference.DamageByType flat.DamageByType)
+      (fun () -> mapDifference "Uptime" showFloat same reference.Uptime flat.Uptime)
       (fun () -> option' "Died" reference.Died flat.Died)
       (fun () -> float' "DamageTaken" reference.DamageTaken flat.DamageTaken)
       (fun () -> float' "ManaStarved" reference.ManaStarved flat.ManaStarved)
       (fun () -> float' "Evened" reference.Evened flat.Evened)
       (fun () -> float' "MinLife" reference.MinLife flat.MinLife)
-      (fun () -> mapDifference "ManaGained" showFloat sameFloat reference.ManaGained flat.ManaGained) ]
+      (fun () -> mapDifference "ManaGained" showFloat same reference.ManaGained flat.ManaGained) ]
     |> List.tryPick (fun check -> check ())
 
-/// Where the two engines first part: the first event or hit that one tells differently from
-/// the other, with the few before it.
-let divergence (fight: Fight) (program: Flat.Program) (seed: uint32) : string =
+/// The first difference beyond the tolerance.
+let difference (reference: Outcome) (flat: Outcome) : string option = differenceWith nearFloat reference flat
+
+/// Where the two engines first part, by what they tell of every event and hit: the place,
+/// and whether up to there all their numbers were the same within the tolerance and what
+/// differs there is a decision (which event comes next, a hit or none, a critical hit or
+/// not), not a number. That is what a rounding difference flipping a threshold looks like;
+/// a number that is off beyond the tolerance while the events still agree is a mistake.
+let divergence (fight: Fight) (program: Flat.Program) (seed: uint32) : bool * string =
     let record () =
-        let told = ResizeArray<string>()
-        told, (fun (t: float) (kind: string) (who: string) (what: string) (v: float) -> told.Add(sprintf "%.17g %s %s %s %.17g" t kind who what v))
+        let told = ResizeArray<float * string * float>()
+        told, (fun (t: float) (kind: string) (who: string) (what: string) (v: float) -> told.Add((t, kind + " " + who + " " + what, v)))
     let a, tellA = record ()
     let b, tellB = record ()
     Sim.traced tellA fight seed |> ignore
     Flat.traced tellB program seed |> ignore
+    let say (xs: ResizeArray<float * string * float>) (i: int) =
+        if i < xs.Count then (let t, what, v = xs.[i] in sprintf "%.17g %s %.17g" t what v) else "(nothing more)"
     let n = min a.Count b.Count
     let mutable at = 0
-    while at < n && a.[at] = b.[at] do
-        at <- at + 1
-    if at = n && a.Count = b.Count then sprintf "the %d events and hits are told the same" n
+    let mutable numbersOff = false
+    let mutable go = true
+    while go && at < n do
+        let ta, wa, va = a.[at]
+        let tb, wb, vb = b.[at]
+        if wa <> wb then go <- false
+        elif not (nearFloat ta tb && nearFloat va vb) then
+            numbersOff <- true
+            go <- false
+        else at <- at + 1
+    if at = n && a.Count = b.Count then false, sprintf "the %d events and hits are told the same" n
     else
-        let before = [ for i in max 0 (at - 4) .. at - 1 -> "    " + a.[i] ] |> String.concat "\n"
-        let line (xs: ResizeArray<string>) = if at < xs.Count then xs.[at] else "(nothing more)"
-        sprintf "event %d differs\n%s\n  reference: %s\n  flat:      %s" at before (line a) (line b)
+        let before = [ for i in max 0 (at - 3) .. at - 1 -> "    " + say a i ] |> String.concat "\n"
+        not numbersOff, sprintf "event %d differs\n%s\n  reference: %s\n  flat:      %s" at before (say a at) (say b at)
+
+/// What comparing the two engines on a fight and a seed gave.
+type Verdict =
+    | NotCompiled
+    /// The same in every bit.
+    | Exact
+    /// The same within the tolerance.
+    | Within
+    /// The two went different ways at a decision, their numbers the same within the tolerance until then.
+    | AtThreshold of string
+    /// Different, and not for rounding.
+    | Wrong of string
+
+let verdict (fight: Fight) (seed: uint32) : Verdict =
+    match Flat.compile fight with
+    | Error _ -> NotCompiled
+    | Ok program ->
+        let reference, flat = Sim.run fight seed, Flat.run program seed
+        match differenceWith exactFloat reference flat with
+        | None -> Exact
+        | Some _ ->
+            match difference reference flat with
+            | None -> Within
+            | Some d ->
+                let threshold, where = divergence fight program seed
+                let text = sprintf "seed %d: %s\n  %s" seed d where
+                if threshold then AtThreshold text else Wrong text
 
 /// Both engines on one fight and seed: None if the fight does not compile; else whether
-/// the outcomes are the same, and if not, what differs and where it starts.
+/// the outcomes are the same (or differ only as rounding can make them), and if not, what
+/// differs and where it starts.
 let check (fight: Fight) (seed: uint32) : Result<unit, string> option =
-    match Flat.compile fight with
-    | Error _ -> None
-    | Ok program ->
-        match difference (Sim.run fight seed) (Flat.run program seed) with
-        | None -> Some(Ok())
-        | Some d -> Some(Error(sprintf "seed %d: %s\n  %s" seed d (divergence fight program seed)))
+    match verdict fight seed with
+    | NotCompiled -> None
+    | Wrong d -> Some(Error d)
+    | _ -> Some(Ok())
 
 // ---- fights made at random ----
 
@@ -615,7 +666,10 @@ let run (test: string -> (unit -> unit) -> unit) =
         if (Flat.unsupported two).Length <> 2 then failwithf "expected two reasons, got %A" (Flat.unsupported two))
 
     test "flat: random fights give the reference's outcome, or are refused" (fun () ->
-        let mutable compared = 0
+        let mutable exact = 0
+        let mutable within = 0
+        let mutable threshold = 0
+        let mutable example = ""
         let mutable compiled = 0
         let mutable refused = 0
         for case in 1u .. 400u do
@@ -625,9 +679,16 @@ let run (test: string -> (unit -> unit) -> unit) =
             | Ok _ ->
                 compiled <- compiled + 1
                 for seed in [ case; case * 7919u + 1u; 4000000000u - case ] do
-                    compared <- compared + 1
-                    match check fight seed with
-                    | Some (Error d) -> failwithf "%s\n  %s" described d
-                    | _ -> ()
-        printfn "     flat: %d random fights compiled (%d refused), %d runs the same as the reference's" compiled refused compared
-        if compiled < 250 then failwithf "only %d of 400 random fights compile" compiled)
+                    match verdict fight seed with
+                    | Exact -> exact <- exact + 1
+                    | Within -> within <- within + 1
+                    | AtThreshold d ->
+                        threshold <- threshold + 1
+                        if example = "" then example <- described + "\n  " + d
+                    | Wrong d -> failwithf "%s\n  %s" described d
+                    | NotCompiled -> ()
+        let runs = exact + within + threshold
+        printfn "     flat: %d random fights compiled (%d refused); of %d runs %d the same in every bit, %d the same within %g, %d parted at a threshold after a rounding difference" compiled refused runs exact within tolerance threshold
+        if example <> "" then printfn "     for example %s" example
+        if compiled < 250 then failwithf "only %d of 400 random fights compile" compiled
+        if threshold * 1000 > runs then failwithf "%d of %d runs parted at a threshold: more than 1 in 1000" threshold runs)

@@ -14,7 +14,7 @@ let results =
         try
             let fight, described = FlatTests.randomFight case
             match Flat.compile fight with
-            | Error _ -> 0, [], 0
+            | Error _ -> None
             | Ok p ->
                 // a fight of very many events is left out (the reference takes minutes for it)
                 let n = ref 0
@@ -23,13 +23,19 @@ let results =
                         Flat.traced (fun _ _ _ _ _ -> n.Value <- n.Value + 1; if n.Value > 60000 then raise TooLong) p (case + 17u) |> ignore
                         false
                     with TooLong -> true
-                if long' then 0, [], 1
+                if long' then None
                 else
-                    match FlatTests.check fight (case + 17u) with
-                    | Some (Error d) -> 1, [ described + "\n  " + d ], 0
-                    | _ -> 1, [], 0
-        with e -> 0, [ sprintf "case %d threw %s" case e.Message ], 0)
-let bad = results |> Array.collect (fun (_, b, _) -> Array.ofList b)
-printfn "%d cases, %d compiled and compared, %d left out as too long, %d differ" results.Length (results |> Array.sumBy (fun (c, _, _) -> c)) (results |> Array.sumBy (fun (_, _, l) -> l)) bad.Length
-for b in bad |> Array.truncate 5 do
-    printfn "%s" b
+                    match FlatTests.verdict fight (case + 17u) with
+                    | FlatTests.AtThreshold d -> Some(FlatTests.AtThreshold(described + "\n  " + d))
+                    | FlatTests.Wrong d -> Some(FlatTests.Wrong(described + "\n  " + d))
+                    | v -> Some v
+        with e -> Some(FlatTests.Wrong(sprintf "case %d threw %s" case e.Message)))
+    |> Array.choose id
+let count f = results |> Array.filter f |> Array.length
+let threshold = results |> Array.choose (function FlatTests.AtThreshold d -> Some d | _ -> None)
+let wrong = results |> Array.choose (function FlatTests.Wrong d -> Some d | _ -> None)
+printfn "%d fights compared: %d the same in every bit, %d the same within %g, %d parted at a threshold after a rounding difference, %d wrong"
+    results.Length (count (fun v -> v = FlatTests.Exact)) (count (fun v -> v = FlatTests.Within)) FlatTests.tolerance threshold.Length wrong.Length
+if threshold.Length > 0 then printfn "parted at a threshold, for example:\n%s" threshold.[0]
+for b in wrong |> Array.truncate 5 do
+    printfn "WRONG %s" b
