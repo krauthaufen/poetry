@@ -68,6 +68,7 @@
           clear: clears.length === rs.length ? stats(clears) : null,
           dps: stats(rs.map((r) => r.dps.mean)),
           damageShare: pairs(rs.map((r) => r.damageShare), true),
+          damageType: pairs(rs.map((r) => r.damageType), true),
           uptime: pairs(rs.map((r) => r.uptime), true),
           counts: pairs(rs.map((r) => r.counts), false),
           deathRate: mean(rs.map((r) => r.deathRate)),
@@ -246,6 +247,18 @@
     #app .share .bar { position: absolute; left: 0; top: 0; bottom: 0; background: linear-gradient(90deg, rgba(175,96,37,.75), rgba(175,96,37,.35)); }
     #app .share .name, #app .share .pct { position: relative; color: var(--ink); }
     #app .share .pct { color: var(--ink); font-variant-numeric: tabular-nums; }
+    #app .share.fire .bar { background: linear-gradient(90deg, rgba(200,70,30,.8), rgba(200,70,30,.4)); }
+    #app .share.cold .bar { background: linear-gradient(90deg, rgba(60,120,200,.8), rgba(60,120,200,.4)); }
+    #app .share.lightning .bar { background: linear-gradient(90deg, rgba(200,180,40,.75), rgba(200,180,40,.35)); }
+    #app .share.chaos .bar { background: linear-gradient(90deg, rgba(150,60,170,.8), rgba(150,60,170,.4)); }
+    #app .share.physical .bar { background: linear-gradient(90deg, rgba(140,130,120,.8), rgba(140,130,120,.4)); }
+    #app .knob { display: flex; align-items: center; gap: 4px; margin: 3px 0; }
+    #app .knob .what { flex: 1; color: var(--ink); }
+    #app .knob button { min-width: 30px; padding: 3px 8px; border: 1px solid #2a221c; background: #171310; color: var(--ink); cursor: pointer; font: inherit; }
+    #app .knob button.value { min-width: 96px; color: #9a8f80; }
+    #app .knob.said button.value { color: var(--gem); }
+    #app .switches { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    #app .switches .tab { font-size: 12px; padding: 4px 8px; }
     #app .share.part { margin: 1px 0 1px 18px; padding: 1px 8px; font-size: 12px; border-color: transparent; background: none; }
     #app .share.part .bar { background: rgba(175,96,37,.3); }
     #app .share.part .name, #app .share.part .pct { color: var(--dim, #9a8f80); }

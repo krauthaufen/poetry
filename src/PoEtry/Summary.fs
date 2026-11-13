@@ -16,6 +16,8 @@ type Summary =
       Dps: Stats
       /// Mean share of total damage per source.
       DamageShare: (string * float) list
+      /// Share of the damage by damage type.
+      TypeShare: (string * float) list
       /// Mean uptime fraction per enemy status.
       Uptime: (string * float) list
       /// Mean count per run.
@@ -60,6 +62,9 @@ module Summary =
           DamageShare =
             outcomes
             |> meanOf (fun o -> let t = max 1e-9 (total o) in o.DamageBy |> Map.map (fun _ v -> v / t))
+          TypeShare =
+            outcomes
+            |> meanOf (fun o -> let t = max 1e-9 (total o) in o.DamageByType |> Map.map (fun _ v -> v / t))
           Uptime = outcomes |> meanOf (fun o -> o.Uptime |> Map.map (fun _ v -> v / max 1e-9 o.Duration))
           Counts = outcomes |> meanOf (fun o -> o.Counts |> Map.map (fun _ v -> float v))
           DeathRate = float (outcomes |> List.filter (fun o -> o.Died.IsSome) |> List.length) / float outcomes.Length
@@ -97,6 +102,7 @@ module Summary =
                 sprintf "mana     waited for mana %.1f%% of the time; gained per second: %s" (s.Starved * 100.0) (s.ManaGained |> List.map (fun (k, v) -> sprintf "%s %.0f" k v) |> String.concat ", ")
                 "damage share:" ]
             @ (s.DamageShare |> List.map (fun (k, v) -> sprintf "  %-28s %5.1f%%" k (v * 100.0)))
+            @ [ "by type: " + (s.TypeShare |> List.map (fun (k, v) -> sprintf "%s %.1f%%" k (v * 100.0)) |> String.concat ", ") ]
             @ [ "uptime:" ]
             @ (s.Uptime |> List.map (fun (k, v) -> sprintf "  %-28s %5.1f%%" k (v * 100.0)))
             @ [ "per fight:" ]

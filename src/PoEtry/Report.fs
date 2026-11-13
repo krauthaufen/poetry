@@ -102,6 +102,8 @@ module Report =
               "passivesSet1", JArr(c.Build.TreeNodesSet1 |> List.map (fun i -> num (float i)))
               "passivesSet2", JArr(c.Build.TreeNodesSet2 |> List.map (fun i -> num (float i)))
               "attributes", obj [ "str", num v.Str; "dex", num v.Dex; "int", num v.Int ]
+              // what the character has a count of going into a fight (charges, rage, ...)
+              "resources", JArr(c.Resources |> List.filter (fun (k, _) -> k.EndsWith "Charge" || k = "Rage" || k.StartsWith "Mote:") |> List.map (fun (k, n) -> obj [ "name", JStr k; "start", num (float n); "max", num (float (Map.tryFind k c.MaxResources |> Option.defaultValue n)) ]))
               "pools", obj [ "life", num v.Life; "mana", num v.Mana; "energyShield", num v.EnergyShield; "ward", num v.Ward; "spirit", num c.Spirit ]
               "defences",
               obj [ "armour", num v.Armour; "evasion", num v.Evasion; "deflection", num v.Deflection; "block", num v.Block
@@ -168,7 +170,16 @@ module Report =
         let n key d = Json.numField key request |> Option.defaultValue d
         let s key d = Json.strField key request |> Option.defaultValue d
         let level, runs = int (n "level" 83.0), max 1 (int (n "runs" 20.0))
-        let o = { Options.defaults with MaxTime = n "time" 30.0 }
+        // how the character goes into the fight: "start" is "PowerCharge:3,Rage:0" (counts to
+        // begin with), the others are switches (1: on)
+        let on key = n key 0.0 > 0.0
+        let start =
+            (s "start" "").Split(',') |> Array.choose (fun x ->
+                match x.Split(':') with
+                | [| k; v |] -> (match System.Int32.TryParse(v.Trim()) with | true, v -> Some(k.Trim(), v) | _ -> None)
+                | _ -> None)
+            |> List.ofArray
+        let o = { Options.defaults with MaxTime = n "time" 30.0; Start = start; Infused = on "infused"; NoFlask = on "noflask"; Immortal = on "immortal"; CastOnSelf = on "self"; LowLife = on "lowlife" }
         let scenario = s "scenario" "boss"
         let profile r =
             let p = Rarity.defaults r
@@ -203,6 +214,7 @@ module Report =
               "clear", (match summary.Ttk with Some t -> stats t | None -> JNull)
               "dps", stats summary.Dps
               "damageShare", pairs summary.DamageShare
+              "damageType", pairs summary.TypeShare
               "uptime", pairs summary.Uptime
               "counts", pairs (summary.Counts |> List.sortBy fst)
               "deathRate", num summary.DeathRate
@@ -224,8 +236,8 @@ type Session(read: string -> string) =
 
     /// The character of a build text; `passives` ("" or ids separated by commas) replaces
     /// the passives allocated in it.
-    member _.Load(build: string, passives: string, choices: string) : Loaded =
-        let key = passives + "|" + choices + "|" + build
+    member _.Load(build: string, passives: string, choices: string, lowLife: bool) : Loaded =
+        let key = (if lowLife then "low|" else "") + passives + "|" + choices + "|" + build
         match last with
         | Some (k, c) when k = key -> c
         | _ ->
@@ -247,7 +259,7 @@ type Session(read: string -> string) =
                             | [| i; a |] -> (match System.Int32.TryParse(i.Trim()) with | true, v -> Some(v, [ "+5 to " + a.Trim() ]) | _ -> None)
                             | _ -> None)
                     { b with TreeNodes = ids; TreeOverrides = chosen |> Array.fold (fun m (i, s) -> Map.add i s m) b.TreeOverrides }
-            let c = Setup.loadWith db.Value tree.Value b Options.defaults
+            let c = Setup.loadWith db.Value tree.Value b { Options.defaults with LowLife = lowLife }
             last <- Some(key, c)
             c
 
@@ -262,9 +274,10 @@ type Session(read: string -> string) =
                 | Some (JNum n) -> sprintf "%.0f" n
                 | _ -> ""
             let choices = Json.strField "choices" j |> Option.defaultValue ""
+            let low = Json.numField "lowlife" j |> Option.exists (fun v -> v > 0.0)
             match Json.strField "op" j with
-            | Some "character" -> Report.write (Report.character (Tree.jewelSlots tree.Value) (this.Load(build, passives, choices)))
-            | Some "fight" -> Report.write (Report.fight (this.Load(build, passives, choices)) j)
+            | Some "character" -> Report.write (Report.character (Tree.jewelSlots tree.Value) (this.Load(build, passives, choices, low)))
+            | Some "fight" -> Report.write (Report.fight (this.Load(build, passives, choices, low)) j)
             | other -> Report.write (JObj(Map.ofList [ "error", JStr(sprintf "unknown op %A" other) ]))
         with e ->
             Report.write (JObj(Map.ofList [ "error", JStr e.Message ]))

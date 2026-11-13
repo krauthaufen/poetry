@@ -451,6 +451,8 @@ type Outcome =
       Kills: (string * Rarity * float) list
       /// Damage dealt by source: "Skill (hit)", "Ignite", ...
       DamageBy: Map<string, float>
+      /// Damage dealt by damage type ("Fire", ...; "Other": owed damage that has no type).
+      DamageByType: Map<string, float>
       /// Event counts: "uses:Skill", "hits:Skill", "crits:Skill", "inflict:Ignite", "trigger:Skill"...
       Counts: Map<string, int>
       /// Seconds each status was active, averaged over the enemies alive at the time.
@@ -593,6 +595,7 @@ module Sim =
           ShownAt: Map<string, Vec>
           Seq: int
           DamageBy: Map<string, float>
+          DamageByType: Map<string, float>
           Counts: Map<string, int>
           Uptime: Map<string, float>
           Kills: (string * Rarity * float) list
@@ -822,6 +825,11 @@ module Sim =
                     |> List.map (fun d ->
                         let k = if d.Ailment = Some Bleed then bleedK else 1.0
                         d.Label, d.Dps * k * Ailments.dotTakenMult def d.Type)
+                let types =
+                    activeDots e
+                    |> List.map (fun d ->
+                        let k = if d.Ailment = Some Bleed then bleedK else 1.0
+                        DamageType.name d.Type, d.Dps * k * Ailments.dotTakenMult def d.Type)
                 let dps = parts |> List.sumBy snd
                 let span = if dps > 0.0 && e.Life <= dps * dt then e.Life / dps else dt
                 let life = e.Life - dps * span
@@ -829,6 +837,7 @@ module Sim =
                 { w with
                     Enemies = Map.add e.Def.Name { e with Life = (if dead then 0.0 else life) } w.Enemies
                     DamageBy = parts |> List.fold (fun m (k, v) -> addf k (v * span) m) w.DamageBy
+                    DamageByType = types |> List.fold (fun m (k, v) -> addf k (v * span) m) w.DamageByType
                     Uptime = status e |> Map.fold (fun m k _ -> addf k (span / n) m) w.Uptime
                     Kills = if dead then (e.Def.Name, e.Def.Rarity, w.Time + span) :: w.Kills else w.Kills }
             let w = living |> List.fold step w
@@ -2277,6 +2286,8 @@ module Sim =
                         // the enemy as it is now: what the hit consumed stays consumed
                         Enemies = Map.add target { (Map.find target w.Enemies) with Life = (if dead then 0.0 else life) } w.Enemies
                         DamageBy = addf (skill.Name + " (hit)") (min dealt e.Life) w.DamageBy
+                        // (a hit that deals more than the enemy has left: each type's share of what was left)
+                        DamageByType = (let k = if dealt > e.Life && dealt > 0.0 then e.Life / dealt else 1.0 in hit.Dealt |> Map.fold (fun m t v -> if v > 0.0 then addf (DamageType.name t) (v * k) m else m) w.DamageByType)
                         // "25% of Hit Damage dealt to them while Debuffed": hits are what is recorded
                         Agonies = w.Agonies |> List.map (fun ((o, s, en, recorded, share, until) as a) -> if en = target && until > w.Time then (o, s, en, recorded + min dealt e.Life, share, until) else a)
                         Counts = w.Counts |> bump ("hits:" + skill.Name) |> (if hit.Crit then bump ("crits:" + skill.Name) else id)
@@ -3245,6 +3256,7 @@ module Sim =
                                 { drop w with
                                     Enemies = Map.add enemy { e with Life = (if dead then 0.0 else e.Life - dealt) } w.Enemies
                                     DamageBy = addf skill dealt w.DamageBy
+                                    DamageByType = addf "Other" dealt w.DamageByType
                                     Kills = if dead then (enemy, e.Def.Rarity, w.Time) :: w.Kills else w.Kills }
                             else w
                         | _ -> drop w) w
@@ -3594,6 +3606,7 @@ module Sim =
               ShownAt = Map.empty
               Seq = 0
               DamageBy = Map.empty
+              DamageByType = Map.empty
               Counts = Map.empty
               Uptime = Map.empty
               Kills = []
@@ -3643,6 +3656,7 @@ module Sim =
           Duration = (match cleared with Some t -> t | None -> min w.Time fight.MaxTime)
           Kills = List.rev w.Kills
           DamageBy = w.DamageBy
+          DamageByType = w.DamageByType
           Counts = w.Counts
           Uptime = w.Uptime
           Died = w.Player |> Option.bind (fun p -> p.Died)

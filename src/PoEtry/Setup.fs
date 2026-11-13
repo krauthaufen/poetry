@@ -38,6 +38,8 @@ type Options =
       StartPowerCharges: int option
       /// Start with no resources except power charges and rage.
       StartEmpty: bool
+      /// Resources that begin the fight at these counts, whatever else is assumed about them.
+      Start: (string * int) list
       /// Replace the character's chance to not consume charges.
       ChargeSkip: float option
       /// Unlimited infusions: infusing skills always use their "-Infused" stat sets.
@@ -71,6 +73,7 @@ module Options =
           SheetSetTwo = None
           StartPowerCharges = None
           StartEmpty = false
+          Start = []
           ChargeSkip = None
           Infused = false
           Pickup = 1.0
@@ -667,6 +670,8 @@ module Setup =
                 Resources =
                     player.Resources |> List.map (fun (k, n) ->
                         match k with
+                        | _ when o.Start |> List.exists (fun (x, _) -> x = k) ->
+                            k, max 0 (min (Map.tryFind k player.MaxResources |> Option.defaultValue n) (o.Start |> List.find (fun (x, _) -> x = k) |> snd))
                         | "PowerCharge" when o.StartPowerCharges.IsSome -> k, n
                         | "PowerCharge" | "FrenzyCharge" | "EnduranceCharge" ->
                             (match Map.tryFind k sources with

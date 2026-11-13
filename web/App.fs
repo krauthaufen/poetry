@@ -75,6 +75,9 @@ type Msg =
     | Sheet of Fetched
     | Fought of Fetched
     | Scenario of string
+    /// A count the character begins the fight with (below zero: as the fight decides).
+    | Begin of string * int
+    | Switch of string
     | Tab of string
     | TreeData of Fetched
     | Toggle of int
@@ -112,6 +115,13 @@ type Model =
       Gem : string
       Dps : Row list
       Shares : Share list
+      /// The damage by damage type.
+      Types : Share list
+      /// What the character has a count of going into a fight (name, most), the counts said
+      /// here, and the switches that are on.
+      Counts : (string * int) list
+      Start : Map<string, int>
+      Switches : Set<string>
       /// The passive tree: its passives and connections, who neighbours whom, the ribbons of
       /// all connections as one mesh, what is allocated (and whether that was changed here).
       /// (Arrays: read by the update alone, and as arrays they are one value each to the view,
@@ -209,7 +219,7 @@ type Model =
 let init : Model =
     { Build = ""; Scenario = "boss"; Status = "locating"; Title = ""; Class = ""; Ascendancy = ""; Tab = "character"
       Pools = []; Defences = []; Resistances = []; Minions = []
-      NotUnderstood = 0; Fighting = false; Gem = ""; Dps = []; Shares = []
+      NotUnderstood = 0; Fighting = false; Gem = ""; Dps = []; Shares = []; Types = []; Counts = []; Start = Map.empty; Switches = Set.empty
       Passives = [||]; Ascendancies = []; Shown = []; AscendancyWeb = Data.pack (Data.ofList ([] : V3f list)); Path = Data.pack (Data.ofList ([] : V3f list))
       Loaded = false; Capacity = 0
       WebUv = Data.pack (Data.ofList ([] : V2f list)); AscendancyWebUv = Data.pack (Data.ofList ([] : V2f list)); PathUv = Data.pack (Data.ofList ([] : V2f list)); Art = ""; Links = [||]; Neighbours = Map.empty; Web = Data.pack (Data.ofList ([] : V3f list)); Allocated = Set.empty; Edited = false
@@ -235,8 +245,13 @@ let private passives (m : Model) =
         + "&choices=" + (m.Choices |> Map.toList |> List.filter (fun (i, _) -> m.Allocated.Contains i) |> List.map (fun (i, c) -> string i + ":" + c) |> String.concat ",")
     else ""
 
+/// How the character goes into the fight, as the simulator is told it.
+let private knobs (m : Model) =
+    (if m.Start.IsEmpty then "" else "&start=" + (m.Start |> Map.toList |> List.map (fun (k, v) -> k + ":" + string v) |> String.concat ","))
+    + (m.Switches |> Set.toList |> List.map (fun k -> "&" + k + "=1") |> String.concat "")
+
 let private sheetUrl (m : Model) = "__sim?op=character" + passives m + "&build=" + m.Build
-let private fightOf (m : Model) (scenario : string) (ask : string) = "__sim?op=fight&runs=32&time=20&life=1e12" + ask + "&scenario=" + scenario + (if m.Pressing <> "" then "&gem=" + m.Pressing.Replace (" ", "%20") else "") + passives m + "&build=" + m.Build
+let private fightOf (m : Model) (scenario : string) (ask : string) = "__sim?op=fight&runs=32&time=20&life=1e12" + ask + "&scenario=" + scenario + (if m.Pressing <> "" then "&gem=" + m.Pressing.Replace (" ", "%20") else "") + knobs m + passives m + "&build=" + m.Build
 let private fightUrl (m : Model) = fightOf m m.Scenario ("&round=" + string m.Round)
 
 let private scenarios = [ "boss"; "pinnacle"; "pack"; "surrounded" ]
@@ -646,9 +661,12 @@ let private circle (c : V2d) (r : float) (width : float) (z : float) : V3f list 
 
 /// The connections between allocated passives, as one mesh.
 let private paths (m : Model) : Model =
+    // (an ascendancy's start is no passive one allocates: the way from it to a taken passive is taken)
+    let begun = List.ofArray m.Passives |> List.filter (fun p -> p.Kind = "ascstart" && p.Ascendancy = m.Ascendancy) |> List.map (fun p -> p.Id) |> Set.ofList
+    let has (i : int) = m.Allocated.Contains i || begun.Contains i
     let ribbons =
         List.ofArray m.Links
-        |> List.filter (fun l -> (l.Of = "" || l.Of = m.Ascendancy) && m.Allocated.Contains l.A && m.Allocated.Contains l.B && l.Needs |> List.forall m.Allocated.Contains)
+        |> List.filter (fun l -> (l.Of = "" || l.Of = m.Ascendancy) && has l.A && has l.B && l.Needs |> List.forall m.Allocated.Contains)
         |> List.collect (fun l -> l.Ribbon)
     let opened = List.ofArray m.Links |> List.filter (fun l -> not l.Needs.IsEmpty && l.Needs |> List.forall m.Allocated.Contains) |> List.collect (fun l -> l.Thin)
     let rings = areas m m.Allocated |> List.collect (fun a -> circle a.Middle a.Far 14.0 0.5 @ (if a.Near > 0.0 then circle a.Middle a.Near 14.0 0.5 else []))
@@ -804,7 +822,12 @@ let rec update (msg : Msg) (m : Model) : Model =
         match Native.queryParam "build" href with
         | Some b -> { m with Build = b; Status = "reading the character" }
         | None -> { m with Status = "no character: add ?build=<url of a character or a PoB build> to the address" }
-    | Scenario s -> { m with Scenario = s; Fighting = true; Dps = []; Shares = []; Runs = 0; Round = 0; Happened = [] }
+    | Scenario s -> { m with Scenario = s; Fighting = true; Dps = []; Shares = []; Types = []; Runs = 0; Round = 0; Happened = [] }
+    | Begin (name, count) ->
+        let most = m.Counts |> List.tryFind (fun (k, _) -> k = name) |> Option.map snd |> Option.defaultValue 0
+        { m with Start = (if count < 0 || count > most then Map.remove name m.Start else Map.add name count m.Start); Fighting = true; Dps = []; Shares = []; Types = []; Runs = 0; Round = 0; Happened = []; Warm = [] }
+    | Switch key ->
+        { m with Switches = (if m.Switches.Contains key then Set.remove key m.Switches else Set.add key m.Switches); Fighting = true; Dps = []; Shares = []; Types = []; Runs = 0; Round = 0; Happened = []; Warm = [] }
     | Tab t -> { m with Tab = t }
     | TreeData r ->
         match r.Status, Native.parseJson r.Text with
@@ -891,6 +914,7 @@ let rec update (msg : Msg) (m : Model) : Model =
                                                               Inner = Json.number (Json.field "inner" x); Outer = Json.number (Json.field "outer" x); Leap = Json.bool (Json.field "leap" x)
                                                               Centres = Json.field "centres" x |> Json.list |> List.map Json.string })
                         |> Map.ofList
+                    Counts = Json.field "resources" j |> Json.list |> List.map (fun x -> Json.string (Json.field "name" x), Json.int (Json.field "max" x)) |> List.filter (fun (_, most) -> most > 0)
                     Pools = [ row "Life" (n [ "pools"; "life" ]); row "Mana" (n [ "pools"; "mana" ]); row "Energy Shield" (n [ "pools"; "energyShield" ]); row "Spirit" (n [ "pools"; "spirit" ]) ]
                     Defences = [ row "Armour" (n [ "defences"; "armour" ]); row "Evasion" (n [ "defences"; "evasion" ]); row "Deflection" (n [ "defences"; "deflection" ]); row "Block" (n [ "defences"; "block" ]) ]
                     Resistances = named "resistances"
@@ -928,7 +952,11 @@ let rec update (msg : Msg) (m : Model) : Model =
                 Shares =
                     Json.field "damageShare" j |> Json.list
                     |> List.map (fun x -> Json.string (Json.field "name" x), Json.number (Json.field "value" x) * 100.0)
-                    |> shares }
+                    |> shares
+                Types =
+                    Json.field "damageType" j |> Json.list
+                    |> List.map (fun x -> let v = Json.number (Json.field "value" x) * 100.0 in { Name = Json.string (Json.field "name" x); Percent = v; Text = sprintf "%.1f%%" v; Part = false })
+                    |> List.filter (fun s -> s.Percent >= 0.05) }
         | s, _ -> { m with Fighting = false; Status = "the fight did not come back (status " + string s + ")" }
 
 let private panel (title : string) (rows : Row list) : Node<Msg> =
@@ -942,6 +970,31 @@ let private panel (title : string) (rows : Row list) : Node<Msg> =
                 span { Dom.Class "what"; r.Label }
                 span { Dom.Class "amount"; r.Value }
             }
+    }
+
+/// "PowerCharge" as it is said: "Power Charge".
+let private spaced (name : string) : string =
+    name.Replace("Mote:", "Mote ").Replace("Charge", " Charge")
+
+/// A count to begin the fight with: fewer, the count (pressed: as the fight decides again), more.
+let private count (m : Model) (name : string) (most : int) : Node<Msg> =
+    let said = Map.tryFind name m.Start
+    let shown = match said with Some v -> string v + " of " + string most | None -> "as it comes"
+    let fewer = match said with Some v -> v - 1 | None -> most - 1
+    let more = match said with Some v -> v + 1 | None -> most
+    div {
+        Dom.Class (if said.IsSome then "knob said" else "knob")
+        span { Dom.Class "what"; spaced name }
+        button { Dom.OnClick (fun _ -> Begin (name, max 0 fewer)); "−" }
+        button { Dom.Class "value"; Dom.OnClick (fun _ -> Begin (name, -1)); shown }
+        button { Dom.OnClick (fun _ -> Begin (name, more)); "+" }
+    }
+
+let private switch (m : Model) (key : string) (name : string) : Node<Msg> =
+    button {
+        Dom.Class (if m.Switches.Contains key then "tab active" else "tab")
+        Dom.OnClick (fun _ -> Switch key)
+        name
     }
 
 let private scenario (m : Model) (key : string) (name : string) : Node<Msg> =
@@ -1259,8 +1312,33 @@ let view (m : Model) : Node<Msg> =
                         scenario m "pack" "Pack"
                         scenario m "surrounded" "Surrounded"
                     }
+                    section {
+                        Dom.Class "panel going"
+                        h3 { "Going into the fight" }
+                        for (name, most) in m.Counts do
+                            count m name most
+                        div {
+                            Dom.Class "switches"
+                            switch m "lowlife" "On low life"
+                            switch m "infused" "Always infused"
+                            switch m "noflask" "No flasks"
+                            switch m "self" "Cast on self"
+                            switch m "immortal" "Takes no damage, pays no costs"
+                        }
+                    }
                     if m.Gem <> "" then div { Dom.Class "pressing"; Dom.Attr ("data-check", "gem"); "pressing " + m.Gem }
                     panel "Damage" m.Dps
+                    section {
+                        Dom.Class "panel"
+                        h3 { "By damage type" }
+                        for s in m.Types do
+                            div {
+                                Dom.Class ("share " + s.Name.ToLower())
+                                div { Dom.Class "bar"; Dom.Style [ Css.Width (sprintf "%.1f%%" s.Percent) ] }
+                                span { Dom.Class "name"; s.Name }
+                                span { Dom.Class "pct"; s.Text }
+                            }
+                    }
                     section {
                         Dom.Class "panel"
                         h3 { "Who deals it" }
