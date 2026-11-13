@@ -310,10 +310,21 @@ module Report =
             else match System.Int32.TryParse(x.Substring(cut + 1).Trim()) with | true, v -> Some(x.Substring(0, cut).Trim(), v) | _ -> None)
         |> List.ofArray
 
-    let fight (c: Loaded) (request: Json) : Json =
+    /// A fight made ready: who fights whom, what is pressed, and the way one run of it is
+    /// fought (by the fast engine where it can play the fight, `Engine` says which and why).
+    /// Making it ready costs far more than a run: whoever asks again and again keeps it.
+    type Ready =
+        { Gem: string
+          Scenario: string
+          Steps: (Play * string) list
+          Fight: Fight
+          Run: uint32 -> Outcome
+          Engine: string }
+
+    let prepare (c: Loaded) (request: Json) : Ready =
         let n key d = Json.numField key request |> Option.defaultValue d
         let s key d = Json.strField key request |> Option.defaultValue d
-        let level, runs = int (n "level" 83.0), max 1 (int (n "runs" 20.0))
+        let level = int (n "level" 83.0)
         // how the character goes into the fight: "start" is "PowerCharge:3,Rage:0" (counts to
         // begin with), the others are switches (1: on)
         let on key = n key 0.0 > 0.0
@@ -378,14 +389,28 @@ module Report =
             | _ -> Encounter.boss level profile distance
         let enemies = match n "life" 0.0 with l when l > 0.0 -> enemies |> List.map (fun e -> { e with Life = l }) | _ -> enemies
         let f = Setup.fight c o player enemies
+        // ("engine": "reference" asks for the reference engine whatever the fight)
+        let run, engine =
+            if s "engine" "" = "reference" then Sim.run f, "reference (asked for)"
+            else
+                match Flat.compile f with
+                | Ok program -> Flat.run program, "flat"
+                | Error why -> Sim.run f, "reference: " + why
+        { Gem = gem; Scenario = scenario; Steps = steps; Fight = f; Run = run; Engine = engine }
+
+    let fought (ready: Ready) (request: Json) : Json =
+        let n key d = Json.numField key request |> Option.defaultValue d
+        let gem, scenario, steps, f = ready.Gem, ready.Scenario, ready.Steps, ready.Fight
+        let runs = max 1 (int (n "runs" 20.0))
         // (`seed`: the first of the runs' consecutive seeds, so that several askers each run their own)
         let first = max 1 (int (n "seed" 1.0))
-        // (`trace`: the first run is kept for showing, see `replay`)
+        // (`trace`: the first run is kept for showing, see `replay`; that one is the reference's)
         let tracing = n "trace" 0.0 > 0.0
-        let outcomes = [ for seed in first .. first + runs - 1 -> (if tracing && seed = first then Sim.shown else Sim.run) f (uint32 seed) ]
+        let outcomes = [ for seed in first .. first + runs - 1 -> if tracing && seed = first then Sim.shown f (uint32 seed) else ready.Run (uint32 seed) ]
         let summary = outcomes |> Summary.ofOutcomes
         obj
             [ "gem", JStr gem
+              "engine", JStr ready.Engine
               // what is pressed, first to last
               "play", JArr(steps |> List.collect (fun (p, code) ->
                   let how =
@@ -409,6 +434,8 @@ module Report =
               "lowestLife", obj [ "mean", num (fst summary.MinLife); "worst", num (snd summary.MinLife) ]
               "waitingForMana", num summary.Starved
               "replay", (if tracing then replay f outcomes.Head else JNull) ]
+
+    let fight (c: Loaded) (request: Json) : Json = fought (prepare c request) request
 
     /// The build's gems changed, one change after the other (apart by ";", fields by "|";
     /// groups count from 1 as "without" names them, a group's gems from 0):
@@ -561,6 +588,8 @@ type Session(read: string -> string) =
     let bases = lazy (Defence.classBases tree.Value)
     let mutable parsed: (string * PobBuild) option = None
     let mutable last: (string * Loaded) option = None
+    /// The fights made ready last, by what was asked (all of it but which runs).
+    let mutable ready: (string * Report.Ready) list = []
     /// The build as its text says (gem levels without what supports add, see `Setup.ownLevels`).
     let origin (build: string) : PobBuild =
         match parsed with
@@ -639,7 +668,20 @@ type Session(read: string -> string) =
                 // (gems and items as the character was built: one turned or taken off here is still listed)
                 let sheet = Report.character slots.Value (Pob.itemPassives nodes.Value c.Build) (edited ()).Groups false (Report.gemIcons build) c
                 Report.write (match sheet with | JObj m -> JObj(Map.add "items" (Report.items build (origin build)) m) | _ -> sheet)
-            | Some "fight" -> Report.write (Report.fight (this.Load(build, j)) j)
+            | Some "fight" ->
+                // (the same fight is asked for seed after seed: it is made ready once)
+                let key =
+                    match j with
+                    | JObj m -> Report.write (JObj(m |> Map.remove "seed" |> Map.remove "runs" |> Map.remove "trace" |> Map.remove "build")) + "|" + string build.Length + "|" + string (hash build)
+                    | _ -> ""
+                let r =
+                    match ready |> List.tryFind (fun (k, _) -> k = key) with
+                    | Some (_, r) -> r
+                    | None ->
+                        let r = Report.prepare (this.Load(build, j)) j
+                        ready <- (key, r) :: (if ready.Length >= 8 then List.truncate 7 ready else ready)
+                        r
+                Report.write (Report.fought r j)
             | Some "calcs" -> Report.write (Report.calcs (this.Load(build, j)))
             | Some "gems" ->
                 let at = Json.numField "group" j |> Option.map int |> Option.defaultValue 0
