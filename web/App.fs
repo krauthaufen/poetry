@@ -192,6 +192,9 @@ type Model =
       /// (the middle of what is shown: between the player and the enemies)
       Middle : V2d
       Began : float
+      /// Where the minions are shown now, and the fight's time that was shown last.
+      Stands : Map<string, V2d>
+      Clock : float
       Stage : Layer list
       Warm : string list
       /// The fight is asked again while runs are still out: which asking this is, how many
@@ -213,7 +216,7 @@ let init : Model =
       Centre = V2d (0.0, 0.0); Height = 9000.0
       Camera = { Sky = V3d (0.0, 1.0, 0.0); Location = V3d (0.0, 0.0, 7794.2); Forward = V3d (0.0, 0.0, -1.0); Up = V3d (0.0, 1.0, 0.0); Right = V3d (1.0, 0.0, 0.0) }
       Near = 7000.0; Far = 8600.0
-      Touches = []; Travel = 0.0; Page = V2d (0.0, 0.0); Pending = None; Choices = Map.empty; JewelSprites = Map.empty; Jewels = Map.empty; Unlocks = Map.empty; Opened = Data.pack (Data.ofList ([] : V3f list)); OpenedUv = Data.pack (Data.ofList ([] : V2f list)); Rings = Data.pack (Data.ofList ([] : V3f list)); RingsUv = Data.pack (Data.ofList ([] : V2f list)); Pressing = ""; Foes = []; Allies = []; Happened = []; Lasts = 0.0; Field = 100.0; Middle = V2d (0.0, 0.0); Began = -1.0; Stage = []; Warm = []; Round = 0; Runs = 0; More = false; Selected = None; Hovered = None; Level = 0 }
+      Touches = []; Travel = 0.0; Page = V2d (0.0, 0.0); Pending = None; Choices = Map.empty; JewelSprites = Map.empty; Jewels = Map.empty; Unlocks = Map.empty; Opened = Data.pack (Data.ofList ([] : V3f list)); OpenedUv = Data.pack (Data.ofList ([] : V2f list)); Rings = Data.pack (Data.ofList ([] : V3f list)); RingsUv = Data.pack (Data.ofList ([] : V2f list)); Pressing = ""; Foes = []; Allies = []; Happened = []; Lasts = 0.0; Field = 100.0; Middle = V2d (0.0, 0.0); Began = -1.0; Stands = Map.empty; Clock = 0.0; Stage = []; Warm = []; Round = 0; Runs = 0; More = false; Selected = None; Hovered = None; Level = 0 }
 
 /// The camera straight above the centre, so far up that `Height` of the tree is seen through
 /// its 60 degree lens; the depth range close around the tree's plane (its layers are a unit
@@ -299,15 +302,30 @@ let private lengthOf (points : V2d list) : float =
 /// player in the middle with the minions around (they have no place of their own in the
 /// simulation), the marks of the uses just made (the player's, the minions'), the enemies'
 /// hits on the player, and a flash on whoever was just hit.
-let private stage (m : Model) (c : float) : Layer list =
+let private stage (m : Model) (c : float) : Layer list * Map<string, V2d> =
     let speed = pace m
     let w = 0.45 * speed
     let u = m.Field / 110.0
     let gone = m.Happened |> List.filter (fun h -> h.Kind = "k" && h.T <= c - w * 0.3) |> List.map (fun h -> h.Who) |> Set.ofList
-    let at =
-        m.Happened |> List.fold (fun (p : Map<string, V2d>) h -> if h.Kind = "m" && h.T <= c then Map.add h.Who (V2d (h.X, h.Y)) p else p)
-            (m.Foes |> List.map (fun f -> f.Called, f.Start) |> Map.ofList)
-    let place (name : string) = Map.tryFind name at |> Option.defaultValue (V2d (0.0, 0.0))
+    // where an enemy is: between the two places noted around this time, walking from the one
+    // to the other (when the next was noted much later it stood still first: frozen, stunned)
+    let noted =
+        m.Happened |> List.fold (fun (p : Map<string, (float * V2d) * (float * V2d) option>) h ->
+            if h.Kind <> "m" then p
+            elif h.T <= c then Map.add h.Who ((h.T, V2d (h.X, h.Y)), None) p
+            else
+                match Map.tryFind h.Who p with
+                | Some (was, None) -> Map.add h.Who (was, Some (h.T, V2d (h.X, h.Y))) p
+                | _ -> p)
+            (m.Foes |> List.map (fun f -> f.Called, ((0.0, f.Start), None)) |> Map.ofList)
+    let place (name : string) =
+        match Map.tryFind name noted with
+        | Some ((_, a), None) -> a
+        | Some ((t0, a), Some (t1, b)) ->
+            let from = max t0 (t1 - 0.5)
+            let k = if c <= from then 0.0 else (c - from) / max 1e-6 (t1 - from)
+            V2d (a.X + (b.X - a.X) * k, a.Y + (b.Y - a.Y) * k)
+        | None -> V2d (0.0, 0.0)
     let struck = m.Happened |> List.filter (fun h -> h.Kind = "s" && h.T <= c && h.T > c - w * 0.3) |> List.map (fun h -> h.Who) |> Set.ofList
     let foes (rank : string) = m.Foes |> List.filter (fun f -> f.Rank = rank && not (gone.Contains f.Called)) |> List.collect (fun f -> disc (place f.Called) f.Radius 1.0)
     let flashes = m.Foes |> List.filter (fun f -> struck.Contains f.Called) |> List.collect (fun f -> disc (place f.Called) (f.Radius * 0.55) 9.0)
@@ -339,15 +357,31 @@ let private stage (m : Model) (c : float) : Layer list =
                         a, V2d (c.X + r * cos ang, c.Y + r * sin ang)))
                     @ rings (List.skip here.Length left) (k + 1)
             rings melee 0
-    let beside =
-        let facing = match focus with Some f -> (let c = place f.Called in atan2 c.Y c.X) | None -> 0.0
-        ranged |> List.mapi (fun i a ->
-            let side = if i % 2 = 0 then 1.0 else -1.0
-            let ang = facing + side * (1.2 + 0.35 * float (i / 2))
-            a, V2d (u * 7.0 * cos ang, u * 7.0 * sin ang))
-    let placed = around @ beside
+    let minions = m.Allies |> List.filter (fun a -> a.Minion)
+    let facing = match focus with Some f -> (let c = place f.Called in atan2 c.Y c.X) | None -> 0.0
+    // (beside the player, to both sides of where it looks; `i` counts the minions that stand there)
+    let home (i : int) =
+        let side = if i % 2 = 0 then 1.0 else -1.0
+        let ang = facing + side * (1.2 + 0.35 * float (i / 2))
+        V2d (u * 7.0 * cos ang, u * 7.0 * sin ang)
+    let beside = ranged |> List.mapi (fun i a -> a, home i)
+    // A minion walks to its place, it is not there at once: from where it was shown last
+    // (at the fight's start beside the player), no faster than a minion runs.
+    let again = c < m.Clock
+    let reach = 55.0 * max 0.0 (c - m.Clock)
+    let placed =
+        around @ beside |> List.map (fun (a, goal) ->
+            let was =
+                match (if again then None else Map.tryFind a.Named m.Stands) with
+                | Some p -> p
+                | None -> home (minions |> List.findIndex (fun x -> x.Named = a.Named))
+            let dx, dy = goal.X - was.X, goal.Y - was.Y
+            let l = sqrt (dx * dx + dy * dy)
+            a, (if l <= reach || l < 1e-6 then goal else V2d (was.X + dx / l * reach, was.Y + dy / l * reach)))
     let stand (name : string) = placed |> List.tryFind (fun (a, _) -> a.Named = name) |> Option.map snd |> Option.defaultValue (V2d (0.0, 0.0))
-    let allies = disc (V2d (0.0, 0.0)) (u * 2.2) 2.0 @ (placed |> List.filter (fun (a, _) -> not a.Companion) |> List.collect (fun (a, p) -> disc p (body a) 2.0))
+    // (the player: a ring with a dot, so that it is no monster's disc)
+    let self = band (V2d (0.0, 0.0)) (u * 2.4) (u * 0.8) 3.0 @ disc (V2d (0.0, 0.0)) (u * 1.0) 3.0
+    let allies = (placed |> List.filter (fun (a, _) -> not a.Companion) |> List.collect (fun (a, p) -> disc p (body a) 2.0))
     let companions = placed |> List.filter (fun (a, _) -> a.Companion) |> List.collect (fun (a, p) -> disc p (body a) 2.0)
     let player = m.Allies |> List.tryFind (fun a -> not a.Minion) |> Option.map (fun a -> a.Named) |> Option.defaultValue ""
     let marks (own : bool) =
@@ -382,11 +416,13 @@ let private stage (m : Model) (c : float) : Layer list =
       layer 0.95 0.95 0.4 (foes "rare")
       layer 0.8 0.42 0.14 (foes "unique")
       layer 0.9 0.86 0.62 allies
+      layer 1.0 1.0 1.0 self
       layer 0.35 0.8 0.75 companions
       layer 0.4 0.78 1.0 (marks true)
       layer 0.45 0.85 0.5 (marks false)
       layer 1.0 0.22 0.18 hurts
-      layer 1.0 1.0 1.0 flashes ]
+      layer 1.0 1.0 1.0 flashes ],
+    (placed |> List.map (fun (a, p) -> a.Named, p) |> Map.ofList)
 
 /// The fight to show, out of a fight's answer (none: what is shown stays).
 /// Damage by skill: a skill's lines (infused or not, each gem that triggers it) are one line,
@@ -448,7 +484,9 @@ let private readReplay (j : Json) (m : Model) : Model =
             Lasts = max 0.5 (Json.number (Json.field "duration" r))
             Field = max 60.0 (max (x1 - x0) (y1 - y0) * 1.5)
             Middle = V2d ((x0 + x1) / 2.0, (y0 + y1) / 2.0)
-            Began = -1.0 }
+            Began = -1.0
+            Stands = Map.empty
+            Clock = 0.0 }
 
 // ---- the passive tree ----
 
@@ -868,7 +906,8 @@ let rec update (msg : Msg) (m : Model) : Model =
             let whole = m.Lasts / pace m + 1.2
             let shown = t - began
             let c = (shown - whole * floor (shown / whole)) * pace m
-            { m with Began = began; Stage = stage m c }
+            let layers, stands = stage m c
+            { m with Began = began; Stage = layers; Stands = stands; Clock = c }
     | Warmed r -> { m with Warm = (warming m) :: m.Warm }
     | Fought r when r.Url <> fightUrl m -> m
     | Fought r ->
