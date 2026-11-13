@@ -371,7 +371,7 @@ module Flat =
             if k >= 0 then (at ev.KVal k) <> 0.0
             else
                 let v = qFlag ev q
-                ev.KVal.[-1 - k] <- (if v then 1.0 else 0.0)
+                put ev.KVal (-1 - k) ((if v then 1.0 else 0.0))
                 v
 
     let inline private incQ (ev: Ev) (i: int) = 1.0 + sumQ ev i / 100.0
@@ -1608,7 +1608,7 @@ module Flat =
             count <- 0
             freeCount <- free.Length
             for i in 0 .. free.Length - 1 do
-                free.[i] <- i
+                put free i (i)
         /// When the earliest is due.
         member _.Next = (at time ((at heap 0)))
         member _.Push(t: float, sq: int, k: int, va: int, vb: int, vx: float, vy: float) =
@@ -2103,11 +2103,11 @@ module Flat =
                                 if n = top.Length then
                                     let wider = Array.zeroCreate (top.Length * 2)
                                     for i in 0 .. n - 1 do
-                                        wider.[i] <- top.[i]
+                                        put wider i (top.[i])
                                     top <- wider
                                 n <- n + 1
                             for i in n - 1 .. -1 .. at + 1 do
-                                top.[i] <- top.[i - 1]
+                                put top i (top.[i - 1])
                             put top at (d)
                     for i in n - 1 .. -1 .. 0 do
                         active <- (at top i) :: active
@@ -2165,15 +2165,15 @@ module Flat =
                     if first then
                         for b in Ailment.damaging do
                             if activeDots e |> List.exists (fun x -> x.Ailing = Some b) then
-                                has.[(at p.AilmentStatus (ailmentIndex b))] <- true
-                                stacks.[(at p.AilmentStatus (ailmentIndex b))] <- 0
+                                put has ((at p.AilmentStatus (ailmentIndex b))) (true)
+                                put stacks ((at p.AilmentStatus (ailmentIndex b))) (0)
                         first <- false
                     put stacks id ((at stacks id) + 1)
                 | None -> ()
             let on (name: Ailment) = (at has ((at p.AilmentStatus (ailmentIndex name))))
             let set (slot: int) =
-                has.[(at p.SDerived slot)] <- true
-                stacks.[(at p.SDerived slot)] <- 1
+                put has ((at p.SDerived slot)) (true)
+                put stacks ((at p.SDerived slot)) (1)
             let ailing = allAilments |> List.exists on
             if def.Moving then set 0
             if cullable then set 1
@@ -2184,7 +2184,7 @@ module Flat =
             (let n = (if on Ignite then 1 else 0) + (if on Chill then 1 else 0) + (if on Freeze then 1 else 0) + (if on Shock then 1 else 0) + (if on Electrocute then 1 else 0)
              if n > 0 then
                 set 6
-                stacks.[(at p.SDerived 6)] <- n)
+                put stacks ((at p.SDerived 6)) (n))
             if exposed then set 7
             if def.Rarity = Rare || def.Rarity = Unique then set 8
             if low then set 9
@@ -2268,7 +2268,7 @@ module Flat =
                 put e.DStat at (stat)
                 (let c = StatKey.code stat
                  put e.DCode at (c)
-                 e.DName.[at] <- (if c < 0 then StatKey.name stat else ""))
+                 put e.DName at ((if c < 0 then StatKey.name stat else "")))
                 put e.DKind at (ModKind.number kind)
                 put e.DVal at (v)
                 put e.DShock at (shock)
@@ -3045,7 +3045,7 @@ module Flat =
                 let pending = List.sort (pending @ [ start + cd / recovery ])
                 put s.Recharges sid (pending)
                 // blocked once every stored use is recharging; free again when the first is back
-                s.Cooldowns.[sid] <- (if pending.Length >= uses then pending.Head else -infinity)
+                put s.Cooldowns sid ((if pending.Length >= uses then pending.Head else -infinity))
             | None -> ()
             // "Lose X% of maximum Life, Mana and Energy Shield when you use"
             (match p.Vitals with
@@ -3377,8 +3377,8 @@ module Flat =
                         let pct = sumQ ev (at qGain (from * 5 + into))
                         if pct > 0.0 then
                             let k = pct / 100.0
-                            rMin.[into] <- (if (at rHas into) then (at rMin into) else 0.0) + (at oMin from) * k
-                            rMax.[into] <- (if (at rHas into) then (at rMax into) else 0.0) + (at oMax from) * k
+                            put rMin into ((if (at rHas into) then (at rMin into) else 0.0) + (at oMin from) * k)
+                            put rMax into ((if (at rHas into) then (at rMax into) else 0.0) + (at oMax from) * k)
                             put rHas into (true)
         // conversion: the skill's own first, then everything else on the result
         if info.HasConvert || anyDyn ev p.ConvSlots then
@@ -3404,8 +3404,8 @@ module Flat =
                                 if k > 0.0 then gone <- gone + k
                         let put (into: int) (k: float) =
                             if k > 0.0 then
-                                rMin.[into] <- (if (at rHas into) then (at rMin into) else 0.0) + (at oMin from) * k
-                                rMax.[into] <- (if (at rHas into) then (at rMax into) else 0.0) + (at oMax from) * k
+                                put rMin into ((if (at rHas into) then (at rMin into) else 0.0) + (at oMin from) * k)
+                                put rMax into ((if (at rHas into) then (at rMax into) else 0.0) + (at oMax from) * k)
                                 put rHas into (true)
                         put from (1.0 - gone)
                         for into in 0 .. 4 do
@@ -3451,7 +3451,7 @@ module Flat =
                         let b = rng.Between(lo, hi)
                         max a b
                     else rng.Between(lo, hi)
-                un.[t] <- rolled * multQ ev (at qDamage t) * critMult * (if doubled then 2.0 else 1.0)
+                put un t (rolled * multQ ev (at qDamage t) * critMult * (if doubled then 2.0 else 1.0))
             else un.[t] <- 0.0
 
     /// `Hit.rollWith`: crit roll, damage roll, mitigation; whether it is a critical hit.
