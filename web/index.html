@@ -269,20 +269,40 @@
           : null;
         const ask = async (q) => {
           if (returning) await returning;
-          if (!hosted) return { can: false, name: "", characters: [] };
           const op = q.get("op");
+          const saved = (listed) => savedList().filter((e) => !listed.some((c) => c.url === e.url)).map((e) => ({ name: e.name, about: e.about + ", saved here", url: e.url }));
+          if (!hosted) return { can: false, name: "", characters: saved([]) };
           if (op === "login") { await login(); return { ok: true }; }
-          if (op === "logout") { put("token", null); sessionStorage.clear(); location.reload(); return { ok: true }; }
+          if (op === "logout") { put("token", null); sessionStorage.clear(); location.href = location.pathname; return { ok: true }; }
           if (op === "open") { location.search = "?build=" + encodeURIComponent("poe-api/character/poe2/" + q.get("name")).replace(/%2F/g, "/"); return { ok: true }; }
           const failed = get("failed"); put("failed", null);
           const t = await token();
-          if (!t) return { can: true, name: "", characters: [], error: failed || "" };
+          if (!t) return { can: true, name: "", characters: saved([]), error: failed || "" };
           try {
             const list = JSON.parse(await kept("characters", 600, () => api("character/poe2")));
-            return { can: true, name: t.name, characters: (list.characters || []).map((c) => ({ name: c.name, about: "Level " + c.level + " " + c.class + (c.league ? " (" + c.league + ")" : ""), url: "poe-api/character/poe2/" + c.name })) };
-          } catch (err) { return { can: true, name: t.name, characters: [], error: String(err && err.message || err) }; }
+            const listed = (list.characters || []).map((c) => ({ name: c.name, about: "Level " + c.level + " " + c.class + (c.league ? " (" + c.league + ")" : ""), url: "poe-api/character/poe2/" + c.name }));
+            return { can: true, name: t.name, characters: [...listed, ...saved(listed)] };
+          } catch (err) { return { can: true, name: t.name, characters: saved([]), error: String(err && err.message || err) }; }
         };
-        const character = (url) => kept(url, 120, () => api(url.slice(8)));
+        // A character that was opened stays in this browser (the newest few): it is listed with
+        // the account's and opens without a login, as it was when last fetched.
+        const savedList = () => get("saved") || [];
+        const save = (url, text) => {
+          try {
+            const c = JSON.parse(text).character || {};
+            const entry = { url, name: c.name || url.split("/").pop(), about: "Level " + c.level + " " + c.class + (c.league ? " (" + c.league + ")" : ""), at: Date.now() };
+            const list = [entry, ...savedList().filter((e) => e.url !== url)];
+            for (const gone of list.slice(8)) localStorage.removeItem("poe:char:" + gone.url);
+            for (let keep = Math.min(8, list.length); keep > 0; keep--) {
+              try { localStorage.setItem("poe:char:" + url, text); put("saved", list.slice(0, keep)); return; }
+              catch { const drop = list[keep - 1]; if (drop.url === url) return; localStorage.removeItem("poe:char:" + drop.url); list.splice(keep - 1, 1); }
+            }
+          } catch {}
+        };
+        const character = async (url) => {
+          try { const text = await kept(url, 120, () => api(url.slice(8))); save(url, text); return text; }
+          catch (err) { const text = localStorage.getItem("poe:char:" + url); if (text) return text; throw err; }
+        };
         return { ask, character };
       })();
       window.fetch = async (input, init) => {
@@ -663,7 +683,7 @@
     }
     #app header .login { flex: 0 0 auto; background: none; border: 0; color: var(--dim); font: inherit; font-size: 13px; cursor: pointer; padding: 0; text-decoration: underline dotted; overflow: visible; }
     #app header .login:hover { color: var(--ink); }
-    #app header select.title { flex: 0 1 auto; min-width: 90px; background: #14110f; color: var(--rare); border: 1px solid var(--edge); font: inherit; font-size: 16px; padding: 4px 6px; }
+    #app header select.pick { flex: 0 1 auto; min-width: 90px; background: #14110f; color: var(--rare); border: 1px solid var(--edge); font: inherit; font-size: 16px; padding: 4px 6px; }
     #app .main.notes .panel { flex: 1 1 100%; max-width: 760px; }
     #app .main.defence { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; align-items: start; max-width: 1100px; }
     #app .main.defence .survival { display: flex; flex-direction: column; gap: 8px; }
@@ -682,7 +702,7 @@
       background: linear-gradient(180deg, #2a1f15, #19120c); color: #d8c8a8; border: 1px solid #6b5438; }
     #app button.tab:hover, #app .knob button:hover, #app .gem-tip .act:hover, #app button.act:hover, #app .item-tip .act:hover { background: linear-gradient(180deg, #3a2a1a, #241a10); border-color: #c89a58; color: #fff0d0; }
     #app button.tab.active, #app .item-tip .act.active { background: linear-gradient(180deg, #5a3c1c, #33220f); color: #ffe6b0; border-color: #d8a050; }
-    #app .title, #app header select.title { color: #e8c888; }
+    #app .title, #app header select.pick { color: #e8c888; }
     #app .headline { color: #ffd890; }
     #app .status, #app .depth { color: #8a7a64; }
     #app .share { border: 1px solid #3b2e20; background: #120e0a; }
@@ -710,6 +730,12 @@
     #app .panel.fight { padding-bottom: 10px; } #app .panel.fight canvas, #app .panel.fight > :not(h3) { border: 1px solid #3b2e20; }
     #app header { gap: 16px; } #app header > nav button.tab { padding: 7px 11px; } #app header .status { flex: 0 2 auto; }
     #app .panel.fight > :not(h3) { height: min(170px, 44vw) !important; width: min(340px, 100%) !important; margin: 0 auto; }
+    #app header select.pick { flex: 0 1 auto; min-width: 110px; max-width: 46vw; overflow: hidden; text-overflow: ellipsis; }
+    #app .main.landing { flex-direction: column; align-items: stretch; max-width: 560px; margin: 0 auto; gap: 8px; padding-top: 28px; }
+    #app .main.landing button.act { padding: 14px 18px; font-size: 17px; text-align: left; }
+    #app .main.landing button.act.enter { text-align: center; font-size: 19px; padding: 18px; border-color: #d8a050; color: #ffe6b0; margin-top: 12vh; }
+    /* (nothing open: no tabs to go to) */
+    #app:has(.main.landing) header > nav { visibility: hidden; }
   </style>
 </head>
 <body>

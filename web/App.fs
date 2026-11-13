@@ -2422,7 +2422,7 @@ let view (m : Model) : Node<Msg> =
                 div { Dom.Class "title"; Dom.Attr ("data-check", "title"); named }
             if not m.Characters.IsEmpty then
                 select {
-                    Dom.Class "title"
+                    Dom.Class "pick"
                     Dom.OnChange Open
                     if not here then option { Dom.Attr ("value", ""); chosen' }
                     for (name, about, _) in m.Characters do
@@ -2521,7 +2521,18 @@ let view (m : Model) : Node<Msg> =
                     div { Dom.Class "actions"; button { Dom.Class "act"; Dom.OnClick (fun _ -> Apply); "Apply" } }
                 }
             }
-        if m.Tab = "character" then
+        // no character yet: the account's characters to choose from, or the way to log in
+        if m.Build = "" then
+            div {
+                Dom.Class "main landing"
+                if m.CanLogin && m.Player = "" then
+                    button { Dom.Class "act enter"; Dom.OnClick (fun _ -> Login); "Log in with your Path of Exile account" }
+                if not m.CanLogin then
+                    div { Dom.Class "depth"; "no character: add ?build=<url of a character or a PoB build> to the address" }
+                for (name, about, _) in m.Characters do
+                    button { Dom.Class "act character"; Dom.OnClick (fun _ -> Open name); about }
+            }
+        if m.Tab = "character" && m.Build <> "" then
             div {
                 Dom.Class "main"
                 div {
