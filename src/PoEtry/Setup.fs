@@ -40,6 +40,8 @@ type Options =
       StartEmpty: bool
       /// Resources that begin the fight at these counts, whatever else is assumed about them.
       Start: (string * int) list
+      /// Dead enemies are replaced (see `Fight.Replace`).
+      Replace: bool
       /// Replace the character's chance to not consume charges.
       ChargeSkip: float option
       /// Unlimited infusions: infusing skills always use their "-Infused" stat sets.
@@ -74,6 +76,7 @@ module Options =
           StartPowerCharges = None
           StartEmpty = false
           Start = []
+          Replace = false
           ChargeSkip = None
           Infused = false
           Pickup = 1.0
@@ -710,6 +713,7 @@ module Setup =
           Reach = (if o.CastOnSelf then 0.0 else o.Reach)
           CascadeSpacing = o.CascadeSpacing
           BankedInvocations = o.Banked
+          Replace = o.Replace
           Walls = []
           MaxTime = o.MaxTime }
 

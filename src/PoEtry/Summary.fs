@@ -132,6 +132,7 @@ module Scenarios =
                   Reach = 15.0
                   CascadeSpacing = 1.0
                   BankedInvocations = 0.0
+                  Replace = false
                   EnemyAuras = []
                   Walls = []
                   MaxTime = maxTime })

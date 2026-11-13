@@ -138,6 +138,7 @@ module Report =
     ///   ["m", time, enemy, x, y]           an enemy is here now
     ///   ["h", time, enemy, damage]         an enemy's hit on the player
     ///   ["k", time, enemy]                 an enemy dies
+    ///   ["e", time, enemy, x, y, size, rarity]  a new enemy comes into the fight there
     let private replay (f: Fight) (o: Outcome) : Json =
         let r (v: float) = num (System.Math.Round(v, 1))
         let mark (m: Mark) =
@@ -152,7 +153,8 @@ module Report =
                 | Used (time, actor, skill, marks) -> time, JArr [ JStr "u"; t time; JStr actor; JStr skill; JArr(marks |> List.map mark) ]
                 | Struck (time, enemy, damage, crit) -> time, JArr [ JStr "s"; t time; JStr enemy; num (System.Math.Round damage); JBool crit ]
                 | Moved (time, enemy, p) -> time, JArr [ JStr "m"; t time; JStr enemy; r p.X; r p.Y ]
-                | Hurt (time, enemy, damage) -> time, JArr [ JStr "h"; t time; JStr enemy; num (System.Math.Round damage) ])
+                | Hurt (time, enemy, damage) -> time, JArr [ JStr "h"; t time; JStr enemy; num (System.Math.Round damage) ]
+                | Entered (time, e) -> time, JArr [ JStr "e"; t time; JStr e.Name; r e.Position.X; r e.Position.Y; r e.Size; JStr(Rarity.name e.Rarity) ])
         let kills = o.Kills |> List.map (fun (enemy, _, time) -> time, JArr [ JStr "k"; t time; JStr enemy ])
         obj
             [ "duration", num o.Duration
@@ -180,6 +182,8 @@ module Report =
                 | _ -> None)
             |> List.ofArray
         let o = { Options.defaults with MaxTime = n "time" 30.0; Start = start; Infused = on "infused"; NoFlask = on "noflask"; Immortal = on "immortal"; CastOnSelf = on "self"; LowLife = on "lowlife" }
+        // a pack does not end: who dies is replaced (unless the enemies are made unkillable)
+        let o = { o with Replace = (s "scenario" "boss" = "pack" || s "scenario" "boss" = "surrounded") && n "life" 0.0 <= 0.0 }
         let scenario = s "scenario" "boss"
         let profile r =
             let p = Rarity.defaults r

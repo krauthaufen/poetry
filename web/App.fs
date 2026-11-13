@@ -60,7 +60,8 @@ type Ascendancy = { Called : string; Middle : V2d; Art : string }
 /// triangles of the picture.
 type Shape = { Sort : string; Nums : float list }
 type Happening = { Kind : string; T : float; Who : string; Shapes : Shape list; X : float; Y : float }
-type Foe = { Called : string; Start : V2d; Radius : float; Rank : string }
+/// (`From`: when it comes into the fight; below zero: there from the beginning)
+type Foe = { Called : string; Start : V2d; Radius : float; Rank : string; From : float }
 type Layer = { Color : V4d; Points : Buffer<V3f>; Uvs : Buffer<V2f> }
 /// Who fights the enemies: the player, or a minion (one that fights in melee stands at the
 /// enemy; a companion is a monster of its own size).
@@ -251,7 +252,7 @@ let private knobs (m : Model) =
     + (m.Switches |> Set.toList |> List.map (fun k -> "&" + k + "=1") |> String.concat "")
 
 let private sheetUrl (m : Model) = "__sim?op=character" + passives m + "&build=" + m.Build
-let private fightOf (m : Model) (scenario : string) (ask : string) = "__sim?op=fight&runs=32&time=20&life=1e12" + ask + "&scenario=" + scenario + (if m.Pressing <> "" then "&gem=" + m.Pressing.Replace (" ", "%20") else "") + knobs m + passives m + "&build=" + m.Build
+let private fightOf (m : Model) (scenario : string) (ask : string) = "__sim?op=fight&runs=32&time=20" + (if scenario = "pack" || scenario = "surrounded" then "" else "&life=1e12") + ask + "&scenario=" + scenario + (if m.Pressing <> "" then "&gem=" + m.Pressing.Replace (" ", "%20") else "") + knobs m + passives m + "&build=" + m.Build
 let private fightUrl (m : Model) = fightOf m m.Scenario ("&round=" + string m.Round)
 
 let private scenarios = [ "boss"; "pinnacle"; "pack"; "surrounded" ]
@@ -321,7 +322,10 @@ let private stage (m : Model) (c : float) : Layer list * Map<string, V2d> =
     let speed = pace m
     let w = 0.45 * speed
     let u = m.Field / 110.0
-    let gone = m.Happened |> List.filter (fun h -> h.Kind = "k" && h.T <= c - w * 0.3) |> List.map (fun h -> h.Who) |> Set.ofList
+    let gone =
+        (m.Happened |> List.filter (fun h -> h.Kind = "k" && h.T <= c - w * 0.3) |> List.map (fun h -> h.Who))
+        @ (m.Foes |> List.filter (fun f -> f.From > c) |> List.map (fun f -> f.Called))
+        |> Set.ofList
     // where an enemy is: between the two places noted around this time, walking from the one
     // to the other (when the next was noted much later it stood still first: frozen, stunned)
     let noted =
@@ -471,7 +475,14 @@ let private readReplay (j : Json) (m : Model) : Model =
     else
         let foes =
             Json.field "enemies" r |> Json.list
-            |> List.map (fun e -> { Called = Json.string (Json.field "name" e); Start = V2d (Json.number (Json.field "x" e), Json.number (Json.field "y" e)); Radius = max 2.0 (Json.number (Json.field "size" e)); Rank = Json.string (Json.field "rarity" e) })
+            |> List.map (fun e -> { Called = Json.string (Json.field "name" e); Start = V2d (Json.number (Json.field "x" e), Json.number (Json.field "y" e)); Radius = max 2.0 (Json.number (Json.field "size" e)); Rank = Json.string (Json.field "rarity" e); From = -1.0 })
+        // (those that come into the fight later)
+        let came =
+            events |> List.choose (fun e ->
+                match Json.list e with
+                | [ k; t; who; x; y; size; rarity ] when Json.string k = "e" ->
+                    Some { Called = Json.string who; Start = V2d (Json.number x, Json.number y); Radius = max 2.0 (Json.number size); Rank = Json.string rarity; From = Json.number t }
+                | _ -> None)
         let happened =
             events |> List.map (fun e ->
                 match Json.list e with
@@ -489,7 +500,7 @@ let private readReplay (j : Json) (m : Model) : Model =
         let high (pick : V2d -> float) = foes |> List.fold (fun d f -> max d (pick f.Start + f.Radius)) 14.0
         let x0, x1, y0, y1 = low (fun p -> p.X), high (fun p -> p.X), low (fun p -> p.Y), high (fun p -> p.Y)
         { m with
-            Foes = foes
+            Foes = foes @ came
             Allies =
                 Json.field "actors" r |> Json.list
                 |> List.map (fun a ->

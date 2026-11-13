@@ -400,6 +400,9 @@ type Fight =
       /// Debuffs every enemy has for the whole fight (curses applied as an aura): name, stacks
       /// and monster-side mods per stack; curses are scaled by the enemy's "curse effect on self".
       EnemyAuras: (string * int * Mod list) list
+      /// A dead enemy is replaced by a new one of its kind that walks in from further out
+      /// (a pack that never ends: the fight lasts until MaxTime).
+      Replace: bool
       MaxTime: float }
 
 module Fight =
@@ -414,6 +417,7 @@ module Fight =
           Walls = []
           BankedInvocations = 1.0
           EnemyAuras = []
+          Replace = false
           MaxTime = maxTime }
 
 /// A timed effect with stacks.
@@ -440,6 +444,7 @@ type Shown =
     | Struck of time: float * enemy: string * damage: float * crit: bool
     | Moved of time: float * enemy: string * position: Vec
     | Hurt of time: float * enemy: string * damage: float
+    | Entered of time: float * enemy: EnemyDef
 
 type Outcome =
     { /// What happened, in order (only of a run that was asked to keep it: `Sim.shown`).
@@ -3510,6 +3515,21 @@ module Sim =
               HitAt = -1e9
               Gone = false
               Leaves = infinity }
+        /// An enemy as it comes into the fight.
+        let fresh (d: EnemyDef) : EnemyState =
+            { Def = d
+              Life = d.Life
+              Debuffs =
+                fight.EnemyAuras
+                |> List.map (fun (name, stacks, mods) ->
+                    let k = if name.StartsWith "Curse:" then Mods.more Ctx.empty [ Named "CurseEffectOnSelf" ] (ModDb.ofList d.Mods) else 1.0
+                    name, { Name = name; Mods = mods |> List.map (Mod.scaled k); Stacks = stacks; Expires = infinity })
+                |> Map.ofList
+              Dots = []
+              Buildup = Map.empty
+              StunBuildupAt = 0.0
+              Flammability = []
+              Db = ModDb.ofList d.Mods }
         let w0 =
             { Player =
                 fight.Player.Vitals
@@ -3544,22 +3564,7 @@ module Sim =
                       CharmCharges = fight.Player.Charms |> List.map (fun c -> c.Buff, c.MaxCharges) |> Map.ofList })
               Time = 0.0
               Enemies =
-                fight.Enemies
-                |> List.map (fun d ->
-                    d.Name,
-                    { Def = d
-                      Life = d.Life
-                      Debuffs =
-                        fight.EnemyAuras
-                        |> List.map (fun (name, stacks, mods) ->
-                            let k = if name.StartsWith "Curse:" then Mods.more Ctx.empty [ Named "CurseEffectOnSelf" ] (ModDb.ofList d.Mods) else 1.0
-                            name, { Name = name; Mods = mods |> List.map (Mod.scaled k); Stacks = stacks; Expires = infinity })
-                        |> Map.ofList
-                      Dots = []
-                      Buildup = Map.empty
-                      StunBuildupAt = 0.0
-                      Flammability = []
-                      Db = ModDb.ofList d.Mods })
+                fight.Enemies |> List.map (fun d -> d.Name, fresh d)
                 |> Map.ofList
               Actors =
                 actors
@@ -3639,7 +3644,25 @@ module Sim =
             if died || allDead w || Map.isEmpty w.Queue || fst (Seq.head w.Queue).Key > fight.MaxTime then w
             elif n >= maxEvents then { w with Counts = bump "aborted: too many events" w.Counts }
             else
+                let before = w.Kills
                 let w = step env rng w
+                // those that just died are replaced: one of the same kind comes from where the
+                // first of them began, further out and somewhat to the side, and walks in
+                let w =
+                    if not fight.Replace || obj.ReferenceEquals(w.Kills, before) then w
+                    else
+                        let rec fallen (ks: (string * Rarity * float) list) =
+                            if obj.ReferenceEquals(ks, before) || ks.IsEmpty then [] else ks.Head :: fallen ks.Tail
+                        fallen w.Kills |> List.rev |> List.fold (fun (w: World) (name, _, _) ->
+                            let root = fight.Enemies |> List.tryFind (fun d -> d.Name = name.TrimEnd('+'))
+                            match root with
+                            | None -> w
+                            | Some d ->
+                                let at = Vec.scale (Vec.length d.Position * 1.25 + 10.0) (Vec.ofAngle (Vec.angle d.Position + (rng.Float() - 0.5) * 1.2))
+                                let d = { d with Name = name + "+"; Position = at }
+                                let w = { w with Enemies = Map.add d.Name (fresh d) w.Enemies; Shown = (if w.Tracing then Entered(w.Time, d) :: w.Shown else w.Shown) }
+                                if fight.Player.Vitals.IsNone && fight.Minions |> List.forall (fun m -> m.Body.IsNone) then w
+                                else match d.Attack with Some a -> schedule (w.Time + rng.Float() * a.Interval) (EnemyAttack d.Name) w | None -> w) w
                 // where the enemies are now, for showing: those that moved since last noted
                 let w =
                     if not w.Tracing then w
