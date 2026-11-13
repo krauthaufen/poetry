@@ -2131,7 +2131,7 @@ let frame (m : Model) (p : Passive) : Scene<Msg> =
 /// The fight's picture: a small field seen from above, the player in the middle.
 let arena (m : Model) : Node<Msg> =
     renderControl {
-        Dom.Style [ Css.Prop ("display", "block"); Css.Width "100%"; Css.Height "min(300px, 62vw)"; Css.Prop ("pointer-events", "none")
+        Dom.Style [ Css.Prop ("display", "block"); Css.Width "min(340px, 100%)"; Css.Height "min(170px, 44vw)"; Css.Prop ("pointer-events", "none")
                     Css.Prop ("visibility", (if m.Happened.IsEmpty then "hidden" else "visible")) ]
         RenderControl.Orthographic (m.Field, 1.0, 400.0)
         RenderControl.Camera { Sky = V3d (0.0, 1.0, 0.0); Location = V3d (m.Middle.X, m.Middle.Y, 200.0); Forward = V3d (0.0, 0.0, -1.0); Up = V3d (0.0, 1.0, 0.0); Right = V3d (1.0, 0.0, 0.0) }
