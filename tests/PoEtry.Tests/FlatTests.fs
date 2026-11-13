@@ -360,21 +360,23 @@ let randomFight (case: uint32) : Fight * string =
                     [ { Name = "Archon"; OnIgniteStat = "ArchonOnIgnite"; Duration = between 1.0 5.0; Recovery = between 0.5 4.0; Mods = [ Mod.more (Damage Elemental) 30.0 ] } ]
                  else [])
             Vitals = vitals
+            // (a meta gem's spell is a triggered one, which gives no energy: a skill that fed the
+            // gem that triggers it would go on for ever)
             Metas =
-                [ if chance 0.3 then
+                [ if not triggered.IsEmpty && chance 0.6 then
                     yield
-                        { Meta.simple "Cast on Crit" (between 100.0 300.0) (if triggered.IsEmpty then names.Head else "Echo") with
+                        { Meta.simple "Cast on Crit" (between 100.0 300.0) "Echo" with
                             Sources = [ for _ in 1 .. whole 0 3 -> pick [ CritHits(between 20.0 400.0); MeleeHits(between 20.0 200.0); MeleeKills(between 5.0 60.0); InflictsAilment(pick [ Ignite; Shock; Freeze; Chill; Poison ], between 50.0 800.0); CastsSpells(between 0.2 0.9); Blocks(between 20.0 60.0); DodgeRolls 1.0 ] ]
                             EnergyMult = between 0.8 1.6
                             EnergyMods = ModDb.ofList (if chance 0.4 then [ Mod.inc (Named "EnergyGenerated") (between 10.0 50.0) |> Mod.whenever (WhileBuff "CritRecently") ] else [])
                             RefundChance = (if chance 0.3 then between 10.0 60.0 else 0.0) }
-                  if chance 0.2 then
+                  if not triggered.IsEmpty && chance 0.4 then
                     let most = between 200.0 600.0
                     yield
-                        { Meta.simple "Invocation" most (if triggered.IsEmpty then names.Head else "Echo") with
+                        { Meta.simple "Invocation" most "Echo" with
                             Release = Invocation(between 0.5 4.0)
                             Cost = most / float (whole 1 4)
-                            Triggers = (if triggered.IsEmpty then [ names.Head ] else [ "Echo"; names.Head ])
+                            Triggers = [ "Echo"; "Echo" ]
                             Sources = [ CritHits(between 50.0 400.0); CastsSpells(between 0.3 0.9) ] } ]
             // (what the buffs do to the defences: more armour while buffed)
             VitalsAt = (if chance 0.3 then vitals |> Option.map (fun v -> fun (buffs: Map<string, int>) -> { v with Armour = v.Armour + 500.0 * float (Map.tryFind "Buffed" buffs |> Option.defaultValue 0); Block = (if buffs.ContainsKey "Tide" then min 75.0 (v.Block + 20.0) else v.Block) }) else None)
