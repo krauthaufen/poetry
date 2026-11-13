@@ -131,7 +131,7 @@ module Setup =
     /// The game's own character data gives a skill gem's level with what its supports add
     /// (a Mastery's level, Dialla's Desire): here a gem has its own level, and the supports'
     /// levels are added where the skill is built (so a support turned off takes its level along).
-    let private ownLevels (db: GameDb) (build: PobBuild) =
+    let ownLevels (db: GameDb) (build: PobBuild) =
         if not (Map.containsKey "levelsWithSupports" build.Config) then build
         else
             { build with
@@ -420,7 +420,7 @@ module Setup =
                           Extra = (doom |> Option.map fst |> Option.toList) @ (match tipped with Some (f, _, _) -> [ f ] | None -> []) @ empowered }
                 | _ -> None)
 
-    let private gemOf (p: Play) =
+    let gemOf (p: Play) =
         match p with
         | Spam g | OnCooldown g | KeepBuff g | KeepCurse g | WhileBelow (_, _, g) | When (_, g) -> [ g ]
         | Cycle gs -> gs

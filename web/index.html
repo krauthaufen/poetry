@@ -64,7 +64,7 @@
         const rs = f.results;
         const clears = rs.map((r) => r.clear && r.clear.mean).filter((x) => x != null);
         return {
-          gem: f.gem, scenario: rs[0].scenario, runs: rs.length, more: rs.length < f.total && !f.failed,
+          gem: f.gem, play: rs[0].play || [], scenario: rs[0].scenario, runs: rs.length, more: rs.length < f.total && !f.failed,
           replay: (rs.find((r) => r.replay) || {}).replay || null,
           killRate: mean(rs.map((r) => r.killRate)),
           clear: clears.length === rs.length ? stats(clears) : null,
@@ -105,7 +105,7 @@
           // and that question is forgotten (asked again, it starts anew)
           for (let i = jobs.length - 1; i >= 0; i--) {
             const other = jobs[i].fight;
-            if (!other || other === key) continue;
+            if (!other || other === key || other === "analyse") continue;
             jobs.splice(i, 1);
             const dropped = fights.get(other);
             if (dropped) { fights.delete(other); dropped.error = dropped.results.length ? "" : "dropped"; dropped.failed = true; settle(dropped); }
@@ -162,11 +162,52 @@
         return JSON.stringify({ runs: list[0][3], scenarios: out });
       };
 
+      // What each of a list of changes does to the damage, one after the other: the scenario
+      // fought a few times as it is and with each change alone, on the same seeds. "list":
+      // entries apart by a line "@@", each a key, the parameter that is another, and its value
+      // on lines of their own. Answered like a fight, with what is known so far:
+      // { done, total, more, results: [{ key, base, changed }] }
+      const analyses = new Map();
+      const told = (a) => {
+        if (!a.waiters.length || (a.results.length <= a.told && a.results.length < a.total)) return;
+        a.told = a.results.length;
+        const text = JSON.stringify({ done: a.results.length, total: a.total, more: a.results.length < a.total, results: a.results });
+        a.waiters.splice(0).forEach((done) => done(text));
+      };
+      const analyse = (key, request) => {
+        let a = analyses.get(key);
+        if (!a) {
+          for (let i = jobs.length - 1; i >= 0; i--) if (jobs[i].fight === "analyse") jobs.splice(i, 1)[0].done(JSON.stringify({ error: "dropped" }));
+          analyses.clear();
+          const { op, list, scenario, seeds, ...rest } = request;
+          const scene = scenes(1).find((s) => s[0] === scenario) || scenes(1)[0];
+          const entries = String(list || "").split("\n@@\n").filter((e) => e).map((e) => { const [k, param, ...v] = e.split("\n"); return { key: k, param, value: v.join("\n") }; });
+          a = { results: [], total: entries.length, told: -1, waiters: [] };
+          analyses.set(key, a);
+          const dps = (text) => { try { const r = JSON.parse(text); return r.error ? null : r.dps.mean; } catch { return null; } };
+          const several = (extra) => Promise.all(Array.from({ length: seeds || 5 }, (_, i) => ask({ ...rest, ...extra, op: "fight", scenario: scene[0], time: Math.min(scene[1], 14), runs: 1, seed: i + 1, ...(scene[2] ? { life: scene[2] } : {}) }, "analyse").then(dps)))
+            .then((xs) => (xs.some((x) => x == null) ? null : mean(xs)));
+          const base = several({});
+          entries.forEach((e) => several({ [e.param]: e.value }).then(async (changed) => { a.results.push({ key: e.key, base: await base, changed }); told(a); }));
+        }
+        return new Promise((done) => { a.waiters.push(done); told(a); });
+      };
+
       const builds = new Map();
       const plain = window.fetch.bind(window);
       const answer = (text, status = 200) => new Response(text, { status, headers: { "content-type": "application/json" } });
       window.fetch = async (input, init) => {
         const url = typeof input === "string" ? input : input.url;
+        // what the page keeps between visits, in this browser: "__store?op=put&key=..&value=.."
+        // and "__store?op=get&key=.." (answered { value }, "" if there is none)
+        const kept = url.indexOf("__store?");
+        if (kept >= 0) {
+          const q = new URLSearchParams(url.slice(kept + 8));
+          try {
+            if (q.get("op") === "put") { localStorage.setItem("poetry:" + q.get("key"), q.get("value") || ""); return answer(JSON.stringify({ ok: true })); }
+            return answer(JSON.stringify({ value: localStorage.getItem("poetry:" + q.get("key")) || "" }));
+          } catch (err) { return answer(JSON.stringify({ value: "", error: String(err) })); }
+        }
         const at = url.indexOf("__sim?");
         if (at < 0) return plain(input, init);
         // everything after "build=" is the character's url, whatever it contains
@@ -191,7 +232,9 @@
         // is no longer wanted; it must not push the fight that is wanted out of the line)
         if (request.op === "fight" && request.scenario === "") return answer(JSON.stringify({ error: "no scenario" }));
         if (request.op === "compare") return answer(await compare(request));
-        return answer(await (request.op === "fight" ? fight(key, request, all) : ask(request, "")));
+        if (request.op === "analyse") return answer(await analyse(key, request));
+        // (a question about the character goes before the fights that wait)
+        return answer(await (request.op === "fight" ? fight(key, request, all) : ask(request, "", true)));
       };
     })();
   </script>
@@ -459,6 +502,38 @@
     #app .paste .act, #app .item-tip .act { padding: 4px 10px; background: #1a1a1a; color: #e0e0e0; border: 1px solid #808080; cursor: pointer; font: inherit; font-size: 13px; }
     #app .item-tip .actions { gap: 6px; flex-wrap: wrap; }
     #app .item-tip .act.active { border-color: #fff; color: #fff; background: #2a2a2a; }
+    /* what an analysis found: how much of the damage a line, an item or a gem is worth */
+    #app .w3 { color: #ff9a3c !important; } #app .w2 { color: #e6c15a !important; } #app .w1 { color: #b9b08c !important; }
+    #app .w0 { color: #6d6d6d !important; } #app .wneg { color: #e0507a !important; }
+    #app .mod { display: flex; justify-content: space-between; gap: 12px; }
+    #app .mod > span:first-child { flex: 1 1 auto; }
+    #app .worth { flex: 0 0 auto; font-variant-numeric: tabular-nums; opacity: .95; }
+    #app .item.w3 { box-shadow: inset 0 0 0 2px #ff9a3c; } #app .item.w2 { box-shadow: inset 0 0 0 2px #e6c15a; } #app .item.w1 { box-shadow: inset 0 0 0 1px #b9b08c; }
+    #app .item.w0 { box-shadow: inset 0 0 0 1px #4a4a4a; } #app .item.wneg { box-shadow: inset 0 0 0 2px #e0507a; }
+    #app .gem .face .worth { margin-left: 8px; font-size: 12px; }
+    #app .gem.w3 .face, #app .gem.w2 .face, #app .gem.w1 .face, #app .gem.w0 .face, #app .gem.wneg .face { border-left: 3px solid currentColor; }
+    #app .analyse { flex: 1 1 100%; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+    #app .analyse .legend { display: flex; gap: 10px; font-size: 12px; }
+    #app .gem-acts { flex: 1 1 100%; }
+    #app .actions.steps { align-items: center; gap: 6px; } #app .actions.steps span { color: var(--dim); font-size: 12px; margin-right: 8px; }
+    #app button.act.more { margin: 4px 6px; font-size: 12px; opacity: .7; }
+    #app .picker { flex: 1 1 100%; background: linear-gradient(180deg, #221c18, var(--slab)); border: 1px solid var(--gem); border-radius: 3px; padding: 10px 12px; }
+    #app .picker-head { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+    #app .picker-head h3 { margin: 0; }
+    #app .offers { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 4px; max-height: 46vh; overflow: auto; }
+    #app .offer { display: flex; gap: 8px; align-items: baseline; text-align: left; background: #14110f; border: 1px solid var(--edge); border-left: 3px solid var(--dim); color: var(--ink); padding: 4px 8px; font: inherit; cursor: pointer; }
+    #app .offer:hover { border-color: var(--gold); }
+    #app .offer.c1 { border-left-color: #c44; } #app .offer.c2 { border-left-color: #4a4; } #app .offer.c3 { border-left-color: #58c; }
+    #app .offer.unfit { opacity: .45; }
+    #app .offer .name { flex: 1 1 auto; } #app .offer .tags { color: var(--dim); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 90px; }
+    #app .press { display: flex; gap: 8px; align-items: center; padding: 3px 0; }
+    #app .press img { width: 28px; height: 28px; }
+    #app .press .name { flex: 1 1 auto; color: var(--gem); } #app .press button.act.how { color: var(--dim); font-size: 12px; margin-right: 6px; }
+    #app .press button.act { padding: 1px 8px; }
+    #app .main.calcs .panel, #app .main.config .panel { flex: 1 1 320px; max-width: 520px; }
+    #app .main.calcs .line .what { color: var(--dim); }
+    #app .knob input { width: 110px; background: #0f0d0c; border: 1px solid var(--edge); color: var(--ink); padding: 2px 6px; font: inherit; }
+    #app .panel.custom textarea { width: 100%; box-sizing: border-box; }
     #app .main.defence { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; align-items: start; max-width: 1100px; }
     #app .main.defence .survival { display: flex; flex-direction: column; gap: 8px; }
     #app .line.runic-ward .what, #app .line.runic-ward .amount, #app .line.runic-ward-regenerated .amount { color: #d9a441; }

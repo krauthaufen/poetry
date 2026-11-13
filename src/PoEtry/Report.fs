@@ -222,7 +222,7 @@ module Report =
                           yield obj [ "slot", JStr g.Slot
                                       // (the group's number, as "without" names it)
                                       "index", num (float (i + 1))
-                                      "gems", JArr [ for x in g.Gems do
+                                      "gems", JArr [ for (at, x) in List.indexed g.Gems do
                                                        if x.Enabled then
                                                            // (a skill's level with what gear, passives and its supports add)
                                                            let level =
@@ -234,7 +234,7 @@ module Report =
                                                                    let on = List.tryItem i c.Build.Groups |> Option.map (fun h -> h.Gems |> List.filter (fun y -> y.Enabled && y.IsSupport) |> List.map (fun y -> y.Name, y.Level)) |> Option.defaultValue all
                                                                    let own = if levelsWithSupports then max 1 (x.Level - Gems.supportLevels c.Db (setup all)) else x.Level
                                                                    Gems.level c.Db sheetMods { setup on with Level = own }
-                                                           yield obj [ "name", JStr x.Name; "level", num (float level); "socketed", num (float x.Level); "quality", num (float x.Quality); "support", JBool x.IsSupport
+                                                           yield obj [ "name", JStr x.Name; "at", num (float at); "level", num (float level); "socketed", num (float x.Level); "quality", num (float x.Quality); "support", JBool x.IsSupport
                                                                        "icon", JStr((Map.tryFind x.Name icons |> Option.defaultValue "|").Split('|').[0])
                                                                        "gemIcon", JStr((Map.tryFind x.Name icons |> Option.defaultValue "|").Split('|').[1])
                                                                        // kept up by Spirit: a persistent buff, a meta gem, a minion
@@ -319,12 +319,44 @@ module Report =
         let scenario = s "scenario" "boss"
         let profile r =
             let p = Rarity.defaults r
-            if scenario = "pinnacle" && r = Unique then { p with ElementalResist = 50.0 } else p
+            let p = if scenario = "pinnacle" && r = Unique then { p with ElementalResist = 50.0 } else p
+            // (the enemies' resistances as asked for, whoever they are)
+            let p = match Json.numField "eres" request with Some v -> { p with ElementalResist = v } | None -> p
+            match Json.numField "cres" request with Some v -> { p with ChaosResist = v } | None -> p
         let gem =
             match s "gem" "" with
             | "" -> Setup.strongest c o (Encounter.boss level Rarity.defaults 30.0 |> List.map (fun e -> { e with Life = 1e12 })) |> Option.defaultValue ""
             | g -> g
-        let play = Setup.auto c o gem
+        // what is pressed: by skill type, or ("rotation", names apart by "|") these in this order,
+        // the first that is ready: each as its type says (a buff kept up, a curse kept on the
+        // target), otherwise whenever its cooldown is over; those at the end that have no
+        // cooldown are pressed in turn
+        // (an entry may say when itself, after an "@": "ready", "buff" (kept up), "curse" (kept
+        // on the enemy), "below:<resource>:<count>")
+        let chosen =
+            (s "rotation" "").Split('|') |> Array.map (fun x -> x.Trim()) |> Array.filter (fun x -> x <> "") |> List.ofArray
+            |> List.map (fun x -> match x.IndexOf '@' with | -1 -> x, "" | k -> x.Substring(0, k), x.Substring(k + 1))
+        let gem = match List.tryLast chosen with Some (g, _) -> g | None -> gem
+        let usual = Setup.auto c o gem
+        let steps : (Play * string) list =
+            match chosen with
+            | [] -> usual |> List.map (fun p -> p, "")
+            | _ ->
+                let special g = usual |> List.tryFind (fun p -> match p with | Spam _ | Cycle _ -> false | _ -> Setup.gemOf p = [ g ])
+                let said (g: string, code: string) =
+                    match code.Split(':') with
+                    | [| "ready" |] -> Some(OnCooldown g)
+                    | [| "buff" |] -> Some(KeepBuff g)
+                    | [| "curse" |] -> Some(KeepCurse g)
+                    | [| "below"; r; n |] -> Some(WhileBelow(r, (match System.Int32.TryParse n with | true, v -> v | _ -> 1), g))
+                    | _ -> None
+                let waits (g, code) = code <> "" || special g |> Option.isSome || (Setup.pressed c o g |> Option.exists (fun p -> (p.Skill.Cooldown |> Option.defaultValue 0.0) > 0.0))
+                let tail = chosen |> List.rev |> List.takeWhile (fun x -> not (waits x)) |> List.rev
+                let tail = if tail.IsEmpty then [ List.last chosen ] else tail
+                let before = chosen |> List.take (chosen.Length - tail.Length)
+                (before |> List.map (fun (g, code) -> (said (g, code) |> Option.orElse (special g) |> Option.defaultValue (OnCooldown g)), (if (said (g, code)).IsSome then code else "")))
+                @ [ (match tail with [ (one, _) ] -> Spam one | many -> Cycle(many |> List.map fst)), "" ]
+        let play = steps |> List.map fst
         let player = Setup.player c o play None
         // where the enemies begin: in a melee player's face; one who presses something else (or
         // lets minions fight) stands back twice as far (the distances are this page's choice)
@@ -344,6 +376,14 @@ module Report =
         let summary = outcomes |> Summary.ofOutcomes
         obj
             [ "gem", JStr gem
+              // what is pressed, first to last
+              "play", JArr(steps |> List.collect (fun (p, code) ->
+                  let how =
+                      match p with
+                      | Spam _ -> "always" | Cycle _ -> "in turn" | OnCooldown _ -> "when ready" | KeepBuff _ -> "kept up" | KeepCurse _ -> "kept on the enemy"
+                      | WhileBelow (r, n, _) -> (if n <= 1 then "when out of " else sprintf "while below %d " n) + r
+                      | When _ -> "when it fits"
+                  Setup.gemOf p |> List.map (fun g -> obj [ "gem", JStr g; "how", JStr how; "cond", JStr code ])))
               "scenario", JStr scenario
               "runs", num (float summary.Runs)
               "killRate", num summary.KillRate
@@ -359,6 +399,144 @@ module Report =
               "waitingForMana", num summary.Starved
               "replay", (if tracing then replay f outcomes.Head else JNull) ]
 
+    /// The build's gems changed, one change after the other (apart by ";", fields by "|";
+    /// groups count from 1 as "without" names them, a group's gems from 0):
+    ///   add|group|name|level|quality   del|group|gem   set|group|gem|level|quality
+    ///   swap|group|gem|name            new|name|level|quality (a group of its own)
+    let editGems (db: GameDb) (text: string) (b: PobBuild) : PobBuild =
+        let supports name = Map.tryFind name db.GemVariants |> Option.defaultValue [] |> List.exists (fun g -> g.Support)
+        let skills name = Map.tryFind name db.GemVariants |> Option.defaultValue [] |> List.exists (fun g -> not g.Support)
+        let n (x: string) = match System.Int32.TryParse(x.Trim()) with | true, v -> v | _ -> 0
+        let gem name level quality support = { Name = name; Level = max 1 level; Quality = quality; Enabled = true; IsSupport = support; StatSet = 1; Minion = None }
+        let inGroup (b: PobBuild) at f = { b with Groups = b.Groups |> List.mapi (fun i g -> if i + 1 = at then { g with Gems = f g.Gems } else g) }
+        text.Split(';') |> Array.fold (fun (b: PobBuild) (cmd: string) ->
+            match cmd.Split('|') |> List.ofArray with
+            | [ "add"; g; name; level; quality ] ->
+                inGroup b (n g) (fun gems ->
+                    if gems |> List.exists (fun x -> x.Name = name) then gems
+                    else gems @ [ gem name (n level) (n quality) (supports name && (not (skills name) || gems |> List.exists (fun x -> not x.IsSupport))) ])
+            | [ "del"; g; k ] -> inGroup b (n g) (fun gems -> gems |> List.indexed |> List.filter (fun (i, _) -> i <> n k) |> List.map snd)
+            | [ "set"; g; k; level; quality ] -> inGroup b (n g) (List.mapi (fun i x -> if i = n k then { x with Level = max 1 (n level); Quality = n quality } else x))
+            | [ "swap"; g; k; name ] -> inGroup b (n g) (List.mapi (fun i x -> if i = n k then { x with Name = name; Minion = None } else x))
+            | [ "new"; name; level; quality ] -> { b with Groups = b.Groups @ [ { Label = ""; Slot = ""; Enabled = true; Gems = [ gem name (n level) (n quality) false ] } ] }
+            | _ -> b) b
+
+    /// Lines taken out of items: "<the item's place>\n<the line>", several apart by a line "====".
+    /// The first line of the item that reads so goes (a line of a rune with it: it is one line).
+    let stripLines (text: string) (b: PobBuild) : PobBuild =
+        text.Replace("\r", "").Split([| "\n====\n" |], System.StringSplitOptions.None)
+        |> Array.fold (fun (b: PobBuild) (entry: string) ->
+            match entry.IndexOf '\n' with
+            | -1 -> b
+            | k ->
+                match System.Int32.TryParse(entry.Substring(0, k).Trim()) with
+                | true, at ->
+                    let line = entry.Substring(k + 1).Trim()
+                    { b with
+                        Items =
+                            b.Items |> List.mapi (fun i (slot, t: string) ->
+                                if i <> at then slot, t
+                                else
+                                    let lines = t.Split('\n') |> List.ofArray
+                                    match lines |> List.tryFindIndex (fun l -> l.Trim() = line) with
+                                    | Some j -> slot, (lines |> List.indexed |> List.filter (fun (x, _) -> x <> j) |> List.map snd |> String.concat "\n")
+                                    | None -> slot, t) }
+                | _ -> b) b
+
+    /// Every gem there is to socket: its name, colour, tags, what it says; and (`group`: the
+    /// gems it would go to) whether a support can support one of the group's skills.
+    let gems (db: GameDb) (group: PobGem list) : Json =
+        let types = group |> List.filter (fun x -> not x.IsSupport) |> List.choose (fun x -> Gems.data db x.Name) |> List.map (fun d -> d.Types)
+        JArr
+            [ for KeyValue (name, variants) in db.GemVariants do
+                for support in [ false; true ] do
+                    match variants |> List.tryFind (fun g -> g.Support = support) with
+                    | Some g ->
+                        match Map.tryFind g.GrantedEffectId db.Skills with
+                        | Some d when not d.Hidden ->
+                            yield obj [ "name", JStr name; "support", JBool support; "color", num (float d.Color)
+                                        "tags", strs (g.Tags |> Set.toList |> List.filter (fun t -> t <> "support"))
+                                        "says", JStr d.Description
+                                        "fits", JBool(not support || types |> List.exists (Gems.canSupport d)) ]
+                        | _ -> ()
+                    | None -> () ]
+
+    let private statName (s: Stat) : string =
+        let scope d = match d with | AllDamage -> "" | OfType t -> DamageType.name t + " " | Elemental -> "Elemental "
+        let ail a = sprintf "%A" a
+        let rec name s =
+            match s with
+            | Damage d -> scope d + "Damage"
+            | AddedMin t -> "Added minimum " + DamageType.name t + " Damage"
+            | AddedMax t -> "Added maximum " + DamageType.name t + " Damage"
+            | AddedDamageEffect -> "Effect of added Damage"
+            | SkillConvert (a, b) -> DamageType.name a + " converted to " + DamageType.name b + " (skill)"
+            | Convert (a, b) -> DamageType.name a + " converted to " + DamageType.name b
+            | GainAs (a, b) -> DamageType.name a + " gained as extra " + DamageType.name b
+            | LuckyDamage -> "Lucky Damage"
+            | CritChance -> "Critical Hit Chance"
+            | CritBonus -> "Critical Damage Bonus"
+            | Penetration t -> DamageType.name t + " Penetration"
+            | HitChance -> "Accuracy"
+            | DoubleDamageChance -> "Chance to deal double Damage"
+            | AreaOfEffect -> "Area of Effect"
+            | AdditionalProjectiles -> "Additional Projectiles"
+            | Pierce -> "Pierce"
+            | Chains -> "Chains"
+            | Speed -> "Skill Speed"
+            | CooldownRecovery -> "Cooldown Recovery"
+            | SkillDuration -> "Skill Duration"
+            | AilmentChance a -> "Chance to inflict " + ail a
+            | AilmentMagnitude a -> "Magnitude of " + (match a with Some a -> ail a | None -> "Ailments")
+            | AilmentDuration a -> "Duration of " + (match a with Some a -> ail a | None -> "Ailments")
+            | AilmentStacks a -> "Stacks of " + ail a
+            | Buildup a -> "Buildup of " + ail a
+            | Resist t -> DamageType.name t + " Resistance"
+            | MaxResist t -> "Maximum " + DamageType.name t + " Resistance"
+            | DamageTaken d -> scope d + "Damage taken"
+            | DotTaken -> "Damage over Time taken"
+            | Armour -> "Armour"
+            | PhysicalReduction -> "Physical Damage Reduction"
+            | AilmentThreshold -> "Ailment Threshold"
+            | PoiseThreshold -> "Stun Threshold"
+            | Attribute a -> (match a with "Str" -> "Strength" | "Dex" -> "Dexterity" | "Int" -> "Intelligence" | a -> a)
+            | MaxLife -> "Maximum Life"
+            | MaxMana -> "Maximum Mana"
+            | MaxEnergyShield -> "Maximum Energy Shield"
+            | Evasion -> "Evasion Rating"
+            | Deflection -> "Deflection Rating"
+            | LifeRegen -> "Life Regeneration"
+            | LifeRegenPercent -> "Life Regeneration (% of Life)"
+            | ManaRegen -> "Mana Regeneration Rate"
+            | ManaCostEfficiency -> "Mana Cost Efficiency"
+            | ManaCost -> "Mana Cost"
+            | ManaOnKill -> "Mana on Kill"
+            | ManaLeech -> "Mana Leech"
+            | ForMinions s -> "Minions: " + name s
+            | Named n -> n
+        name s
+
+    let rec private condName (c: Cond) : string =
+        match c with
+        | IsCrit -> "on a critical hit"
+        | SkillIs t -> (match t with | Tag n -> n | t -> sprintf "%A" t) + " skills"
+        | SkillNamed n -> n
+        | WhileBuff b -> "while " + b
+        | EnemyHas s -> "enemy has " + s
+        | PerStack (b, every) -> (if every = 1.0 then "per " else sprintf "per %g " every) + b
+        | PerEnemyStack (s, every) -> (if every = 1.0 then "per " else sprintf "per %g " every) + s + " on the enemy"
+        | Not c -> "not " + condName c
+
+    /// Where the character's numbers come from: every modifier of the character, grouped by
+    /// what it changes, each with its kind, value, conditions and source; and what the worn
+    /// items show of armour, evasion and energy shield.
+    let calcs (c: Loaded) : Json =
+        let kind k = match k with | Base -> "base" | Inc -> "increased" | More -> "more" | Flag -> "flag" | Override -> "is"
+        let line (m: Mod) = obj [ "kind", JStr(kind m.Kind); "value", num m.Value; "when", JStr(m.Conds |> List.map condName |> String.concat ", "); "source", JStr m.Source ]
+        let mods = c.Sheet.Mods |> List.groupBy (fun m -> statName m.Stat) |> List.map (fun (k, ms) -> k, ms |> List.map line)
+        let worn = c.Sheet.ItemDefences |> List.groupBy (fun (_, st, _) -> statName st + " on items") |> List.map (fun (k, xs) -> k, xs |> List.map (fun (slot, _, v) -> obj [ "kind", JStr "base"; "value", num v; "when", JStr ""; "source", JStr slot ]))
+        JArr((mods @ worn) |> List.sortBy fst |> List.map (fun (k, ls) -> obj [ "stat", JStr k; "mods", JArr ls ]))
+
 /// The simulator for a front end: the game data read once, the last character kept.
 /// Requests and answers are JSON text:
 ///   { "op": "character", "build": "<character JSON or PoB XML>", "passives": "id,id,..." }
@@ -372,21 +550,34 @@ type Session(read: string -> string) =
     let bases = lazy (Defence.classBases tree.Value)
     let mutable parsed: (string * PobBuild) option = None
     let mutable last: (string * Loaded) option = None
+    /// The build as its text says (gem levels without what supports add, see `Setup.ownLevels`).
+    let origin (build: string) : PobBuild =
+        match parsed with
+        | Some (text, b) when text = build -> b
+        | _ ->
+            let b = Setup.ownLevels db.Value (fst (Setup.parseBuild build))
+            parsed <- Some(build, b)
+            b
 
-    /// The character of a build text; `passives` ("" or ids separated by commas) replaces
-    /// the passives allocated in it.
-    member _.Load(build: string, passives: string, choices: string, lowLife: bool, start: string, without: string, unequip: string, equip: string) : Loaded =
-        let key = (if lowLife then "low|" else "") + start + "|" + without + "|" + unequip + "|" + equip + "|" + passives + "|" + choices + "|" + build
+    /// The character of a build text as the request changes it: "passives" ("" or ids apart
+    /// by commas) replaces the passives allocated in it, "choices" says what attribute
+    /// passives are, "without" turns gems off, "gems" changes them (see `Report.editGems`),
+    /// "unequip", "equip" and "strip" change what is worn, "custom" adds lines of modifiers.
+    member _.Load(build: string, j: Json) : Loaded =
+        // (a single number arrives as a number)
+        let s key =
+            match Json.field key j with
+            | Some (JStr s) -> s
+            | Some (JNum n) -> sprintf "%.0f" n
+            | _ -> ""
+        let passives, choices, start, without, unequip, equip = s "passives", s "choices", s "start", s "without", s "unequip", s "equip"
+        let gems, custom, strip = s "gems", s "custom", s "strip"
+        let lowLife = Json.numField "lowlife" j |> Option.exists (fun v -> v > 0.0)
+        let key = String.concat "|" [ (if lowLife then "low" else ""); start; without; unequip; equip; gems; custom; strip; passives; choices; build ]
         match last with
         | Some (k, c) when k = key -> c
         | _ ->
-            let b =
-                match parsed with
-                | Some (text, b) when text = build -> b
-                | _ ->
-                    let b, _ = Setup.parseBuild build
-                    parsed <- Some(build, b)
-                    b
+            let b = Report.editGems db.Value gems (origin build)
             let b =
                 if passives = "" then b
                 else
@@ -413,7 +604,10 @@ type Session(read: string -> string) =
                         match System.Int32.TryParse where with
                         | true, at -> { b with Items = b.Items |> List.mapi (fun i (slot, t) -> if i = at then slot, text else slot, t) }
                         | _ -> { b with Items = b.Items @ [ where, text ] }) b
+            let b = Report.stripLines strip b
             let b = if off.IsEmpty then b else { b with Items = b.Items |> List.indexed |> List.filter (fun (i, _) -> not (off.Contains i)) |> List.map snd }
+            let lines = custom.Replace("\r", "").Split('\n') |> Array.map (fun l -> l.Trim()) |> Array.filter (fun l -> l <> "") |> List.ofArray
+            let b = if lines.IsEmpty then b else { b with ExtraLines = b.ExtraLines @ lines }
             let c = Setup.loadParsed db.Value nodes.Value slots.Value bases.Value b { Options.defaults with LowLife = lowLife; Start = Report.starts start; Without = without.Split(',') |> Array.map (fun x -> x.Trim()) |> Array.filter (fun x -> x <> "") |> List.ofArray }
             last <- Some(key, c)
             c
@@ -427,31 +621,18 @@ type Session(read: string -> string) =
         try
             let j = Json.parse request
             let build = if text <> "" then text else Json.strField "build" j |> Option.defaultValue ""
-            // (a single id arrives as a number)
-            let passives =
-                match Json.field "passives" j with
-                | Some (JStr s) -> s
-                | Some (JNum n) -> sprintf "%.0f" n
-                | _ -> ""
-            let choices = Json.strField "choices" j |> Option.defaultValue ""
-            let low = Json.numField "lowlife" j |> Option.exists (fun v -> v > 0.0)
-            let start = Json.strField "start" j |> Option.defaultValue ""
-            // gems turned off: "Name" everywhere, "3:Name" in the third group only
-            let without = Json.strField "without" j |> Option.defaultValue ""
-            let unequip =
-                match Json.field "unequip" j with
-                | Some (JStr s) -> s
-                | Some (JNum n) -> sprintf "%.0f" n
-                | _ -> ""
-            let equip = Json.strField "equip" j |> Option.defaultValue ""
+            let edited () = Report.editGems db.Value (Json.strField "gems" j |> Option.defaultValue "") (origin build)
             match Json.strField "op" j with
             | Some "character" ->
-                let c = this.Load(build, passives, choices, low, start, without, unequip, equip)
-                let groups, withSupports = match parsed with Some (_, b) -> b.Groups, Map.containsKey "levelsWithSupports" b.Config | None -> c.Build.Groups, false
-                let sheet = Report.character slots.Value (Pob.itemPassives nodes.Value c.Build) groups withSupports (Report.gemIcons build) c
-                // (the items as the character was built: one taken off here is still listed)
-                Report.write (match sheet, parsed with | JObj m, Some (_, b) -> JObj(Map.add "items" (Report.items build b) m) | _ -> sheet)
-            | Some "fight" -> Report.write (Report.fight (this.Load(build, passives, choices, low, start, without, unequip, equip)) j)
+                let c = this.Load(build, j)
+                // (gems and items as the character was built: one turned or taken off here is still listed)
+                let sheet = Report.character slots.Value (Pob.itemPassives nodes.Value c.Build) (edited ()).Groups false (Report.gemIcons build) c
+                Report.write (match sheet with | JObj m -> JObj(Map.add "items" (Report.items build (origin build)) m) | _ -> sheet)
+            | Some "fight" -> Report.write (Report.fight (this.Load(build, j)) j)
+            | Some "calcs" -> Report.write (Report.calcs (this.Load(build, j)))
+            | Some "gems" ->
+                let at = Json.numField "group" j |> Option.map int |> Option.defaultValue 0
+                Report.write (Report.gems db.Value ((edited ()).Groups |> List.tryItem (at - 1) |> Option.map (fun g -> g.Gems) |> Option.defaultValue []))
             | other -> Report.write (JObj(Map.ofList [ "error", JStr(sprintf "unknown op %A" other) ]))
         with e ->
             Report.write (JObj(Map.ofList [ "error", JStr e.Message ]))
