@@ -103,8 +103,14 @@ module Report =
                                 "mods", JArr(mods "enchantMods" "enchant" @ mods "implicitMods" "implicit" @ mods "runeMods" "rune" @ mods "utilityMods" "utility" @ mods "explicitMods" "explicit" @ mods "mutatedMods" "mutated")
                                 "sockets", JArr(Json.list (Json.field "sockets" it) |> List.mapi (fun k _ ->
                                     match Json.list (Json.field "socketedItems" it) |> List.tryFind (fun s -> Json.numField "socket" s = Some(float k)) with
-                                    | Some s -> obj [ "name", JStr(Json.strField "typeLine" s |> Option.defaultValue ""); "icon", JStr(Json.strField "icon" s |> Option.defaultValue "") ]
-                                    | None -> obj [ "name", JStr ""; "icon", JStr "" ]))
+                                    | Some s ->
+                                        // (an augment says what it does in each kind of item)
+                                        let says key = Json.list (Json.field key s) |> List.choose (fun m -> match m with | JStr t -> Some t | _ -> Json.strField "description" m) |> List.collect (fun t -> (Api.stripMarkup t).Split('\n') |> List.ofArray) |> List.filter (fun l -> l <> "")
+                                        obj [ "name", JStr(Json.strField "typeLine" s |> Option.defaultValue ""); "icon", JStr(Json.strField "icon" s |> Option.defaultValue ""); "lines", strs (says "explicitMods" @ says "bondedMods") ]
+                                    | None -> obj [ "name", JStr ""; "icon", JStr ""; "lines", strs [] ]))
+                                // "Grants Skill: Level 17 ..." with the skill's picture
+                                "grants", JArr(Json.list (Json.field "grantedSkills" it) |> List.map (fun g ->
+                                    obj [ "text", JStr((Json.strField "name" g |> Option.defaultValue "" |> Api.stripMarkup) + ": " + (value g |> String.concat ", ")); "icon", JStr(Json.strField "icon" g |> Option.defaultValue "") ]))
                                 "corrupted", JBool(flag "corrupted") ]
                 | None ->
                     // rarity, name, base, then whatever the text says
@@ -113,7 +119,7 @@ module Report =
                     let name, bas, rest = match rest with | a :: c :: rest when rarity = "rare" || rarity = "unique" -> a, c, rest | a :: rest -> "", a, rest | [] -> "", "", []
                     yield obj [ "index", num (float i); "slot", JStr slot; "at", num 0.0; "name", JStr name; "base", JStr bas; "rarity", JStr rarity
                                 "icon", JStr ""; "w", num 1.0; "h", num 1.0; "props", strs []; "requires", JStr ""
-                                "mods", JArr(rest |> List.map (line "explicit")); "sockets", JArr []; "corrupted", JBool(rest |> List.contains "Corrupted") ] ]
+                                "mods", JArr(rest |> List.map (line "explicit")); "sockets", JArr []; "grants", JArr []; "corrupted", JBool(rest |> List.contains "Corrupted") ] ]
 
     /// (`groups`: the build's socket groups before any gem was turned off, `icons`: see `gemIcons`.)
     let character (slots: int list) (anointed: int list) (groups: PobGroup list) (levelsWithSupports: bool) (icons: Map<string, string>) (c: Loaded) : Json =

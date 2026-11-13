@@ -15,10 +15,11 @@ type GemGroup = { Slot : string; Gems : Gem list }
 /// An item of the inventory: where it is worn (`Place`: its number, as "unequip" names it;
 /// `Col`: which of several in one slot, the flasks and charms), what it says, its picture.
 type ItemLine = { Mark : string; Reads : string }
-type Socketed = { Rune : string; Pic : string }
+type Socketed = { Rune : string; Pic : string; Does : string list }
+type Granted = { Grant : string; Shows : string }
 type Item =
     { Place : int; Worn : string; Col : int; Headed : string; Type : string; Grade : string; Picture : string
-      Says : string list; Requires : string; Lines : ItemLine list; Holds : Socketed list; Spoiled : bool }
+      Says : string list; Requires : string; Lines : ItemLine list; Holds : Socketed list; Grants : Granted list; Spoiled : bool }
 type Share = { Name : string; Percent : float; Text : string; Part : bool }
 
 /// A passive as the tree draws it: where, how big, and its art in the sprite sheets (a
@@ -928,9 +929,12 @@ let private compareOf (m : Model) (deep : bool) : string =
 let private compareUrl (m : Model) : string = compareOf m false
 
 let private passiveAt (m : Model) (x : float) (y : float) : Passive option =
+    // (a little more than the passive itself, and never less than a fingertip on the page:
+    // of several that reach, the nearest is the one)
+    let least = 16.0 * m.Height / max 1.0 (size m).X
     let near (ps : Passive list) =
         ps
-        |> List.filter (fun q -> (q.X - x) * (q.X - x) + (q.Y + y) * (q.Y + y) <= q.Size * q.Size / 4.0)
+        |> List.filter (fun q -> let r = max (q.Size * 0.65) least in (q.X - x) * (q.X - x) + (q.Y + y) * (q.Y + y) <= r * r)
         |> List.sortBy (fun q -> (q.X - x) * (q.X - x) + (q.Y + y) * (q.Y + y))
         |> List.tryHead
     // (the ascendancy's lie over the tree's own there: they come first)
@@ -1060,7 +1064,8 @@ let rec private step (msg : Msg) (m : Model) : Model =
                             { Place = Json.int (Json.field "index" x); Worn = s "slot"; Col = Json.int (Json.field "at" x); Headed = s "name"; Type = s "base"; Grade = s "rarity"; Picture = s "icon"
                               Says = Json.field "props" x |> Json.list |> List.map Json.string; Requires = s "requires"
                               Lines = Json.field "mods" x |> Json.list |> List.map (fun l -> { Mark = Json.string (Json.field "kind" l); Reads = Json.string (Json.field "text" l) })
-                              Holds = Json.field "sockets" x |> Json.list |> List.map (fun l -> { Rune = Json.string (Json.field "name" l); Pic = Json.string (Json.field "icon" l) })
+                              Holds = Json.field "sockets" x |> Json.list |> List.map (fun l -> { Rune = Json.string (Json.field "name" l); Pic = Json.string (Json.field "icon" l); Does = Json.field "lines" l |> Json.list |> List.map Json.string })
+                              Grants = Json.field "grants" x |> Json.list |> List.map (fun l -> { Grant = Json.string (Json.field "text" l); Shows = Json.string (Json.field "icon" l) })
                               Spoiled = Json.bool (Json.field "corrupted" x) })
                     Groups =
                         Json.field "groups" j |> Json.list
@@ -1258,16 +1263,28 @@ let private item (m : Model) (i : Item) (where : string) : Node<Msg> =
             Dom.OnClick (fun _ -> Pin (if pinned then "" else key))
             if i.Picture <> "" then img { Dom.Attr ("src", i.Picture); Dom.Attr ("alt", "") }
             if i.Picture = "" then span { Dom.Class "name"; face }
-            if not i.Holds.IsEmpty then
-                span {
-                    Dom.Class "sockets"
-                    for h in i.Holds do
-                        span {
-                            Dom.Class "socket"
-                            if h.Pic <> "" then img { Dom.Attr ("src", h.Pic); Dom.Attr ("alt", "") }
-                        }
-                }
         }
+        // what is in its sockets, each with a tooltip of its own (under the mouse, or tapped)
+        if not i.Holds.IsEmpty then
+            div {
+                Dom.Class "sockets"
+                for h in i.Holds do
+                    span {
+                        Dom.Class "socket"
+                        Dom.Attr ("tabindex", "0")
+                        if h.Pic <> "" then img { Dom.Attr ("src", h.Pic); Dom.Attr ("alt", "") }
+                        if h.Rune <> "" then
+                            div {
+                                Dom.Class "item-tip aug-tip"
+                                div { Dom.Class "head"; h.Rune }
+                                div {
+                                    Dom.Class "body"
+                                    for l in h.Does do
+                                        div { Dom.Class "mod rune"; l }
+                                }
+                            }
+                    }
+            }
         div {
             Dom.Class "item-tip"
             div {
@@ -1280,6 +1297,12 @@ let private item (m : Model) (i : Item) (where : string) : Node<Msg> =
                 for p in i.Says do
                     div { Dom.Class "prop"; p }
                 if i.Requires <> "" then div { Dom.Class "prop"; needs }
+                for g in i.Grants do
+                    div {
+                        Dom.Class "mod grant"
+                        if g.Shows <> "" then img { Dom.Attr ("src", g.Shows); Dom.Attr ("alt", "") }
+                        span { g.Grant }
+                    }
                 for l in i.Lines do
                     div { Dom.Class ("mod " + l.Mark); l.Reads }
                 if i.Spoiled then div { Dom.Class "corrupted"; "Corrupted" }
