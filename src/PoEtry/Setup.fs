@@ -656,6 +656,7 @@ module Setup =
             Cycles = c.Cycles
             Vitals = (if o.Immortal then None else Some c.Vitals)
             VitalsAt = Some(fun current -> Defence.computeWith current c.Bases sheet)
+            VitalsReads = Some(Defence.reads sheet)
             Periodics = c.Periodics @ snd (Behaviours.summons db sheet c.Build pressedSkills) @ starPeriodics
             MaxResources = Map.fold (fun m k v -> Map.add k v m) c.MaxResources infusionMaxima
             ResourceDurations = Map.fold (fun m k v -> Map.add k v m) (Behaviours.chargeDurations sheet) (Behaviours.infusionDurations db sheet c.Build)

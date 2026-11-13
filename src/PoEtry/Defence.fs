@@ -63,6 +63,22 @@ module Defence =
             elif setTwo && slot.StartsWith "Weapon" then None
             else Some(slot, s, v))
 
+    /// The names `computeWith` looks up in its resources: the two it asks for by name, and
+    /// the buffs the sheet's mods have conditions on (the resources are the buffs of every
+    /// question it asks of them). For resources that differ in other names only it gives the same.
+    let reads (sheet: CharacterSheet) : Set<string> =
+        let rec names (c: Cond) =
+            match c with
+            | WhileBuff b | PerStack (b, _) -> [ b ]
+            | Not inner -> names inner
+            | _ -> []
+        sheet.Mods
+        |> List.collect (fun m -> m.Conds |> List.collect names)
+        |> Set.ofList
+        |> Set.add "WeaponSetTwo"
+        |> Set.add "LowLifeIntent"
+
+    // (what this reads of `resources` is said by `reads`: keep the two in step)
     let computeWith (resources: Map<string, int>) (bases: Map<string, float * float * float>) (sheet: CharacterSheet) : PlayerStats =
         let db = ModDb.ofList sheet.Mods
         // "while wielding a Quarterstaff" and similar read the main hand

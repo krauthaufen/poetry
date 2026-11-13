@@ -329,6 +329,10 @@ type Actor =
       /// Mitigation from the current buffs and charges (evasion, armour, deflection, resists
       /// can depend on them). None: use Vitals.
       VitalsAt: (Map<string, int> -> PlayerStats) option
+      /// The buffs VitalsAt looks at, where that is known: for buffs that differ in others
+      /// only it gives the same. (Nothing in this engine reads it; the fast one asks VitalsAt
+      /// once per set of these.)
+      VitalsReads: Set<string> option
       ManaFlask: ManaFlask option
       Periodics: Periodic list
       /// Maximum stacks per resource (charges, rage, motes).
@@ -369,6 +373,7 @@ module Actor =
           Cycles = []
           Vitals = None
           VitalsAt = None
+          VitalsReads = None
           ManaFlask = None
           Periodics = []
           MaxResources = Map.empty

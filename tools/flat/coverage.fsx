@@ -55,10 +55,13 @@ let report (title: string) (o: Options) =
     let compiled = results |> Array.filter (fun (r, _) -> r.IsEmpty)
     // a fight that compiles is played by both engines with a few seeds, the outcomes compared,
     // and both timed, one after the other, after a few fights to warm up (rough all the same)
+    // (numbers the same within 1e-9: the fast engine may add in another order; counts identical)
+    let near (x: float) (y: float) = x = y || abs (x - y) <= 1e-9 || abs (x - y) <= 1e-9 * max (abs x) (abs y)
+    let nearMap (a: Map<string, float>) (b: Map<string, float>) = a.Count = b.Count && a |> Map.forall (fun k v -> match Map.tryFind k b with Some w -> near v w | None -> false)
     let same (a: Outcome) (b: Outcome) =
-        a.Duration = b.Duration && a.Ttk = b.Ttk && a.Kills = b.Kills && a.DamageBy = b.DamageBy && a.DamageByType = b.DamageByType && a.Counts = b.Counts
-        && a.Uptime = b.Uptime && a.Died = b.Died && a.DamageTaken = b.DamageTaken && a.Evened = b.Evened && a.MinLife = b.MinLife
-        && a.ManaGained = b.ManaGained && a.ManaStarved = b.ManaStarved
+        near a.Duration b.Duration && a.Ttk.IsSome = b.Ttk.IsSome && a.Kills.Length = b.Kills.Length && nearMap a.DamageBy b.DamageBy && nearMap a.DamageByType b.DamageByType && a.Counts = b.Counts
+        && nearMap a.Uptime b.Uptime && a.Died.IsSome = b.Died.IsSome && near a.DamageTaken b.DamageTaken && near a.Evened b.Evened && near a.MinLife b.MinLife
+        && nearMap a.ManaGained b.ManaGained && near a.ManaStarved b.ManaStarved
     let seeds = [ 1u .. 40u ]
     let timed =
         compiled |> Array.choose snd |> Array.map (fun (fight, p) ->
@@ -71,15 +74,30 @@ let report (title: string) (o: Options) =
             sw.Restart()
             let b = seeds |> List.map (Flat.run p)
             let flatMs = sw.Elapsed.TotalMilliseconds / float seeds.Length
+            // and once more with both engines warm (the runtime compiles code better the more it has run)
+            for seed in 200u .. 500u do
+                Flat.run p seed |> ignore
+            sw.Restart()
+            for seed in 1u .. 100u do
+                Flat.run p seed |> ignore
+            let flatWarm = sw.Elapsed.TotalMilliseconds / 100.0
+            sw.Restart()
+            for seed in 1u .. 20u do
+                Sim.run fight seed |> ignore
+            let simWarm = sw.Elapsed.TotalMilliseconds / 20.0
             let events = ref 0
             Flat.traced (fun _ k _ _ _ -> if k <> "hit" && k <> "crit" then events.Value <- events.Value + 1) p 1u |> ignore
-            List.forall2 same a b, simMs, flatMs, events.Value)
-    printfn "\n== %s: %d characters with a fight, %d compile (%d of them the same as the reference with seeds 1 to 40)" title results.Length compiled.Length (timed |> Array.filter (fun (ok, _, _, _) -> ok) |> Array.length)
-    for (_, simMs, flatMs, events) in timed do
-        printfn "   a fight of %d events: reference %.2f ms, flat %.2f ms (%.1f times as fast)" events simMs flatMs (simMs / flatMs)
+            List.forall2 same a b, simMs, flatMs, events.Value, simWarm, flatWarm)
+    printfn "\n== %s: %d characters with a fight, %d compile (%d of them the same as the reference within 1e-9 with seeds 1 to 40)" title results.Length compiled.Length (timed |> Array.filter (fun (ok, _, _, _, _, _) -> ok) |> Array.length)
+    for (_, simMs, flatMs, events, simWarm, flatWarm) in timed do
+        printfn "   a fight of %d events: reference %.2f ms, flat %.3f ms (%.1f times as fast); warm: %.2f ms, %.3f ms (%.1f times)" events simMs flatMs (simMs / flatMs) simWarm flatWarm (simWarm / flatWarm)
     if timed.Length > 0 then
         let total f = timed |> Array.sumBy f
-        printfn "   all of them: reference %.2f ms a fight, flat %.2f ms a fight (%.1f times as fast; rough)" (total (fun (_, a, _, _) -> a) / float timed.Length) (total (fun (_, _, b, _) -> b) / float timed.Length) (total (fun (_, a, _, _) -> a) / total (fun (_, _, b, _) -> b))
+        let events = total (fun (_, _, _, n, _, _) -> float n)
+        let line (what: string) (a: float) (b: float) =
+            printfn "   all of them, %s: reference %.2f ms a fight (%.1f us an event), flat %.3f ms a fight (%.2f us an event): %.1f times as fast (rough)" what (a / float timed.Length) (a * 1000.0 / events) (b / float timed.Length) (b * 1000.0 / events) (a / b)
+        line "as before (40 fights after 4)" (total (fun (_, a, _, _, _, _) -> a)) (total (fun (_, _, b, _, _, _) -> b))
+        line "warm" (total (fun (_, _, _, _, a, _) -> a)) (total (fun (_, _, _, _, _, b) -> b))
     printfn "-- what stops the others (characters stopped by it; in brackets: by it alone)"
     results |> Array.collect (fun (r, _) -> Array.ofList r) |> Array.countBy id |> Array.sortByDescending snd
     |> Array.iter (fun (reason, n) ->
