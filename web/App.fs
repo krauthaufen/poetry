@@ -220,6 +220,14 @@ type Model =
       OpenedUv : Buffer<V2f>
       /// The radii of the jewels in allocated sockets, as a mesh.
       Rings : Buffer<V3f>
+      /// What pressing the button of the passive looked at would do: the ways and passives
+      /// it would take (`Gain`) or give back (`Loss`), and how many passives that is (negative:
+      /// given back).
+      Gain : Buffer<V3f>
+      GainUv : Buffer<V2f>
+      Loss : Buffer<V3f>
+      LossUv : Buffer<V2f>
+      Change : int
       /// What is searched in the tree, how many passives have it, and the rings around them.
       Sought : string
       Hits : int
@@ -265,7 +273,7 @@ let init : Model =
       Centre = V2d (0.0, 0.0); Height = 9000.0
       Camera = { Sky = V3d (0.0, 1.0, 0.0); Location = V3d (0.0, 0.0, 7794.2); Forward = V3d (0.0, 0.0, -1.0); Up = V3d (0.0, 1.0, 0.0); Right = V3d (1.0, 0.0, 0.0) }
       Near = 7000.0; Far = 8600.0
-      Touches = []; Travel = 0.0; Page = V2d (0.0, 0.0); Pending = None; Choices = Map.empty; JewelSprites = Map.empty; Jewels = Map.empty; Unlocks = Map.empty; Opened = Data.pack (Data.ofList ([] : V3f list)); OpenedUv = Data.pack (Data.ofList ([] : V2f list)); Sought = ""; Hits = 0; Found = Data.pack (Data.ofList ([] : V3f list)); FoundUv = Data.pack (Data.ofList ([] : V2f list)); Rings = Data.pack (Data.ofList ([] : V3f list)); RingsUv = Data.pack (Data.ofList ([] : V2f list)); Pressing = ""; Foes = []; Allies = []; Happened = []; Lasts = 0.0; Field = 100.0; Middle = V2d (0.0, 0.0); Began = -1.0; Stands = Map.empty; Clock = 0.0; Stage = []; Warm = []; Round = 0; Runs = 0; More = false; Selected = None; Hovered = None; Level = 0 }
+      Touches = []; Travel = 0.0; Page = V2d (0.0, 0.0); Pending = None; Choices = Map.empty; JewelSprites = Map.empty; Jewels = Map.empty; Unlocks = Map.empty; Opened = Data.pack (Data.ofList ([] : V3f list)); OpenedUv = Data.pack (Data.ofList ([] : V2f list)); Sought = ""; Hits = 0; Found = Data.pack (Data.ofList ([] : V3f list)); FoundUv = Data.pack (Data.ofList ([] : V2f list)); Gain = Data.pack (Data.ofList ([] : V3f list)); GainUv = Data.pack (Data.ofList ([] : V2f list)); Loss = Data.pack (Data.ofList ([] : V3f list)); LossUv = Data.pack (Data.ofList ([] : V2f list)); Change = 0; Rings = Data.pack (Data.ofList ([] : V3f list)); RingsUv = Data.pack (Data.ofList ([] : V2f list)); Pressing = ""; Foes = []; Allies = []; Happened = []; Lasts = 0.0; Field = 100.0; Middle = V2d (0.0, 0.0); Began = -1.0; Stands = Map.empty; Clock = 0.0; Stage = []; Warm = []; Round = 0; Runs = 0; More = false; Selected = None; Hovered = None; Level = 0 }
 
 /// The camera straight above the centre, so far up that `Height` of the tree is seen through
 /// its 60 degree lens; the depth range close around the tree's plane (its layers are a unit
@@ -821,6 +829,29 @@ let private toggle (id : int) (m : Model) : Model =
             let rec path (i : int) (acc : int list) = if i = id then i :: acc else path from.[i] (i :: acc)
             { m with Allocated = path reached [] |> List.fold (fun s n -> Set.add n s) m.Allocated; Edited = true }
 
+/// What pressing the button of the pinned passive (or the one under the mouse) would do, to
+/// be drawn over the tree: the passives it would take with the ways between them, or those it
+/// would give back (all that comes loose with it).
+let private plan (m : Model) : Model =
+    let none (m : Model) = if m.Change = 0 then m else { m with Change = 0; Gain = Data.pack (Data.ofList ([] : V3f list)); GainUv = noUv []; Loss = Data.pack (Data.ofList ([] : V3f list)); LossUv = noUv [] }
+    match (if m.Selected.IsSome then m.Selected else m.Hovered) with
+    | Some id when not (m.Anointed.Contains id) ->
+        let after = (toggle id m).Allocated
+        let added, dropped = Set.difference after m.Allocated, Set.difference m.Allocated after
+        if added.IsEmpty && dropped.IsEmpty then none m
+        else
+            let begun = List.ofArray m.Passives |> List.filter (fun p -> p.Kind = "ascstart" && p.Ascendancy = m.Ascendancy) |> List.map (fun p -> p.Id) |> Set.ofList
+            // the ways between passives of `whole` that touch one of `some`, and rings around those
+            let drawn (some : Set<int>) (whole : Set<int>) : V3f list =
+                let has (i : int) = whole.Contains i || begun.Contains i
+                let ways =
+                    List.ofArray m.Links
+                    |> List.filter (fun l -> (l.Of = "" || l.Of = m.Ascendancy) && has l.A && has l.B && (some.Contains l.A || some.Contains l.B))
+                    |> List.collect (fun l -> l.Ribbon)
+                ways @ (m.Shown |> List.filter (fun p -> some.Contains p.Id) |> List.collect (fun p -> circle (V2d (p.X, p.Y)) (p.Size * 0.66) 24.0 0.0))
+            let gain, loss = drawn added after, drawn dropped m.Allocated
+            { m with Change = added.Count - dropped.Count; Gain = Data.pack (Data.ofList gain); GainUv = noUv gain; Loss = Data.pack (Data.ofList loss); LossUv = noUv loss }
+    | _ -> none m
 
 /// 1234567 as "1.23M", 45678 as "45.7k".
 let private short (v : float) =
@@ -1095,7 +1126,10 @@ let update (msg : Msg) (m : Model) : Model =
         && n.Allocated = m.Allocated && n.Choices = m.Choices && n.Anointed = m.Anointed
         && n.Start = m.Start && n.Switches = m.Switches && n.Dropped = m.Dropped
         && n.Passives.Length = m.Passives.Length && n.Tab = m.Tab && n.Pinned = m.Pinned
-    if same then n else { n with Ask = compareOf n false; AskMore = compareOf n true }
+    let n = if same then n else { n with Ask = compareOf n false; AskMore = compareOf n true }
+    // (what the passive looked at would take or give back, drawn on the tree)
+    if n.Selected = m.Selected && n.Hovered = m.Hovered && n.Allocated = m.Allocated && n.Passives.Length = m.Passives.Length && n.Ascendancy = m.Ascendancy then n
+    else plan n
 
 let private panel (title : string) (rows : Row list) : Node<Msg> =
     section {
@@ -1435,6 +1469,17 @@ let tree (m : Model) : Node<Msg> =
                     Sg.Translate (0.0, 0.0, 0.7)
                     mesh Topology.Triangles { Mesh.Attribute ("Positions", m.Path); Mesh.Attribute ("DiffuseColorCoordinates", m.PathUv) }
                 }
+                // what the passive looked at would take (green) or give back (red)
+                sg {
+                    Sg.Uniform ("Color", V4d (0.2, 1.0, 0.47, 1.0))
+                    Sg.Translate (0.0, 0.0, 0.8)
+                    mesh Topology.Triangles { Mesh.Attribute ("Positions", m.Gain); Mesh.Attribute ("DiffuseColorCoordinates", m.GainUv) }
+                }
+                sg {
+                    Sg.Uniform ("Color", V4d (0.95, 0.1, 0.15, 1.0))
+                    Sg.Translate (0.0, 0.0, 0.8)
+                    mesh Topology.Triangles { Mesh.Attribute ("Positions", m.Loss); Mesh.Attribute ("DiffuseColorCoordinates", m.LossUv) }
+                }
                 if m.Art <> "" then
                     sg {
                         Sg.Uniform ("Color", V4d (0.227, 0.227, 0.306, 1.0))
@@ -1515,6 +1560,14 @@ let private tooltip (m : Model) : Node<Msg> =
         let y = top + s.Y / 2.0 + (q.Y + m.Centre.Y) / u + q.Size / u / 2.0 + 6.0
         let wide = min 380.0 (m.Page.X - 24.0)
         let state = if m.Anointed.Contains p.Id then "Allocated by an item" elif has then "Allocated" else "Unallocated"
+        // how many passives the button takes or gives back, this one with them
+        let cost =
+            if m.Change > 1 then sprintf "takes %d passives (%d on the way)" m.Change (m.Change - 1)
+            elif m.Change = 1 then "takes 1 passive"
+            elif m.Change < -1 then sprintf "frees %d passives (%d that hang on it)" (-m.Change) (-m.Change - 1)
+            elif m.Change = -1 then "frees 1 passive"
+            else ""
+        let costs = if m.Change > 0 then "cost up" else "cost down"
         // (a chosen attribute grants that one)
         let stats = match Map.tryFind p.Id m.Choices with Some c when has -> p.Stats |> List.map (fun s -> s.Replace ("any Attribute", c)) | _ -> p.Stats
         let j = Map.tryFind p.Id m.Jewels
@@ -1542,6 +1595,7 @@ let private tooltip (m : Model) : Node<Msg> =
                     for l in jewel do
                         div { Dom.Class (if l = "Corrupted" then "corrupted" else "mod"); l }
                 }
+            if cost <> "" then div { Dom.Class costs; Dom.Attr ("data-check", "cost"); cost }
             if not p.Options.IsEmpty && pinned then
                 div {
                     Dom.Class "select"
@@ -1582,6 +1636,9 @@ let private status (m : Model) =
     else m.Status
 
 let view (m : Model) : Node<Msg> =
+    // (the game's data names an ascendancy it has no word for as "Mercenary3": the one the
+    // character's passives belong to is the one)
+    let named = if m.Title = "" then "" else sprintf "Level %d %s" m.Level (if m.Ascendancy <> "" then m.Ascendancy else m.Class)
     body {
         Dom.OnLocation Located
         // The tree comes first among the page's children, and the conditional ones after it
@@ -1605,7 +1662,8 @@ let view (m : Model) : Node<Msg> =
         }
         header {
             h1 { "PoEtry" }
-            div { Dom.Class "title"; Dom.Attr ("data-check", "title"); m.Title }
+            if m.Art <> "" then img { Dom.Class "crest"; Dom.Attr ("src", m.Art); Dom.Attr ("alt", "") }
+            div { Dom.Class "title"; Dom.Attr ("data-check", "title"); named }
             nav {
                 tab m "character" "Character"
                 tab m "items" "Items"
