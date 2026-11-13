@@ -628,7 +628,11 @@ module Sim =
           Boned: Set<string>
           /// Pustules on enemies: owner, part, enemy, the Poison damage dealt when it was attached,
           /// Poison per 1% more damage, the most (%), when it bursts at the latest.
-          Pustules: (string * string * string * float * float * float * float) list }
+          Pustules: (string * string * string * float * float * float * float) list
+          /// The enemy that is the cause of what happens now (the one just hit, the one whose hit
+          /// was blocked; "": none), and the enemy a triggered skill is aimed at while it starts.
+          Cause: string
+          Aim: string }
 
     /// Fixed for the whole fight: mod dbs built once, buffs layered on per event.
     type private Env =
@@ -777,8 +781,14 @@ module Sim =
             db
 
     let private aimed (env: Env) (w: World) =
-        Geometry.aim env.Fight.Targeting (alive w |> List.map (fun e -> e.Def))
-        |> Option.map (fun d -> w.Enemies.[d.Name])
+        // (a triggered skill "usually targets the cause of the trigger", wiki: Trigger)
+        match (if w.Aim = "" then None else Map.tryFind w.Aim w.Enemies) with
+        | Some e when e.Life > 0.0 -> Some e
+        // (the cause died of the hit: the skill lands where it was, on whoever is nearest to there)
+        | Some e when not (allDead w) -> alive w |> List.minBy (fun x -> Vec.dist x.Def.Position e.Def.Position) |> Some
+        | _ ->
+            Geometry.aim env.Fight.Targeting (alive w |> List.map (fun e -> e.Def))
+            |> Option.map (fun d -> w.Enemies.[d.Name])
 
     let private view env (w: World) (st: ActorState) =
         let target = aimed env w
@@ -1823,10 +1833,11 @@ module Sim =
         let skill = skillOf actor name
         let st = Map.find actor.Name w.Actors
         if ready st w.Time skill then
-            { w with Counts = bump ("trigger:" + name) w.Counts }
+            { w with Counts = bump ("trigger:" + name) w.Counts; Aim = w.Cause }
             |> updateActor actor.Name (fun st -> { st with Buffs = Map.add "TriggeredRecently" { Name = "TriggeredRecently"; Mods = []; Stacks = 1; Expires = w.Time + 4.0 } st.Buffs })
             |> schedule (w.Time + 4.0) Expire
             |> startUse env rng actor skill 0.0
+            |> fun w -> { w with Aim = "" }
         else
             w
 
@@ -2540,7 +2551,8 @@ module Sim =
                                         | MeleeKills per when dead && skill.Tags.Contains Melee -> per * power
                                         | InflictsAilment (a, per) when newly a -> per * power * ratio (Ailments.scalesFromWith ctx mods a)
                                         | _ -> 0.0)
-                                if amount > 0.0 then gainEnergy env rng actor meta.Name (amount * meta.EnergyMult) w else w)
+                                // (what this fills up and triggers is aimed at the enemy that was hit)
+                                if amount > 0.0 then { gainEnergy env rng actor meta.Name (amount * meta.EnergyMult) { w with Cause = target } with Cause = w.Cause } else w)
                             w
                 // infusion remnants (Siphon Elements): each freeze / shock / ignite inflicted
                 let w =
@@ -3079,7 +3091,8 @@ module Sim =
                             |> List.fold
                                 (fun w meta ->
                                     let amount = meta.Sources |> List.sumBy (function Blocks e -> e | _ -> 0.0)
-                                    if amount > 0.0 then gainEnergy env rng player meta.Name (amount * meta.EnergyMult) w else w)
+                                    // (what a block triggers is aimed at the enemy whose hit was blocked)
+                                    if amount > 0.0 then { gainEnergy env rng player meta.Name (amount * meta.EnergyMult) { w with Cause = name } with Cause = w.Cause } else w)
                                 w
                         match player.Skills |> List.tryHead with
                         | Some anySkill -> react env rng player OnBlock anySkill (Some name) w
@@ -3631,7 +3644,9 @@ module Sim =
               Entropy = Map.empty
               Revival = None
               Boned = Set.empty
-              Pustules = [] }
+              Pustules = []
+              Cause = ""
+              Aim = "" }
             // (a temporary minion starts acting when it is summoned)
             |> fun w -> actors |> List.fold (fun w a -> if a.Pool.IsSome then w else schedule 0.0 (Ready a.Name) w) w
             |> fun w -> actors |> List.fold (fun w a -> a.Cycles |> List.fold (fun w c -> schedule 0.0 (CycleTick(a.Name, c.Name)) w) w) w

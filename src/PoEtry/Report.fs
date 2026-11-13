@@ -226,6 +226,11 @@ module Report =
         let start = starts (s "start" "")
         let o = { Options.defaults with MaxTime = n "time" 30.0; Start = start; Infused = on "infused"; NoFlask = on "noflask"; Immortal = on "immortal"; CastOnSelf = on "self"; LowLife = on "lowlife" }
         // a pack does not end: who dies is replaced (unless the enemies are made unkillable)
+        // who the player aims at ("target"): the strongest, or the nearest; in a pack that
+        // never ends the nearest, unless said (a rare far out is not what one aims at while
+        // others are upon one)
+        let packs = s "scenario" "boss" = "pack" || s "scenario" "boss" = "surrounded"
+        let o = { o with Targeting = (match s "target" (if packs then "nearest" else "strongest") with "nearest" -> Nearest | _ -> Strongest) }
         let o = { o with Replace = (s "scenario" "boss" = "pack" || s "scenario" "boss" = "surrounded") && n "life" 0.0 <= 0.0 }
         let scenario = s "scenario" "boss"
         let profile r =

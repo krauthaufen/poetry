@@ -338,6 +338,41 @@
     #app .share.part { margin: 1px 0 1px 18px; padding: 1px 8px; font-size: 12px; border-color: transparent; background: none; }
     #app .share.part .bar { background: rgba(175,96,37,.3); }
     #app .share.part .name, #app .share.part .pct { color: var(--dim, #9a8f80); }
+      /* ---- as Path of Building looks: flat black, thin grey frames, every number in its stat's colour ---- */
+    #app > div { background: #080808; }
+    #app header { background: #0f0f0f; border-bottom: 1px solid #555; }
+    #app h1 { color: #af6025; text-shadow: none; letter-spacing: 2px; font-variant: normal; }
+    #app .panel, #app .group { background: #000; border: 1px solid #666; border-radius: 0; box-shadow: none; }
+    #app h3 { color: #fff; letter-spacing: 1px; text-transform: none; font-size: 16px; border-bottom: 1px solid #444; padding-bottom: 4px; margin: 0 0 6px; }
+    #app .line { padding: 0; line-height: 1.35; font-size: 15px; }
+    #app .line .what { color: #c8c8c8; }
+    #app .line .what::after { content: ":"; }
+    #app .line .amount { color: #fff; }
+    #app .line.life .what, #app .line.life .amount { color: #e05030; }
+    #app .line.mana .what, #app .line.mana .amount { color: #7070ff; }
+    #app .line.energy-shield .what, #app .line.energy-shield .amount { color: #88ffff; }
+    #app .line.spirit .what, #app .line.spirit .amount { color: #5fb8b0; }
+    #app .line.evasion .what, #app .line.evasion .amount, #app .line.deflection .what, #app .line.deflection .amount { color: #33ff77; }
+    #app .line.fire .what, #app .line.fire .amount { color: #b97123; }
+    #app .line.cold .what, #app .line.cold .amount { color: #3f6db3; }
+    #app .line.lightning .what, #app .line.lightning .amount { color: #adaa47; }
+    #app .line.chaos .what, #app .line.chaos .amount { color: #d02090; }
+    #app .line.dps .what, #app .line.dps .amount { color: #fff; font-size: 17px; }
+    #app button.tab, #app .knob button, #app .gem-tip .act, #app .seek { background: #1a1a1a; color: #e0e0e0; border: 1px solid #808080; border-radius: 0; letter-spacing: 0; }
+    #app button.tab:hover, #app .knob button:hover, #app .gem-tip .act:hover { background: #2a2a2a; border-color: #fff; color: #fff; }
+    #app button.tab.active { background: #3a3a3a; color: #fff; border-color: #fff; }
+    #app .title { color: #fff; }
+    #app .headline { color: #fff; }
+    #app .status { color: #888; }
+    #app .pressing { color: #1ba29b; }
+    #app .share { border: 1px solid #333; background: #0c0c0c; }
+    #app .share .name, #app .share .pct { color: #fff; }
+    #app .knob .what { color: #c8c8c8; }
+    #app .knob button.value { color: #888; }
+    #app .knob.said button.value { color: #33ff77; }
+    #app .gem .face:hover { background: #1a1a1a; }
+    #app .passive-tip .delta.up .by, #app .up { color: #33ff77; }
+    #app .passive-tip .delta.down .by, #app .down { color: #dd0022; }
   </style>
 </head>
 <body>

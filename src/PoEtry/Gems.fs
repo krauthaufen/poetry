@@ -1014,7 +1014,17 @@ module Gems =
     let ctxOf (db: GameDb) (gem: string) : Ctx =
         let tags =
             match skillOfGem db gem with
-            | Some data -> (data.Types |> Set.toList |> List.choose tagOfType) @ (data.Types |> Set.toList |> List.map (fun t -> Tag("Type:" + t))) @ [ Tag("Gem:" + data.Name) ]
+            | Some data ->
+                // ("Skills with an Intelligence requirement": by the gem's attribute requirements)
+                let required =
+                    match Map.tryFind gem db.Gems with
+                    | Some g ->
+                        let s, d, i = g.Requirements
+                        [ if s > 0.0 then Tag "StrRequirement"
+                          if d > 0.0 then Tag "DexRequirement"
+                          if i > 0.0 then Tag "IntRequirement" ]
+                    | None -> []
+                (data.Types |> Set.toList |> List.choose tagOfType) @ (data.Types |> Set.toList |> List.map (fun t -> Tag("Type:" + t))) @ [ Tag("Gem:" + data.Name) ] @ required
             | None -> []
         { Ctx.empty with SkillName = gem; SkillTags = Set.ofList tags }
 
@@ -1037,8 +1047,7 @@ module Gems =
             match List.tryItem (setup.StatSet - 1) data.StatSets with
             | None -> []
             | Some set ->
-                let tags = (data.Types |> Set.toList |> List.choose tagOfType) @ (data.Types |> Set.toList |> List.map (fun t -> Tag("Type:" + t))) @ [ Tag("Gem:" + data.Name) ] |> Set.ofList
-                let ctx = { Ctx.empty with SkillName = data.Name; SkillTags = tags }
+                let ctx = ctxOf db setup.Gem
                 let maxLevel = data.Levels |> Map.toList |> List.map fst |> List.fold max 1
                 let level = min maxLevel (setup.Level + int (Mods.sumBase ctx [ Named "GemLevel" ] characterMods) + supportLevels db setup)
                 let quality = setup.Quality + int (Mods.sumBase ctx [ Named "GemQuality" ] characterMods)
