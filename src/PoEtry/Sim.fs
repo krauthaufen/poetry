@@ -679,11 +679,17 @@ module Sim =
         Map.add key ((Map.tryFind key m |> Option.defaultValue 0.0) + v) m
 
     /// The seed of the n-th draw of a stream of its own, named by `key`, in a fight of this seed.
-    let streamSeed (seed: uint32) (key: string) (n: int) : uint32 =
+    let streamHash (key: string) : uint32 =
         let mutable h = 5381u
         for ch in key do
             h <- (((h <<< 5) &&& 0xFFFFFFFFu) + h + uint32 ch) &&& 0xFFFFFFFFu
+        h
+
+    /// `streamSeed` with the stream's name already hashed (`streamHash`).
+    let streamSeedOf (seed: uint32) (h: uint32) (n: int) : uint32 =
         ((seed ^^^ h) + uint32 (n % 65536) * 40503u + 1u) &&& 0xFFFFFFFFu
+
+    let streamSeed (seed: uint32) (key: string) (n: int) : uint32 = streamSeedOf seed (streamHash key) n
 
     let private schedule t ev (w: World) =
         { w with
