@@ -134,6 +134,12 @@ type Msg =
     | Among of string
     /// What was changed here is kept in the browser (by character) and comes back on the next visit.
     | Saved of Fetched
+    /// The game account (where the page is hosted for it): who is logged in and their
+    /// characters arrive; logging in and out; another character is opened.
+    | Account of Fetched
+    | Login
+    | Logout
+    | Open of string
     | Restore of Fetched
     | Note of string
     /// The inventory: the box to paste an item into opens or closes, what is typed there, the
@@ -240,6 +246,13 @@ type Model =
       Calcs : (string * Row list) list
       /// What is kept between visits as text, whether what was kept has been read, and notes
       /// (as typed, and as they were when read: what the box shows to begin with).
+      /// The game account: whether one can log in here, who is logged in (""), their
+      /// characters (name, what they are, the url of each), and where the page is going
+      /// ("login", "logout", "open&name=..": asked of the bridge, which goes there).
+      CanLogin : bool
+      Player : string
+      Characters : (string * string * string) list
+      Going : string
       Kept : string
       Restored : bool
       Notes : string
@@ -368,7 +381,7 @@ type Model =
 let init : Model =
     { Build = ""; Scenario = "boss"; Status = "locating"; Title = ""; Class = ""; Ascendancy = ""; Tab = "character"
       Pools = []; Guards = []; Survival = []; Defences = []; Resistances = []; Minions = []
-      NotUnderstood = 0; Fighting = false; Gem = ""; Dps = []; Shares = []; Groups = []; Items = []; Bag = []; Swapped = Map.empty; Wearing = []; Equip = ""; Aim = ""; Pasting = false; Draft = ""; Dropped = Set.empty; GemEdits = []; Picker = ""; Offers = []; Wanted = ""; Offered = []; Probe = ""; ProbeRound = 0; Probing = false; Probed = ""; Worth = []; Play = []; Rotation = []; Pressable = []; EnemyLevel = ""; EnemyEle = ""; EnemyChaos = ""; CustomDraft = ""; Custom = ""; Calcs = []; Kept = ""; Restored = false; Notes = ""; NotesWere = ""; NodeWorth = Map.empty; Among = ""; CalcShown = []; Pinned = ""; Deltas = []; DeltaOf = ""; Ask = ""; AskMore = ""; Anointed = Set.empty; Types = []; Counts = []; Start = Map.empty; Switches = Set.empty
+      NotUnderstood = 0; Fighting = false; Gem = ""; Dps = []; Shares = []; Groups = []; Items = []; Bag = []; Swapped = Map.empty; Wearing = []; Equip = ""; Aim = ""; Pasting = false; Draft = ""; Dropped = Set.empty; GemEdits = []; Picker = ""; Offers = []; Wanted = ""; Offered = []; Probe = ""; ProbeRound = 0; Probing = false; Probed = ""; Worth = []; Play = []; Rotation = []; Pressable = []; EnemyLevel = ""; EnemyEle = ""; EnemyChaos = ""; CustomDraft = ""; Custom = ""; Calcs = []; CanLogin = false; Player = ""; Characters = []; Going = ""; Kept = ""; Restored = false; Notes = ""; NotesWere = ""; NodeWorth = Map.empty; Among = ""; CalcShown = []; Pinned = ""; Deltas = []; DeltaOf = ""; Ask = ""; AskMore = ""; Anointed = Set.empty; Types = []; Counts = []; Start = Map.empty; Switches = Set.empty
       Passives = [||]; Ascendancies = []; Shown = []; AscendancyWeb = Data.pack (Data.ofList ([] : V3f list)); Path = Data.pack (Data.ofList ([] : V3f list))
       Loaded = false; Capacity = 0
       WebUv = Data.pack (Data.ofList ([] : V2f list)); AscendancyWebUv = Data.pack (Data.ofList ([] : V2f list)); PathUv = Data.pack (Data.ofList ([] : V2f list)); Art = ""; Links = [||]; Neighbours = Map.empty; Web = Data.pack (Data.ofList ([] : V3f list)); Allocated = Set.empty; Edited = false
@@ -1461,6 +1474,22 @@ let rec private step (msg : Msg) (m : Model) : Model =
          | _ -> m)
     | Among text -> among { m with Among = text }
     | Saved _ -> m
+    | Account r ->
+        (match r.Status, Native.parseJson r.Text with
+         | 200, Ok j ->
+            let failed = Json.string (Json.field "error" j)
+            { m with
+                CanLogin = Json.bool (Json.field "can" j); Player = Json.string (Json.field "name" j)
+                // (the one that is open first: a list shows its first)
+                Characters =
+                    Json.field "characters" j |> Json.list
+                    |> List.map (fun c -> Json.string (Json.field "name" c), Json.string (Json.field "name" c) + ": " + Json.string (Json.field "about" c), Json.string (Json.field "url" c))
+                    |> List.sortBy (fun (_, _, url) -> if url = m.Build then 0 else 1)
+                Status = (if failed <> "" then failed elif m.Build = "" && Json.bool (Json.field "can" j) then (if Json.string (Json.field "name" j) = "" then "log in to see your characters" else "choose a character") else m.Status) }
+         | _ -> m)
+    | Login -> { m with Going = "login" }
+    | Logout -> { m with Going = "logout" }
+    | Open name -> if name = "" then m else { m with Going = "open&name=" + esc name }
     | Note text -> { m with Notes = text }
     | Restore _ when m.Restored -> m
     | Restore r ->
@@ -2356,8 +2385,10 @@ let view (m : Model) : Node<Msg> =
     // element that holds it is taken away)
     let headline = match m.Dps with | d :: _ -> d.Value + " DPS" | [] -> ""
     let undo = "Undo (" + string m.GemEdits.Length + ")"
+    let here = m.Characters |> List.exists (fun (_, _, url) -> url = m.Build)
     let analysing = if m.Probing then "Analysing " + m.Probed else "Analyse"
     let named = if m.Title = "" then "" else sprintf "Level %d %s" m.Level (if m.Ascendancy <> "" then m.Ascendancy else m.Class)
+    let chosen' = if named = "" then "choose a character" else named
     body {
         Dom.OnLocation Located
         // The tree comes first among the page's children, and the conditional ones after it
@@ -2374,12 +2405,14 @@ let view (m : Model) : Node<Msg> =
             if (m.Tab = "tree" || m.Tab = "items") && m.Ask <> "" then span { Dom.Fetch (m.Ask, Compared) }
             if m.Probing then span { Dom.Fetch (probeUrl m, Analysed) }
             if m.Build <> "" then span { Dom.Fetch (restoreUrl m, Restore) }
+            if m.Going <> "" then span { Dom.Fetch ("__poe?op=" + m.Going, Saved) }
             if m.Restored && m.Kept <> "" then span { Dom.Fetch (saveUrl m, Saved) }
             if m.Picker <> "" then span { Dom.Fetch (pickUrl m, Picked) }
             if m.Tab = "calcs" && m.Title <> "" then span { Dom.Fetch (calcsUrl m, Sources) }
             if (m.Tab = "tree" || m.Tab = "items") && m.Ask <> "" && (m.DeltaOf = m.Ask || m.DeltaOf = m.AskMore) then span { Dom.Fetch (m.AskMore, Compared) }
         }
         span { Dom.Fetch ("tree.json", TreeData) }
+        span { Dom.Fetch ("__poe?op=account", Account) }
         div {
             if m.Tab = "tree" then
                 tooltip m
@@ -2387,7 +2420,18 @@ let view (m : Model) : Node<Msg> =
         header {
             h1 { "PoEtry" }
             if m.Art <> "" then img { Dom.Class "crest"; Dom.Attr ("src", m.Art); Dom.Attr ("alt", "") }
-            div { Dom.Class "title"; Dom.Attr ("data-check", "title"); named }
+            if m.Characters.IsEmpty then
+                div { Dom.Class "title"; Dom.Attr ("data-check", "title"); named }
+            if not m.Characters.IsEmpty then
+                select {
+                    Dom.Class "title"
+                    Dom.OnChange Open
+                    if not here then option { Dom.Attr ("value", ""); chosen' }
+                    for (name, about, _) in m.Characters do
+                        option { Dom.Attr ("value", name); about }
+                }
+            if m.CanLogin && m.Player = "" then button { Dom.Class "login"; Dom.OnClick (fun _ -> Login); "login" }
+            if m.CanLogin && m.Player <> "" then button { Dom.Class "login"; Dom.Attr ("title", "logged in as " + m.Player); Dom.OnClick (fun _ -> Logout); "logout" }
             nav {
                 tab m "character" "Character"
                 tab m "defence" "Defence"

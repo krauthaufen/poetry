@@ -196,6 +196,90 @@
       const builds = new Map();
       const plain = window.fetch.bind(window);
       const answer = (text, status = 200) => new Response(text, { status, headers: { "content-type": "application/json" } });
+
+      // The game account, where the page is hosted with the proxies to the game's servers
+      // beside it ("/poe-oauth/", "/poe-api/"): the login of pob.awx.at's registered client
+      // (public, PKCE), whose callback sends a state beginning "poetry." on to this page.
+      // Everything stays in this browser. "__poe?op=account" says who is logged in and their
+      // characters; "op=login", "op=logout" and "op=open&name=.." go where they say.
+      const poe = (() => {
+        const hosted = location.hostname === "poetry.awx.at";
+        const CLIENT = "pobweb", REDIRECT = "https://pob.awx.at/", SCOPE = "account:profile account:characters";
+        const get = (k) => { try { return JSON.parse(localStorage.getItem("poe:" + k) || "null"); } catch { return null; } };
+        const put = (k, v) => { try { if (v == null) localStorage.removeItem("poe:" + k); else localStorage.setItem("poe:" + k, JSON.stringify(v)); } catch {} };
+        const b64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+        const grant = async (params) => {
+          const r = await plain("/poe-oauth/token", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ client_id: CLIENT, ...params }) });
+          const j = await r.json();
+          if (!r.ok || j.error || !j.access_token) throw new Error(j.error_description || j.error || "status " + r.status);
+          const t = { access: j.access_token, refresh: j.refresh_token || "", expires: Date.now() + (j.expires_in || 3600) * 1000, name: j.username || "" };
+          put("token", t);
+          return t;
+        };
+        let renewing = null;
+        const token = async () => {
+          const t = get("token");
+          if (!t) return null;
+          if (Date.now() < t.expires - 60000) return t;
+          if (!t.refresh) { put("token", null); return null; }
+          renewing ??= grant({ grant_type: "refresh_token", refresh_token: t.refresh }).catch(() => { put("token", null); return null; }).finally(() => { renewing = null; });
+          return renewing;
+        };
+        const api = async (path) => {
+          const t = await token();
+          if (!t) throw new Error("not logged in");
+          const r = await plain("/poe-api/" + path, { headers: { Authorization: "Bearer " + t.access } });
+          if (r.status === 401) { put("token", null); throw new Error("the login has run out: log in again"); }
+          if (!r.ok) throw new Error(path + ": status " + r.status);
+          return r.text();
+        };
+        // (what was fetched is kept a while: the game's servers allow few questions)
+        const kept = async (key, seconds, make) => {
+          try { const c = JSON.parse(sessionStorage.getItem("poe:" + key) || "null"); if (c && Date.now() - c.at < seconds * 1000) return c.text; } catch {}
+          const text = await make();
+          try { sessionStorage.setItem("poe:" + key, JSON.stringify({ at: Date.now(), text })); } catch {}
+          return text;
+        };
+        const login = async () => {
+          const verifier = b64(crypto.getRandomValues(new Uint8Array(32)));
+          const state = "poetry." + b64(crypto.getRandomValues(new Uint8Array(12)));
+          const challenge = b64(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)));
+          put("pending", { verifier, state, back: location.search });
+          location.href = "https://www.pathofexile.com/oauth/authorize?client_id=" + CLIENT + "&response_type=code&scope=" + encodeURIComponent(SCOPE)
+            + "&redirect_uri=" + encodeURIComponent(REDIRECT) + "&state=" + state + "&code_challenge=" + challenge + "&code_challenge_method=S256";
+        };
+        // back from the login: the code is exchanged, and the page opened again as it was left
+        const back = new URLSearchParams(location.search);
+        const returning = hosted && back.get("code") && (back.get("state") || "").startsWith("poetry.")
+          ? (async () => {
+              const pending = get("pending");
+              put("pending", null);
+              try {
+                if (!pending || pending.state !== back.get("state")) throw new Error("the login does not belong to this page");
+                await grant({ grant_type: "authorization_code", code: back.get("code"), redirect_uri: REDIRECT, code_verifier: pending.verifier, scope: SCOPE });
+                location.replace(location.pathname + (pending.back || ""));
+              } catch (err) { put("failed", String(err && err.message || err)); location.replace(location.pathname); }
+              await new Promise(() => {});
+            })()
+          : null;
+        const ask = async (q) => {
+          if (returning) await returning;
+          if (!hosted) return { can: false, name: "", characters: [] };
+          const op = q.get("op");
+          if (op === "login") { await login(); return { ok: true }; }
+          if (op === "logout") { put("token", null); sessionStorage.clear(); location.reload(); return { ok: true }; }
+          if (op === "open") { location.search = "?build=" + encodeURIComponent("poe-api/character/poe2/" + q.get("name")).replace(/%2F/g, "/"); return { ok: true }; }
+          const failed = get("failed"); put("failed", null);
+          const t = await token();
+          if (!t) return { can: true, name: "", characters: [], error: failed || "" };
+          try {
+            const list = JSON.parse(await kept("characters", 600, () => api("character/poe2")));
+            return { can: true, name: t.name, characters: (list.characters || []).map((c) => ({ name: c.name, about: "Level " + c.level + " " + c.class + (c.league ? " (" + c.league + ")" : ""), url: "poe-api/character/poe2/" + c.name })) };
+          } catch (err) { return { can: true, name: t.name, characters: [], error: String(err && err.message || err) }; }
+        };
+        const character = (url) => kept(url, 120, () => api(url.slice(8)));
+        return { ask, character };
+      })();
       window.fetch = async (input, init) => {
         const url = typeof input === "string" ? input : input.url;
         // what the page keeps between visits, in this browser: "__store?op=put&key=..&value=.."
@@ -208,6 +292,8 @@
             return answer(JSON.stringify({ value: localStorage.getItem("poetry:" + q.get("key")) || "" }));
           } catch (err) { return answer(JSON.stringify({ value: "", error: String(err) })); }
         }
+        const account = url.indexOf("__poe?");
+        if (account >= 0) return answer(JSON.stringify(await poe.ask(new URLSearchParams(url.slice(account + 6)))));
         const at = url.indexOf("__sim?");
         if (at < 0) return plain(input, init);
         // everything after "build=" is the character's url, whatever it contains
@@ -222,7 +308,8 @@
         delete request.wait;
         const key = JSON.stringify(request) + "|" + buildUrl;
         try {
-          if (!builds.has(buildUrl)) builds.set(buildUrl, plain(buildUrl, { cache: "no-cache" }).then((r) => { if (!r.ok) throw new Error(`${buildUrl}: status ${r.status}`); return r.text(); }));
+          // (a character of the account logged in: from the game's servers, with the login)
+          if (!builds.has(buildUrl)) builds.set(buildUrl, buildUrl.startsWith("poe-api/") ? poe.character(buildUrl) : plain(buildUrl, { cache: "no-cache" }).then((r) => { if (!r.ok) throw new Error(`${buildUrl}: status ${r.status}`); return r.text(); }));
           request.build = await builds.get(buildUrl);
         } catch (err) {
           builds.delete(buildUrl);
@@ -567,6 +654,9 @@
       #app button.act { padding: 9px 14px; font-size: 15px; }
       #app .press button.act { padding: 7px 12px; }
     }
+    #app header .login { flex: 0 0 auto; background: none; border: 0; color: var(--dim); font: inherit; font-size: 13px; cursor: pointer; padding: 0; text-decoration: underline dotted; overflow: visible; }
+    #app header .login:hover { color: var(--ink); }
+    #app header select.title { flex: 0 1 auto; min-width: 90px; background: #14110f; color: var(--rare); border: 1px solid var(--edge); font: inherit; font-size: 16px; padding: 4px 6px; }
     #app .main.notes .panel { flex: 1 1 100%; max-width: 760px; }
     #app .main.defence { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; align-items: start; max-width: 1100px; }
     #app .main.defence .survival { display: flex; flex-direction: column; gap: 8px; }
