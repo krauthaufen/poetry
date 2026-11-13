@@ -162,6 +162,10 @@ module Flat =
         member val CloseId = -1 with get, set
         member val OpenId = -1 with get, set
         member val Dyn : Item[][] = [||] with get, set
+        /// The buffs' mods before the skill's part in their conditions was decided.
+        member val DynRaw : Item[][] = [||] with get, set
+        /// Whether what is asked is asked as an attack (for Rage).
+        member val AsAttack = false with get, set
         member val RageSlot = -1 with get, set
         /// Rage's more attack damage for the skill (NaN: none).
         member val RageMore = nan with get, set
@@ -243,7 +247,7 @@ module Flat =
             if it.Slot < 0 then (if it.Conds.Length = 0 || passes ev it then acc <- acc * (1.0 + amount ev it / 100.0))
             else
                 // (Rage's more attack damage is the newest mod of all)
-                if it.Slot = ev.RageSlot && not (System.Double.IsNaN ev.RageMore) && ev.Tags.Contains Attack then acc <- acc * (1.0 + ev.RageMore / 100.0)
+                if it.Slot = ev.RageSlot && ev.AsAttack && not (System.Double.IsNaN ev.RageMore) then acc <- acc * (1.0 + ev.RageMore / 100.0)
                 for d in ev.Dyn.[it.Slot] do
                     if d.Conds.Length = 0 || passes ev d then acc <- acc * (1.0 + amount ev d / 100.0)
         acc
@@ -281,6 +285,33 @@ module Flat =
     let inline private incQ (ev: Ev) (i: int) = 1.0 + qSum ev ev.Q.[i] / 100.0
     /// increased x more of a question asked as two (`Mods.mult`): the increased at i, the more at i + 1.
     let inline private multQ (ev: Ev) (i: int) = max 0.0 ((1.0 + qSum ev ev.Q.[i] / 100.0) * qMore ev ev.Q.[i + 1])
+
+    let rec private ofSkill (c: CC) =
+        match c with
+        | CTag _ | CNamed _ -> true
+        | CNot inner -> ofSkill inner
+        | _ -> false
+
+    /// The buffs' mods with the skill's part in their conditions decided: for this skill
+    /// (its tags, its name), or for no skill at all.
+    let private resolveDyn (table: Item[][]) (tags: Set<SkillTag>) (name: string) : Item[][] =
+        let rec decide (c: CC) =
+            match c with
+            | CTag t -> if tags.Contains t then CTrue else CFalse
+            | CNamed n -> if name = n then CTrue else CFalse
+            | CNot inner ->
+                match decide inner with
+                | CTrue -> CFalse
+                | CFalse -> CTrue
+                | x -> CNot x
+            | x -> x
+        table |> Array.map (fun items ->
+            if items |> Array.exists (fun it -> it.Conds |> Array.exists ofSkill) then
+                items |> Array.choose (fun it ->
+                    let conds = it.Conds |> Array.map decide
+                    if conds |> Array.contains CFalse then None
+                    else Some { it with Conds = conds |> Array.filter (fun c -> c <> CTrue) })
+            else items)
 
     /// A stat and a kind as one key.
     let private statKey (stat: Stat) (kind: ModKind) : string =
@@ -325,12 +356,13 @@ module Flat =
                 if fixed' items.[i] then from <- i
             { Items = (if items.Length = 0 then items else items.[from..]); Start = 0; Init = 0.0 }
         | _ ->
+            // the mods without conditions are worked out now, whatever comes between them (the
+            // reference takes each in its turn: the same but for rounding where a conditional
+            // one, or a buff's, counts too)
             let mutable acc = if kind = More then 1.0 else 0.0
-            let mutable start = 0
-            while start < items.Length && fixed' items.[start] do
-                acc <- (if kind = More then acc * (1.0 + items.[start].V / 100.0) else acc + items.[start].V)
-                start <- start + 1
-            { Items = items; Start = start; Init = acc }
+            for it in items do
+                if fixed' it then acc <- (if kind = More then acc * (1.0 + it.V / 100.0) else acc + it.V)
+            { Items = items |> Array.filter (fun it -> not (fixed' it)); Start = 0; Init = acc }
 
     // ---- the questions the engine asks of a skill ----
 
@@ -1591,9 +1623,12 @@ module Flat =
           /// debuffs', then its own), each with its value; whether a mod is a shock's; for
           /// which count of changes they were listed.
           mutable DStat: Stat[]
-          mutable DKind: ModKind[]
+          mutable DCode: int[]
+          mutable DName: string[]
+          mutable DKind: int[]
           mutable DVal: float[]
           mutable DShock: bool[]
+          mutable DCount: int
           mutable DListVersion: int
           /// The increased damage taken that shocks give it, and whether a shock's mod is of another kind.
           mutable ShockInc: float
@@ -1663,6 +1698,11 @@ module Flat =
           /// The buffs' mods per stat (see `dyn`), for the mods as they were at `DynVersion`.
           mutable Dyn: Item[][]
           mutable DynVersion: int
+          /// Whether a buff's mod has a condition on the skill; the mods with that decided, per
+          /// skill and way of asking (as the skill, with nothing known, as damage over time).
+          mutable DynOfSkill: bool
+          DynFor: Item[][][]
+          DynForVer: int[]
           BComp: (int * Item)[][]
           BCompOf: Mod list[]
           RageMore: float[]
@@ -1841,7 +1881,7 @@ module Flat =
     let private setDebuff (e: Foe) (id: int) (stacks: int) (expires: float) (mods: Mod list) =
         let had = e.Has.[id]
         if not had || e.Stacks.[id] <> stacks then e.StatusStale <- true
-        if not (had && e.Stacks.[id] = stacks && obj.ReferenceEquals(e.DMods.[id], mods)) then
+        if not (had && e.Stacks.[id] = stacks && (obj.ReferenceEquals(e.DMods.[id], mods) || e.DMods.[id] = mods)) then
             if not mods.IsEmpty || (had && not e.DMods.[id].IsEmpty) then
                 e.DefenderStale <- true
                 e.DefVersion <- e.DefVersion + 1
@@ -2041,6 +2081,7 @@ module Flat =
     let private takenOf = damageTypes |> Array.map (fun t -> DamageTaken(OfType t))
     let private resistOf = damageTypes |> Array.map Resist
     let private maxResistOf = damageTypes |> Array.map MaxResist
+    let private takenStats = [| for t in 0 .. 4 -> (if t >= 1 && t <= 3 then [| takenAll; takenOf.[t]; takenElemental |] else [| takenAll; takenOf.[t] |]) |]
     let private thresholdStats = [| AilmentThreshold |]
     let private dotTakenStats = [| DotTaken |]
     let private armourStats = [| Armour |]
@@ -2053,48 +2094,95 @@ module Flat =
     /// The enemy's mods as a defender, in the reference's order (see `Foe.DStat`).
     let private defList (s: State) (e: Foe) =
         if e.DListVersion <> e.DefVersion then
-            let stats, kinds, vals, shock = ResizeArray<Stat>(), ResizeArray<ModKind>(), ResizeArray<float>(), ResizeArray<bool>()
             let order = s.P.StatusOrder
+            let own = e.Info.Own
+            // how many there are, then each in its place (the arrays are kept and grow when they must)
+            let mutable n = own.Length
+            for id in 0 .. e.Has.Length - 1 do
+                if e.Has.[id] && not e.DMods.[id].IsEmpty then n <- n + List.length e.DMods.[id]
+            if e.DStat.Length < n then
+                e.DStat <- Array.zeroCreate (n + 8)
+                e.DCode <- Array.zeroCreate (n + 8)
+                e.DName <- Array.zeroCreate (n + 8)
+                e.DKind <- Array.zeroCreate (n + 8)
+                e.DVal <- Array.zeroCreate (n + 8)
+                e.DShock <- Array.zeroCreate (n + 8)
+            let mutable at = 0
+            let put (stat: Stat) (kind: ModKind) (v: float) (shock: bool) =
+                e.DStat.[at] <- stat
+                (let c = StatKey.code stat
+                 e.DCode.[at] <- c
+                 e.DName.[at] <- (if c < 0 then StatKey.name stat else ""))
+                e.DKind.[at] <- ModKind.number kind
+                e.DVal.[at] <- v
+                e.DShock.[at] <- shock
+                at <- at + 1
             for k in order.Length - 1 .. -1 .. 0 do
                 let id = order.[k]
                 if e.Has.[id] && not e.DMods.[id].IsEmpty then
-                    let n = float e.Stacks.[id]
-                    for m in List.rev e.DMods.[id] do
-                        match Mod.eval Ctx.empty (Mod.scaled n m) with
-                        | Some v ->
-                            stats.Add m.Stat
-                            kinds.Add m.Kind
-                            vals.Add v
-                            shock.Add(m.Source = "Shock")
-                        | None -> ()
-            for (stat, kind, v, sh) in e.Info.Own do
-                stats.Add stat
-                kinds.Add kind
-                vals.Add v
-                shock.Add sh
-            e.DStat <- stats.ToArray()
-            e.DKind <- kinds.ToArray()
-            e.DVal <- vals.ToArray()
-            e.DShock <- shock.ToArray()
+                    let stacks = float e.Stacks.[id]
+                    // (a debuff's mods, the last first)
+                    let from = at
+                    for m in e.DMods.[id] do
+                        if m.Conds.IsEmpty then put m.Stat m.Kind (m.Value * stacks) (m.Source = "Shock")
+                        else
+                            match Mod.eval Ctx.empty (Mod.scaled stacks m) with
+                            | Some v -> put m.Stat m.Kind v (m.Source = "Shock")
+                            | None -> ()
+                    let mutable lo = from
+                    let mutable hi = at - 1
+                    while lo < hi do
+                        let st, kd, v, sh = e.DStat.[lo], e.DKind.[lo], e.DVal.[lo], e.DShock.[lo]
+                        let cd, nm = e.DCode.[lo], e.DName.[lo]
+                        e.DCode.[lo] <- e.DCode.[hi]
+                        e.DName.[lo] <- e.DName.[hi]
+                        e.DCode.[hi] <- cd
+                        e.DName.[hi] <- nm
+                        e.DStat.[lo] <- e.DStat.[hi]
+                        e.DKind.[lo] <- e.DKind.[hi]
+                        e.DVal.[lo] <- e.DVal.[hi]
+                        e.DShock.[lo] <- e.DShock.[hi]
+                        e.DStat.[hi] <- st
+                        e.DKind.[hi] <- kd
+                        e.DVal.[hi] <- v
+                        e.DShock.[hi] <- sh
+                        lo <- lo + 1
+                        hi <- hi - 1
+            for (stat, kind, v, sh) in own do
+                put stat kind v sh
+            e.DCount <- at
             e.ShockInc <- 0.0
             e.ShockOdd <- false
-            for i in 0 .. e.DStat.Length - 1 do
+            for i in 0 .. at - 1 do
                 if e.DShock.[i] then
-                    if e.DKind.[i] = Inc && e.DStat.[i] = DamageTaken AllDamage then e.ShockInc <- e.ShockInc + e.DVal.[i]
+                    if e.DKind.[i] = 1 && e.DStat.[i] = DamageTaken AllDamage then e.ShockInc <- e.ShockInc + e.DVal.[i]
                     else e.ShockOdd <- true
             e.DListVersion <- e.DefVersion
 
     /// The defender's mods of a stat and a kind, added to `acc` in their order.
     let private dsum (e: Foe) (kind: ModKind) (stat: Stat) (acc: float) : float =
         let mutable acc = acc
-        for i in 0 .. e.DStat.Length - 1 do
-            if e.DKind.[i] = kind && e.DStat.[i] = stat then acc <- acc + e.DVal.[i]
+        let c = StatKey.code stat
+        let k = ModKind.number kind
+        if c >= 0 then
+            for i in 0 .. e.DCount - 1 do
+                if e.DCode.[i] = c && e.DKind.[i] = k then acc <- acc + e.DVal.[i]
+        else
+            let name = StatKey.name stat
+            for i in 0 .. e.DCount - 1 do
+                if e.DCode.[i] < 0 && e.DKind.[i] = k && e.DName.[i] = name then acc <- acc + e.DVal.[i]
         acc
 
     let private dmore (e: Foe) (stat: Stat) (acc: float) : float =
         let mutable acc = acc
-        for i in 0 .. e.DStat.Length - 1 do
-            if e.DKind.[i] = More && e.DStat.[i] = stat then acc <- acc * (1.0 + e.DVal.[i] / 100.0)
+        let c = StatKey.code stat
+        if c >= 0 then
+            for i in 0 .. e.DCount - 1 do
+                if e.DCode.[i] = c && e.DKind.[i] = 2 then acc <- acc * (1.0 + e.DVal.[i] / 100.0)
+        else
+            let name = StatKey.name stat
+            for i in 0 .. e.DCount - 1 do
+                if e.DCode.[i] < 0 && e.DKind.[i] = 2 && e.DName.[i] = name then acc <- acc * (1.0 + e.DVal.[i] / 100.0)
         acc
 
     /// increased x more of the defender's mods of these stats (`Mods.mult` with `Ctx.empty`).
@@ -2164,16 +2252,8 @@ module Flat =
                             flushDots s e
                             defList s e
                             if e.DotTakenVersion <> e.DefVersion then
-                                // (`Ailments.dotTakenMult`: bleeding ignores armour)
                                 for t in 0 .. 4 do
-                                    let resist =
-                                        if t = 0 then 0.0
-                                        else
-                                            dsum e Base resistOf.[t] 0.0
-                                            |> min (min Constants.resistCeiling (Constants.enemyBaseMaxResist + dsum e Base maxResistOf.[t] 0.0))
-                                            |> max Constants.resistFloor
-                                    let taken = dmult e (if t >= 1 && t <= 3 then [| takenAll; takenOf.[t]; takenElemental |] else [| takenAll; takenOf.[t] |])
-                                    e.DotTaken.[t] <- (1.0 - resist / 100.0) * taken * dmult e dotTakenStats
+                                    e.DotTaken.[t] <- nan
                                 e.DotTakenVersion <- e.DefVersion
                             let bleedK = if e.Def.Moving then Constants.bleedMovingMultiplier else 1.0
                             let m = List.length active
@@ -2183,6 +2263,15 @@ module Flat =
                             for d in active do
                                 let k = if d.Ailing = Some Bleed then bleedK else 1.0
                                 let t = typeIndex d.Of
+                                if System.Double.IsNaN e.DotTaken.[t] then
+                                    // (`Ailments.dotTakenMult`: bleeding ignores armour)
+                                    let resist =
+                                        if t = 0 then 0.0
+                                        else
+                                            dsum e Base resistOf.[t] 0.0
+                                            |> min (min Constants.resistCeiling (Constants.enemyBaseMaxResist + dsum e Base maxResistOf.[t] 0.0))
+                                            |> max Constants.resistFloor
+                                    e.DotTaken.[t] <- (1.0 - resist / 100.0) * dmult e takenStats.[t] * dmult e dotTakenStats
                                 rates.[i] <- d.Dps * k * e.DotTaken.[t]
                                 labels.[i] <- d.Label
                                 types.[i] <- t
@@ -2539,8 +2628,24 @@ module Flat =
                             table.[slot].[counts.[slot]] <- { it with V = it.V * stacks }
                             counts.[slot] <- counts.[slot] + 1
                 s.Dyn <- table
+            s.DynOfSkill <- s.Dyn |> Array.exists (fun items -> items |> Array.exists (fun it -> it.Conds |> Array.exists ofSkill))
             s.DynVersion <- s.ModsVersion
         s.Dyn
+
+    /// The buffs' mods for a skill asked in one of the three ways (see `MSkill`).
+    let private dynFor (s: State) (sid: int) (mode: int) : Item[][] =
+        let table = dyn s
+        if not s.DynOfSkill then table
+        else
+            let at = sid * 3 + mode
+            if s.DynForVer.[at] <> s.DynVersion then
+                let skill = s.P.Skills.[sid]
+                s.DynFor.[at] <-
+                    (if mode = MEmpty then resolveDyn table Set.empty ""
+                     elif mode = MDot then resolveDyn table skill.DotTags skill.Skill.Name
+                     else resolveDyn table skill.Skill.Tags skill.Skill.Name)
+                s.DynForVer.[at] <- s.DynVersion
+            s.DynFor.[at]
 
     let private acquireRaw (s: State) : Ev =
         if s.EvDepth = s.Evs.Count then
@@ -2556,6 +2661,7 @@ module Flat =
         ev.BOn <- false
         ev.SOn <- false
         ev.Extra <- -1
+        ev.AsAttack <- false
         ev.Iso <- false
         ev.Close <- false
         ev.Open <- false
@@ -2570,13 +2676,15 @@ module Flat =
         ev.Q <- s.P.Skills.[sid].Q
         ev.Tags <- Set.empty
         ev.Name <- ""
-        ev.Dyn <- dyn s
+        ev.Dyn <- dynFor s sid MEmpty
+        ev.DynRaw <- s.Dyn
         ev
 
     /// For questions asked as the skill (its tags and name known; buffs and enemy to be given).
     let private acquire (s: State) (sid: int) : Ev =
         let info = s.P.Skills.[sid]
-        let table = dyn s
+        let table = dynFor s sid MSkill
+        let raw = s.Dyn
         // Rage: 1% more attack damage per Rage, times rage effect, rounded down
         if s.RageVer.[sid] <> s.DynVersion then
             let rage = s.P.BRage
@@ -2593,6 +2701,8 @@ module Flat =
         ev.Tags <- info.Skill.Tags
         ev.Name <- info.Skill.Name
         ev.Dyn <- table
+        ev.DynRaw <- raw
+        ev.AsAttack <- info.IsAttack
         ev.RageMore <- s.RageMore.[sid]
         ev
 
@@ -3466,7 +3576,7 @@ module Flat =
                         evE.Q <- info.Q
                         evE.Tags <- Set.empty
                         evE.Name <- ""
-                        evE.Dyn <- ev.Dyn
+                        evE.Dyn <- (if obj.ReferenceEquals(ev.Dyn, ev.DynRaw) then ev.DynRaw else resolveDyn ev.DynRaw Set.empty "")
                         let kill = (sumQ evE qManaOnKill + v.Mana * sumQ evE qManaPercentOnKill / 100.0) * v.ManaRecoveryRate
                         release s
                         gainMana s v 5 kill
@@ -3488,7 +3598,11 @@ module Flat =
                 if not (dead || info.Dots.IsEmpty) then
                     let duration = (if skill.Duration > 0.0 then skill.Duration else 1.0) * multQ ev qSkillDuration
                     // spell (or attack) damage mods only count if the skill says so
-                    if not info.SpellDot then ev.Tags <- info.DotTags
+                    let asSkill = ev.Dyn
+                    if not info.SpellDot then
+                        ev.Tags <- info.DotTags
+                        ev.AsAttack <- false
+                        if not (obj.ReferenceEquals(ev.Dyn, ev.DynRaw)) then ev.Dyn <- resolveDyn ev.DynRaw info.DotTags skill.Name
                     for (t, perSecond, _, label) in info.Dots do
                         let ti = typeIndex t
                         let dps =
@@ -3499,6 +3613,8 @@ module Flat =
                         if not (d.Until >= e.Soonest) then e.Soonest <- d.Until
                         expireAt s d.Until
                     ev.Tags <- skill.Tags
+                    ev.AsAttack <- info.IsAttack
+                    ev.Dyn <- asSkill
                 // meta gem energy: crits and newly inflicted ailments, scaled by monster power and by
                 // the share of the ailment threshold the hit deals; none from triggered skills
                 if p.Metas.Length > 0 && not (skill.Tags.Contains Triggered) then
@@ -4106,9 +4222,12 @@ module Flat =
                           Poise = Array.create 13 nan; Armour = nan; PhysFlat = nan; Threshold = nan; Flam = nan }
                       DefVersion = 0
                       DStat = [||]
+                      DCode = [||]
+                      DName = [||]
                       DKind = [||]
                       DVal = [||]
                       DShock = [||]
+                      DCount = 0
                       DListVersion = -1
                       ShockInc = 0.0
                       ShockOdd = false
@@ -4165,6 +4284,9 @@ module Flat =
               SnapVersion = -1
               Dyn = p.NoDyn
               DynVersion = -1
+              DynOfSkill = false
+              DynFor = Array.create (nk * 3) p.NoDyn
+              DynForVer = Array.create (nk * 3) -1
               BComp = Array.create nb [||]
               BCompOf = Array.create nb []
               RageMore = Array.create nk nan
