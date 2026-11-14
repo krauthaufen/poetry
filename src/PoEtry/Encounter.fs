@@ -539,7 +539,7 @@ module Geometry =
         // leg that a place on it can reach one (no place on a leg is further from the leg's
         // start than the leg is long); where none is, the places are not worked out
         let asked : Vec list[] = Array.create from.Length []
-        let legLen : float[] = Array.zeroCreate from.Length
+        let legLen : float[] = Array.create from.Length nan
         let near : bool[] = Array.create from.Length false
         // when each enemy was last hit, by its place in the list (NaN: not yet)
         let last : float[] = Array.create (List.length alive) nan
@@ -549,7 +549,17 @@ module Geometry =
         while flying > 0 do
             let t = float k * tick
             flying <- 0
+            // (a tick at which every enemy was hit too short a time ago hits none: the
+            // flights only move on)
+            let mutable anyDue = false
+            for place in 0 .. last.Length - 1 do
+                if not (t - last.[place] < p.HitInterval - 1e-9) then anyDue <- true
             for flight in 0 .. from.Length - 1 do
+              // (still on the leg it was on, and nothing to hit from it: it only moves on)
+              if gone.[flight] <= legLen.[flight] && not (anyDue && near.[flight]) then
+                gone.[flight] <- gone.[flight] + step
+                flying <- flying + 1
+              else
                 // (on to the leg this tick's place lies on; none: the flight is over)
                 let mutable points = from.[flight]
                 let mutable d = gone.[flight]
@@ -582,19 +592,17 @@ module Geometry =
                 if not points.IsEmpty then
                     flying <- flying + 1
                     gone.[flight] <- d + step
-                    if near.[flight] then
+                    if anyDue && near.[flight] then
                         let a, b = points.Head, points.Tail.Head
                         let at = Vec.add a (Vec.scale (d / max 1e-9 len) (Vec.sub b a))
                         let mutable rest = alive
                         let mutable place = 0
                         while not rest.IsEmpty do
                             let e = rest.Head
-                            if within at r e then
-                                let t0 = last.[place]
-                                // (never hit before, or long enough ago)
-                                if not (t - t0 < p.HitInterval - 1e-9) then
-                                    hits.Add((t, e.Name))
-                                    last.[place] <- t
+                            // (never hit before, or long enough ago)
+                            if not (t - last.[place] < p.HitInterval - 1e-9) && within at r e then
+                                hits.Add((t, e.Name))
+                                last.[place] <- t
                             rest <- rest.Tail
                             place <- place + 1
             k <- k + 1
