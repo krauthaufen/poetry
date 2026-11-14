@@ -35,8 +35,10 @@ namespace PoEtry
 /// charms; infusions and remnants; Glory, Combo and banners; seals, Barrage and chained
 /// attacks; what is planted in or beside an enemy (seeds, pustules, Ice Crystals); the
 /// player's pools, with monsters walking up and hitting back; minions that are hurt, killed
-/// and revived, temporary ones that are summoned and leave, corpses. What is left is refused
-/// by `compile`, by name (`unsupported` lists it): the lists at `build` say what.
+/// and revived, temporary ones that are summoned and leave, corpses. One kind of fight is
+/// refused by `compile` (`unsupported` says so): actors of the same name, which the
+/// reference plays as one actor with the state of another. Where the reference fails in
+/// the middle of a fight (a name no skill has, a gain of nothing), a run here fails too.
 ///
 /// Every actor has a program of its own (`Program`: the player's, with the minions' in it)
 /// and a state of its own during a run (`Agent`); the names (buffs, statuses, counts) have
@@ -1323,6 +1325,9 @@ module Flat =
         // of the enemy that goes by the name without the +. Where that name with a + is an
         // enemy's own, the replacement takes that enemy's place, alive or not: see `replace`.)
         let actors = fight.Player :: fight.Minions
+        // (The reference keeps an actor's state by its name. Of two of one name the first is
+        // the one that acts, for both, on a state that began as the last one's, with the
+        // mods of whichever came last with a skill of the name. Not built.)
         if (actors |> List.map (fun a -> a.Name) |> List.distinct).Length <> actors.Length then reject "actors of the same name"
         // (The reference keeps what decides whether an attack lands by the defender's name:
         // an enemy's name, a minion's name, "Player" for the player whatever it is called.
