@@ -1092,6 +1092,47 @@ let run (test: string -> (unit -> unit) -> unit) =
                 MaxResources = Map.ofList [ "PowerCharge", 3; "FrenzyCharge", 3 ] }
         same { fine with Player = twice } few)
 
+    test "flat: defenders that go by one name share what decides whether attacks on them land" (fun () ->
+        let body : MinionBody = { Life = 5000.0; EnergyShield = 100.0; Armour = 0.0; Evasion = 3000.0; Resist = Map.empty; Melee = true; Size = 3.0; Reach = 10.0; Revive = Some 3.0; Power = 1.0; LifeRegen = 5.0; TakesForOwner = 0.0; Explodes = None }
+        let player name =
+            { Actor.make name [ Mod.base' (Named "Accuracy") 900.0; Mod.inc CritChance 100.0 ] [ strike "Swing" 300.0 500.0 ] with
+                Vitals = Some { PlayerStats.basic 50000.0 500.0 with Evasion = 4000.0 } }
+        let hound name = { Actor.make name [ Mod.base' (Named "Accuracy") 600.0 ] [ strike "Bite" 100.0 200.0 ] with Body = Some body }
+        let foe name life = { EnemyDef.make Rarity.defaults 80 Magic name (Vec.make 12.0 0.0) with Life = life }
+        let few = [ 1u; 2u; 3u; 4u; 5u; 6u ]
+        // an enemy called Player: the player's own, whatever the player is called
+        same { Fight.single (foe "Player" 1e9) (player "Player") 20.0 with Minions = [ hound "Hound" ] } few
+        same { Fight.single (foe "Player" 1e9) (player "Hero") 20.0 with Minions = [ hound "Hound" ] } few
+        // a minion named like an enemy, like the player's own, and like an enemy's replacement
+        same { Fight.single (foe "Hound" 1e9) (player "Hero") 20.0 with Minions = [ hound "Hound" ] } few
+        same { Fight.single (foe "boss" 1e9) (player "Hero") 20.0 with Minions = [ hound "Player" ] } few
+        same { Fight.single (foe "Hound" 400.0) (player "Hero") 20.0 with Minions = [ hound "Hound++" ]; Replace = true } few)
+
+    test "flat: meta gems of one name: their energy is one, the first's" (fun () ->
+        let mutable compared = 0
+        for case in 1u .. 400u do
+            let fight, described = randomFight case
+            match fight.Player.Metas with
+            | [] -> ()
+            | first :: _ as metas ->
+                let variants =
+                    [ // all go by the first's name
+                      metas |> List.map (fun m -> { m with Name = first.Name })
+                      // another of the first's name, that differs, before and after it
+                      metas @ [ { first with MaxEnergy = first.MaxEnergy * 0.5; Cost = first.Cost * 0.25; Release = Invocation 1.5; EnergyMult = 1.4 } ]
+                      { first with MaxEnergy = first.MaxEnergy * 2.0; Release = (match first.Release with AtMaximum -> Invocation 0.7 | Invocation _ -> AtMaximum); RefundChance = 30.0 } :: metas ]
+                for metas in variants do
+                    let clashing = { fight with Player = { fight.Player with Metas = metas } }
+                    match Flat.compile clashing with
+                    | Error why -> failwithf "%s: does not compile: %s" described why
+                    | Ok _ ->
+                        for seed in [ 1u; 2u ] do
+                            compared <- compared + 1
+                            match check clashing seed with
+                            | Some (Error d) -> failwithf "%s: %s" described d
+                            | _ -> ()
+        if compared < 100 then failwithf "only %d runs compared" compared)
+
     // ---- minions and totems ----
     let bite name dmg = { Skill.make name [ Attack; Melee ] with BaseDamage = Map.ofList [ Physical, { Min = dmg * 0.8; Max = dmg * 1.2 } ]; BaseCrit = 6.0 }
     let sure = Mod.base' (Named "Accuracy") 1e12
@@ -1335,10 +1376,16 @@ let run (test: string -> (unit -> unit) -> unit) =
             | Error why -> if not (why.Contains reason) then failwithf "refused for '%s', expected '%s'" why reason
         if not (Flat.unsupported fine).IsEmpty then failwithf "a plain fight is refused: %A" (Flat.unsupported fine)
         refused { fine with Minions = [ Actor.make "Player" [] [ strike "Bite" 1.0 2.0 ] ] } "actors of the same name"
-        refused { fine with Player = { player with Metas = [ Meta.simple "Cast on Crit" 100.0 "Bolt"; Meta.simple "Cast on Crit" 50.0 "Bolt" ] } } "meta gems of the same name"
         // both reasons of a fight with two
-        let two = { fine with Enemies = [ { boss 1e9 with Name = "boss+" } ]; Replace = true; Minions = [ Actor.make "Player" [] [ strike "Bite" 1.0 2.0 ] ] }
-        if (Flat.unsupported two).Length < 2 then failwithf "expected two reasons, got %A" (Flat.unsupported two))
+        // (a replacement of "boss" would take the place of the enemy that is called "boss+" already)
+        refused { fine with Enemies = [ boss 1e9; { boss 1e9 with Name = (boss 1.0).Name + "+" } ]; Replace = true } "an enemy named like the replacement of another"
+        // (a skill that goes by a name the reference keeps a cooldown of its own under)
+        let sealed = { spell "Bolt" Fire 1.0 2.0 with Mods = [ Mod.base' (Named "MaxSeals") 3.0; Mod.base' (Named "SealIntervalMs") 500.0 ] }
+        refused { fine with Player = Actor.make "Player" [] [ sealed; spell "SealBreak:Bolt" Cold 1.0 2.0 ] } "a skill named like a cooldown of the engine's own"
+        same { fine with Player = Actor.make "Player" [] [ spell "Bolt" Fire 1.0 2.0; { spell "SealBreak:Bolt" Cold 1.0 2.0 with Cooldown = Some 1.0 }; { spell "ArchonRecovery" Cold 1.0 2.0 with Cooldown = Some 0.7 } ] } [ 1u; 2u; 3u ]
+        // both reasons of a fight with two
+        let two = { fine with Enemies = [ boss 1e9; { boss 1e9 with Name = (boss 1.0).Name + "+" } ]; Replace = true; Minions = [ Actor.make "Player" [] [ strike "Bite" 1.0 2.0 ] ] }
+        if (Flat.unsupported two).Length <> 2 then failwithf "expected two reasons, got %A" (Flat.unsupported two))
 
     test "flat: skills and parts of one name, the same or not: a name is the first of it, a use reads its own parts" (fun () ->
         let player = Actor.make "Player" [] [ spell "Bolt" Fire 1.0 2.0 ]

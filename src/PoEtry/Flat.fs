@@ -707,6 +707,10 @@ module Flat =
 
     type private MetaInfo =
         { Meta: Meta
+          /// The first meta gem of its name (energy goes by the name), and for that one the
+          /// energy that is full at the start of a fight (NaN: none is banked).
+          First: int
+          Banked: float
           /// Where its energy comes from, in the order the gem lists them, and whether any of
           /// that is a hit's doing.
           Sources: EnergySource[]
@@ -1142,6 +1146,9 @@ module Flat =
               Attackers: (int * float)[]
               /// What a replacement is a fresh one of, by the name without its + (see `build`).
               Roots: Dictionary<string, EnemyInfo>
+              /// Whether two defenders can go by one name (see `build`): they then share
+              /// what decides whether an attack on them lands.
+              SharedEntropy: bool
               /// The character's own chance to keep a charge, and the mana (a share of the most)
               /// that consuming a Power Charge gives.
               SheetSkip: float
@@ -1311,12 +1318,15 @@ module Flat =
         // not built here.)
         if fight.Replace && fight.Enemies |> List.exists (fun e -> e.Name.EndsWith "+" && fight.Enemies |> List.exists (fun o -> o.Name = e.Name.TrimEnd('+'))) then
             reject "an enemy named like the replacement of another"
-        // (the player's evasion entropy goes by this name in the reference, whatever the player is called)
-        if fight.Enemies |> List.exists (fun e -> e.Name = "Player") then reject "an enemy called Player"
         let actors = fight.Player :: fight.Minions
         if (actors |> List.map (fun a -> a.Name) |> List.distinct).Length <> actors.Length then reject "actors of the same name"
-        // (a minion's evasion entropy goes by its name, beside the enemies' and the player's)
-        if fight.Minions |> List.exists (fun m -> m.Name = "Player" || fight.Enemies |> List.exists (fun e -> e.Name = m.Name)) then reject "a minion named like an enemy"
+        // (The reference keeps what decides whether an attack lands by the defender's name:
+        // an enemy's name, a minion's name, "Player" for the player whatever it is called.
+        // Two that go by one name share it.)
+        let sharedEntropy =
+            let names = "Player" :: (fight.Minions |> List.map (fun m -> m.Name)) @ (fight.Enemies |> List.map (fun e -> e.Name) |> List.distinct)
+            let names = if fight.Replace then names |> List.map (fun n -> n.TrimEnd('+')) else names
+            (List.distinct names).Length <> names.Length
 
         // ---- the enemies ----
         // (the reference keeps the enemies by their names: of several of one name the last is
@@ -1381,7 +1391,6 @@ module Flat =
         // ---- an actor: the player, or a minion ----
         let one (index: int) (actor: Actor) : unit -> Program =
             let isPlayer = index = 0
-            if (actor.Metas |> List.map (fun m -> m.Name) |> List.distinct).Length <> actor.Metas.Length then reject "meta gems of the same name"
 
             // ---- its skills ----
             // The reference finds a skill by its name, the first of that name among the
@@ -1402,8 +1411,13 @@ module Flat =
                     at.[i] <- next
                     next <- next + o.Parts.Length)
                 at
-            // (the reference keeps these beside the skills' cooldowns, under these names)
-            if all |> List.exists (fun s -> s.Name = "ArchonRecovery" || s.Name.StartsWith "invocation:" || s.Name.StartsWith "SealBreak:") then reject "a skill named like a cooldown of the engine's own"
+            // (the reference keeps these beside the skills' cooldowns, under these names: a skill
+            // that goes by one of them where it is in use shares its cooldown with it. Not built.)
+            if named |> List.exists (fun s ->
+                (s.Name = "ArchonRecovery" && not actor.Archons.IsEmpty)
+                || (s.Name.StartsWith "invocation:" && actor.Metas |> List.exists (fun m -> "invocation:" + m.Name = s.Name && (match m.Release with Invocation _ -> true | AtMaximum -> false)))
+                || (s.Name.StartsWith "SealBreak:" && named |> List.exists (fun o -> "SealBreak:" + o.Name = s.Name && o.Mods |> List.exists (fun m -> m.Stat = Named "MaxSeals")))) then
+                reject "a skill named like a cooldown of the engine's own"
             let skillIds = Dictionary<string, int>()
             named |> List.iteri (fun i s -> if not (skillIds.ContainsKey s.Name) then skillIds.[s.Name] <- i)
             // (a name no skill of the actor has: -1; the reference fails where it is to be
@@ -1572,6 +1586,15 @@ module Flat =
                 actor.Metas
                 |> List.map (fun m ->
                     ({ Meta = m
+                       // (energy is kept by the gem's name: of several of one name it is the
+                       // first's, and what is banked at the start is the last invocation's)
+                       First = actor.Metas |> List.findIndex (fun o -> o.Name = m.Name)
+                       Banked =
+                        (if not (obj.ReferenceEquals(actor.Metas |> List.find (fun o -> o.Name = m.Name), m)) then nan
+                         else
+                            match actor.Metas |> List.tryFindBack (fun o -> o.Name = m.Name && (match o.Release with Invocation _ -> true | AtMaximum -> false)) with
+                            | Some last -> last.MaxEnergy
+                            | None -> nan)
                        Sources = Array.ofList m.Sources
                        FromHits = m.Sources |> List.exists (fun src -> match src with CritHits _ | MeleeHits _ | MeleeKills _ | InflictsAilment _ -> true | _ -> false)
                        Triggers = m.Triggers |> List.map skillId |> Array.ofList
@@ -2148,6 +2171,7 @@ module Flat =
                         (if actor.Vitals.IsNone && not anyBody then [||]
                          else fight.Enemies |> List.choose (fun e -> e.Attack |> Option.map (fun attack -> enemyIds.[e.Name], attack.Interval)) |> Array.ofList)
                       Roots = roots
+                      SharedEntropy = sharedEntropy
                       SheetSkip = Mods.sumBase Ctx.empty [ Named "ChargeSkipConsume" ] sheet
                       ConsumePowerMana = Mods.sumBase Ctx.empty [ Named "ManaPercentOnConsumePower" ] sheet
                       Enemies = enemyInfos
@@ -2361,6 +2385,12 @@ module Flat =
                         i <- least
                     else go <- false
 
+    /// What decides whether attacks on a defender land (`World.Entropy`, see `Sim.lands`).
+    type private Entropy =
+        { mutable Value: float
+          mutable At: float
+          mutable Has: bool }
+
     /// Damage over time on an enemy (`DotInstance`, its label a number).
     type private FDot =
         { Ailing: Ailment option
@@ -2425,9 +2455,7 @@ module Flat =
           mutable FlamTo: int
           /// What they add up to (kept as they come and go: the same as their sum but for rounding).
           mutable FlamSum: float
-          mutable Entropy: float
-          mutable EntropyAt: float
-          mutable HasEntropy: bool
+          Entropy: Entropy
           /// Its statuses (`Sim.status`) with their numbers, good until a debuff or the damage
           /// over time changes, or its life crosses one of the marks that are statuses.
           mutable Status: Map<string, int>
@@ -2595,9 +2623,7 @@ module Flat =
           /// Whether its bones have been used since it was killed (`Sim.World.Boned`).
           mutable Boned: bool
           /// Its evasion entropy.
-          mutable Dodge: float
-          mutable DodgeAt: float
-          mutable HasDodge: bool }
+          Dodge: Entropy }
 
     type private State =
         { /// The actor that acts now, its program and its place; all of them.
@@ -2713,9 +2739,9 @@ module Flat =
           /// Charges per charm, by its buff.
           CharmCharges: float[]
           /// The player's evasion entropy.
-          mutable PEntropy: float
-          mutable PEntropyAt: float
-          mutable PHasEntropy: bool
+          PEntropy: Entropy
+          /// The same by the defenders' names, where two can go by one name (else null).
+          Entropies: Dictionary<string, Entropy>
           /// The defences for the sets of buffs they were asked for (`Actor.VitalsAt`), by the
           /// buffs written out; and the last set asked for, with its defences.
           VitalsSeen: Dictionary<string, PlayerStats>
@@ -3715,18 +3741,31 @@ module Flat =
     // ---- using skills ----
 
     /// Does an attack with this chance to hit land (`Sim.lands`)?
-    let private lands (s: State) (rng: Rng) (e: Foe) (hitChance: float) : bool =
+    let private landsOn (s: State) (rng: Rng) (entropy: Entropy) (hitChance: float) : bool =
         if hitChance >= 100.0 then true
         else
             let value =
-                if e.HasEntropy && s.Time - e.EntropyAt <= 100.0 * Constants.serverTick then e.Entropy
+                if entropy.Has && s.Time - entropy.At <= 100.0 * Constants.serverTick then entropy.Value
                 else floor (rng.Float() * 100.0)
             let value = value + hitChance
             let hit = value >= 100.0
-            e.Entropy <- (if hit then value - 100.0 else value)
-            e.EntropyAt <- s.Time
-            e.HasEntropy <- true
+            entropy.Value <- (if hit then value - 100.0 else value)
+            entropy.At <- s.Time
+            entropy.Has <- true
             hit
+
+    let private lands (s: State) (rng: Rng) (e: Foe) (hitChance: float) : bool = landsOn s rng e.Entropy hitChance
+
+    /// A defender's entropy: its own, or the one of its name where names can be shared.
+    let private entropyOf (shared: Dictionary<string, Entropy>) (name: string) : Entropy =
+        if isNull shared then { Value = 0.0; At = 0.0; Has = false }
+        else
+            match shared.TryGetValue name with
+            | true, entropy -> entropy
+            | _ ->
+                let entropy = { Value = 0.0; At = 0.0; Has = false }
+                shared.[name] <- entropy
+                entropy
 
     // ---- the numbers of a hit ----
 
@@ -4083,6 +4122,7 @@ module Flat =
     /// `Sim.releaseMeta`): "Cast on" at maximum, Invocations whenever enough is banked and the
     /// invocation is off cooldown (as many times as it covers).
     and private gainEnergy (s: State) (rng: Rng) (index: int) (gained: float) =
+        let index = (at s.P.Metas index).First
         let info = (at s.P.Metas index)
         let meta = info.Meta
         let gained =
@@ -6024,18 +6064,7 @@ module Flat =
         else
             let accuracy = atk.Accuracy * (if blinded then 1.0 - Constants.blindAccuracyLess / 100.0 else 1.0)
             let hitChance = Vitals.monsterHitChance body.Evasion accuracy
-            let landed =
-                if hitChance >= 100.0 then true
-                else
-                    let value =
-                        if a.HasDodge && s.Time - a.DodgeAt <= 100.0 * Constants.serverTick then a.Dodge
-                        else floor (rng.Float() * 100.0)
-                    let value = value + hitChance
-                    let hit = value >= 100.0
-                    a.Dodge <- (if hit then value - 100.0 else value)
-                    a.DodgeAt <- s.Time
-                    a.HasDodge <- true
-                    hit
+            let landed = landsOn s rng a.Dodge hitChance
             if not landed then bump s p.CMinionEvaded
             else
                 let crit = rng.Chance atk.CritChance && not (hitChance < 100.0 && rng.Chance(100.0 - hitChance))
@@ -6231,18 +6260,7 @@ module Flat =
                     let h = Vitals.monsterHitChance v.Evasion accuracy
                     // Glancing Blows: the evade roll is unlucky (both of two rolls must evade)
                     if v.UnluckyEvade then 100.0 - (100.0 - h) * (100.0 - h) / 100.0 else h
-                let landed =
-                    if hitChance >= 100.0 then true
-                    else
-                        let value =
-                            if s.PHasEntropy && s.Time - s.PEntropyAt <= 100.0 * Constants.serverTick then s.PEntropy
-                            else floor (rng.Float() * 100.0)
-                        let value = value + hitChance
-                        let hit = value >= 100.0
-                        s.PEntropy <- (if hit then value - 100.0 else value)
-                        s.PEntropyAt <- s.Time
-                        s.PHasEntropy <- true
-                        hit
+                let landed = landsOn s rng s.PEntropy hitChance
                 if not landed then bump s p.CEvaded
                 else
                     let blockRoll () = rng.Chance v.Block
@@ -6725,7 +6743,7 @@ module Flat =
 
     /// An enemy as it comes into the fight (`fresh` in `Sim.runWith`): `root` is the enemy
     /// the fight names that it is, or that it replaces.
-    let private makeFoe (ns: int) (info: EnemyInfo) (index: int) (root: int) (def: EnemyDef) : Foe =
+    let private makeFoe (shared: Dictionary<string, Entropy>) (ns: int) (info: EnemyInfo) (index: int) (root: int) (def: EnemyDef) : Foe =
         let e =
             { Info = info
               Index = index
@@ -6755,9 +6773,7 @@ module Flat =
               FlamFrom = 0
               FlamTo = 0
               FlamSum = 0.0
-              Entropy = 0.0
-              EntropyAt = 0.0
-              HasEntropy = false
+              Entropy = entropyOf shared def.Name
               Status = Map.empty
               SHas = [||]
               SStacks = [||]
@@ -6808,7 +6824,8 @@ module Flat =
         let player = fight.Player
         let nb = p.BuffNames.Length
         let ns = p.StatusNames.Length
-        let foes = p.Enemies |> Array.mapi (fun i info -> makeFoe ns info i i info.Def)
+        let shared : Dictionary<string, Entropy> = if p.SharedEntropy then Dictionary<string, Entropy>() else null
+        let foes = p.Enemies |> Array.mapi (fun i info -> makeFoe shared ns info i i info.Def)
         let v = p.Vitals
         let progs : Program[] = Array.zeroCreate (1 + p.Minions.Length)
         put progs 0 p
@@ -6870,8 +6887,8 @@ module Flat =
                   InvocationReady = Array.create pr.Metas.Length -infinity
                   Energy = Map.empty
                   // invocations start with what was banked while clearing
-                  Held = pr.Metas |> Array.map (fun meta -> match meta.Meta.Release with Invocation _ -> meta.Meta.MaxEnergy * fight.BankedInvocations | AtMaximum -> 0.0)
-                  HeldSet = pr.Metas |> Array.map (fun meta -> match meta.Meta.Release with Invocation _ -> true | AtMaximum -> false)
+                  Held = pr.Metas |> Array.map (fun meta -> if System.Double.IsNaN meta.Banked then 0.0 else meta.Banked * fight.BankedInvocations)
+                  HeldSet = pr.Metas |> Array.map (fun meta -> not (System.Double.IsNaN meta.Banked))
                   HeldStale = true
                   LastUsed = -1
                   CritRoll = Array.zeroCreate nk
@@ -6896,9 +6913,7 @@ module Flat =
                   Leaves = infinity
                   Epoch = 0
                   Boned = false
-                  Dodge = 0.0
-                  DodgeAt = 0.0
-                  HasDodge = false })
+                  Dodge = entropyOf shared pr.Actor.Name })
         let s =
             { P = p
               A = agents.[0]
@@ -6977,9 +6992,8 @@ module Flat =
               LastManaRemnant = -1e9
               Burning = []
               CharmCharges = Array.zeroCreate nb
-              PEntropy = 0.0
-              PEntropyAt = 0.0
-              PHasEntropy = false
+              PEntropy = entropyOf shared "Player"
+              Entropies = shared
               VitalsSeen = kept.Vitals
               VitalsOf = -1
               VitalsLast = None
@@ -7041,7 +7055,7 @@ module Flat =
                 let position = Vec.scale (Vec.length d.Position * 1.25 + 10.0) (Vec.ofAngle (Vec.angle d.Position + (s.Rng.Float() - 0.5) * 1.2))
                 let def = { d with Name = name + "+"; Position = position }
                 let index = s.Foes.Length
-                s.Foes <- Array.append s.Foes [| makeFoe ns info index (at s.Foes s.FoeIds.[name]).Root def |]
+                s.Foes <- Array.append s.Foes [| makeFoe s.Entropies ns info index (at s.Foes s.FoeIds.[name]).Root def |]
                 s.FoeIds.[def.Name] <- index
                 s.AliveCount <- s.AliveCount + 1
                 if p.Attacked then
