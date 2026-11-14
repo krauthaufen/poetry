@@ -707,6 +707,21 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         if plain <= 0.0 then failwith "Hammer of the Gods builds no Glory"
         near (plain * 1.25) (builds [ "25% increased Glory generation" ]))
 
+    test "Oil Ground: the plain barrage's hits leave the enemy in oil: Fire Exposure of 20% + 20%, 20% slower, for 6 s" (fun () ->
+        let setup = { Gem = "Oil Barrage"; Level = 20; Quality = 0; StatSet = 1; Supports = [] }
+        let skill = Skill.make "Oil Barrage" [ Attack; Projectile ]
+        let rules = Behaviours.oilGround db.Value ModDb.empty setup skill
+        equal (box [ "exposure", 40.0, 6.0; "slow", -20.0, 6.0 ])
+            (box (rules |> List.map (fun r ->
+                match r.Hook, r.Filter, r.Reaction with
+                | OnHit, Called "Oil Barrage", ApplyExposure (Fire, a, d) -> "exposure", a, d
+                | OnHit, Called "Oil Barrage", ApplyDebuff ("Oil Ground", d, 1, [ m ]) when m.Stat = Named "MovementSpeed" -> "slow", m.Value, d
+                | _ -> "other", 0.0, 0.0)))
+        // 50% increased skill effect duration: 9 s
+        let longer = Behaviours.oilGround db.Value (ModDb.ofList [ Mod.inc SkillDuration 50.0 ]) setup skill
+        equal (box [ 9.0; 9.0 ]) (box (longer |> List.map (fun r -> match r.Reaction with ApplyExposure (_, _, d) | ApplyDebuff (_, d, _, _) -> d | _ -> 0.0)))
+        equal (box ([]: string list)) (box (Gems.unmodelledTypes db.Value "Oil Barrage" |> List.filter ((=) "CreatesGroundEffect"))))
+
     // ---- Scarred Faith ----
 
     test "Scarred Faith: prevented physical damage recouped as energy shield per enemy power; no regeneration; none above armour" (fun () ->

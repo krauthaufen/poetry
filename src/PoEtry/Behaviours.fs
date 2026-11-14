@@ -1290,6 +1290,24 @@ module Behaviours =
             elif has "can_create_jagged_ground" && sum "skill_jagged_ground_base_duration_ms" > 0.0 then onHit debuff
             else []
 
+    /// Oil Ground (Oil Barrage without a charge): "creating Oil Ground where the Projectiles
+    /// land"; it slows movement ("Oil Slows enemy movement speed by X%") and inflicts Fire
+    /// Exposure ("Oiled Ground": "inflicted with Fire Exposure"), whose 20% "Exposure lowers
+    /// Total Elemental Resistances by an additional X%" raises. The enemies the plain barrage
+    /// hits are in the oil, and are taken to stay in it for its time (as for Jagged Ground).
+    let oilGround (db: GameDb) (charMods: ModDb) (setup: GemSetup) (skill: Skill) : Rule list =
+        let raw = Gems.rawStats db charMods setup
+        let sum id = raw |> List.filter (fun (k, _) -> k = id) |> List.sumBy snd
+        let exposure, slow = sum "skill_base_oil_exposure_-_to_total_elemental_resistance", sum "skill_base_oil_movement_speed_+%_final_to_apply"
+        if exposure = 0.0 && slow = 0.0 then []
+        else
+            let ctx = { Ctx.empty with SkillTags = skill.Tags; SkillName = skill.Name }
+            let seconds = sum "base_skill_effect_duration" / 1000.0 * Mods.mult ctx [ SkillDuration ] (ModDb.ofList (ModDb.toList charMods @ skill.Mods))
+            [ if exposure > 0.0 then
+                  yield { Hook = OnHit; Filter = Called skill.Name; Chance = 100.0; Reaction = ApplyExposure(Fire, Constants.exposureMagnitude + exposure, seconds) }
+              if slow < 0.0 then
+                  yield { Hook = OnHit; Filter = Called skill.Name; Chance = 100.0; Reaction = ApplyDebuff("Oil Ground", seconds, 1, [ Mod.more (Named "MovementSpeed") slow ]) } ]
+
     /// Ice Bite: "Gain X% of Damage as Cold Damage for N seconds on Freezing an enemy with
     /// Supported Skills": a buff on the character (for all it does: "infuses your damage with
     /// Cold damage") whenever the supported skill, one of its parts or its infused form

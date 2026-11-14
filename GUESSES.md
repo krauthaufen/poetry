@@ -18,7 +18,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
    whose description or behaviour changed.
 5. Go through the lists below; the wiki's version history of a skill says what changed.
 
-## Rules (113)
+## Rules (114)
 
 ### Hit damage
 
@@ -128,6 +128,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | Frost Bomb's exposure | "Initially applies {0}% Elemental Exposure and {1}% Exposure per pulse, up to a maximum of {2}%" (`active_skill_all_elemental_exposure_compounding_magnitude`, `_cap`) | data / guess |
 | The Stars Answer | game data, wiki. Active for the whole fight (it has no duration in the data, the cast is taken to be before the fight) is a guess; more stars per enemy in its radius after the first are not counted | data; guess |
 | Triskelion Cascade | game data. The pattern's measures are not in the data: impacts spaced like Spell Cascade's (1.5 radii), the arms turned at random. The share of the spell's cast time added to the cooldown is not counted | data; pattern guess |
+| Oil Ground | gem data, buff text "Oiled Ground: inflicted with Fire Exposure"; adding the 20% to the keyword's 20% and staying in the oil are guesses | guess |
 | Ice Crystals (Grim Pillars) | gem stats (`wall_maximum_length`, `frost_wall_maximum_life`); wiki Ice Crystal ("larger enemies can walk through them and destroy them", 80% less within 0.5 s); user (no explosion on expiry); placement, one crystal per 0.8 m, and enemy life lost standing for damage to the crystal, are guesses | guess |
 | What a fight starts with | user: buffs that last may be up when the fight starts, what comes from the last kill is not, bosses have introductions far longer than 4 s | guess |
 | Weapon for a skill | - | guess |

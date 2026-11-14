@@ -352,7 +352,9 @@ module Gems =
         |> Option.map (fun d ->
             // (a detonation after a time is played for grenades and Frost Bomb: their hit's delay)
             let fused = d.Types.Contains "Grenade" || d.Name = "Frost Bomb"
-            d.Types |> Set.filter (fun t -> not (descriptiveTypes.Contains t) && not (modelledTypes.Contains t) && not (fused && t = "DetonatesAfterTime")) |> Set.toList)
+            // (what Grim Pillars and Oil Barrage leave on the ground is played: Ice Crystals, Oil Ground)
+            let grounded = d.Name = "Grim Pillars" || d.Name = "Oil Barrage"
+            d.Types |> Set.filter (fun t -> not (descriptiveTypes.Contains t) && not (modelledTypes.Contains t) && not (fused && t = "DetonatesAfterTime") && not (grounded && t = "CreatesGroundEffect")) |> Set.toList)
         |> Option.defaultValue []
 
     let isPersistentBuff (db: GameDb) name =

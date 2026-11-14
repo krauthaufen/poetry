@@ -317,6 +317,9 @@ module StatMap =
         | "support_consume_X_endurance_charges_on_use" -> Some Structural
         // "Enemies you Curse are Hindered, with 15% reduced Movement Speed" (Behaviours.curseOf)
         | "enemies_you_curse_have_15%_hinder" -> one (Mod.flag (Named "CursesHinder"))
+        // Oil Ground's exposure and slow: read by Behaviours.oilGround; how it ignites (an Ignite
+        // from Ignited Ground or a Detonator) is not modelled
+        | "skill_base_oil_exposure_-_to_total_elemental_resistance" | "skill_base_oil_movement_speed_+%_final_to_apply" -> Some Structural
         // Ice Bite's buff on freezing an enemy: read by Behaviours.iceBite
         | "support_ice_bite_buff_grant_%_added_cold_attack_damage" | "support_ice_bite_base_buff_duration" -> Some Structural
         // "Casting Ice Nova targeting near a Frostbolt Projectile will cause it to originate from

@@ -417,6 +417,7 @@ module Setup =
                     let biteRules =
                         let withParts (x: Skill) = x.Name :: (x.Parts |> List.map (fun p -> p.Name))
                         biteRules @ Behaviours.jaggedGround db charMods setup s (withParts s @ (match copy with Some (_, _, cp) -> withParts cp | None -> []))
+                        @ Behaviours.oilGround db charMods setup s
                     let rules = cryRules @ biteRules @ (match lasting with Some (_, rs) -> rs | None -> []) @ Behaviours.useRules db charMods setup s.Name o.Pickup @ Behaviours.buffRules db charMods setup s @ Behaviours.totemPlacement db charMods setup s @ curseRules
                     let grants = Behaviours.verisiumGrant db charMods setup
                     let s = Behaviours.applyObserved s
