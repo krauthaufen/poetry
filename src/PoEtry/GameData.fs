@@ -82,7 +82,11 @@ type MinionData =
       Ranged: bool
       /// MonsterVarieties ObjectSize (its body's radius) and its attack range, game units.
       ObjectSize: float
-      AttackRange: float }
+      AttackRange: float
+      /// The Spirit it reserves as a companion (Tame Beast) or a spectre: the monster's own
+      /// numbers (PoB Data/Spectres `companionReservation`, `spectreReservation`).
+      CompanionReservation: float
+      SpectreReservation: float }
 
 type GemData =
     { GameId: string
@@ -188,7 +192,9 @@ module GameData =
                     (let tags = Json.list (Json.field "monsterTags" j) |> List.choose Json.str
                      not (List.contains "melee" tags) && (List.contains "ranged" tags || List.contains "caster" tags))
                   ObjectSize = num "objectSize" 1.0
-                  AttackRange = num "attackRange" 10.0 })
+                  AttackRange = num "attackRange" 10.0
+                  CompanionReservation = num "companionReservation" 0.0
+                  SpectreReservation = num "spectreReservation" 0.0 })
         | _ -> Map.empty
 
     /// skills.json: grantedEffectId -> skill.

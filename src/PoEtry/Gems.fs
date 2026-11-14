@@ -235,6 +235,13 @@ module Gems =
             | Some g -> Map.tryFind g.GrantedEffectId db.Skills
             | None -> Map.tryFind n db.Skills
         find name |> Option.orElse (if plain name <> name then find (plain name) else None)
+        // a companion or spectre the source names by its monster ("Companion: Quill Crab"): the
+        // gem that holds it (Tame Beast with a captured beast, Spectre: {0}); the monster is
+        // found by name where minions are built
+        |> Option.orElse (
+            if name.StartsWith "Companion: " then Map.tryFind "TameBeastPlayer" db.Skills
+            elif name.StartsWith "Spectre: " then Map.tryFind "SummonSpectrePlayer" db.Skills
+            else None)
 
     /// A support gem's data. A name can belong to a support and to a skill ("Unleash"): in a
     /// support socket it is the support.

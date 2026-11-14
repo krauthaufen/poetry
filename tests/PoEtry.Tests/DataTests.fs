@@ -811,6 +811,13 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         let cost (b: PobBuild) name = Behaviours.spiritUses db.Value (sheetOf b) b |> List.filter (fun u -> u.Gem = name) |> List.sumBy (fun u -> u.Flat)
         // Cast on Critical: 100 Spirit; 0.5% reservation efficiency per quality
         near 100.0 (cost { blank with Groups = [ group "" "Cast on Critical" 0 ] } "Cast on Critical")
+        // a companion and a spectre named by their monster reserve the monster's own Spirit
+        // (Rabid Dog: 30 as a companion, 50 as a spectre; the variant with the most skills)
+        let perMinion (b: PobBuild) name = Behaviours.spiritUses db.Value (sheetOf b) b |> List.filter (fun u -> u.Gem = name) |> List.sumBy (fun u -> u.PerMinion)
+        let dog = db.Value.Minions |> Map.toList |> List.map snd |> List.filter (fun m -> m.Name = "Rabid Dog") |> List.sortByDescending (fun m -> m.SkillList.Length) |> List.head
+        near dog.CompanionReservation (perMinion { blank with Groups = [ group "" "Companion: Rabid Dog" 0 ] } "Companion: Rabid Dog")
+        near dog.SpectreReservation (perMinion { blank with Groups = [ group "" "Spectre: Rabid Dog" 0 ] } "Spectre: Rabid Dog")
+        equal (box true) (box (Gems.data db.Value "Companion: Rabid Dog").IsSome)
         near (100.0 / 1.1) (cost { blank with Groups = [ group "" "Cast on Critical" 20 ] } "Cast on Critical")
         // a skill an item grants reserves nothing
         near 0.0 (cost { blank with Groups = [ group "granted" "Cast on Critical" 0 ] } "Cast on Critical")

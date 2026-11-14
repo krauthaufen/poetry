@@ -1384,13 +1384,23 @@ module Behaviours =
                 |> Option.bind (fun l -> l.SpiritReservation)
                 |> Option.defaultValue 0.0
             let level (x: PobGem) = Gems.data db x.Name |> Option.bind (fun d -> Map.tryFind x.Level d.Levels |> Option.orElse (Map.tryFind 1 d.Levels))
+            // a companion or a spectre named by its monster: the monster's own Spirit
+            let monsterReservation (gem: PobGem) =
+                let named (prefix: string) = if gem.Name.StartsWith prefix then Some(gem.Name.Substring prefix.Length) else None
+                let monster (n: string) =
+                    gem.Minion |> Option.bind (fun id -> Map.tryFind id db.Minions)
+                    |> Option.orElse (db.Minions |> Map.toList |> List.map snd |> List.filter (fun m -> m.Name = n) |> List.sortByDescending (fun m -> m.SkillList.Length) |> List.tryHead)
+                match named "Companion: ", named "Spectre: " with
+                | Some n, _ -> monster n |> Option.map (fun m -> m.CompanionReservation)
+                | _, Some n -> monster n |> Option.map (fun m -> m.SpectreReservation)
+                | _ -> None
             enabled
             |> List.filter (fun x -> not x.IsSupport)
             |> List.choose (fun gem ->
                 match Gems.data db gem.Name with
-                | Some d when d.Types.Contains "Persistent" || d.Types.Contains "HasReservation" ->
+                | Some d when d.Types.Contains "Persistent" || d.Types.Contains "HasReservation" || (monsterReservation gem).IsSome ->
                     let tags = d.Types |> Set.toList |> List.map (fun t -> Tag("Type:" + t)) |> Set.ofList
-                    let own = reservation gem.Name gem.Level
+                    let own = match monsterReservation gem with Some r -> r | None -> reservation gem.Name gem.Level
                     // supports' own Spirit, and their "+N% reservation", which multiply with each other
                     // In a meta gem a support belongs to the meta gem or to a skill socketed in it:
                     // one that fits a socketed skill and not the meta gem costs the meta gem nothing.
