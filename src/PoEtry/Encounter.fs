@@ -339,7 +339,10 @@ module Geometry =
         while not rest.IsEmpty do
             let e = rest.Head
             if hit.IsEmpty || not (List.contains e.Name hit) then
-                let t = entryAt origin dir e
+                // (the ray enters no nearer than the enemy's edge is: one whose edge is out of
+                // reach, by more than any rounding, is not worked out)
+                let away = Vec.dist e.Position origin
+                let t = if away - e.Size > within + 1e-3 + 1e-6 * away then nan else entryAt origin dir e
                 if t <= within && (best.IsNone || t < least) then
                     best <- ValueSome(struct (t, e))
                     least <- t
@@ -628,7 +631,7 @@ module Geometry =
             let whom = ResizeArray<string>()
             for i in 0 .. flights.Length - 1 do
                 let path = flights.[i]
-                mark (Flight path.Points)
+                if marks.IsSome then mark (Flight path.Points)
                 let mutable hit = path.Hit
                 let mutable dist = path.Dist
                 while not hit.IsEmpty do
@@ -681,13 +684,17 @@ module Geometry =
                     match best with
                     | Some next -> next :: chain next (left - 1) (seen.Add next.Name)
                     | None -> []
-            pathsWith marks.IsSome rng walls p reach primary alive
-            |> List.fold
-                (fun (acc, hitByUse: Set<string>) path ->
+            let names = ResizeArray<string>()
+            let hitByUse = System.Collections.Generic.HashSet<string>()
+            let mutable flights = pathsWith marks.IsSome rng walls p reach primary alive
+            while not flights.IsEmpty do
+                let path = flights.Head
+                if marks.IsSome then mark (Flight path.Points)
+                // (a projectile that hit nothing does nothing more)
+                if not path.Hit.IsEmpty then
                     // without shotgun, a later projectile ignores enemies an earlier one hit
                     let hits = if p.CanShotgun then path.Hit else path.Hit |> List.filter (fun n -> not (hitByUse.Contains n))
                     let struck = hits |> List.map byName
-                    mark (Flight path.Points)
                     let chained =
                         match List.tryLast struck with
                         | Some last -> chain last p.Chains (hits |> Set.ofList)
@@ -696,10 +703,16 @@ module Geometry =
                      | Some last -> chained |> List.fold (fun (from: EnemyDef) next -> mark (Line(from.Position, next.Position)); next) last |> ignore
                      | None -> ())
                     let all = struck @ chained
-                    let names = (all |> List.map (fun e -> e.Name)) @ (all |> List.collect (fun e -> explode e.Position))
-                    acc @ names, names |> List.fold (fun s n -> s.Add n) hitByUse)
-                ([], Set.empty)
-            |> fst
+                    let from = names.Count
+                    for e in all do
+                        names.Add e.Name
+                    for e in all do
+                        for n in explode e.Position do
+                            names.Add n
+                    for k in from .. names.Count - 1 do
+                        hitByUse.Add names.[k] |> ignore
+                flights <- flights.Tail
+            List.ofSeq names
 
     let targetsFrom (rng: Rng) (walls: Wall list) (reach: float) (delivery: Delivery) (areaMult: float) (primary: EnemyDef) (alive: EnemyDef list) : string list =
         targetsWith None rng walls reach delivery areaMult primary alive

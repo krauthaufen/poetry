@@ -707,8 +707,8 @@ module Flat =
           Sources: EnergySource[]
           FromHits: bool
           Triggers: int[]
-          /// Whether the character has "increased Energy" of its own for it.
-          HasEnergyMods: bool
+          /// The character's own "increased Energy" for it, newest first, their conditions as numbers.
+          EnergyMods: Item[]
           Released: int }
 
     /// An overkill explosion (see `OverkillBurn`).
@@ -1517,7 +1517,13 @@ module Flat =
                        Sources = Array.ofList m.Sources
                        FromHits = m.Sources |> List.exists (fun src -> match src with CritHits _ | MeleeHits _ | MeleeKills _ | InflictsAilment _ -> true | _ -> false)
                        Triggers = m.Triggers |> List.map (skillId "a meta gem's trigger") |> Array.ofList
-                       HasEnergyMods = ModDb.hasStat (fun st -> st = Named "EnergyGenerated") m.EnergyMods
+                       EnergyMods =
+                        (let found = ResizeArray<Item>()
+                         ModDb.forStat (Named "EnergyGenerated") Inc m.EnergyMods (fun md ->
+                            match compileConds buffs.Id statuses.Id None md.Conds with
+                            | Some conds, stacky -> found.Add { V = md.Value; Conds = conds; Stacky = stacky; Slot = -1 }
+                            | None, _ -> ())
+                         found.ToArray())
                        Released = counts.Id("meta:" + m.Name) }: MetaInfo))
                 |> Array.ofList
 
@@ -2419,7 +2425,13 @@ module Flat =
           mutable ArchonRecovery: float
           /// By meta gem: when its invocation can be used again.
           InvocationReady: float[]
+          /// The counters the reference keeps by name (Glory, the place in a chain, ...), with
+          /// the meta gems' energy as it was when last asked for by name (see `energyMap`).
           mutable Energy: Map<string, float>
+          /// By meta gem: its energy, and whether it has had any yet.
+          Held: float[]
+          HeldSet: bool[]
+          mutable HeldStale: bool
           mutable LastUsed: int
           CritRoll: float[]
           HasCritRoll: bool[]
@@ -3874,16 +3886,31 @@ module Flat =
     /// A meta gem gains energy, and triggers its spells if that allows (`Sim.gainEnergy`,
     /// `Sim.releaseMeta`): "Cast on" at maximum, Invocations whenever enough is banked and the
     /// invocation is off cooldown (as many times as it covers).
-    and private gainEnergy (s: State) (rng: Rng) (index: int) (amount: float) =
+    and private gainEnergy (s: State) (rng: Rng) (index: int) (gained: float) =
         let info = (at s.P.Metas index)
         let meta = info.Meta
-        let amount =
-            if not info.HasEnergyMods then amount
+        let gained =
+            if info.EnergyMods.Length = 0 then gained
             else
-                let more = Mods.sumInc { Ctx.empty with Buffs = buffMap s } [ Named "EnergyGenerated" ] meta.EnergyMods / 100.0
-                amount * (meta.EnergyMult + more) / meta.EnergyMult
-        let energy = min meta.MaxEnergy ((Map.tryFind meta.Name s.A.Energy |> Option.defaultValue 0.0) + amount)
-        s.A.Energy <- Map.add meta.Name energy s.A.Energy
+                // (asked with the buffs known and nothing else: no skill, no enemy)
+                let ev = acquireRaw s
+                ev.Tags <- Set.empty
+                ev.Name <- ""
+                ev.BOn <- true
+                ev.BHas <- s.A.BHas
+                ev.BStacks <- s.A.BStacks
+                s.A.BKept <- true
+                let mutable sum = 0.0
+                for k in 0 .. info.EnergyMods.Length - 1 do
+                    let it = at info.EnergyMods k
+                    if it.Conds.Length = 0 || passes ev it then sum <- sum + amount ev it
+                release s
+                let more = sum / 100.0
+                gained * (meta.EnergyMult + more) / meta.EnergyMult
+        let energy = min meta.MaxEnergy ((if (at s.A.HeldSet index) then (at s.A.Held index) else 0.0) + gained)
+        put s.A.Held index energy
+        put s.A.HeldSet index true
+        s.A.HeldStale <- true
         let triggers =
             match meta.Release with
             | AtMaximum -> if energy >= meta.MaxEnergy && meta.Cost > 0.0 then 1 else 0
@@ -3891,7 +3918,7 @@ module Flat =
         if triggers <> 0 then
             let spent = float triggers * meta.Cost
             let refund = if rng.Chance meta.RefundChance then spent / 2.0 else 0.0
-            s.A.Energy <- Map.add meta.Name (energy - spent + refund) s.A.Energy
+            put s.A.Held index (energy - spent + refund)
             (match meta.Release with
              | Invocation cd -> s.A.InvocationReady.[index] <- s.Time + cd
              | AtMaximum -> ())
@@ -4248,6 +4275,16 @@ module Flat =
                 s.A.Energy <- s.A.Energy |> Map.add "SigilSpent" (total - need) |> Map.add "SigilStageAt" s.Time
             else s.A.Energy <- Map.add "SigilSpent" total s.A.Energy
 
+    /// The actor's energies and counters by name, as the reference has them: the meta gems'
+    /// energy is kept by number, and put under the gems' names here when it has changed.
+    let private energyMap (s: State) : Map<string, float> =
+        if s.A.HeldStale then
+            let metas = s.P.Metas
+            for i in 0 .. metas.Length - 1 do
+                if (at s.A.HeldSet i) then s.A.Energy <- Map.add (at metas i).Meta.Name (at s.A.Held i) s.A.Energy
+            s.A.HeldStale <- false
+        s.A.Energy
+
     /// What the player sees when choosing a skill (`Sim.view`).
     let private view (s: State) : View =
         let t = aimed s
@@ -4277,7 +4314,7 @@ module Flat =
           EnemyLifeFraction = (if t >= 0 then (at s.Foes t).Life / (at s.Foes t).Def.Life else 0.0)
           EnemyRarity = (if t >= 0 then (at s.Foes t).Def.Rarity else Normal)
           EnemiesAlive = s.AliveCount
-          Energy = s.A.Energy
+          Energy = energyMap s
           LastUsed = (if s.A.LastUsed >= 0 then (at s.P.Skills s.A.LastUsed).Skill.Name else "") }
 
     /// The player is free to act: the first step of the rotation that can be used and paid
@@ -6446,12 +6483,11 @@ module Flat =
                   Recharges = Array.create nk []
                   ArchonRecovery = -infinity
                   InvocationReady = Array.create pr.Metas.Length -infinity
+                  Energy = Map.empty
                   // invocations start with what was banked while clearing
-                  Energy =
-                    pr.Metas |> Array.fold (fun (m: Map<string, float>) meta ->
-                        match meta.Meta.Release with
-                        | Invocation _ -> Map.add meta.Meta.Name (meta.Meta.MaxEnergy * fight.BankedInvocations) m
-                        | AtMaximum -> m) Map.empty
+                  Held = pr.Metas |> Array.map (fun meta -> match meta.Meta.Release with Invocation _ -> meta.Meta.MaxEnergy * fight.BankedInvocations | AtMaximum -> 0.0)
+                  HeldSet = pr.Metas |> Array.map (fun meta -> match meta.Meta.Release with Invocation _ -> true | AtMaximum -> false)
+                  HeldStale = true
                   LastUsed = -1
                   CritRoll = Array.zeroCreate nk
                   HasCritRoll = Array.create nk false
