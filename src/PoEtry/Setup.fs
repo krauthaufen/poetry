@@ -111,7 +111,10 @@ type Loaded =
       SpiritUses: Behaviours.SpiritUse list
       /// Persistent minions, and notes on minion skills left out.
       Minions: Actor list
-      MinionNotes: string list }
+      MinionNotes: string list
+      /// The character fights with weapon set two in hand: its defences in the fight are that
+      /// set's (`Vitals` is already).
+      SheetSetTwo: bool }
 
 module Setup =
     /// A build from its text: official character API JSON or PoB XML.
@@ -322,7 +325,8 @@ module Setup =
           Spirit = Behaviours.spiritTotal sheet build
           SpiritUses = Behaviours.spiritUses db sheet build
           Minions = fst minionActors
-          MinionNotes = snd minionActors }
+          MinionNotes = snd minionActors
+          SheetSetTwo = sheetSetTwo }
 
     /// A skill the player uses, by gem name, with its group's supports: the skill, its
     /// infused copy (skill name, infusion, copy), Verisium infusions it grants, and the rules
@@ -668,7 +672,8 @@ module Setup =
                    | None -> [])
             Cycles = c.Cycles
             Vitals = (if o.Immortal then None else Some c.Vitals)
-            VitalsAt = Some(fun current -> Defence.computeWith current c.Bases sheet)
+            // (with the weapon set in hand: the buffs of the moment don't say which it is)
+            VitalsAt = Some(fun current -> Defence.computeWith (if c.SheetSetTwo then Map.add "WeaponSetTwo" 1 current else current) c.Bases sheet)
             VitalsReads = Some(Defence.reads sheet)
             Periodics = c.Periodics @ snd (Behaviours.summons db sheet c.Build pressedSkills) @ starPeriodics
             MaxResources = Map.fold (fun m k v -> Map.add k v m) c.MaxResources infusionMaxima

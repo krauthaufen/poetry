@@ -573,3 +573,36 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         for id in [ "curse_effect_on_self_+%"; "damage_+%_per_active_curse_on_self"; "armour_break_taken_+%"; "deflected_hits_cannot_inflict_bleeding_on_self"
                     "enemies_in_presence_life_regeneration_+%"; "enemies_in_presence_cooldown_recovery_+%"; "heist_enchantment_resistance_mod_effect_+%" ] do
             equal (box NotOffensive) (box (StatMap.meaning id 10.0)))
+
+    // ---- the weapon set in hand ----
+
+    test "a character that fights with weapon set two has that set's defences in the fight, not only on its sheet" (fun () ->
+        // a shield of 400 armour in set one, of 100 in set two, "+30 to Strength" on set two's weapon
+        let b =
+            { blank with
+                Items =
+                    [ "Weapon 2", "Rarity: Rare\nTest Shield\n--------\nArmour: 400"
+                      "Weapon 2 Swap", "Rarity: Rare\nOther Shield\n--------\nArmour: 100"
+                      "Weapon 1 Swap", "Rarity: Rare\nTest Mace\nPlated Mace\n--------\n+30 to Strength\n" ] }
+        for setTwo in [ false; true ] do
+            let o = { Options.defaults with SheetSetTwo = Some setTwo }
+            let c = load b o
+            let player = Setup.player c o [] None
+            let atFight = player.VitalsAt.Value (c.Resources |> Map.ofList)
+            // the sheet and the fight agree, whichever set is in hand
+            near c.Vitals.Armour atFight.Armour
+            near c.Vitals.Str atFight.Str
+            near c.Vitals.Life atFight.Life
+        let one, two = load b { Options.defaults with SheetSetTwo = Some false }, load b { Options.defaults with SheetSetTwo = Some true }
+        near 30.0 (two.Vitals.Str - one.Vitals.Str)
+        if not (one.Vitals.Armour > two.Vitals.Armour * 2.0) then failwithf "armour %.0f in set one, %.0f in set two" one.Vitals.Armour two.Vitals.Armour
+        // and a monster's hit meets set two's armour: it takes more through the smaller shield
+        let o = { Options.defaults with SheetSetTwo = Some true; MaxTime = 10.0 }
+        let brute =
+            { EnemyDef.make Rarity.defaults 70 Magic "brute" (Vec.make 5.0 0.0) with
+                Life = 1e9
+                Attack = Some { Interval = 0.5; Damage = Map.ofList [ Physical, 200.0 ]; Accuracy = 1e9; Range = 20.0; CritChance = 0.0; Melee = true } }
+        let taken (c: Loaded) (o: Options) = (Sim.run (Setup.fight c o (Setup.player c o [] None) [ brute ]) 1u).DamageTaken
+        let withTwo = taken two o
+        let withOne = taken one { o with SheetSetTwo = Some false }
+        if not (withTwo > withOne) then failwithf "took %.0f with set two in hand, %.0f with set one" withTwo withOne)
