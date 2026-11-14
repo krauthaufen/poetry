@@ -18,7 +18,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
    whose description or behaviour changed.
 5. Go through the lists below; the wiki's version history of a skill says what changed.
 
-## Rules (97)
+## Rules (98)
 
 ### Hit damage
 
@@ -97,7 +97,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | Shapeshift skills | using one means "while Shapeshifted" conditions hold for the whole fight | | guess |
 | Using them up | game rule | guess |
 | Chains | game rule (recollection) | guess |
-| Herald of Ash | gem description + data | data; the ignite takes no further modifiers (guess) |
+| Herald of Ash | gem description + data | data; the ignite takes no further modifiers (guess); in the damage shares it is the herald's, not "Ignite" |
 | Item modifier magnitudes | item text as the API gives it | guess |
 | Tempest Bell | `bell_hit_limit`, `bell_shockwave_cooldown_ms`; description | data / guess |
 | Lightning Warp | description ("Can also be used on Ball Lightning Projectiles", "Creates a Lightning Infusion on successful use") | guess |
@@ -153,6 +153,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 |---|---|---|
 | Infusion remnants | gem data; pickup delay a guess | data + guess |
 | Verisium in the rotation | player behaviour | guess |
+| Charged Staff's shockwave | `ChargedStaffShockwavePlayer` (baseMultiplier, `active_skill_base_area_of_effect_radius` 50, `charged_staff_cone_angle` 45, `charged_staff_bonus_width` 15, conversion 80); gem text ("adding Lightning damage and a Lightning shockwave to your Quarterstaff Attacks"); user: its hits deal a little physical damage and leech with the group's support. One per use and when it lands, 45 degrees being the whole angle, and what the bonus width widens are guesses | data / guess |
 | Block | data / game text | data + guess (cap) |
 | Energy from melee hits / kills | gem stats; the scaling is taken to be the same as for crits | guess |
 

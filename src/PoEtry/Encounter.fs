@@ -661,6 +661,20 @@ module Geometry =
             let r = radius r areaMult
             mark (Ring(Vec.zero, r, 0.0))
             alive |> List.filter (within Vec.zero r) |> List.map (fun e -> e.Name)
+        | Cone (length, angle, width) ->
+            // towards the aimed-at enemy; an enemy is in it if it reaches into it
+            let r = radius length areaMult
+            let aim = Vec.angle primary.Position
+            let dir = Vec.ofAngle aim
+            let half = angle * System.Math.PI / 360.0
+            mark (Line(Vec.zero, Vec.scale r (Vec.ofAngle (aim - half))))
+            mark (Line(Vec.zero, Vec.scale r (Vec.ofAngle (aim + half))))
+            alive
+            |> List.filter (fun e ->
+                let along = dot e.Position dir
+                let aside = abs (dir.X * e.Position.Y - dir.Y * e.Position.X)
+                within Vec.zero r e && along >= -e.Size && aside <= width / 2.0 + max 0.0 along * tan half + e.Size)
+            |> List.map (fun e -> e.Name)
         | Projectiles ({ Rain = Some (area, impact) } as p) ->
             // every projectile lands at a random point of the area and hits what is in reach
             let area, impact = radius area areaMult, radius impact areaMult

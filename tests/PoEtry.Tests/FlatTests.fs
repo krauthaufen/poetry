@@ -909,6 +909,32 @@ let run (test: string -> (unit -> unit) -> unit) =
         let unprepared = Sim.run { fight with BankedInvocations = 0.0; Enemies = pack |> List.map (fun e -> { e with Life = 1e9 }) } 1u
         if not (unprepared.Counts.ContainsKey "buff:Charged") then failwith "expected the charge buff")
 
+    test "flat: a shockwave in a cone, set off by every use of a staff attack while a buff is up" (fun () ->
+        let pack = Encounter.pack 80 Rarity.defaults [ Normal, 8; Magic, 3; Rare, 1 ] 30.0 20.0 false 5u |> List.map (fun e -> { e with Life = e.Life * 3.0 })
+        let staff = { Skill.make "Charged Staff" [ Spell ] with Hits = []; BaseTime = 0.5; Cooldown = Some 6.0 }
+        let wave = { strike "Charged Staff: Shockwave" 300.0 500.0 with Tags = Set.ofList [ Attack; Quarterstaff; Area; Triggered ]; Delivery = Cone(50.0, 45.0, 15.0); Mods = [ Mod.base' ManaLeech 8.0 ] }
+        let swing = { strike "Swing" 2000.0 4000.0 with Tags = Set.ofList [ Attack; Quarterstaff; Melee ] }
+        let player =
+            { Actor.make "Player" [ Mod.inc AreaOfEffect 30.0 ] [ staff; swing; wave ] with
+                Rotation = [ { Use = "Charged Staff"; When = fun v -> not (v.Buffs.ContainsKey "Charged Staff buff") }; Actor.always "Swing" ]
+                Rules =
+                    [ { Hook = OnUse; Filter = Called "Charged Staff"; Chance = 100.0; Reaction = ChargeBuff("Charged Staff buff", "PowerCharge", [ Mod.base' (AddedMax Lightning) 50.0 ], 2.0, 0.0) }
+                      { Hook = OnUse; Filter = WithTags([ Quarterstaff ], [ Triggered ]); Chance = 100.0; Reaction = IfBuff("Charged Staff buff", TriggerSkill "Charged Staff: Shockwave") }
+                      { Hook = OnCrit; Filter = AnySkill; Chance = 100.0; Reaction = GainResource("PowerCharge", 1) } ]
+                Resources = [ "PowerCharge", 2 ]
+                MaxResources = Map.ofList [ "PowerCharge", 3 ] }
+        let fight = { Fight.single pack.Head player 25.0 with Enemies = pack }
+        same fight seeds
+        same { fight with BankedInvocations = 0.0 } seeds
+        let o = Sim.run fight 1u
+        let count k = Map.tryFind k o.Counts |> Option.defaultValue 0
+        // at most one shockwave a swing, and it hits more than one enemy; none without the buff
+        if not (count "uses:Charged Staff: Shockwave" > 0 && count "uses:Charged Staff: Shockwave" <= count "uses:Swing") then
+            failwithf "expected a shockwave with the swings: %d of %d" (count "uses:Charged Staff: Shockwave") (count "uses:Swing")
+        let bare = Sim.run { fight with BankedInvocations = 0.0; Player = { player with Resources = []; Rotation = [ Actor.always "Swing" ] } } 1u
+        if bare.Counts.ContainsKey "uses:Charged Staff: Shockwave" then failwith "expected no shockwave without the buff"
+        if not (count "hits:Charged Staff: Shockwave" > count "uses:Charged Staff: Shockwave") then failwith "expected the cone to hit several enemies")
+
     // ---- minions and totems ----
     let bite name dmg = { Skill.make name [ Attack; Melee ] with BaseDamage = Map.ofList [ Physical, { Min = dmg * 0.8; Max = dmg * 1.2 } ]; BaseCrit = 6.0 }
     let sure = Mod.base' (Named "Accuracy") 1e12

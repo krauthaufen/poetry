@@ -791,6 +791,32 @@ module Behaviours =
                   { Hook = OnHit; Filter = WithTagNot(Attack, Tag("Gem:" + setup.Gem)); Chance = 100.0; Reaction = SpendStack("TempestBell", TriggerSkill wave.Name) } ])
         | _ -> None
 
+    /// Charged Staff: "adding Lightning damage and a Lightning shockwave to your Quarterstaff
+    /// Attacks". The shockwave is the gem's second effect (`triggered_by_charged_staff`): an
+    /// attack with the weapon and its own multiplier, in a cone towards the target, with the
+    /// gem's supports. Every use of a quarterstaff attack that is not itself triggered sets
+    /// one off while the buff is up, at the moment of the use (guess: the text does not say
+    /// how often; the user sees its hits and its leech).
+    /// Returns the shockwave and the rule.
+    let chargedShockwave (db: GameDb) (charMods: ModDb) (weapon: Weapon option) (setup: GemSetup) (skill: Skill) : (Skill * Rule list) option =
+        Map.tryFind setup.Gem db.Gems |> Option.map (fun g -> g.AdditionalEffects) |> Option.defaultValue []
+        |> List.tryPick (fun id ->
+            match Map.tryFind id db.Skills with
+            | Some d when d.StatSets |> List.exists (fun st -> st.Stats |> List.contains "triggered_by_charged_staff") ->
+                (match Gems.skill db charMods weapon { setup with Gem = id } with
+                 | Ok (s, _) -> Some(id, s)
+                 | Error _ -> None)
+            | _ -> None)
+        |> Option.map (fun (id, s) ->
+            let raw = Gems.rawStats db charMods { setup with Gem = id; Supports = [] }
+            let sum k = raw |> List.filter (fun (x, _) -> x = k) |> List.sumBy snd
+            let name = skill.Name + ": " + s.Name
+            { s with
+                Name = name; Tags = s.Tags.Add Triggered; Cost = 0.0; Cooldown = None; Parts = []
+                Delivery = Cone(sum "active_skill_base_area_of_effect_radius", sum "charged_staff_cone_angle", sum "charged_staff_bonus_width")
+                Hits = [ 1.0, 1.0 ] },
+            [ { Hook = OnUse; Filter = WithTags([ Quarterstaff ], [ Triggered ]); Chance = 100.0; Reaction = IfBuff(skill.Name + " buff", TriggerSkill name) } ])
+
     /// Ice-Tipped Arrows: "Empowering your next Repeatable Bow or Projectile Spear Attacks to
     /// Convert Physical Damage to Cold Damage and Trigger Ice Fragments on Hit". The gem's second
     /// effect is the fragments: they land around the target and explode after their detonation

@@ -405,6 +405,8 @@ module Setup =
                     let tipped = Behaviours.iceTipped db charMods (Gems.chooseWeapon db setup.Gem sheet.Weapons) setup s
                     let cryRules = cryRules @ (match tipped with Some (_, rs, _) -> rs | None -> [])
                     let cryGrants = cryGrants @ (match tipped with Some (_, _, ms) -> ms | None -> [])
+                    let wave = Behaviours.chargedShockwave db charMods (Gems.chooseWeapon db setup.Gem sheet.Weapons) setup s
+                    let cryRules = cryRules @ (match wave with Some (_, rs) -> rs | None -> [])
                     let rules = cryRules @ (match lasting with Some (_, rs) -> rs | None -> []) @ Behaviours.useRules db charMods setup s.Name o.Pickup @ Behaviours.buffRules db charMods setup s @ Behaviours.totemPlacement db charMods setup s @ curseRules
                     let grants = Behaviours.verisiumGrant db charMods setup
                     let s = Behaviours.applyObserved s
@@ -419,7 +421,7 @@ module Setup =
                           Grants = (match curse with Some (_, _, _, player) -> player | None -> []) @ cryGrants
                           Curse = curse |> Option.map (fun (name, _, _, _) -> name)
                           Pattern = lasting |> Option.map fst
-                          Extra = (doom |> Option.map fst |> Option.toList) @ (match tipped with Some (f, _, _) -> [ f ] | None -> []) @ empowered }
+                          Extra = (doom |> Option.map fst |> Option.toList) @ (match tipped with Some (f, _, _) -> [ f ] | None -> []) @ (match wave with Some (f, _) -> [ f ] | None -> []) @ empowered }
                 | _ -> None)
 
     let gemOf (p: Play) =

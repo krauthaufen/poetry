@@ -62,7 +62,7 @@ let dossier (name: string) : string list =
             let built =
                 player.Skills |> List.collect (fun s ->
                     (sprintf "  built %-34s x%.2f, %.2fs, cd %A x%d, cost %.0f +%.0f/s, hits %A, %s" s.Name s.BaseMultiplier s.BaseTime s.Cooldown s.StoredUses s.Cost s.CostPerSecond s.Hits
-                        (match s.Delivery with Single -> "single" | AreaAtTarget r -> sprintf "area %.0f" r | AreaAroundSelf r -> sprintf "around self %.0f" r | Projectiles p -> sprintf "%d projectiles, pierce %d, chain %d" p.Count p.Pierce p.Chains))
+                        (match s.Delivery with Single -> "single" | AreaAtTarget r -> sprintf "area %.0f" r | Cone (r, a, _) -> sprintf "cone %.0f, %.0f degrees" r a | AreaAroundSelf r -> sprintf "around self %.0f" r | Projectiles p -> sprintf "%d projectiles, pierce %d, chain %d" p.Count p.Pierce p.Chains))
                     :: (s.Parts |> List.map (fun p -> sprintf "        part %-28s x%.2f, hits %A" p.Name p.BaseMultiplier p.Hits)))
             let total = out.DamageBy |> Map.toList |> List.sumBy snd
             let counts = out.Counts |> Map.toList |> List.filter (fun (k, _) -> not (k.StartsWith "enemy:" || k.StartsWith "player:" || k.StartsWith "expired" || k.StartsWith "flask")) |> List.map (fun (k, v) -> sprintf "%s %d" k v)

@@ -852,6 +852,66 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         | Ok (s, _) -> equal (box 100) (box s.Clip)
         | Error e -> failwith e)
 
+    test "Charged Staff: its shockwave is set off by quarterstaff attacks while the buff is up, with the gem's supports" (fun () ->
+        let gem name support = { Name = name; Level = 20; Quality = 0; Enabled = true; IsSupport = support; StatSet = 1; Minion = None }
+        let group gems = { Label = ""; Slot = ""; Enabled = true; Gems = gems }
+        let fight (staffGems: PobGem list) charges =
+            let b =
+                { blank with
+                    Items = [ "Weapon 1", "Rarity: Normal\nAegis Quarterstaff\n--------\n" ]
+                    Groups = (if staffGems.IsEmpty then [] else [ group staffGems ]) @ [ group [ gem "Falling Thunder" false ] ]
+                    ExtraLines = [ "+400 to maximum Mana"; "+5000 to Accuracy Rating" ] }
+            let o = { Options.defaults with MaxTime = 5.0; StartPowerCharges = Some charges }
+            let c = Setup.loadWith db.Value treeJson b o
+            let player = Setup.player c o [ KeepBuff "Charged Staff"; Spam "Falling Thunder" ] None
+            player, Setup.fight c o player (Encounter.boss 83 Rarity.defaults 30.0 |> List.map (fun e -> { e with Life = 1e13; Attack = None }))
+        let name = "Charged Staff: Charged Shockwave"
+        let player, plain = fight [ gem "Charged Staff" false ] 3
+        let wave = player.Skills |> List.find (fun s -> s.Name = name)
+        // level 20: 66% of weapon damage (`ChargedStaffShockwavePlayer` baseMultiplier), a cone of 5 m
+        // and 45 degrees, 1.5 m wide where it begins; 80% of physical converted to lightning.
+        // Aegis Quarterstaff 58 to 97: x 0.66 = 38.28 to 64.02, a fifth of it physical
+        near 0.66 wave.BaseMultiplier
+        equal (box (Cone(50.0, 45.0, 15.0))) (box wave.Delivery)
+        equal (box true) (box (wave.Tags.Contains Triggered && wave.Tags.Contains Attack && wave.Tags.Contains Quarterstaff))
+        near 0.0 wave.Cost
+        let ranges = Hit.ranges (Skill.ctx wave false Map.empty Map.empty) (ModDb.ofList wave.Mods) wave
+        near 7.656 (Map.find Physical ranges).Min
+        near 12.804 (Map.find Physical ranges).Max
+        near 30.624 (Map.find Lightning ranges).Min
+        near 51.216 (Map.find Lightning ranges).Max
+        // the fight starts with the buff up (three charges, 18 s): one shockwave with every Falling Thunder
+        let count (o: Outcome) k = Map.tryFind k o.Counts |> Option.defaultValue 0
+        let o = Sim.run plain 1u
+        equal (box true) (box (count o "uses:Falling Thunder" > 0))
+        equal (box (count o "uses:Falling Thunder")) (box (count o ("uses:" + name)))
+        equal (box (count o "uses:Falling Thunder")) (box (count o ("hits:" + name)))
+        equal (box true) (box (o.DamageBy.ContainsKey(name + " (hit)")))
+        near 0.0 (Map.tryFind "leech" o.ManaGained |> Option.defaultValue 0.0)
+        // Mana Leech in the Charged Staff group is for the shockwave: its hits leech
+        let _, leeching = fight [ gem "Charged Staff" false; gem "Mana Leech" true ] 3
+        let l = Sim.run leeching 1u
+        equal (box true) (box ((Map.tryFind "leech" l.ManaGained |> Option.defaultValue 0.0) > 0.0))
+        // without the buff (no charges to make it of) no shockwave, and none without the gem
+        equal (box 0) (box (count (Sim.run (snd (fight [ gem "Charged Staff" false ] 0)) 1u) ("uses:" + name)))
+        equal (box 0) (box (count (Sim.run (snd (fight [] 3)) 1u) ("uses:" + name)))
+        // the flat engine plays the same
+        for f in [ plain; leeching ] do
+            match Flat.compile f with
+            | Ok p -> equal (box (sprintf "%A" (Sim.run f 2u))) (box (sprintf "%A" (Flat.run p 2u)))
+            | Error e -> failwith e)
+
+    test "a cone reaches from the player towards the target and widens" (fun () ->
+        let foe name x y = { (Encounter.boss 83 Rarity.defaults 30.0).Head with Name = name; Position = Vec.make x y; Size = 5.0 }
+        let primary = foe "ahead" 30.0 0.0
+        // 5 m long, 45 degrees in all, 1.5 m wide at the player: at 40 units along it is
+        // 7.5 + 40 tan 22.5 = 24.1 units to either side, and an enemy 5 units across reaches in
+        let all =
+            [ primary; foe "beside it" 40.0 25.0; foe "too far aside" 40.0 32.0; foe "at the side" 0.0 30.0
+              foe "behind" -20.0 0.0; foe "at the end" 54.0 0.0; foe "beyond" 60.0 0.0 ]
+        let hit = Geometry.targetsFrom (Rng 1u) [] 30.0 (Cone(50.0, 45.0, 15.0)) 1.0 primary all
+        equal (box [ "ahead"; "beside it"; "at the end" ]) (box hit))
+
     test "gem: a staged channel is one use to full stages" (fun () ->
         match Gems.skill db.Value ModDb.empty None { Gem = "Flameblast"; Level = 20; Quality = 0; StatSet = 1; Supports = [] } with
         | Ok (s, _) ->

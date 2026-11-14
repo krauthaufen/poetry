@@ -69,6 +69,9 @@ type Delivery =
     | AreaAtTarget of radius: float
     /// Everything within the radius of the player.
     | AreaAroundSelf of radius: float
+    /// Everything in a cone from the player towards the aimed-at enemy: so long, so many
+    /// degrees wide in all, and so wide where it begins.
+    | Cone of length: float * angle: float * width: float
     | Projectiles of ProjectileShape
 
 module ProjectileShape =
