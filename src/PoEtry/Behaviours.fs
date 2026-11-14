@@ -888,8 +888,12 @@ module Behaviours =
     /// - Herald of Ice: an attack that kills a frozen enemy makes it explode ("Explosion").
     /// - Herald of Thunder: after an attack kills a shocked enemy, lightning bolts strike the
     ///   targets of the next N attack hits ("Bolt", N = `herald_of_thunder_storm_max_hits`).
+    /// - Herald of Blood: killing a bleeding enemy (with a hit, by any skill) makes it explode
+    ///   ("Explosion": its own physical damage, not the weapon's). The share of the enemy's
+    ///   accumulated Blood Loss the explosion adds and its chance to aggravate bleeding are not
+    ///   modelled.
     /// The explosion is centred on the enemy aimed at, not on the corpse. A herald's own hits
-    /// don't set heralds off. Herald of Ash: see `heraldOfAsh`. Blood, Plague: not modelled.
+    /// don't set heralds off. Herald of Ash: see `heraldOfAsh`. Plague: not modelled.
     let heralds (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) : Skill list * Rule list =
         let charMods = ModDb.ofList sheet.Mods
         let attack = WithTagNot(Attack, Herald)
@@ -899,9 +903,9 @@ module Behaviours =
             let enabled = g.Gems |> List.filter (fun x -> x.Enabled)
             let supports = enabled |> List.filter (fun x -> x.IsSupport) |> List.map (fun x -> x.Name, x.Level)
             enabled
-            |> List.filter (fun x -> not x.IsSupport && (x.Name = "Herald of Ice" || x.Name = "Herald of Thunder"))
+            |> List.filter (fun x -> not x.IsSupport && (x.Name = "Herald of Ice" || x.Name = "Herald of Thunder" || x.Name = "Herald of Blood"))
             |> List.choose (fun gem ->
-                let label = if gem.Name = "Herald of Ice" then "Explosion" else "Bolt"
+                let label = if gem.Name = "Herald of Thunder" then "Bolt" else "Explosion"
                 Gems.data db gem.Name
                 |> Option.bind (fun d -> d.StatSets |> List.tryFindIndex (fun s -> s.Label = label))
                 |> Option.bind (fun i ->
@@ -913,6 +917,8 @@ module Behaviours =
                         let rules =
                             if gem.Name = "Herald of Ice" then
                                 [ { Hook = OnKillOf "Frozen"; Filter = attack; Chance = 100.0; Reaction = TriggerSkill name } ]
+                            elif gem.Name = "Herald of Blood" then
+                                [ { Hook = OnKillOf "Bleeding"; Filter = WithTags([], [ Herald ]); Chance = 100.0; Reaction = TriggerSkill name } ]
                             else
                                 let bolts =
                                     Gems.rawStats db charMods { setup with StatSet = 1 }

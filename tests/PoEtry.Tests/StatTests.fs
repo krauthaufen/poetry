@@ -847,6 +847,24 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         near 1.5 (twisted (fight false true) / twisted (fight false false))
         same (fight true true) seeds)
 
+    // ---- Herald of Blood ----
+
+    test "Herald of Blood: killing a bleeding enemy with a hit sets off its explosion, of its own physical damage" (fun () ->
+        let c = load { blank with Groups = [ group [ gem "Herald of Blood" ] ]; ExtraLines = [ "+100 to Spirit" ] } Options.defaults
+        let skills, rules = Behaviours.heralds db.Value c.Sheet c.Build
+        let boom = skills |> List.find (fun s -> s.Name = "Herald of Blood: Explosion")
+        // level 20: 107 to 160 physical, whatever the weapon
+        equal (box [ Physical, 107.0, 160.0 ]) (box (boom.BaseDamage |> Map.toList |> List.map (fun (t, r) -> t, r.Min, r.Max)))
+        equal (box [ OnKillOf "Bleeding", TriggerSkill boom.Name ]) (box (rules |> List.map (fun r -> r.Hook, r.Reaction)))
+        // a kill of a bleeding enemy (by a skill that always makes it bleed) sets it off; of one that does not bleed, nothing
+        let bolt bleeds = { Skill.make "Bolt" [ Spell ] with BaseDamage = Map.ofList [ Physical, { Min = 100.0; Max = 100.0 } ]; BaseTime = 0.5; BaseCrit = 0.0; Mods = (if bleeds then [ Mod.base' (AilmentChance Bleed) 100.0 ] else []) }
+        let fight bleeds =
+            let foes = [ for i in 0 .. 2 -> { EnemyDef.atLevel 83 150.0 with Name = sprintf "m%d" i; Position = Vec.make (30.0 + float i) 0.0; Size = 4.0; Mods = []; Attack = None } ]
+            { Fight.single foes.Head { Actor.make "Player" [] [ bolt bleeds; boom ] with Rules = rules; Rotation = [ Actor.always "Bolt" ] } 5.0 with Enemies = foes }
+        if count (Sim.run (fight true) 1u) ("uses:" + boom.Name) < 1 then failwith "no explosion"
+        equal (box 0) (box (count (Sim.run (fight false) 1u) ("uses:" + boom.Name)))
+        same (fight true) seeds)
+
     // ---- Scarred Faith ----
 
     test "Scarred Faith: prevented physical damage recouped as energy shield per enemy power; no regeneration; none above armour" (fun () ->

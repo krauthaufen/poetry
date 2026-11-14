@@ -859,6 +859,8 @@ module StatMap =
               "twister_hit_interval_ms"; "twister_base_movement_speed"; "minimum_per_projectile_spread_angle_degrees"; "rain_hit_delay_ms"
               // Gems (Twister: what it consumes, that it bounces off walls), Behaviours.whirlwind
               "twister_consumes_wind_storm"; "twister_bounce_check_angle"; "sandstorm_swipe_max_stages"
+              // Gems: an attack's own damage in place of the weapon's (a herald's explosion)
+              "main_hand_weapon_minimum_physical_damage"; "main_hand_weapon_maximum_physical_damage"
               "spear_wall_cm_per_spear"; "nova_skills_cast_at_target_location"; "projectiles_barrage"; "poison_duration_is_skill_duration"
               "channel_end_duration_as_%_of_attack_time"; "channel_skill_end_animation_duration_multiplier_permyriad"
               // Behaviours.minions, summons, totems: how many, how they come and go
@@ -1200,6 +1202,13 @@ module StatMap =
         | "minions_get_amulet_stats_instead_of_you" | "keystone_ancestral_bond" ->
             Some(Unsimulated "minions / allies")
         | "keystone_bulwark" -> Some(Unsimulated "movement")
+        // Herald of Blood's explosion: "partially based on their accumulated Blood Loss", "has a
+        // chance to Aggravate Bleeding" (the explosion itself is played, Behaviours.heralds)
+        | "skill_herald_bleeding_enemies_explode_for_%_blood_loss_as_unscalable_physical_damage" -> Some(Unsimulated "blood loss")
+        | "skill_herald_of_blood_explosion_aggravate_bleeding_chance_%" -> Some(Unsimulated "aggravating bleeding")
+        // Herald of Plague: "killing a Poisoned enemy spreads its Poison to other nearby enemies,
+        // and has a chance to also Hinder them"
+        | "herald_of_agony_poison_spread_on_kill_radius_base_magnitude_to_grant" | "hinder_chance_%_on_spreading_poioson" -> Some(Unsimulated "spreading poison on kill")
         // "When you kill a Rare monster, you gain its Modifiers for 60 seconds": the monsters of a
         // fight have no modifiers of their own (only what their rarity makes of them)
         | "gain_rare_monster_mods_on_kill_ms" -> Some(Unsimulated "rare monsters' modifiers")
