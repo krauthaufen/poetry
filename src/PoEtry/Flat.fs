@@ -28,12 +28,18 @@ namespace PoEtry
 /// are a short list of its own. The arithmetic of a hit follows `Hit` and `Ailments` line by
 /// line; who is hit is `Geometry`'s own code.
 ///
-/// Played: one player (no minions, no totems) against any number of enemies that are not
+/// Played: the player and its minions and totems against any number of enemies that are not
 /// replaced; skills with parts, cooldowns, costs and charges; the rules whose reactions are
 /// listed in `Re`; ailments, damage over time, curses, exposure, armour break; meta gems;
 /// cycles, periodic actions, archons, rage, charms; the player's pools, with monsters
-/// walking up and hitting back. Everything else is refused by `compile`, by name
+/// walking up and hitting back; minions that are hurt, killed and revived, temporary ones
+/// that are summoned and leave, corpses. Everything else is refused by `compile`, by name
 /// (`unsupported` lists it): the lists at `build` say what.
+///
+/// Every actor has a program of its own (`Program`: the player's, with the minions' in it)
+/// and a state of its own during a run (`Agent`); the names (buffs, statuses, counts) have
+/// the same numbers in all of them. One actor acts at a time (`State.P`, `State.A`, set by
+/// `enter`): what is written for the player's skills, buffs and rules is a minion's the same way.
 ///
 /// One thing is taken for granted of a fight: the defences for a set of buffs
 /// (`Actor.VitalsAt`) are a function of the buffs (of those `Actor.VitalsReads` names, if

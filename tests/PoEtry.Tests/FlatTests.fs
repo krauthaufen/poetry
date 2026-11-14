@@ -502,15 +502,123 @@ let randomFight (case: uint32) : Fight * string =
             BankedInvocations = pick [ 1.0; 0.0; 0.5 ]
             EnemyAuras =
                 (if chance 0.2 then [ pick [ "Curse:Aura"; "Withered"; "Mark:Aura" ], whole 1 4, [ Mod.inc (DamageTaken AllDamage) 5.0; Mod.base' (Resist Chaos) -3.0 ] ] else []) }
+    // minions and totems beside the player, in about a third of the fights: some that can be
+    // hurt and come back, some that cannot, totems that act under a buff of the player's, and
+    // a pool of temporary ones with what summons them
+    let fight =
+        if not (chance 0.35) then fight
+        else
+            note "minions"
+            let minionSkill (name: string) (spam: bool) = { skill 0 spam with Name = name }
+            let minionMods () = [ if chance 0.6 then yield Mod.base' (Named "Accuracy") 1e9 ] @ [ for _ in 1 .. whole 0 3 do yield! (pick modPool) () ]
+            let minionRules (own: string) : Rule list =
+                [ for _ in 1 .. (if chance 0.4 then whole 1 2 else 0) ->
+                    { Hook = pick [ OnHit; OnHit; OnUse; OnCrit; OnKill ]
+                      Filter = pick [ AnySkill; Called own; WithTag Attack ]
+                      Chance = pick [ 100.0; between 10.0 90.0 ]
+                      Reaction =
+                        (match whole 0 6 with
+                         | 0 | 1 -> ApplyDebuff(pick [ "Marked by pain"; "Gnawed" ], between 0.5 6.0, whole 1 4, [ Mod.inc (DamageTaken AllDamage) (between 2.0 15.0) ])
+                         | 2 -> GrantBuff(pick [ "Buffed"; "Frenzied" ], between 0.5 5.0, whole 1 4, buffMods ())
+                         | 3 -> ApplyExposure(pick types, between 5.0 40.0, between 1.0 8.0)
+                         | 4 -> GainResource(pick [ "PowerCharge"; "FrenzyCharge" ], 1)
+                         | 5 -> ApplyCurse(pick [ "Hex"; "Mark:Prey" ], between 1.0 6.0, [ Mod.base' (Resist(pick types)) (between -30.0 -5.0) ])
+                         | _ -> GrantMinionBuff("Pack howl", between 0.5 4.0, [ Mod.inc Speed (between 5.0 30.0) ])) } ]
+            let body () : MinionBody =
+                { Life = (if chance 0.6 then between 40.0 600.0 else between 600.0 20000.0)
+                  EnergyShield = (if chance 0.3 then between 20.0 300.0 else 0.0)
+                  Armour = (if chance 0.4 then between 100.0 3000.0 else 0.0)
+                  Evasion = (if chance 0.4 then between 100.0 3000.0 else 0.0)
+                  Resist = [ for t in types do if chance 0.3 then yield t, between -20.0 75.0 ] |> Map.ofList
+                  Melee = chance 0.6
+                  Size = pick [ 1.0; 2.0; 6.0 ]
+                  Reach = pick [ 8.0; 12.0; 16.0 ]
+                  Revive = (if chance 0.7 then Some(between 1.5 7.0) else None)
+                  Power = between 0.3 2.0
+                  LifeRegen = (if chance 0.3 then between 1.0 60.0 else 0.0)
+                  TakesForOwner = (if chance 0.25 then between 10.0 70.0 else 0.0)
+                  Explodes = None }
+            let persistent =
+                [ for i in 1 .. whole 0 4 do
+                    let name = sprintf "Minion %d" i
+                    let own = minionSkill (sprintf "Bite %d" (whole 1 2)) true
+                    let extra = if chance 0.3 then [ minionSkill "Howl" false ] else []
+                    let blast = { minionSkill "Instability" true with Delivery = AreaAroundSelf(between 15.0 40.0) }
+                    let b = if chance 0.75 then Some(body ()) else None
+                    let explodes = b.IsSome && chance 0.25
+                    yield
+                        { Actor.make name (minionMods ()) (extra @ [ own ] @ (if explodes then [ blast ] else [])) with
+                            Rotation = [ for s in extra @ [ own ] -> Actor.always s.Name ]
+                            Rules = minionRules own.Name
+                            Body = b |> Option.map (fun b -> if explodes then { b with Explodes = Some blast.Name } else b)
+                            Resources = [ if chance 0.3 then yield "PowerCharge", whole 1 3 ]
+                            MaxResources = Map.ofList [ "PowerCharge", 3; "FrenzyCharge", 2 ]
+                            ResourceDurations = (if chance 0.3 then Map.ofList [ "PowerCharge", between 2.0 8.0 ] else Map.empty)
+                            Cycles = (if chance 0.1 then [ { Name = "Mood"; Period = between 1.0 4.0; Variants = [ [ Mod.more (Damage AllDamage) 20.0 ]; [ Mod.inc Speed 20.0 ]; [] ] } ] else [])
+                            Periodics = (if chance 0.1 then [ { Name = "stir"; Every = between 0.5 3.0; Action = GainRandom [ "PowerCharge"; "FrenzyCharge" ] } ] else []) } ]
+            let totems =
+                [ for i in 1 .. (if chance 0.4 then whole 1 2 else 0) ->
+                    let own = minionSkill "Totem shot" true
+                    { Actor.make (sprintf "Totem %d" i) (minionMods ()) [ own ] with ActiveWhile = Some(pick [ "Totem buff"; "Spirit A"; "Spirit B"; "Buffed" ]) } ]
+            let pack =
+                [ for i in 1 .. (if chance 0.5 then whole 1 5 else 0) ->
+                    let own = minionSkill "Snap" true
+                    { Actor.make (sprintf "Whelp %d" i) (minionMods ()) [ own ] with Pool = Some "Pack"; Body = (if chance 0.5 then Some { body () with Revive = None } else None); Rules = minionRules own.Name } ]
+            let first = fight.Player.Skills.Head.Name
+            let summons () : Reaction =
+                match whole 0 7 with
+                | 0 -> Summon("Pack", whole 1 3, pick [ between 0.5 6.0; infinity ])
+                | 1 -> SummonEmpowered("Pack", whole 1 3, between 0.5 6.0, [ Mod.more (Damage AllDamage) (between 20.0 100.0) ])
+                | 2 -> WithCorpse(Summon("Pack", 1, between 1.0 6.0), pick [ NoReaction; SpendStack("PowerCharge", Summon("Pack", 2, between 1.0 6.0)); GrantBuff("Buffed", 2.0, 2, []) ])
+                | 3 -> SummonPerCorpse("Pack", between 1.0 6.0, chance 0.6)
+                | 4 -> SummonPerWard("Pack", between 10.0 60.0, between 1.0 6.0)
+                | 5 -> GrantOneOf(pick [ [ "Spirit A"; "Spirit B" ]; [ "Totem buff" ]; [] ], between 1.0 6.0)
+                | 6 -> GrantBuff("Totem buff", between 1.0 6.0, 1, [])
+                | _ -> GrantMinionBuff(pick [ "Offering"; "Buffed" ], between 0.5 5.0, buffMods ())
+            let more : Rule list =
+                [ for _ in 1 .. whole 1 4 ->
+                    { Hook = pick [ OnUse; OnUse; OnHit; OnKill ]; Filter = pick [ AnySkill; Called first ]; Chance = pick [ 100.0; 100.0; between 10.0 90.0 ]; Reaction = summons () } ]
+            let corpseSkill = chance 0.3
+            let onDeath = if not triggered.IsEmpty && fight.Player.Metas.IsEmpty && chance 0.5 then [ { Meta.simple "On Death" (between 20.0 80.0) "Echo" with Sources = [ MinionDeaths(between 20.0 60.0) ] } ] else []
+            let watchful = chance 0.3
+            let player' =
+                { fight.Player with
+                    Rules = fight.Player.Rules @ more
+                    Metas = fight.Player.Metas @ onDeath
+                    Skills =
+                        fight.Player.Skills |> List.mapi (fun i s ->
+                            if i = 0 && corpseSkill then { s with Tags = s.Tags |> Set.add (Tag "Type:TargetsDestructibleCorpses") |> (if chance 0.3 then Set.add (Tag "Type:SkillConsumesPowerChargesOnUse") else id) } else s)
+                    Rotation =
+                        fight.Player.Rotation |> List.mapi (fun i step ->
+                            if i = 0 && watchful then { step with When = fun v -> step.When v && ((Map.tryFind "Out:Pack" v.Buffs |> Option.defaultValue 0) < 2 || v.Buffs.ContainsKey "Corpses") } else step)
+                    Periodics =
+                        fight.Player.Periodics
+                        @ [ if chance 0.3 then
+                                yield { Name = "pack"; Every = between 0.5 3.0; Action = (if chance 0.5 then SummonMinions("Pack", whole 1 2, between 0.5 4.0) else SummonFromCorpse("Pack", whole 1 2, between 0.5 4.0)) } ] }
+            // (monsters that hit, so that minions die)
+            let enemies' =
+                fight.Enemies |> List.map (fun e ->
+                    if e.Attack.IsSome || chance 0.3 then e
+                    else
+                        { e with
+                            Attack =
+                                Some
+                                    { Interval = between 0.3 1.5
+                                      Damage = [ for _ in 1 .. whole 1 2 -> pick types, between 20.0 400.0 ] |> Map.ofList
+                                      Accuracy = between 100.0 5000.0
+                                      Range = between 5.0 40.0
+                                      CritChance = between 0.0 40.0
+                                      Melee = chance 0.5 } })
+            { fight with Player = player'; Enemies = enemies'; Minions = persistent @ totems @ pack }
     // now and then something the fast engine does not play: it must say so
     let fight =
         match (if chance 0.12 then pick [ 1; 3; 5 ] else -1) with
         | 1 ->
-            note "minion"
-            { fight with Minions = [ Actor.make "Hound" [] [ { skill 7 true with Name = "Bite" } ] ] }
+            note "pustule"
+            { fight with Player = { fight.Player with Rules = { Hook = OnHit; Filter = AnySkill; Chance = 100.0; Reaction = AttachPustule(fight.Player.Skills.Head.Name, 3.0, 0.0, 0.0) } :: fight.Player.Rules } }
         | 3 ->
             note "seals"
-            { fight with Player = { player with Skills = player.Skills |> List.map (fun s -> { s with Mods = Mod.base' (Named "MaxSeals") 2.0 :: Mod.base' (Named "SealIntervalMs") 900.0 :: Mod.base' (Named "SealRepeats") 1.0 :: s.Mods }) } }
+            { fight with Player = { fight.Player with Skills = fight.Player.Skills |> List.map (fun s -> { s with Mods = Mod.base' (Named "MaxSeals") 2.0 :: Mod.base' (Named "SealIntervalMs") 900.0 :: Mod.base' (Named "SealRepeats") 1.0 :: s.Mods }) } }
         | 5 ->
             note "replace"
             { fight with Replace = true }
@@ -522,7 +630,7 @@ let randomFight (case: uint32) : Fight * string =
             fight.Player.Rules.Length
             (fight.Player.Rules |> List.map (fun r -> match r.Reaction with GrantBuff _ -> "buff" | ApplyDebuff _ -> "debuff" | ApplyCurse _ -> "curse" | TriggerSkill _ -> "trigger" | GainResource _ -> "resource" | _ -> "other") |> String.concat " ")
             fight.Player.Mods.Length fight.Enemies.Length fight.Player.Vitals.IsSome fight.MaxTime
-            (if notes.Count = 0 then "" else " [" + String.concat ", " notes + "]")
+            ((if fight.Minions.IsEmpty then "" else sprintf ", %d minions" fight.Minions.Length) + (if notes.Count = 0 then "" else " [" + String.concat ", " notes + "]"))
     fight, described
 
 let run (test: string -> (unit -> unit) -> unit) =
