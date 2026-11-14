@@ -511,6 +511,9 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
             (box [ Mod.base' (ForMinions(Named "Rule:OnKill:Onslaught:4")) 20.0 |> Mod.whenever (SkillIs(Tag "Companion")) ])
             (box (mods "companion_onslaught_on_kill_%" 20.0))
         equal (box Structural) (box (StatMap.meaning "active_skill_override_turn_duration_ms" 100.0))
+        // Tame Beast's capture: never used by a companion gem (the beast is captured)
+        equal (box Structural) (box (StatMap.meaning "tame_beast_hinder_%" 30.0))
+        equal (box Structural) (box (StatMap.meaning "skill_can_see_monster_categories" 1.0))
         equal (box NotOffensive) (box (StatMap.meaning "unique_jewel_nearby_disconnected_passives_can_be_allocated" 1.0)))
 
     // ---- allies, recovery while standing, stun recovery, what monsters never do ----

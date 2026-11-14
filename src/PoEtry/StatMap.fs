@@ -845,6 +845,10 @@ module StatMap =
         // where a Flame of Chayula appears and from how far it is seen: every flame is taken
         // to be picked up at once (RULES.md, Flames of Chayula)
         | "breach_flame_spawn_radius" | "breach_walk_base_visibility_range" -> Some Structural
+        // Tame Beast's own use: hindering and capturing a beast, and which monsters it can see.
+        // A companion gem is that gem with the beast already captured, and the capture is never
+        // used in a fight
+        | "tame_beast_hinder_%" | "skill_can_see_monster_categories" -> Some Structural
         | "critical_strike_chance_+%" -> one (Mod.inc CritChance v)
         | "spell_critical_strike_chance_+%" -> one (Mod.inc CritChance v |> Mod.whenever (SkillIs Spell))
         | "attack_critical_strike_chance_+%" -> one (Mod.inc CritChance v |> Mod.whenever (SkillIs Attack))
