@@ -493,7 +493,10 @@ module Gems =
               ("Lightning Warp", ""), [ "Vs:Cullable"; "WarpsInto:Ball Lightning" ]
               ("His Vile Intrusion", ""), [ "Vs:Cullable" ]
               ("Detonate Living", ""), [ "Vs:Cullable" ]
-              ("Power Siphon", ""), [ "Vs:Cullable" ] ]
+              ("Power Siphon", ""), [ "Vs:Cullable" ]
+              // "Leaving the area collapses the storm": the character stands in it until a twister
+              // consumes it (Behaviours.whirlwind)
+              ("Whirling Slash", "Whirlwind"), [ "NoHit" ] ]
 
     let private conditionMods (skill: string) (label: string) (isMain: bool) : Mod list =
         (Map.tryFind (skill, label) partConditions |> Option.defaultValue [])
@@ -705,7 +708,8 @@ module Gems =
                         // "spark_pathing_width_bounds", as far as speed x lifetime takes them, in a
                         // fan that widens with their number
                         Wander = statOf "spark_pathing_width_bounds" |> Option.defaultValue (if (statOf "twister_base_movement_speed").IsSome then Constants.twisterWander else 0.0)
-                        Bounces = flagOf "spark_projectile_bounces_off_walls"
+                        // (a twister "bounces" off walls in any direction: twister_bounce_check_angle 360)
+                        Bounces = flagOf "spark_projectile_bounces_off_walls" || flagOf "twister_bounce_check_angle"
                         Speed =
                             (if (statOf "spark_pathing_width_bounds").IsSome then Map.tryFind data.Name Constants.erraticProjectileSpeed |> Option.defaultValue 0.0
                              else
@@ -834,6 +838,8 @@ module Gems =
             |> Option.map (fun kind -> kind + "Charge")
             // or something else the description names (a Fragment of Divinity)
             |> Option.orElse (Map.tryFind (data.Name, "") partConditions |> Option.bind (List.tryPick (fun (c: string) -> if c.StartsWith "Consumes:" then Some(c.Substring 9) else None)))
+            // "If a twister touches a Whirlwind from your other skills, it Consumes the Whirlwind"
+            |> Option.orElse (if ownStats |> List.exists (fun (k, _) -> k = "twister_consumes_wind_storm") then Some "Whirlwind" else None)
           Cost = gemLevel |> Option.bind (fun l -> l.ManaCost) |> Option.defaultValue 0.0
           // "comet_fall_time_ms": hits land this long after the cast
           HitDelay =

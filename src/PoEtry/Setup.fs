@@ -417,7 +417,7 @@ module Setup =
                     let biteRules =
                         let withParts (x: Skill) = x.Name :: (x.Parts |> List.map (fun p -> p.Name))
                         biteRules @ Behaviours.jaggedGround db charMods setup s (withParts s @ (match copy with Some (_, _, cp) -> withParts cp | None -> []))
-                        @ Behaviours.oilGround db charMods setup s
+                        @ Behaviours.oilGround db charMods setup s @ Behaviours.whirlwind db setup s
                     let rules = cryRules @ biteRules @ (match lasting with Some (_, rs) -> rs | None -> []) @ Behaviours.useRules db charMods setup s.Name o.Pickup @ Behaviours.buffRules db charMods setup s @ Behaviours.totemPlacement db charMods setup s @ curseRules
                     let grants = Behaviours.verisiumGrant db charMods setup
                     let s = Behaviours.applyObserved s
@@ -527,36 +527,61 @@ module Setup =
             match pressed c o mainGem with
             | Some p when (p.Skill.Hits.IsEmpty || p.Pattern.IsSome) && p.Rules |> List.exists (fun r -> match r.Hook, r.Reaction with OnInflict _, _ -> false | _, (ChargeBuff _ | GrantBuff _) -> true | _ -> false) -> KeepBuff mainGem
             | _ -> Spam mainGem
-        // a main skill with a cooldown of its own goes first whenever it is ready: otherwise the
-        // other cooldown skills would fill every gap and it would never be used
-        match pressed c o mainGem with
-        | Some p when p.Skill.Mods |> List.exists (fun m -> match m.Stat with Named n -> (n.StartsWith "Requires:" || n.StartsWith "NeedsEnemyStacks:") && m.Value > 0.0 | _ -> false) ->
-            // the main skill needs Glory, Combo or a pile on the enemy: it is used when there is
-            // enough, and the weapon's plain attack (if the character has it) builds in between
-            let filler =
-                c.Build.Groups |> List.filter (fun g -> g.Enabled) |> List.collect (fun g -> g.Gems) |> List.filter (fun x -> x.Enabled && not x.IsSupport && x.Name <> mainGem)
-                |> List.tryFind (fun x -> (Map.tryFind x.Name c.Db.GemVariants |> Option.defaultValue [] |> List.exists (fun g -> g.GameId.Contains "PlayerDefault")) && (pressed c o x.Name).IsSome)
-            // a pile of lances grows with every spear hit: the spear skill to build it with is
-            // the one that does best in a short fight beside the main skill
-            let stacker =
-                if not (p.Skill.Mods |> List.exists (fun m -> match m.Stat with Named n -> n.StartsWith "NeedsEnemyStacks:" | _ -> false)) then None
-                else
-                    c.Build.Groups |> List.filter (fun g -> g.Enabled) |> List.collect (fun g -> g.Gems) |> List.filter (fun x -> x.Enabled && not x.IsSupport && x.Name <> mainGem && not (Gems.isPersistentBuff c.Db x.Name))
-                    |> List.filter (fun x -> Gems.data c.Db x.Name |> Option.exists (fun d -> not (d.Types.Contains "Persistent") && not (d.Types.Contains "Triggered")))
-                    |> List.choose (fun x -> pressed c o x.Name |> Option.map (fun q -> x.Name, q))
-                    |> List.filter (fun (_, q) -> q.Skill.Tags.Contains Spear && q.Skill.Tags.Contains Attack && not q.Skill.Hits.IsEmpty && q.Skill.Cooldown.IsNone)
-                    |> List.map (fun (g, _) ->
-                        let short = { o with MaxTime = min o.MaxTime 10.0 }
-                        let boss = Encounter.boss 83 Rarity.defaults 30.0 |> List.map (fun e -> { e with Life = 1e13 })
-                        let out = Sim.run (fight c short (player c short [ OnCooldown mainGem; Spam g ] None) boss) 1u
-                        g, out.DamageBy |> Map.toList |> List.sumBy snd)
-                    |> List.sortByDescending snd
-                    |> List.tryHead |> Option.map fst
-            match stacker with
-            | Some g -> OnCooldown mainGem :: (others |> List.filter (function Spam x | OnCooldown x -> x <> g | _ -> true)) @ [ Spam g ]
-            | None -> OnCooldown mainGem :: others @ (filler |> Option.map (fun x -> Spam x.Name) |> Option.toList)
-        | Some p when p.Skill.Cooldown.IsSome && (match main with Spam _ -> true | _ -> false) -> OnCooldown mainGem :: others @ [ main ]
-        | _ -> others @ [ main ]
+        let plain =
+            // a main skill with a cooldown of its own goes first whenever it is ready: otherwise the
+            // other cooldown skills would fill every gap and it would never be used
+            match pressed c o mainGem with
+            | Some p when p.Skill.Mods |> List.exists (fun m -> match m.Stat with Named n -> (n.StartsWith "Requires:" || n.StartsWith "NeedsEnemyStacks:") && m.Value > 0.0 | _ -> false) ->
+                // the main skill needs Glory, Combo or a pile on the enemy: it is used when there is
+                // enough, and the weapon's plain attack (if the character has it) builds in between
+                let filler =
+                    c.Build.Groups |> List.filter (fun g -> g.Enabled) |> List.collect (fun g -> g.Gems) |> List.filter (fun x -> x.Enabled && not x.IsSupport && x.Name <> mainGem)
+                    |> List.tryFind (fun x -> (Map.tryFind x.Name c.Db.GemVariants |> Option.defaultValue [] |> List.exists (fun g -> g.GameId.Contains "PlayerDefault")) && (pressed c o x.Name).IsSome)
+                // a pile of lances grows with every spear hit: the spear skill to build it with is
+                // the one that does best in a short fight beside the main skill
+                let stacker =
+                    if not (p.Skill.Mods |> List.exists (fun m -> match m.Stat with Named n -> n.StartsWith "NeedsEnemyStacks:" | _ -> false)) then None
+                    else
+                        c.Build.Groups |> List.filter (fun g -> g.Enabled) |> List.collect (fun g -> g.Gems) |> List.filter (fun x -> x.Enabled && not x.IsSupport && x.Name <> mainGem && not (Gems.isPersistentBuff c.Db x.Name))
+                        |> List.filter (fun x -> Gems.data c.Db x.Name |> Option.exists (fun d -> not (d.Types.Contains "Persistent") && not (d.Types.Contains "Triggered")))
+                        |> List.choose (fun x -> pressed c o x.Name |> Option.map (fun q -> x.Name, q))
+                        |> List.filter (fun (_, q) -> q.Skill.Tags.Contains Spear && q.Skill.Tags.Contains Attack && not q.Skill.Hits.IsEmpty && q.Skill.Cooldown.IsNone)
+                        |> List.map (fun (g, _) ->
+                            let short = { o with MaxTime = min o.MaxTime 10.0 }
+                            let boss = Encounter.boss 83 Rarity.defaults 30.0 |> List.map (fun e -> { e with Life = 1e13 })
+                            let out = Sim.run (fight c short (player c short [ OnCooldown mainGem; Spam g ] None) boss) 1u
+                            g, out.DamageBy |> Map.toList |> List.sumBy snd)
+                        |> List.sortByDescending snd
+                        |> List.tryHead |> Option.map fst
+                match stacker with
+                | Some g -> OnCooldown mainGem :: (others |> List.filter (function Spam x | OnCooldown x -> x <> g | _ -> true)) @ [ Spam g ]
+                | None -> OnCooldown mainGem :: others @ (filler |> Option.map (fun x -> Spam x.Name) |> Option.toList)
+            | Some p when p.Skill.Cooldown.IsSome && (match main with Spam _ -> true | _ -> false) -> OnCooldown mainGem :: others @ [ main ]
+            | _ -> others @ [ main ]
+
+        // a main skill that consumes a Whirlwind (Twister): the whirlwind is built to the
+        // number of stages that does best in a short fight (none, if that is best)
+        let builder =
+            c.Build.Groups |> List.filter (fun g -> g.Enabled) |> List.collect (fun g -> g.Gems)
+            |> List.filter (fun x -> x.Enabled && not x.IsSupport && x.Name <> mainGem)
+            |> List.tryFind (fun x -> pressed c o x.Name |> Option.exists (fun q -> q.Rules |> List.exists (fun r -> r.Reaction = GainResource("Whirlwind", 1))))
+        let stages = Behaviours.whirlwindStages c.Db c.Build
+        match builder, pressed c o mainGem with
+        | Some b, Some p when p.Skill.Consumes = Some "Whirlwind" && stages > 0 ->
+            let before (k: int) =
+                let rec go (steps: Play list) =
+                    match steps with
+                    | (Spam g as s) :: rest when g = mainGem -> WhileBelow("Whirlwind", k, b.Name) :: s :: rest
+                    | s :: rest -> s :: go rest
+                    | [] -> []
+                go (plain |> List.filter (function Spam g | OnCooldown g -> g <> b.Name | _ -> true))
+            let short = { o with MaxTime = min o.MaxTime 10.0 }
+            let boss = Encounter.boss 83 Rarity.defaults 30.0 |> List.map (fun e -> { e with Life = 1e13 })
+            let dealt (play: Play list) = (Sim.run (fight c short (player c short play None) boss) 1u).DamageBy |> Map.toList |> List.sumBy snd
+            (plain, dealt plain) :: [ for k in 1 .. stages -> let pl = before k in pl, dealt pl ]
+            |> List.fold (fun (best, most) (pl, d) -> if d > most then pl, d else best, most) (plain, -infinity)
+            |> fst
+        | _ -> plain
 
     /// The player actor: the play style's skills, meta gems and their triggered spells,
     /// infusions, charges, defences. `main` replaces the play style's first skill (CLI
@@ -699,6 +724,15 @@ module Setup =
                    if not spammed.IsEmpty && spammed |> List.forall onTheMove && (gains sheet.Mods || used |> List.exists (fun (_, p) -> gains p.Skill.Mods)) then [ "Moving", 1 ]
                    else [])
                 @ (if frenzy.IsSome then [ "CombatFrenzyReady", 1 ] else [])
+                // a Whirlwind the character builds is built up before the fight (it lasts while
+                // the character stands in it), like a charge that needs no kill
+                @ (let stages = Behaviours.whirlwindStages db c.Build
+                   if stages > 0 && not o.StartEmpty && used |> List.exists (fun (_, p) -> p.Rules |> List.exists (fun r -> r.Reaction = GainResource("Whirlwind", 1))) then [ "Whirlwind", stages ] else [])
+                // wind skills that count as boosted by elemental ground: by the first of them
+                // only, unless they can be boosted by several
+                @ (let flag n = Mods.flag Ctx.empty (Named n) (ModDb.ofList sheet.Mods)
+                   let boosts = DamageType.elemental |> List.filter (fun e -> flag ("WindBoost:" + DamageType.name e))
+                   (if flag "WindBoostMultiple" then boosts else List.truncate 1 boosts) |> List.map (fun e -> "BoostedBy:" + DamageType.name e, 1))
                 @ (match infusionSetup with
                    | Some inf ->
                        let usedInf = (consumers |> List.map (fun (_, el, _) -> el)) @ Option.toList inf.Wildcard |> List.distinct
@@ -710,7 +744,10 @@ module Setup =
             VitalsAt = Some(fun current -> Defence.computeWith (if c.SheetSetTwo then Map.add "WeaponSetTwo" 1 current else current) c.Bases sheet)
             VitalsReads = Some(Defence.reads sheet)
             Periodics = c.Periodics @ snd (Behaviours.summons db sheet c.Build pressedSkills) @ starPeriodics @ (frenzy |> Option.map fst |> Option.toList)
-            MaxResources = Map.fold (fun m k v -> Map.add k v m) c.MaxResources infusionMaxima |> (if frenzy.IsSome then Map.add "CombatFrenzyReady" 1 else id)
+            MaxResources =
+                Map.fold (fun m k v -> Map.add k v m) c.MaxResources infusionMaxima |> (if frenzy.IsSome then Map.add "CombatFrenzyReady" 1 else id)
+                |> (let stages = Behaviours.whirlwindStages db c.Build
+                    if stages > 0 then Map.add "Whirlwind" stages else id)
             ResourceDurations = Map.fold (fun m k v -> Map.add k v m) (Behaviours.chargeDurations sheet) (Behaviours.infusionDurations db sheet c.Build)
             KeptChargesPause = o.KeptChargesPause
             // user: stored uses are "just two cooldowns"

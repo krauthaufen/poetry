@@ -813,6 +813,40 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         same (chaining true) seeds
         same (fight true) seeds)
 
+    // ---- Twister and the Whirlwind ----
+
+    test "Twister: it consumes the Whirlwind, 80% more damage per stage and a twister more; elemental twisters gain 50% as their element" (fun () ->
+        // Whirling Slash builds the whirlwind, three stages at most
+        let ws = Behaviours.whirlwind db.Value { Gem = "Whirling Slash"; Level = 1; Quality = 0; StatSet = 1; Supports = [] } (Skill.make "Whirling Slash" [ Attack ])
+        equal (box [ GainResource("Whirlwind", 1) ]) (box (ws |> List.map (fun r -> r.Reaction)))
+        equal (box 3) (box (Behaviours.whirlwindStages db.Value { blank with Groups = [ group [ gem "Whirling Slash"; gem "Twister" ] ] }))
+        let more = mods "twister_damage_+%_final_per_whirling_slash_stage" 80.0
+        equal (box [ Damage AllDamage, More, 80.0; AdditionalProjectiles, Base, 1.0 ]) (box (more |> List.map (fun m -> m.Stat, m.Kind, m.Value)))
+        let gain = mods "twister_gain_%_elemental_damage_of_corresponding_type" 50.0
+        equal (box 15) (box gain.Length)
+        equal (box [ Named "WindBoost:Cold" ]) (box (mods "wind_skills_count_as_empowered_by_chilled_ground" 1.0 |> List.map (fun m -> m.Stat)))
+        // in a fight: three slashes, then a twister that consumes the three stages: 3.4 times
+        // the damage of a twister without a whirlwind
+        let slash = { Skill.make "Slash" [ Attack ] with BaseDamage = Map.ofList [ Chaos, { Min = 1.0; Max = 1.0 } ]; BaseTime = 0.5; BaseCrit = 0.0 }
+        let twister = { Skill.make "Twister" [ Attack ] with BaseDamage = Map.ofList [ Chaos, { Min = 100.0; Max = 100.0 } ]; BaseTime = 0.5; BaseCrit = 0.0; Consumes = Some "Whirlwind"; Mods = more @ gain }
+        let fight builds boosted =
+            { Actor.make "Player" [] [ slash; twister ] with
+                Rules = [ { Hook = OnUse; Filter = Called "Slash"; Chance = 100.0; Reaction = GainResource("Whirlwind", 1) } ]
+                MaxResources = Map.ofList [ "Whirlwind", 3 ]
+                Resources = (if boosted then [ "BoostedBy:Cold", 1 ] else [])
+                Rotation = [ { Use = "Slash"; When = fun v -> builds && v.Time < 1.4 && (Map.tryFind "Whirlwind" v.Buffs |> Option.defaultValue 0) < 3 }; Actor.always "Twister" ] }
+            |> fun a -> { Fight.single (EnemyDef.atLevel 83 1e9) a 2.2 with Enemies = [ { EnemyDef.atLevel 83 1e9 with Mods = [] } ] }
+        let twisted f = (Sim.run f 1u).DamageBy |> Map.toList |> List.filter (fun (k, _) -> k.StartsWith "Twister") |> List.sumBy snd
+        let out = Sim.run (fight true false) 1u
+        equal (box 3) (box (count out "gained:Whirlwind"))
+        equal (box 1) (box (count out "consumed:Whirlwind"))
+        // (2.2 s: three slashes and one twister, against one twister after another)
+        let plain = twisted (fight false false) / float (count (Sim.run (fight false false) 1u) "hits:Twister")
+        near 3.4 (twisted (fight true false) / plain)
+        // a twister boosted by chilled ground: half its damage again, as cold
+        near 1.5 (twisted (fight false true) / twisted (fight false false))
+        same (fight true true) seeds)
+
     // ---- Scarred Faith ----
 
     test "Scarred Faith: prevented physical damage recouped as energy shield per enemy power; no regeneration; none above armour" (fun () ->

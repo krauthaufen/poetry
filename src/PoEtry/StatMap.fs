@@ -522,6 +522,22 @@ module StatMap =
         | "chance_to_fork_extra_projectile_%" -> one (Mod.base' (Named "ForkExtraChance") v)
         | "forking_angle_+%" -> one (Mod.inc (Named "ForkAngle") v)
         | "support_fork_forked_projectile_damage_+%_final" -> one (Mod.more (Named "ForkedDamage") v)
+        // Twister: "Consumes Whirlwinds to create an additional twister and deal X% more damage
+        // per Whirlwind stage" (the Whirlwind's stages are stacks, see Behaviours.whirlwind);
+        // "X% chance for an additional twister"; "Elemental twisters Gain X% of damage as damage
+        // of the corresponding Type" (a twister boosted by an element, see Setup)
+        | "twister_damage_+%_final_per_whirling_slash_stage" ->
+            Some(Mods [ Mod.more (Damage AllDamage) v |> Mod.whenever (PerStack("Whirlwind", 1.0)); Mod.base' AdditionalProjectiles 1.0 |> Mod.whenever (WhileBuff "Whirlwind") ])
+        | "twister_%_chance_for_additional_twister" -> one (Mod.base' (Named "ExtraProjectileChance1") v)
+        | "twister_gain_%_elemental_damage_of_corresponding_type" ->
+            Some(Mods [ for e in DamageType.elemental do
+                            for t in DamageType.all -> Mod.base' (GainAs(t, e)) v |> Mod.whenever (WhileBuff("BoostedBy:" + DamageType.name e)) ])
+        // "Wind Skills which can be boosted by Elemental Ground Surfaces count as being boosted by
+        // Chilled / Ignited / Shocked Ground", "... can be boosted by multiple ..."
+        | "wind_skills_count_as_empowered_by_chilled_ground" -> one (Mod.flag (Named "WindBoost:Cold"))
+        | "wind_skills_count_as_empowered_by_ignited_ground" -> one (Mod.flag (Named "WindBoost:Fire"))
+        | "wind_skills_count_as_empowered_by_shocked_ground" -> one (Mod.flag (Named "WindBoost:Lightning"))
+        | "wind_skills_can_be_empowered_by_multiple_elements" -> one (Mod.flag (Named "WindBoostMultiple"))
         | "critical_strike_multiplier_with_dagger_+" -> one (Mod.inc CritBonus v |> Mod.whenever (SkillIs Dagger))
         | "invocation_spell_damage_+%" -> one (Mod.inc (Damage AllDamage) v |> Mod.whenever (SkillIs Spell) |> Mod.whenever (SkillIs Triggered))
         | "cannot_be_blinded" | "you_cannot_be_hindered" | "weapon_swap_speed_+%" -> Some Structural
@@ -841,6 +857,8 @@ module StatMap =
               // land, channels released at the perfect moment, poison for the skill's duration
               "off_hand_weapon_minimum_physical_damage"; "off_hand_weapon_maximum_physical_damage"; "supported_active_skill_gem_quality_%"
               "twister_hit_interval_ms"; "twister_base_movement_speed"; "minimum_per_projectile_spread_angle_degrees"; "rain_hit_delay_ms"
+              // Gems (Twister: what it consumes, that it bounces off walls), Behaviours.whirlwind
+              "twister_consumes_wind_storm"; "twister_bounce_check_angle"; "sandstorm_swipe_max_stages"
               "spear_wall_cm_per_spear"; "nova_skills_cast_at_target_location"; "projectiles_barrage"; "poison_duration_is_skill_duration"
               "channel_end_duration_as_%_of_attack_time"; "channel_skill_end_animation_duration_multiplier_permyriad"
               // Behaviours.minions, summons, totems: how many, how they come and go

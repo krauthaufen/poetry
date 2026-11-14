@@ -1328,6 +1328,23 @@ module Behaviours =
               if slow < 0.0 then
                   yield { Hook = OnHit; Filter = Called skill.Name; Chance = 100.0; Reaction = ApplyDebuff("Oil Ground", seconds, 1, [ Mod.more (Named "MovementSpeed") slow ]) } ]
 
+    /// Whirling Slash: "kicks up a Whirlwind around you"; using it again while the whirlwind is
+    /// there adds a stage, up to the most (`sandstorm_swipe_max_stages`, 3). The whirlwind is a
+    /// stack count on the character ("Whirlwind"), until a twister consumes it: the character
+    /// stands in it, so it never collapses. Of the gems the character uses, the most stages.
+    let whirlwindStages (db: GameDb) (build: PobBuild) : int =
+        build.Groups |> List.filter (fun g -> g.Enabled) |> List.collect (fun g -> g.Gems)
+        |> List.filter (fun x -> x.Enabled && not x.IsSupport)
+        |> List.choose (fun x -> Gems.data db x.Name)
+        |> List.collect (fun d -> d.StatSets |> List.collect (fun set -> set.ConstantStats |> List.filter (fun (k, _) -> k = "sandstorm_swipe_max_stages") |> List.map snd))
+        |> List.fold (fun m v -> max m (int v)) 0
+
+    let whirlwind (db: GameDb) (setup: GemSetup) (skill: Skill) : Rule list =
+        match Gems.data db setup.Gem with
+        | Some d when d.StatSets |> List.exists (fun set -> set.ConstantStats |> List.exists (fun (k, v) -> k = "sandstorm_swipe_max_stages" && v > 0.0)) ->
+            [ { Hook = OnUse; Filter = Called skill.Name; Chance = 100.0; Reaction = GainResource("Whirlwind", 1) } ]
+        | _ -> []
+
     /// Ice Bite: "Gain X% of Damage as Cold Damage for N seconds on Freezing an enemy with
     /// Supported Skills": a buff on the character (for all it does: "infuses your damage with
     /// Cold damage") whenever the supported skill, one of its parts or its infused form
