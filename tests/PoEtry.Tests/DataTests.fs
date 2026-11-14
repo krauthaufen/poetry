@@ -202,6 +202,9 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         // for its own (they were added up for magic jewels, and rare ones had none)
         let foulborn = "Jewel 3", "Rarity: Unique\nThe Adorned\nDiamond\n--------\n100% increased Effect of Jewel Socket Passive Skills\ncontaining Corrupted Magic Jewels\n50% increased Effect of Jewel Socket Passive Skills\ncontaining Corrupted Rare Jewels"
         near (plain.Str + 10.0 + 20.0 + 15.0) (stats { blank with Items = [ jewel 0 "Magic" true; jewel 1 "Rare" true; jewel 2 "Magic" false; foulborn ] }).Str
+        // a jewel socketed in an item is in no jewel socket of the tree: nothing more for it
+        let inRing = "Jewel Ring 1", snd (jewel 0 "Magic" true)
+        near (plain.Str + 10.0) (stats { blank with Items = [ inRing; foulborn ] }).Str
         equal (box ([]: string list)) (box (sheetOf { blank with Items = [ foulborn ] }).Coverage.UnknownText)
         // "+7% to all Elemental Resistances per socketed Grand Spectrum": two of them give 2 x 2 x 7
         let spectrum n = sprintf "Jewel %d" n, "Rarity: Unique\nGrand Spectrum\nSapphire\n--------\n+7% to all Elemental Resistances per socketed Grand Spectrum"

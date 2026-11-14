@@ -430,7 +430,8 @@ module Pob =
                         | true, n -> (if n < 1000 then List.tryItem n jewelSlots else Some n) |> Option.bind (fun id -> Map.tryFind id tree)
                         | _ -> None
                     let lines = text.Split('\n') |> Array.map (fun l -> l.Trim())
-                    let corrupted = Array.contains "Corrupted" lines
+                    // (The Adorned is about the tree's jewel sockets: not a jewel socketed in an item, "Jewel Ring 1")
+                    let corrupted = Array.contains "Corrupted" lines && fst (System.Int32.TryParse(slot.Substring 6))
                     (match socket with
                      | Some n when n.Ascendancy <> "" -> effect "AscendancyJewel"
                      | _ -> 0.0)
