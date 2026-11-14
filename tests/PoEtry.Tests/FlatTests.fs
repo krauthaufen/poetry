@@ -210,7 +210,9 @@ let randomFight (case: uint32) : Fight * string =
           (fun () -> [ Mod.base' (Named "RageEffect") 0.0; Mod.inc (Named "RageEffect") (between 10.0 50.0) ])
           (fun () -> [ Mod.base' (Named "ConsumeChargeCount") (float (whole 1 2)) ])
           (fun () -> [ Mod.flag (Named "NoHitDamage") |> Mod.whenever (SkillNamed "Skill 2") ])
-          (fun () -> [ Mod.override' HitChance (between 40.0 100.0) |> Mod.whenever (SkillNamed "Skill 1") ]) ]
+          (fun () -> [ Mod.override' HitChance (between 40.0 100.0) |> Mod.whenever (SkillNamed "Skill 1") ])
+          (fun () -> [ Mod.base' (Named "TrinityGain") (between 5.0 40.0); Mod.base' (Named "TrinityLoss") (between 1.0 20.0); Mod.more (Damage AllDamage) 2.0 |> Mod.whenever (PerStack("Resonance", 10.0)); Mod.inc CritChance 30.0 |> Mod.whenever (WhileBuff "Resonance:Fire") ])
+          (fun () -> [ Mod.base' (Named "CascadesPerSide") (float (whole 1 2)); Mod.more (Named "CascadeArea") (between -60.0 30.0) ]) ]
     // (now and then a build around something: ailments that deal damage, charges, leech)
     let theme =
         match whole 0 9 with
@@ -272,7 +274,11 @@ let randomFight (case: uint32) : Fight * string =
                     Name = s.Name + suffix
                     Mods = flags |> List.map (fun f -> Mod.flag (Named f)) }
             let parts =
-                match whole 0 4 with
+                match whole 0 8 with
+                | 5 -> [ part ": Shatter" [ "OnlyVs:Frozen|Shocked|Chilled"; "ConsumesVs" ]; part ": Whole" [ "NotVs:Frozen|Shocked|Chilled" ] ]
+                | 6 -> [ part ": Mine" [ "DetonatedBy:Warcry" ]; part ": Trap" [ "DetonatedBy:Type:Barrageable" ] ]
+                | 7 -> [ part ": Drain" [ "Takes:" + pick [ "Shocked"; "Marked by pain"; "ArmourBreak"; "Chilled"; "Curse:Hex" ] ]; part ": Versus" [ "OnlyVs:Ignited|Cursed|Isolated|ArmourBreak"; "ConsumesVs" ] ]
+                | 8 -> [ part ": Feast" [ "OnlyVs:Poisoned|Marked by pain|Weakened"; (if chance 0.5 then "ConsumesVs" else "OncePerUse") ] ]
                 | 0 -> [ part ": Wave" [] ]
                 | 1 -> [ part ": Explosion" []; part "-Charged" [] ]
                 | 2 -> [ part ": Echo" [ "OncePerUse" ]; part ": Spark" [ "OnlyWithCharge" ] ]
@@ -1003,6 +1009,41 @@ let run (test: string -> (unit -> unit) -> unit) =
         let scarce = { fight with Player = { player with Infusions = player.Infusions |> Option.map (fun inf -> { inf with Remnants = [ Shock, "LightningInfusion", 15.0 ] }) } }
         same scarce seeds
         if not ((Sim.run scarce 1u).Counts.ContainsKey "uninfused:Bolt") then failwith "expected impacts without an infusion")
+
+    test "flat: Spell Cascade, Trinity, parts against an enemy's state, parts set off by another skill" (fun () ->
+        let weak i = { EnemyDef.atLevel 75 1e9 with Name = sprintf "near %d" i; Position = Vec.make (30.0 + 9.0 * float i) (5.0 * float (i % 3) - 5.0); Mods = [] }
+        // a spell that lands three times along a line, the side impacts smaller
+        let comet = { spell "Comet" Cold 100.0 200.0 with Delivery = AreaAtTarget 12.0; BaseTime = 0.8 }
+        let spark = { spell "Spark" Lightning 30.0 300.0 with BaseTime = 0.4 }
+        let caster =
+            { Actor.make "Player"
+                  [ noIgnite; Mod.base' (Named "CascadesPerSide") 2.0 |> Mod.whenever (SkillNamed "Comet"); Mod.more (Named "CascadeArea") -30.0
+                    Mod.base' (Named "TrinityGain") 30.0; Mod.base' (Named "TrinityLoss") 10.0; Mod.more (Damage AllDamage) 3.0 |> Mod.whenever (PerStack("Resonance", 10.0)) ]
+                  [ comet; spark ] with
+                Rotation = [ { Use = "Comet"; When = fun v -> v.LastUsed <> "Comet" }; Actor.always "Spark" ] }
+        let fight = { Fight.single (weak 0) caster 12.0 with Enemies = [ for i in 0 .. 5 -> weak i ] }
+        same fight seeds
+        let o = Sim.run fight 1u
+        if o.Counts.["hits:Comet"] <= o.Counts.["uses:Comet"] then failwithf "expected the cascade to hit more than once a use: %A" o.Counts
+        // a strike that shatters a frozen enemy (the freeze is gone), another part when it is not
+        // frozen; a hit that takes the shock off; mines that a warcry sets off
+        let shatter = { strike "Blow: Shatter" 400.0 600.0 with Mods = [ Mod.flag (Named "OnlyVs:Frozen|Pinned"); Mod.flag (Named "ConsumesVs") ] }
+        let plain = { strike "Blow: Plain" 50.0 80.0 with Mods = [ Mod.flag (Named "NotVs:Frozen|Pinned") ] }
+        let blow = { strike "Blow" 60.0 90.0 with Parts = [ shatter; plain ]; Cooldown = Some 1.3; BaseTime = 0.3 }
+        let drain = { spell "Drain" Chaos 40.0 60.0 with Mods = [ Mod.flag (Named "Takes:Shocked") ]; Cooldown = Some 3.1; BaseTime = 0.3 }
+        let mine = { spell "Lay: Mine" Fire 300.0 400.0 with Mods = [ Mod.flag (Named "DetonatedBy:Warcry") ]; Delivery = AreaAtTarget 20.0 }
+        let lay = { spell "Lay" Fire 1.0 2.0 with Parts = [ mine ]; BaseTime = 0.3 }
+        let cry = { Skill.make "Cry" [ Warcry ] with Hits = []; Cooldown = Some 4.0; BaseTime = 0.5 }
+        let frost = { spell "Frost" Cold 300.0 400.0 with Cooldown = Some 3.3; BaseTime = 0.3 }
+        let zap = { spell "Zap" Lightning 100.0 200.0 with Cooldown = Some 2.7; BaseTime = 0.3 }
+        let fighter =
+            { Actor.make "Player" [ noIgnite; Mod.base' (Named "Accuracy") 1e9; Mod.inc (Buildup Freeze) 30000.0; Mod.base' (AilmentChance Shock) 100.0 ] [ cry; frost; zap; drain; lay; blow ] with
+                Rotation = [ for sk in [ cry; frost; blow; zap; drain; lay ] -> Actor.always sk.Name ] }
+        let fight = { Fight.single (boss 1e12) fighter 20.0 with Enemies = [ { boss 1e12 with Rarity = Magic } ] }
+        same fight seeds
+        let o = Sim.run fight 1u
+        for key in [ "consumed:Frozen"; "consumed:Shocked"; "detonated:Lay: Mine"; "hits:Blow: Plain"; "hits:Blow: Shatter" ] do
+            if not (o.Counts.ContainsKey key) then failwithf "expected %s: %A" key o.Counts)
 
     test "flat: what is not built is refused, with every reason" (fun () ->
         let player = Actor.make "Player" [] [ spell "Bolt" Fire 1.0 2.0 ]

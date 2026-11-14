@@ -618,6 +618,10 @@ module Flat =
     let private qConsumeEvery = site MEmpty Base (named "ConsumeChargeEveryMs")
     let private qConsumeCount = site MEmpty Base (named "ConsumeChargeCount")
     let private qRageEffect = siteMult MEmpty (named "RageEffect")
+    let private qTrinityGain = site MSkill Base (named "TrinityGain")
+    let private qTrinityLoss = site MSkill Base (named "TrinityLoss")
+    let private qCascades = site MSkill Base (named "CascadesPerSide")
+    let private qCascadeArea = site MSkill More (named "CascadeArea")
     let private qInfusionKeep = site MEmpty Base (named "InfusionKeepChance")
     let private qInfusionPower = site MEmpty Base (named "PowerChargeOnInfusionConsumed")
 
@@ -807,7 +811,22 @@ module Flat =
           Wildcard: int
           Infused: int
           CInfused: int
-          CUninfused: int }
+          CUninfused: int
+          /// A part that only happens against an enemy in one of some states (`OnlyVs`), and
+          /// takes the first of them it finds off the enemy (`ConsumesVs`; `CConsumedVs`:
+          /// where that is counted, by state); one that does not happen against some
+          /// (`NotVs`); a state a hit that lands takes off the enemy (`Takes`, -1: none).
+          OnlyVs: int[]
+          ConsumesVs: bool
+          CConsumedVs: int[]
+          NotVs: int[]
+          Takes: int
+          CTakes: int
+          /// A part that waits until another skill sets it off; the waiting parts of other
+          /// skills that a use of this skill sets off, and where that is counted.
+          Waits: bool
+          SetsOff: int[]
+          CDetonated: int }
 
     type private EnemyInfo =
         { Def: EnemyDef
@@ -873,6 +892,9 @@ module Flat =
               RemnantExtra: float
               RemnantDelay: float
               BConsumedInfusion: int
+              /// Trinity: the resonance of each element (lightning, cold, fire), and their sum.
+              BResonance: int[]
+              BResonanceSum: int
               /// Runic Ward and mana remnants (the player's).
               WardRemnants: WardRemnants option
               ManaRemnants: ManaRemnants option
@@ -1046,15 +1068,12 @@ module Flat =
     /// Stats that make the reference do something that is not built here. A fight with a mod
     /// of one of them, wherever the mod is, is not compiled.
     let private unbuiltStats =
-        [ "CascadesPerSide", "Spell Cascade"
-          "TriskelionArms", "Triskelion Cascade"
-          "TrinityGain", "Trinity"
+        [ "TriskelionArms", "Triskelion Cascade"
           "SigilMaxStages", "Sigil of Power"
           "DetonatedByDamage", "seeds set off by damage (Living Bomb)"
           "DetonatesCurse", "curse detonation (Hexblast)"
           "NoCooldownWithCharge", "skills that skip their cooldown when empowered"
           "Crystals", "Ice Crystals"
-          "ConsumesVs", "parts against an enemy state"
           "SeqLength", "chained attacks"
           "SeqHits", "chained attacks"
           "MaxSeals", "sealed skills"
@@ -1064,13 +1083,9 @@ module Flat =
           "RecordsDamage", "debuffs that record damage (Inevitable Agony)" ]
 
     let private unbuiltPrefixes =
-        [ "DetonatedBy:", "parts set off by another skill"
-          "SeqSteps:", "chained attacks"
+        [ "SeqSteps:", "chained attacks"
           "WarpsInto:", "warps into projectiles"
           "ToggleBuff:", "forms that are switched on"
-          "OnlyVs:", "parts against an enemy state"
-          "NotVs:", "parts against an enemy state"
-          "Takes:", "hits that consume an enemy state"
           "NeedsEnemyStacks:", "skills that wait for stacks on the enemy"
           "Requires:", "Glory and Combo" ]
 
@@ -1257,8 +1272,7 @@ module Flat =
                     match m.Stat with
                     | Named n ->
                         for (stat, what) in unbuiltStats do
-                            // (Trinity is the player's alone: the reference does nothing with a minion's)
-                            if n = stat && (isPlayer || n <> "TrinityGain") then reject what
+                            if n = stat then reject what
                         for (prefix, what) in unbuiltPrefixes do
                             if n.StartsWith prefix then reject what
                     | _ -> ()
@@ -1534,6 +1548,10 @@ module Flat =
                             match r.Reaction with
                             | WithCorpse _ | SummonPerCorpse _ when r.Hook = OnUse && matches r.Filter s -> Some r.Reaction
                             | _ -> None)
+                    // (the rest of a flag of the skill's that starts so: `Sim.partNamed`)
+                    let named' (prefix: string) = s.Mods |> List.tryPick (fun m -> match m.Stat with Named n when n.StartsWith prefix -> Some(n.Substring prefix.Length) | _ -> None)
+                    let states (prefix: string) = match named' prefix with Some st -> st.Split '|' |> List.ofArray | None -> []
+                    let onlyVs = states "OnlyVs:"
                     let consumer = actor.Infusions |> Option.bind (fun inf -> Map.tryFind s.Name inf.Consumers |> Option.map (fun c -> inf, c))
                     let query = queriesOf s
                     let answers = sites.ToArray() |> Array.map query
@@ -1624,7 +1642,22 @@ module Flat =
                       Wildcard = (match consumer with Some (inf, _) -> (match inf.Wildcard with Some w -> buff w | None -> -1) | None -> -1)
                       Infused = (match consumer with Some (_, (_, copy)) -> skillId "an infusion" copy | None -> -1)
                       CInfused = counts.Id("infused:" + s.Name)
-                      CUninfused = counts.Id("uninfused:" + s.Name) })
+                      CUninfused = counts.Id("uninfused:" + s.Name)
+                      OnlyVs = onlyVs |> List.map statuses.Id |> Array.ofList
+                      ConsumesVs = flag "ConsumesVs"
+                      CConsumedVs = onlyVs |> List.map (fun st -> counts.Id("consumed:" + st)) |> Array.ofList
+                      NotVs = states "NotVs:" |> List.map statuses.Id |> Array.ofList
+                      Takes = (match named' "Takes:" with Some st -> statuses.Id st | None -> -1)
+                      CTakes = (match named' "Takes:" with Some st -> counts.Id("consumed:" + st) | None -> -1)
+                      Waits = (named' "DetonatedBy:").IsSome
+                      SetsOff =
+                        [| for o in actor.Skills do
+                            for part in o.Parts do
+                                match part.Mods |> List.tryPick (fun m -> match m.Stat with Named n when n.StartsWith "DetonatedBy:" -> Some(n.Substring 12) | _ -> None) with
+                                | Some by when not (s.Parts |> List.exists (fun q -> q.Name = part.Name)) && ((by = "Warcry" && s.Tags.Contains Warcry) || s.Tags.Contains(Tag by)) ->
+                                    yield skillIds.[part.Name]
+                                | _ -> () |]
+                      CDetonated = counts.Id("detonated:" + s.Name) })
                 |> Array.ofList
             let sIso, sClose, sOpen = statuses.Id "Isolated", statuses.Id "Close", statuses.Id "OpenWeakness"
             let sDerived = derivedStatuses |> List.map statuses.Id |> Array.ofList
@@ -1640,6 +1673,9 @@ module Flat =
                 | None -> [||]
             // (named here, while names are still given numbers)
             buffs.Id "ConsumedInfusionRecently" |> ignore
+            for t in DamageType.elemental do
+                buffs.Id("Resonance:" + DamageType.name t) |> ignore
+            buffs.Id "Resonance" |> ignore
             buffs.Id "MinionDiedRecently" |> ignore
             buffs.Id "Empowered" |> ignore
             actor.ActiveWhile |> Option.iter (fun name -> buffs.Id name |> ignore)
@@ -1696,6 +1732,8 @@ module Flat =
                       RemnantExtra = (match actor.Infusions with Some inf -> inf.ExtraRemnantChance | None -> 0.0)
                       RemnantDelay = (match actor.Infusions with Some inf -> inf.Delay | None -> 0.0)
                       BConsumedInfusion = buffs.Id "ConsumedInfusionRecently"
+                      BResonance = DamageType.elemental |> List.map (fun t -> buffs.Id("Resonance:" + DamageType.name t)) |> Array.ofList
+                      BResonanceSum = buffs.Id "Resonance"
                       WardRemnants = actor.WardRemnants
                       ManaRemnants = actor.ManaRemnants
                       CWardRemnant = count "ward remnant"
@@ -2163,6 +2201,8 @@ module Flat =
           PeriodicStream: int[]
           mutable RageAt: float
           mutable RageCarry: float
+          /// By skill: how many of a part that waits to be set off by another skill wait.
+          Waiting: int[]
           /// A minion's life and energy shield, when it was last hit, whether it is out of the
           /// fight (killed, or not summoned), and when a temporary one's time is up.
           mutable Health: float
@@ -3586,17 +3626,33 @@ module Flat =
                         && (if pi.NotEnraged then true
                             elif pi.NotWithCharge then not charged
                             elif pi.WithCharge then charged
+                            elif pi.Waits then false
                             elif pi.OnlyInfused >= 0 then stacksOf s pi.OnlyInfused > 0
                             else not (info.HasChargedPart && charged && pi.Explosion))
                     if happens then
                         if pi.Passing then schedule s at EPassing part target mult (at - s.Time)
                         else schedule s at EStrike part target mult 0.0
-            // an infusion a part needed is used up
-            for k in 1 .. info.Parts.Length - 1 do
-                let infusion = (at p.Skills (at info.Parts k)).OnlyInfused
-                if infusion >= 0 && stacksOf s infusion > 0 then
-                    if (at s.A.BStacks infusion) > 1 then setBuff s infusion ((at s.A.BStacks infusion) - 1) (at s.A.BExpires infusion) (at s.A.BMods infusion)
-                    else removeBuff s infusion
+            // an infusion a part needed is used up; a part that waits is put down
+            // (which parts had their infusion is seen before any is used up)
+            if info.Parts.Length > 1 then
+                let had = info.Parts |> Array.map (fun part -> let infusion = (at p.Skills part).OnlyInfused in infusion >= 0 && stacksOf s infusion > 0)
+                for k in 1 .. info.Parts.Length - 1 do
+                    let part = at info.Parts k
+                    let pi = at p.Skills part
+                    if at had k then
+                        let infusion = pi.OnlyInfused
+                        if (at s.A.BHas infusion) && (at s.A.BStacks infusion) > 1 then setBuff s infusion ((at s.A.BStacks infusion) - 1) (at s.A.BExpires infusion) (at s.A.BMods infusion)
+                        else removeBuff s infusion
+                    elif pi.Waits then put s.A.Waiting part (min 20 ((at s.A.Waiting part) + 1))
+            // a detonator (or a warcry) sets off everything of that kind that waits
+            for k in 0 .. info.SetsOff.Length - 1 do
+                let part = at info.SetsOff k
+                let n = at s.A.Waiting part
+                if n > 0 then
+                    put s.A.Waiting part 0
+                    for _ in 1 .. n do
+                        schedule s (last + 1e-6) EStrike part target 1.0 0.0
+                    bump s (at p.Skills part).CDetonated
             // an attack the player makes while empowered by a warcry uses one empowerment up,
             // and a Repeatable attack one of the repeats readied for it
             if useTime > 0.0 && (info.SpendsEmpowered || info.SpendsRepeats) then
@@ -4221,8 +4277,42 @@ module Flat =
                         let distance = max 0.0 (Vec.length def0.Position - def0.Size)
                         Hit.accuracyHitChance evasion (Hit.accuracyAtDistance distance accuracy)
                 else 100.0
-            if not (lands s rng e hitChance) then bump s info.CMiss
+            // a part that only happens against an enemy in some state: nothing otherwise; and one
+            // that gives way to another part against a state
+            let mutable met = info.OnlyVs.Length = 0
+            for k in 0 .. info.OnlyVs.Length - 1 do
+                if hasStatus ev (at info.OnlyVs k) then met <- true
+            for k in 0 .. info.NotVs.Length - 1 do
+                if hasStatus ev (at info.NotVs k) then met <- false
+            // a state the hit takes off the enemy: the hit itself still meets the enemy as it
+            // was (its mods as a defender, its shock, its broken armour), what the hit leaves
+            // on it finds the state gone
+            let mutable taken = false
+            let mutable shockWas = 0.0
+            let mutable brokenWas = 0.0
+            let take (id: int) (count: int) =
+                if id >= 0 && (at e.Has id) then
+                    if not taken then
+                        defList s e
+                        defender s e |> ignore
+                        shockWas <- (if (at e.Has p.SShocked) && (at e.Expires p.SShocked) > s.Time then (at e.DMods p.SShocked) |> List.sumBy (fun m -> m.Value) else 0.0)
+                        brokenWas <- (if (at e.Has p.SArmourBreak) && (at e.Expires p.SArmourBreak) > s.Time then -((at e.DMods p.SArmourBreak) |> List.sumBy (fun m -> m.Value)) else 0.0)
+                        taken <- true
+                    put e.Has id false
+                    put e.Stacks id 0
+                    put e.DMods id []
+                    e.StatusStale <- true
+                bump s count
+            if met && info.ConsumesVs && info.OnlyVs.Length > 0 then
+                let mutable first = -1
+                for k in 0 .. info.OnlyVs.Length - 1 do
+                    if first < 0 && hasStatus ev (at info.OnlyVs k) then first <- k
+                take (at info.OnlyVs first) (at info.CConsumedVs first)
+            if not met then ()
+            elif not (lands s rng e hitChance) then bump s info.CMiss
             else
+                // a hit that takes a state off the enemy without needing it ("Consumes Shock")
+                if info.Takes >= 0 && hasStatus ev info.Takes then take info.Takes info.CTakes
                 // "Enemies you Curse / Mark take X% increased Damage": additive with what the enemy already takes
                 let nums = numsFor s e (sumQ ev qEnemyTaken)
                 let critRoll = if info.Sustained || not (at s.A.HasCritRoll sid) then nan else (at s.A.CritRoll sid)
@@ -4302,7 +4392,8 @@ module Flat =
                             put de t (0.0)
                 // a shock the hit applies already counts for the hit itself
                 (let currentShock =
-                    if (at e.Has p.SShocked) && (at e.Expires p.SShocked) > s.Time then (at e.DMods p.SShocked) |> List.sumBy (fun m -> m.Value) else 0.0
+                    if taken then shockWas
+                    elif (at e.Has p.SShocked) && (at e.Expires p.SShocked) > s.Time then (at e.DMods p.SShocked) |> List.sumBy (fun m -> m.Value) else 0.0
                  let mutable newShock = nan
                  for i in 0 .. inflicted.Count - 1 do
                     match inflicted.[i] with
@@ -4344,7 +4435,8 @@ module Flat =
                 (match s.Tell with Some tell -> tell s.Time (if crit then "crit" else "hit") def0.Name skill.Name dealt | None -> ())
                 // what the armour break below reads of the enemy as it was before the hit
                 let brokenBefore =
-                    if (at e.Has p.SArmourBreak) && (at e.Expires p.SArmourBreak) > s.Time then -((at e.DMods p.SArmourBreak) |> List.sumBy (fun m -> m.Value)) else 0.0
+                    if taken then brokenWas
+                    elif (at e.Has p.SArmourBreak) && (at e.Expires p.SArmourBreak) > s.Time then -((at e.DMods p.SArmourBreak) |> List.sumBy (fun m -> m.Value)) else 0.0
                 addDamage s info.Source (min dealt lifeBefore)
                 // (only of a hit the enemy outlives: what a killing hit deals is the life that was left)
                 if not dead then s.Evened <- s.Evened + dealt * (evenly - 1.0)
@@ -4575,6 +4667,23 @@ module Flat =
                         let most = match p.Vitals with Some v -> v.Mana | None -> 0.0
                         schedule s (s.Time + r.Delay) EMana 0 0 ((r.ManaPerRemnant + r.PercentOfMaxMana / 100.0 * most) * count) 0.0
                  | _ -> ())
+                // Trinity: the hit's strongest element gains resonance (up to 100), the others lose some
+                if p.IsPlayer then
+                    ev.Crit <- false
+                    let gain = sumQ ev qTrinityGain
+                    if gain > 0.0 && ((at un 1) > 0.0 || (at un 2) > 0.0 || (at un 3) > 0.0) then
+                        // (lightning, cold, fire: of equals the first)
+                        let mutable top = -1
+                        for t in 1 .. 3 do
+                            if (at un t) > 0.0 && (top < 0 || (at un t) > (at un top)) then top <- t
+                        let loss = sumQ ev qTrinityLoss
+                        let mutable sum = 0
+                        for t in 1 .. 3 do
+                            let b = at p.BResonance (t - 1)
+                            let n = if t = top then min 100 (stacksOf s b + int gain) else max 0 (stacksOf s b - int loss)
+                            if n > 0 then setBuff s b n infinity [] else removeBuff s b
+                            sum <- sum + n
+                        if sum > 0 then setBuff s p.BResonanceSum sum infinity [] else removeBuff s p.BResonanceSum
                 // (the player's charms, whoever made the kill)
                 if dead && s.Main.Charms.Length > 0 then
                     if s.Main.Vitals.IsSome then
@@ -4601,6 +4710,10 @@ module Flat =
                 if dead then mark s p.BKilled 4.0
                 react s rng p.OnHit "" sid target
                 if crit then react s rng p.OnCrit "" sid target
+            // (from now on the enemy is met without what was taken off it)
+            if taken then
+                e.DefenderStale <- true
+                e.DefVersion <- e.DefVersion + 1
             release s
 
     /// A strike lands: who is hit, and each hit (`Sim.onStrike`).
@@ -4639,67 +4752,111 @@ module Flat =
                 areaMult, delivery
             s.StrikeLeech <- 0.0
             s.StrikeLifeLeech <- 0.0
+            // (the buffs are the ones the strike began with, whatever it and its hits change)
+            let began = acquire s sid
+            useBuffs s began plain true
+            // what is asked of a skill for an impact of this strike: with the buffs, and their
+            // mods, as they were when the strike began
+            let ask (skill: int) : Ev =
+                let info = at p.Skills skill
+                let ev = acquire s skill
+                ev.DynRaw <- began.DynRaw
+                ev.Dyn <-
+                    (if skill = sid then began.Dyn
+                     elif obj.ReferenceEquals(began.Dyn, began.DynRaw) then began.DynRaw
+                     else resolveDyn began.DynRaw info.Skill.Tags info.Skill.Name)
+                ev.BOn <- true
+                ev.BHas <- began.BHas
+                ev.BStacks <- began.BStacks
+                if info.StackExtra > 0 then
+                    ev.Extra <- info.StackBuff
+                    ev.ExtraN <- info.StackExtra
+                ev
             // (the reference works the shape out twice, and each time rolls what it rolls)
             (match plain.Skill.Delivery with
-             | Projectiles _ ->
-                let ev = acquire s sid
-                useBuffs s ev plain true
-                shape ev plain |> ignore
-                release s
+             | Projectiles _ -> shape began plain |> ignore
              | _ -> ())
             // Infusions: each impact consumes one of the skill's element (or the one that does
             // in its place) and is the infused copy; without one, the plain skill
-            let source =
-                if plain.Infusion < 0 then -1
-                elif stacksOf s plain.Infusion > 0 then plain.Infusion
-                elif plain.Wildcard >= 0 && stacksOf s plain.Wildcard > 0 then plain.Wildcard
-                else -1
-            let direct' = sid
-            let sid = if source >= 0 then plain.Infused else sid
-            let info = (at p.Skills sid)
-            let skill = info.Skill
-            // (the buffs are the ones the strike began with, whatever it and its hits change)
-            let ev = acquire s sid
-            useBuffs s ev info true
-            if plain.Infusion >= 0 then
-                if source < 0 then bump s plain.CUninfused
+            let variant () : int =
+                if plain.Infusion < 0 then sid
                 else
-                    let evE = acquireEmpty s sid
-                    let keep = sumQ evE qInfusionKeep
-                    let charges = int (sumQ evE qInfusionPower)
+                    let source =
+                        if stacksOf s plain.Infusion > 0 then plain.Infusion
+                        elif plain.Wildcard >= 0 && stacksOf s plain.Wildcard > 0 then plain.Wildcard
+                        else -1
+                    if source < 0 then
+                        bump s plain.CUninfused
+                        sid
+                    else
+                        let evE = acquireEmpty s plain.Infused
+                        let keep = sumQ evE qInfusionKeep
+                        let charges = int (sumQ evE qInfusionPower)
+                        release s
+                        bump s plain.CInfused
+                        markStatus s p.BConsumedInfusion
+                        // "Gain a Power Charge when you consume an Elemental Infusion"
+                        if charges > 0 then schedule s s.Time EGainStacks (at p.BCharges 0) charges 0.0 0.0
+                        if not (rng.Chance keep) then setStacks s false source (stacksOf s source - 1)
+                        plain.Infused
+            // Spell Cascade: extra impacts on either side of the target, along an axis chosen at random
+            let cascades =
+                match plain.Skill.Delivery with
+                | AreaAtTarget _ -> int (sumQ began qCascades)
+                | _ -> 0
+            if cascades > 0 then
+                let axis = Vec.ofAngle (rng.Float() * 2.0 * System.Math.PI)
+                let mutable step = 0.0
+                // the centre impact first (it takes the first infusion); its radius sets the spacing
+                for place in 0 .. 2 * cascades do
+                    let k = if place = 0 then 0 elif place % 2 = 1 then -((place + 1) / 2) else place / 2
+                    let impact = variant ()
+                    let info = at p.Skills impact
+                    let ev = ask impact
+                    let areaMult, delivery = shape ev info
+                    let r = match delivery with AreaAtTarget r -> r | _ -> 0.0
+                    let centreR = Geometry.radius r areaMult
+                    if k = 0 then step <- centreR * p.Fight.CascadeSpacing
+                    let reach = if k = 0 then centreR else Geometry.radius r (areaMult * moreQ ev qCascadeArea)
                     release s
-                    bump s plain.CInfused
-                    markStatus s p.BConsumedInfusion
-                    // "Gain a Power Charge when you consume an Elemental Infusion"
-                    if charges > 0 then schedule s s.Time EGainStacks (at p.BCharges 0) charges 0.0 0.0
-                    if not (rng.Chance keep) then setStacks s false source (stacksOf s source - 1)
-            let areaMult, delivery = shape ev info
-            let hitAll (names: string list) =
-                let mutable rest = names
-                while not rest.IsEmpty do
-                    hitEnemy s rng sid mult s.FoeIds.[rest.Head]
-                    rest <- rest.Tail
-            let strike () =
-                if direct then
-                    if primary = aimedAt then hitEnemy s rng sid mult aimedAt
-                else
-                    match delivery with
-                    | Projectiles pr when not passing && pr.Passing > 0.0 && pr.HitInterval > 0.0 ->
-                        // what is inside the projectiles as they travel: every hit at its own time
-                        for (t, target) in Geometry.dwellHits rng p.Fight.Walls pr p.Fight.Reach areaMult primaryDef alive do
-                            if t <= 0.0 then hitEnemy s rng sid mult s.FoeIds.[target]
-                            else schedule s (s.Time + t) EDirect direct' s.FoeIds.[target] mult 0.0
-                    | Projectiles pr when passing && pr.Passing > 0.0 ->
-                        // where the projectile is by now, on its way towards where it was aimed
-                        let at = Vec.scale (pr.Speed * elapsed) (Vec.ofAngle (Vec.angle primaryDef.Position))
-                        alive |> List.filter (Geometry.within at (Geometry.radius pr.Passing areaMult)) |> List.map (fun e -> e.Name) |> hitAll
-                    | Single -> hitEnemy s rng sid mult primary
-                    | _ -> Geometry.targetsFrom rng p.Fight.Walls p.Fight.Reach delivery areaMult primaryDef alive |> hitAll
-            strike ()
-            // Aftershock: a slam has a chance to hit its area once more
-            if info.IsSlam && rng.Chance(sumQ ev qAftershock) then
+                    let centre = Vec.add primaryDef.Position (Vec.scale (float k * step) axis)
+                    let mutable rest = alive
+                    while not rest.IsEmpty do
+                        let d = rest.Head
+                        if Vec.dist centre d.Position <= reach + d.Size then hitEnemy s rng impact mult s.FoeIds.[d.Name]
+                        rest <- rest.Tail
+            else
+                let impact = variant ()
+                let info = at p.Skills impact
+                let ev = ask impact
+                let areaMult, delivery = shape ev info
+                let hitAll (names: string list) =
+                    let mutable rest = names
+                    while not rest.IsEmpty do
+                        hitEnemy s rng impact mult s.FoeIds.[rest.Head]
+                        rest <- rest.Tail
+                let strike () =
+                    if direct then
+                        if primary = aimedAt then hitEnemy s rng impact mult aimedAt
+                    else
+                        match delivery with
+                        | Projectiles pr when not passing && pr.Passing > 0.0 && pr.HitInterval > 0.0 ->
+                            // what is inside the projectiles as they travel: every hit at its own time
+                            for (t, target) in Geometry.dwellHits rng p.Fight.Walls pr p.Fight.Reach areaMult primaryDef alive do
+                                if t <= 0.0 then hitEnemy s rng impact mult s.FoeIds.[target]
+                                else schedule s (s.Time + t) EDirect sid s.FoeIds.[target] mult 0.0
+                        | Projectiles pr when passing && pr.Passing > 0.0 ->
+                            // where the projectile is by now, on its way towards where it was aimed
+                            let spot = Vec.scale (pr.Speed * elapsed) (Vec.ofAngle (Vec.angle primaryDef.Position))
+                            alive |> List.filter (Geometry.within spot (Geometry.radius pr.Passing areaMult)) |> List.map (fun e -> e.Name) |> hitAll
+                        | Single -> hitEnemy s rng impact mult primary
+                        | _ -> Geometry.targetsFrom rng p.Fight.Walls p.Fight.Reach delivery areaMult primaryDef alive |> hitAll
                 strike ()
-                bump s info.CAftershock
+                // Aftershock: a slam has a chance to hit its area once more
+                if info.IsSlam && rng.Chance(sumQ ev qAftershock) then
+                    strike ()
+                    bump s info.CAftershock
+                release s
             release s
 
     /// A minion is killed: it leaves the fight; a reviving one comes back with the others
@@ -5498,6 +5655,7 @@ module Flat =
                   PeriodicStream = Array.zeroCreate pr.Periodics.Length
                   RageAt = 0.0
                   RageCarry = 0.0
+                  Waiting = Array.zeroCreate nk
                   Health = (match pr.Body with Some body -> body.Life | None -> 0.0)
                   Barrier = (match pr.Body with Some body -> body.EnergyShield | None -> 0.0)
                   HitAt = -1e9
