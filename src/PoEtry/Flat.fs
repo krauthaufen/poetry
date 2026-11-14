@@ -615,6 +615,10 @@ module Flat =
 
     let private damageTypes = Array.ofList DamageType.all
 
+    /// The questions the damage ranges of a hit are made of (`rangesAnew`).
+    let private rangeSites =
+        Array.concat [ [| qAddedEffect; qAddedEffect + 1; qNoNonFire |]; qAddedMin; qAddedMax; qGain; qSkillConvert; qConvert ]
+
     // ---- a program ----
 
     /// A reaction with its names as numbers (see `Reaction`).
@@ -730,6 +734,11 @@ module Flat =
           /// Whether a mod of the character or the skill gains damage as extra, or converts it.
           HasGain: bool
           HasConvert: bool
+          /// What the damage ranges are made of (see `rangesAnew`): whether any of it can
+          /// change with the buffs, with the enemy's statuses, and whether buffs' mods have a part in it.
+          RangesOnBuffs: bool
+          RangesOnStatus: bool
+          RangesHasSlot: bool
           DotTags: Set<SkillTag>
           SpellDot: bool
           IsMelee: bool
@@ -1498,6 +1507,8 @@ module Flat =
                             | WithCorpse _ | SummonPerCorpse _ when r.Hook = OnUse && matches r.Filter s -> Some r.Reaction
                             | _ -> None)
                     let query = queriesOf s
+                    let answers = sites.ToArray() |> Array.map query
+                    let rangeQueries = rangeSites |> Array.map (fun i -> at answers i)
                     let own = actor.Mods @ s.Mods
                     let pattern = Map.tryFind s.Name actor.HitPattern |> Option.defaultValue (s.Hits |> List.map (fun (f, m) -> DuringUse f, m)) |> Array.ofList
                     // (as `Sim.skillStacks`: a part counts like the skill it belongs to)
@@ -1516,10 +1527,13 @@ module Flat =
                       Consumes = (match s.Consumes with Some c -> buffs.Id c | None -> -1)
                       StackCharge = stackCharge |> Option.defaultValue ""
                       StackBuff = (match stackCharge with Some c -> buffs.Id c | None -> -1)
-                      Q = sites.ToArray() |> Array.map query
+                      Q = answers
                       QArchon = actor.Archons |> List.map (fun a -> query (MSkill, Base, [ Named a.OnIgniteStat ])) |> Array.ofList
                       BaseMin = DamageType.all |> List.map (fun t -> match Map.tryFind t s.BaseDamage with Some r -> r.Min | None -> 0.0) |> Array.ofList
                       BaseMax = DamageType.all |> List.map (fun t -> match Map.tryFind t s.BaseDamage with Some r -> r.Max | None -> 0.0) |> Array.ofList
+                      RangesOnBuffs = rangeQueries |> Array.exists (fun q -> q.OnBuffs)
+                      RangesOnStatus = rangeQueries |> Array.exists (fun q -> q.OnStatus)
+                      RangesHasSlot = rangeQueries |> Array.exists (fun q -> q.HasSlot)
                       HasGain = own |> List.exists (fun m -> match m.Stat with GainAs _ -> true | _ -> false)
                       HasConvert = own |> List.exists (fun m -> match m.Stat with SkillConvert _ | Convert _ -> true | _ -> false)
                       DotTags = s.Tags |> Set.remove Spell |> Set.remove Attack
@@ -2141,6 +2155,10 @@ module Flat =
           mutable CorpsesUsed: int
           /// Killed minions are revived at this time; how many have died since the last revival.
           mutable Revival: (float * int) option
+          /// By actor: whether it is a melee minion that finds no room at the enemy `RoomAt`
+          /// (see `crowdedOut`; -2: to be worked out anew, a minion has come or gone).
+          NoRoom: bool[]
+          mutable RoomAt: int
           Evs: ResizeArray<Ev>
           NoHas: bool[]
           mutable EvDepth: int
@@ -3259,6 +3277,7 @@ module Flat =
     /// lost (`Sim.leave`; see `Agent.Epoch`).
     let private leave (s: State) (who: int) =
         let a = at s.Agents who
+        s.RoomAt <- -2
         a.Epoch <- a.Epoch + 1
         a.Gone <- true
         a.Health <- 0.0
@@ -3269,6 +3288,7 @@ module Flat =
     let private summon (s: State) (members: int[]) (count: int) (duration: float) (first: Mod list) (summoned: int) =
         if members.Length > 0 && count > 0 then
             let was = s.Cur
+            s.RoomAt <- -2
             let mutable rest =
                 List.ofArray members
                 |> List.sortBy (fun m -> let a = at s.Agents m in (if a.Gone then 0 else 1), a.Leaves)
@@ -3695,19 +3715,25 @@ module Flat =
             schedule s (if next < infinity then next else s.Time + Constants.serverTick) EReady 0 0 0.0 0.0
 
     /// Has this melee minion no room at the enemy aimed at? The melee minions in the fight
-    /// take their places in order (`Sim.crowdedOut`).
+    /// take their places in order (`Sim.crowdedOut`). Who has room is worked out when the
+    /// enemy aimed at is another, or a minion has come or gone, not at every turn.
     let private crowdedOut (s: State) : bool =
         match s.P.Body with
         | Some body when body.Melee ->
             let t = aimed s
             if t < 0 then false
             else
-                let melee =
-                    [ for i in s.P.Bodies do
-                        let b = (at s.Progs i).Body.Value
-                        if b.Melee && not (at s.Agents i).Gone then yield i, (b.Size, b.Reach) ]
-                let places = Geometry.meleePlaces (at s.Foes t).Def.Size (melee |> List.map snd)
-                List.exists2 (fun (i, _) has -> i = s.Cur && not has) melee places
+                if s.RoomAt <> t then
+                    let melee =
+                        [ for i in s.P.Bodies do
+                            let b = (at s.Progs i).Body.Value
+                            if b.Melee && not (at s.Agents i).Gone then yield i, (b.Size, b.Reach) ]
+                    let places = Geometry.meleePlaces (at s.Foes t).Def.Size (melee |> List.map snd)
+                    for i in 0 .. s.NoRoom.Length - 1 do
+                        put s.NoRoom i false
+                    List.iter2 (fun (i, _) has -> put s.NoRoom i (not has)) melee places
+                    s.RoomAt <- t
+                at s.NoRoom s.Cur
         | _ -> false
 
     /// An actor's turn comes (`Sim.onReady`): a stunned or frozen player waits, a totem
@@ -3895,15 +3921,18 @@ module Flat =
             for t in 0 .. 4 do
                 if t <> 3 then rHas.[t] <- false
 
-    /// The same, kept like the answers it is made of: good while neither the buffs nor the
-    /// enemy's statuses have changed (see `keepAnswers`; the ranges stand after the answers).
+    /// The same, kept like the answers it is made of: good while the buffs and the enemy's
+    /// statuses are what they were, where any of those answers can change with them (see
+    /// `keepAnswers`; the ranges stand after the answers).
     let private ranges (p: Program) (ev: Ev) (info: SkillInfo) =
         if not ev.Keeping then rangesAnew p ev info
         else
             let rMin, rMax, rHas = ev.RMin, ev.RMax, ev.RHas
             let stamp = ev.Q.Length * 2 + (if ev.Crit then 1 else 0)
             let from = ev.Q.Length * 2 + (if ev.Crit then 15 else 0)
-            if (at ev.KBuffs stamp) = ev.GBuffs && (at ev.KStatus stamp) = ev.GStatus then
+            if (at ev.KBuffs stamp) >= 0
+               && (not info.RangesOnBuffs || (at ev.KBuffs stamp) = ev.GBuffs)
+               && (not (info.RangesOnStatus || (info.RangesHasSlot && ev.DynOnStatus)) || (at ev.KStatus stamp) = ev.GStatus) then
                 for t in 0 .. 4 do
                     put rMin t (at ev.KVal (from + t))
                     put rMax t (at ev.KVal (from + 5 + t))
@@ -4562,6 +4591,7 @@ module Flat =
         match s.Revival with
         | Some (t, _) when abs (t - due) < 1e-9 ->
             s.Revival <- None
+            s.RoomAt <- -2
             let p = s.Main
             for i in 1 .. s.Agents.Length - 1 do
                 (at s.Agents i).Boned <- false
@@ -5346,6 +5376,8 @@ module Flat =
               Kills = ResizeArray()
               CorpsesUsed = 0
               Revival = None
+              NoRoom = Array.create progs.Length false
+              RoomAt = -2
               Evs = kept.Evs
               NoHas = [||]
               EvDepth = 0
