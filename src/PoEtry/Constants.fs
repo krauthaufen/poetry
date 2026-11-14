@@ -246,3 +246,9 @@ module Constants =
     /// distance (Ice Nova, a passive's "Knocks Back Enemies"): a metre. A guess.
     let knockbackUnitsPerDistance = 10.0
     let knockbackDefault = 10.0
+
+    /// Frostbolt's bolt: 30 units a second (game table Projectiles, FrostBolt 300 tenths, read
+    /// as Spark's and Ice Shot's), for the skill's duration (its `base_skill_effect_duration`,
+    /// 4 s; this where a skill has none).
+    let frostboltSpeed = 30.0
+    let frostboltLife = 4.0

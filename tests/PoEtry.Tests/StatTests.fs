@@ -606,3 +606,44 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         let withTwo = taken two o
         let withOne = taken one { o with SheetSetTwo = Some false }
         if not (withTwo > withOne) then failwithf "took %.0f with set two in hand, %.0f with set one" withTwo withOne)
+
+    // ---- a nova cast on a bolt ----
+
+    test "Ice Nova cast on a Frostbolt in flight: it comes from the bolt when the bolt is nearer the target than the player" (fun () ->
+        // a bolt sent at 0.5 s flies at 3 m a second; the nova lands at 1.5 s (bolt 3 m out). An
+        // enemy 6 m away (0.5 m body) is in a 3 m nova there, not in one around the player
+        let bolt = { Skill.make "Bolt" [ Spell; Projectile ] with BaseDamage = Map.ofList [ Cold, { Min = 0.001; Max = 0.001 } ]; BaseTime = 0.5; BaseCrit = 0.0; Mods = [ Mod.flag (Named "LaunchesBolt") ] }
+        let nova life = { Skill.make "Nova" [ Spell; Area; Nova ] with BaseDamage = Map.ofList [ Cold, { Min = 100.0; Max = 100.0 } ]; BaseTime = 1.0; BaseCrit = 0.0; Delivery = AreaAroundSelf 30.0; Mods = [ Mod.base' (Named "NovaOnBoltSpeed") 30.0; Mod.base' (Named "NovaOnBoltLife") life ] }
+        let fight life distance =
+            let enemy = { EnemyDef.atLevel 83 1e9 with Mods = []; Position = Vec.make distance 0.0; Size = 5.0; Attack = None }
+            let player =
+                { Actor.make "Player" [ Mod.more (Buildup Freeze) -100.0; Mod.more (AilmentMagnitude(Some Chill)) -100.0 ] [ bolt; nova life ] with
+                    Rotation = [ { Use = "Bolt"; When = fun v -> v.LastUsed <> "Bolt" }; Actor.always "Nova" ] }
+            Fight.single enemy player 1.6
+        let out life distance = Sim.run (fight life distance) 1u
+        equal (box 1) (box (count (out 4.0 60.0) "hits:Nova"))
+        equal (box 1) (box (count (out 4.0 60.0) "on bolt:Nova"))
+        // the bolt is gone (it lasts 0.5 s): around the player, which does not reach
+        equal (box 0) (box (count (out 0.5 60.0) "hits:Nova"))
+        // an enemy nearer than the bolt (1 m): around the player, which reaches it
+        equal (box 0) (box (count (out 4.0 10.0) "on bolt:Nova"))
+        equal (box 1) (box (count (out 4.0 10.0) "hits:Nova"))
+        same (fight 4.0 60.0) seeds
+        same { fight 4.0 60.0 with MaxTime = 12.0 } seeds
+        same { fight 4.0 10.0 with MaxTime = 12.0 } seeds
+        // from the gems: with Frostbolt in the play style, Ice Nova gets the bolt's speed and life
+        let o = Options.defaults
+        let c = load { blank with Groups = [ group [ gem "Ice Nova" ]; group [ gem "Frostbolt" ] ] } o
+        let player = Setup.player c o [ Spam "Frostbolt"; Spam "Ice Nova" ] None
+        let value (sk: Skill) n = sk.Mods |> List.sumBy (fun m -> if m.Stat = Named n then m.Value else 0.0)
+        let iceNova = player.Skills |> List.find (fun s -> s.Name = "Ice Nova")
+        near 30.0 (value iceNova "NovaOnBoltSpeed")
+        near 4.0 (value iceNova "NovaOnBoltLife")
+        equal (box true) (box ((player.Skills |> List.find (fun s -> s.Name = "Frostbolt")).Mods |> List.exists (fun m -> m.Stat = Named "LaunchesBolt")))
+        // "30% increased Projectile Speed" and a support's 40% more: 30 x 1.3 x 1.4
+        let c2 = load { blank with Groups = [ group [ gem "Ice Nova" ]; group [ gem "Frostbolt"; support "Projectile Acceleration III" ] ]; ExtraLines = [ "30% increased Projectile Speed" ] } o
+        let p2 = Setup.player c2 o [ Spam "Frostbolt"; Spam "Ice Nova" ] None
+        near (30.0 * 1.3 * 1.4) (value (p2.Skills |> List.find (fun s -> s.Name = "Ice Nova")) "NovaOnBoltSpeed")
+        // without Frostbolt in the play style: an ordinary nova
+        let alone = Setup.player c o [ Spam "Ice Nova" ] None
+        near 0.0 (value (alone.Skills |> List.find (fun s -> s.Name = "Ice Nova")) "NovaOnBoltSpeed"))

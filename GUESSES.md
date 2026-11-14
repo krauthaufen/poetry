@@ -18,7 +18,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
    whose description or behaviour changed.
 5. Go through the lists below; the wiki's version history of a skill says what changed.
 
-## Rules (110)
+## Rules (111)
 
 ### Hit damage
 
@@ -37,6 +37,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | Rule | Source, and what is guessed | Confidence |
 |---|---|---|
 | Triggered skills | use immediately, cost no time, respect their cooldown | guess per trigger |
+| Ice Nova on a Frostbolt | skill description, game table, gem data. What counts as "near" (nearer the target than the player) is a guess | data / guess |
 
 ### Gems and items
 

@@ -3029,8 +3029,32 @@ module Sim =
             | _ ->
                 let sk, w = variant w
                 let ctx, mods, areaMult, delivery = shape sk
+                // a bolt that leaves now (Frostbolt): when, and towards where it was sent
+                let w =
+                    if Mods.flag ctx (Named "LaunchesBolt") mods && not direct && elapsed.IsNone then
+                        updateActor name (fun st -> { st with Energy = st.Energy |> Map.add "BoltAt" w.Time |> Map.add "BoltAngle" (Vec.angle primary.Position) }) w
+                    else w
+                // "Casting Ice Nova targeting near a Frostbolt Projectile will cause it to originate
+                // from the Frostbolt instead of you": the bolt sent last, while it flies, if it is
+                // nearer the enemy aimed at than the player is
+                let novaAt =
+                    match delivery with
+                    | AreaAroundSelf _ ->
+                        let speed = Mods.sumBase ctx [ Named "NovaOnBoltSpeed" ] mods
+                        let st = Map.find name w.Actors
+                        match Map.tryFind "BoltAt" st.Energy, Map.tryFind "BoltAngle" st.Energy with
+                        | Some t0, Some angle when speed > 0.0 && w.Time - t0 >= 0.0 && w.Time - t0 < Mods.sumBase ctx [ Named "NovaOnBoltLife" ] mods ->
+                            let at = Vec.scale (speed * (w.Time - t0)) (Vec.ofAngle angle)
+                            if Vec.dist at primary.Position < Vec.length primary.Position then Some at else None
+                        | _ -> None
+                    | _ -> None
+                let w = if novaAt.IsSome then { w with Counts = bump ("on bolt:" + sk.Name) w.Counts } else w
                 let strike (w: World) =
                     match delivery, elapsed with
+                    | AreaAroundSelf r, _ when novaAt.IsSome ->
+                        let at, rr = novaAt.Value, Geometry.radius r areaMult
+                        let w = if w.Tracing then { w with Shown = Used(w.Time, name, sk.Name, [ Ring(at, rr, 0.0) ]) :: w.Shown } else w
+                        living |> List.filter (Geometry.within at rr) |> List.fold (fun w e -> hitEnemy env rng actor sk mult e.Name w) w
                     | _ when direct ->
                         let w = if w.Tracing then { w with Shown = Used(w.Time, name, sk.Name, [ Line(Vec.zero, primary.Position) ]) :: w.Shown } else w
                         (if primary.Name = aimedAt then hitEnemy env rng actor sk mult aimedAt w else w)

@@ -632,7 +632,28 @@ module Setup =
         let infusionSetup =
             if o.Infused then None
             else Behaviours.infusions db sheet c.Build o.Pickup (consumers |> List.map (fun (n, el, cp) -> n, (el, cp.Name)) |> Map.ofList)
-        { Actor.make "Player" (sheet.Mods @ (used |> List.collect (fun (_, p) -> p.Grants))) (pressedSkills @ (metas |> List.collect (fun (_, s, _) -> s)) @ (consumers |> List.map (fun (_, _, cp) -> cp)) @ heraldSkills @ (used |> List.collect (fun (_, p) -> p.Extra))) with
+        // Ice Nova cast on a Frostbolt: when the play style uses Frostbolt, its bolt is
+        // followed (it flies at the speed of the game's Projectiles table, x the skill's
+        // projectile speed, for the skill's duration), and a nova of a gem that "casts on" one
+        // can be cast on it (`Sim.onStrike`)
+        let onBolts (skills: Skill list) =
+            match used |> List.tryFind (fun (g, _) -> g = "Frostbolt") with
+            | None -> skills
+            | Some (_, fb) ->
+                let fctx = { Ctx.empty with SkillName = fb.Skill.Name; SkillTags = fb.Skill.Tags }
+                let fdb = ModDb.ofList (sheet.Mods @ fb.Skill.Mods)
+                let speed = Constants.frostboltSpeed * Mods.mult fctx [ Named "ProjectileSpeed" ] fdb
+                let life = (if fb.Skill.Duration > 0.0 then fb.Skill.Duration else Constants.frostboltLife) * Mods.mult fctx [ SkillDuration ] fdb
+                let castsOnBolt (gem: string) =
+                    Gems.rawStats db (ModDb.ofList sheet.Mods) { Gem = gem; Level = 1; Quality = 0; StatSet = 1; Supports = [] }
+                    |> List.exists (fun (k, v) -> k = "ice_nova_number_of_frost_bolts_to_cast_on" && v > 0.0)
+                let novas = used |> List.map fst |> List.filter castsOnBolt |> List.map (fun g -> Tag("Gem:" + g)) |> Set.ofList
+                skills |> List.map (fun (sk: Skill) ->
+                    if sk.Name = fb.Skill.Name then { sk with Mods = sk.Mods @ [ Mod.flag (Named "LaunchesBolt") ] }
+                    elif sk.Tags |> Set.exists novas.Contains then
+                        { sk with Mods = sk.Mods @ [ Mod.base' (Named "NovaOnBoltSpeed") speed; Mod.base' (Named "NovaOnBoltLife") life ] }
+                    else sk)
+        { Actor.make "Player" (sheet.Mods @ (used |> List.collect (fun (_, p) -> p.Grants))) (onBolts (pressedSkills @ (metas |> List.collect (fun (_, s, _) -> s)) @ (consumers |> List.map (fun (_, _, cp) -> cp)) @ heraldSkills @ (used |> List.collect (fun (_, p) -> p.Extra)))) with
             Rotation = steps
             OverkillBurns = overkillBurns
             HitPattern = used |> List.choose (fun (_, p) -> p.Pattern |> Option.map (fun pat -> p.Skill.Name, pat)) |> Map.ofList

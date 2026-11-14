@@ -316,6 +316,9 @@ module StatMap =
         | "enemies_you_curse_have_15%_hinder" -> one (Mod.flag (Named "CursesHinder"))
         // Ice Bite's buff on freezing an enemy: read by Behaviours.iceBite
         | "support_ice_bite_buff_grant_%_added_cold_attack_damage" | "support_ice_bite_base_buff_duration" -> Some Structural
+        // "Casting Ice Nova targeting near a Frostbolt Projectile will cause it to originate from
+        // the Frostbolt": read by Setup.player (onBolts)
+        | "ice_nova_number_of_frost_bolts_to_cast_on" -> Some Structural
         // sealed skills (Salvo, Unleash, Zarokh's Revolt, Freezing Salvo): read by the engine at use
         | "base_maximum_seals_for_skill" -> one (Mod.base' (Named "MaxSeals") v)
         | "base_skill_seal_gain_interval_ms" -> one (Mod.base' (Named "SealIntervalMs") v)
@@ -1053,7 +1056,12 @@ module StatMap =
         | "cast_speed_additive_modifiers_also_apply_to_projectile_speed_at_%_value" -> one (Mod.base' (Named "CastSpeedAsProjectileSpeed") v)
         // (how much the speed varies from one projectile to the next: read for shards that live
         // a fixed time, Gems `RangeVariation`; for the others as their speed)
-        | id when id.EndsWith "projectile_speed_+%" || id.EndsWith "projectile_speed_+%_final" || id = "active_skill_projectile_speed_+%_variation_final" -> Some NotOffensive
+        | "active_skill_projectile_speed_+%_variation_final" -> Some NotOffensive
+        // (the projectile speed of minions and of a map's monsters is not the player's)
+        | id when (id.StartsWith "minion_" || id.StartsWith "map_" || id.StartsWith "monster_") && (id.EndsWith "projectile_speed_+%" || id.EndsWith "projectile_speed_+%_final") -> Some NotOffensive
+        // the others: how fast a bolt that is followed flies (Frostbolt, for Ice Nova); nothing else
+        | id when id.EndsWith "projectile_speed_+%" -> one (Mod.inc (Named "ProjectileSpeed") v)
+        | id when id.EndsWith "projectile_speed_+%_final" -> one (Mod.more (Named "ProjectileSpeed") v)
         | "base_cooldown_modifiable_repeat_interval_ms" | "cooldown_recovery_modifiers_also_apply_to_repeat_interval" -> Some Structural
         | "base_chance_to_pierce_%" -> one (Mod.base' (Named "PierceChance") v)
         | "always_pierce" -> one (Mod.base' Pierce 99.0)

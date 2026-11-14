@@ -612,6 +612,9 @@ module Flat =
     let private qChains = site MSkill Base [ Chains ]
     let private qTerrainChain = site MSkill Base (named "TerrainChain")
     let private qAftershock = site MSkill Base (named "AftershockChance")
+    let private qLaunchesBolt = site MSkill Flag (named "LaunchesBolt")
+    let private qNovaBoltSpeed = site MSkill Base (named "NovaOnBoltSpeed")
+    let private qNovaBoltLife = site MSkill Base (named "NovaOnBoltLife")
     let private qKnockChance = site MSkill Base (named "KnockbackChance")
     let private qKnockNever = site MSkill Flag (named "CannotKnockback")
     let private qKnockLimit = site MSkill Base (named "KnockbackLimit")
@@ -841,6 +844,8 @@ module Flat =
           CMiss: int
           CTrigger: int
           CAftershock: int
+          /// A nova cast on a bolt in flight: where the count goes.
+          COnBolt: int
           CCannotAfford: int
           CKept: int
           CConsumed: int
@@ -1873,6 +1878,7 @@ module Flat =
                       CMiss = counts.Id("miss:" + s.Name)
                       CTrigger = counts.Id("trigger:" + s.Name)
                       CAftershock = counts.Id("aftershock:" + s.Name)
+                      COnBolt = counts.Id("on bolt:" + s.Name)
                       CCannotAfford = counts.Id("cannot afford:" + s.Name)
                       CKept = (match s.Consumes with Some c -> counts.Id("kept:" + c) | None -> -1)
                       CConsumed = (match s.Consumes with Some c -> counts.Id("consumed:" + c) | None -> -1)
@@ -6090,11 +6096,28 @@ module Flat =
                     while not rest.IsEmpty do
                         hitEnemy s rng impact mult s.FoeIds.[rest.Head]
                         rest <- rest.Tail
+                // a bolt that leaves now, and a nova cast on it (`Sim.onStrike`)
+                if not direct && not passing && flagQ ev qLaunchesBolt then
+                    s.A.Energy <- s.A.Energy |> Map.add "BoltAt" s.Time |> Map.add "BoltAngle" (Vec.angle primaryDef.Position)
+                let novaAt =
+                    match delivery with
+                    | AreaAroundSelf _ ->
+                        let speed = sumQ ev qNovaBoltSpeed
+                        match Map.tryFind "BoltAt" s.A.Energy, Map.tryFind "BoltAngle" s.A.Energy with
+                        | Some t0, Some angle when speed > 0.0 && s.Time - t0 >= 0.0 && s.Time - t0 < sumQ ev qNovaBoltLife ->
+                            let spot = Vec.scale (speed * (s.Time - t0)) (Vec.ofAngle angle)
+                            if Vec.dist spot primaryDef.Position < Vec.length primaryDef.Position then Some spot else None
+                        | _ -> None
+                    | _ -> None
+                if novaAt.IsSome then bump s info.COnBolt
                 let strike () =
                     if direct then
                         if primary = aimedAt then hitEnemy s rng impact mult aimedAt
                     else
                         match delivery with
+                        | AreaAroundSelf r when novaAt.IsSome ->
+                            let rr = Geometry.radius r areaMult
+                            alive |> List.filter (Geometry.within novaAt.Value rr) |> List.map (fun e -> e.Name) |> hitAll
                         | Projectiles pr when not passing && pr.Passing > 0.0 && pr.HitInterval > 0.0 ->
                             // what is inside the projectiles as they travel: every hit at its own time
                             for (t, target) in Geometry.dwellHits rng p.Fight.Walls pr p.Fight.Reach areaMult primaryDef alive do
