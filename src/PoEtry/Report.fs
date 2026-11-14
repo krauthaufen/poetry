@@ -346,6 +346,10 @@ module Report =
         let profile r =
             let p = Rarity.defaults r
             let p = if scenario = "pinnacle" && r = Unique then { p with ElementalResist = 50.0 } else p
+            // (a boss has several times the life of its level and rarity: the game's own number
+            // for each monster, MonsterVarieties.LifeMultiplier. A map boss: 250%, the middle of
+            // them; the pinnacle: The Arbiter of Ash, 990%)
+            let p = if r = Unique then { p with Life = p.Life * (if scenario = "pinnacle" then 9.9 else 2.5) } else p
             // (the enemies' resistances as asked for, whoever they are)
             let p = match Json.numField "eres" request with Some v -> { p with ElementalResist = v } | None -> p
             match Json.numField "cres" request with Some v -> { p with ChaosResist = v } | None -> p

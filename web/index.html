@@ -134,7 +134,7 @@
           });
           one(1, request.gem).then((r) => {
             if (r.error || fights.get(key) !== f) { f.shown = true; settle(f); return; }
-            // (the others fight the enemies the first one found, see LEAST)
+            // (the others fight the enemies the first one found, see `scenes`)
             for (let s = 2; s <= f.total; s++) one(s, r.gem, r.scale);
             picture(r.gem, true, r.scale);
           });
@@ -148,12 +148,13 @@
       const bases = new Map();
       // (depth 0: at once and rough; depth 1: asked after it, more and longer fights)
       const scenes = (depth) => depth
-        ? [["boss", 30, 0, 32], ["pinnacle", 30, 0, 32], ["pack", 30, 0, 32], ["surrounded", 30, 0, 32]]
-        : [["boss", 30, 0, 8], ["pinnacle", 30, 0, 8], ["pack", 30, 0, 8], ["surrounded", 30, 0, 8]];
-      // The enemies die for real, with so much life that a fight lasts at least so many
-      // seconds (the simulator finds how much, "scale" in its answer); the fights that are
-      // compared have the same enemies: those of the fight as it is.
-      const LEAST = 4;
+        ? [["boss", 30, 0, 32, 4], ["pinnacle", 30, 0, 32, 4], ["pack", 8, 0, 32, 0], ["surrounded", 8, 0, 32, 0]]
+        : [["boss", 30, 0, 8, 4], ["pinnacle", 30, 0, 8, 4], ["pack", 6, 0, 8, 0], ["surrounded", 6, 0, 8, 0]];
+      // (a scene: its name, how long at most, the enemies' life if it is given, how many
+      // fights, and how long a fight lasts at least.) A boss dies for real, with so much life
+      // that a fight lasts at least so many seconds (the simulator finds how much, "scale" in
+      // its answer); the fights that are compared have the same boss: that of the fight as it
+      // is. A pack has the life the game gives it, and who dies is replaced.
       const scales = new Map();
       const scaleOf = (text) => { try { return JSON.parse(text).scale || 1; } catch { return 1; } };
       let compared = "";
@@ -165,7 +166,7 @@
         // (against enemies that do not die, every hit counted as what it deals on average over
         // critical hit or not: the same in the long run, steadier from few fights)
         const dps = (text) => { try { const r = JSON.parse(text); return r.error ? null : (r.dpsEvened != null && r.killRate === 0 ? r.dpsEvened : r.dps.mean); } catch { return null; } };
-        const of = (scene, tree, seed) => ({ ...rest, ...tree, op: "fight", scenario: scene[0], time: scene[1], runs: 1, seed: seed || 1, ...(scene[2] ? { life: scene[2] } : { least: LEAST }) });
+        const of = (scene, tree, seed) => ({ ...rest, ...tree, op: "fight", scenario: scene[0], time: scene[1], runs: 1, seed: seed || 1, ...(scene[2] ? { life: scene[2] } : scene[4] ? { least: scene[4] } : {}) });
         // (a fight a job: whatever is asked next need not wait for more than one)
         const seeds = (scene) => Array.from({ length: scene[3] }, (_, i) => scene[3] - i);
         // (every fight's damage, in the order of the seeds: the same fights with and without the
@@ -228,7 +229,7 @@
           a = { results: [], total: entries.length, told: -1, waiters: [] };
           analyses.set(key, a);
           const dps = (text) => { try { const r = JSON.parse(text); return r.error ? null : (r.dpsEvened != null && r.killRate === 0 ? r.dpsEvened : r.dps.mean); } catch { return null; } };
-          const fought = (extra, seed) => ({ ...rest, ...extra, op: "fight", scenario: scene[0], time: scene[1], runs: 1, seed, ...(scene[2] ? { life: scene[2] } : { least: LEAST }) });
+          const fought = (extra, seed) => ({ ...rest, ...extra, op: "fight", scenario: scene[0], time: scene[1], runs: 1, seed, ...(scene[2] ? { life: scene[2] } : scene[4] ? { least: scene[4] } : {}) });
           const scale = ask(fought({}, 1), "analyse").then(scaleOf);
           const several = (extra) => scale.then((k) => Promise.all(Array.from({ length: seeds || 12 }, (_, i) => ask({ ...fought(extra, i + 1), scale: k }, "analyse").then(dps))))
             .then((xs) => (xs.some((x) => x == null) ? null : mean(xs)));
