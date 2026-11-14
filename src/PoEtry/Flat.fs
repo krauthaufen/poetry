@@ -93,6 +93,10 @@ module Flat =
     let private ERevive = 13
     [<Literal>]
     let private ELeaves = 14
+    [<Literal>]
+    let private EWard = 15
+    [<Literal>]
+    let private EMana = 16
 
     let private kindName kind =
         match kind with
@@ -110,6 +114,8 @@ module Flat =
         | EEnergy -> "EnergyArrives"
         | ERevive -> "ReviveMinions"
         | ELeaves -> "MinionLeaves"
+        | EWard -> "WardArrives"
+        | EMana -> "ManaArrives"
         | _ -> "Expire"
 
     let private ailmentIndex (a: Ailment) =
@@ -612,6 +618,8 @@ module Flat =
     let private qConsumeEvery = site MEmpty Base (named "ConsumeChargeEveryMs")
     let private qConsumeCount = site MEmpty Base (named "ConsumeChargeCount")
     let private qRageEffect = siteMult MEmpty (named "RageEffect")
+    let private qInfusionKeep = site MEmpty Base (named "InfusionKeepChance")
+    let private qInfusionPower = site MEmpty Base (named "PowerChargeOnInfusionConsumed")
 
     let private damageTypes = Array.ofList DamageType.all
 
@@ -789,7 +797,17 @@ module Flat =
           /// (0: no; 1: yes; 2: unless the actor holds the buff `CorpseElse`).
           TakesCorpse: bool
           NeedsCorpse: int
-          CorpseElse: int }
+          CorpseElse: int
+          /// A part that only happens with an infusion, which it uses up: the infusion (-1: none).
+          OnlyInfused: int
+          /// A skill whose every impact consumes an infusion and is then its infused copy:
+          /// the infusion (-1: the skill consumes none), the one that does in its place (-1:
+          /// none), the copy among the actor's skills, and where the counts go.
+          Infusion: int
+          Wildcard: int
+          Infused: int
+          CInfused: int
+          CUninfused: int }
 
     type private EnemyInfo =
         { Def: EnemyDef
@@ -849,6 +867,17 @@ module Flat =
               Walks: bool
               /// Whether monsters attack at all (the player or a minion can be hurt).
               Attacked: bool
+              /// Infusion remnants: by what inflicting an ailment may drop (the ailment, the
+              /// infusion, the chance, where the count goes), the chance of two, the seconds until it arrives.
+              Remnants: (Ailment * int * float * int)[]
+              RemnantExtra: float
+              RemnantDelay: float
+              BConsumedInfusion: int
+              /// Runic Ward and mana remnants (the player's).
+              WardRemnants: WardRemnants option
+              ManaRemnants: ManaRemnants option
+              CWardRemnant: int
+              CManaRemnant: int
               BMinionDied: int
               BEmpowered: int
               CMinionDied: int
@@ -1036,7 +1065,6 @@ module Flat =
 
     let private unbuiltPrefixes =
         [ "DetonatedBy:", "parts set off by another skill"
-          "OnlyInfused:", "infusions"
           "SeqSteps:", "chained attacks"
           "WarpsInto:", "warps into projectiles"
           "ToggleBuff:", "forms that are switched on"
@@ -1180,14 +1208,13 @@ module Flat =
         let one (index: int) (actor: Actor) : unit -> Program =
             let isPlayer = index = 0
             if (actor.Metas |> List.map (fun m -> m.Name) |> List.distinct).Length <> actor.Metas.Length then reject "meta gems of the same name"
-            if actor.WardRemnants.IsSome then reject "Runic Ward remnants"
-            if actor.ManaRemnants.IsSome then reject "mana remnants"
+            // (the reference pays a minion's remnants into the player's pools by the player's own remnants)
+            if not isPlayer && actor.WardRemnants.IsSome then reject "Runic Ward remnants of a minion"
+            if not isPlayer && actor.ManaRemnants.IsSome then reject "mana remnants of a minion"
             if not actor.Banners.IsEmpty then reject "banners"
             if isPlayer && (actor.ActiveWhile.IsSome || actor.Body.IsSome || actor.Pool.IsSome) then reject "a player that is a minion"
             // (the reference lets whoever has these use the player's pools)
             if not isPlayer && (actor.Vitals.IsSome || actor.ManaFlask.IsSome) then reject "a minion with pools"
-            // (infusions that nothing drops and nothing consumes do nothing)
-            if actor.Infusions |> Option.exists (fun i -> not i.Remnants.IsEmpty || not i.Consumers.IsEmpty) then reject "infusions"
             if actor.Vitals |> Option.exists (fun v -> v.CostsInfernalFlame) then reject "Infernal Flame"
 
             // ---- its skills ----
@@ -1507,6 +1534,7 @@ module Flat =
                             match r.Reaction with
                             | WithCorpse _ | SummonPerCorpse _ when r.Hook = OnUse && matches r.Filter s -> Some r.Reaction
                             | _ -> None)
+                    let consumer = actor.Infusions |> Option.bind (fun inf -> Map.tryFind s.Name inf.Consumers |> Option.map (fun c -> inf, c))
                     let query = queriesOf s
                     let answers = sites.ToArray() |> Array.map query
                     let rangeQueries = rangeSites |> Array.map (fun i -> at answers i)
@@ -1587,7 +1615,16 @@ module Flat =
                             | Some (WithCorpse (_, SpendStack _)) -> 2
                             | Some _ -> 1
                             | None -> if s.Tags.Contains(Tag "Type:SkillConsumesPowerChargesOnUse") then 0 else 1)
-                      CorpseElse = (match corpseRule with Some (WithCorpse (_, SpendStack (b, _))) -> buffs.Id b | _ -> -1) })
+                      CorpseElse = (match corpseRule with Some (WithCorpse (_, SpendStack (b, _))) -> buffs.Id b | _ -> -1)
+                      OnlyInfused =
+                        (match s.Mods |> List.tryPick (fun m -> match m.Stat with Named n when n.StartsWith "OnlyInfused:" -> Some(n.Substring 12) | _ -> None) with
+                         | Some infusion -> buff infusion
+                         | None -> -1)
+                      Infusion = (match consumer with Some (_, (element, _)) -> buff element | None -> -1)
+                      Wildcard = (match consumer with Some (inf, _) -> (match inf.Wildcard with Some w -> buff w | None -> -1) | None -> -1)
+                      Infused = (match consumer with Some (_, (_, copy)) -> skillId "an infusion" copy | None -> -1)
+                      CInfused = counts.Id("infused:" + s.Name)
+                      CUninfused = counts.Id("uninfused:" + s.Name) })
                 |> Array.ofList
             let sIso, sClose, sOpen = statuses.Id "Isolated", statuses.Id "Close", statuses.Id "OpenWeakness"
             let sDerived = derivedStatuses |> List.map statuses.Id |> Array.ofList
@@ -1597,7 +1634,12 @@ module Flat =
                 match actor.Body |> Option.bind (fun b -> b.Explodes) with
                 | Some name -> skillId "a minion's explosion" name
                 | None -> -1
+            let remnants =
+                match actor.Infusions with
+                | Some inf -> inf.Remnants |> List.map (fun (a, r, chance) -> a, buff r, chance, counts.Id("remnant:" + r)) |> Array.ofList
+                | None -> [||]
             // (named here, while names are still given numbers)
+            buffs.Id "ConsumedInfusionRecently" |> ignore
             buffs.Id "MinionDiedRecently" |> ignore
             buffs.Id "Empowered" |> ignore
             actor.ActiveWhile |> Option.iter (fun name -> buffs.Id name |> ignore)
@@ -1650,6 +1692,14 @@ module Flat =
                       AnyPool = anyPool
                       Walks = fight.Player.Vitals.IsSome
                       Attacked = fight.Player.Vitals.IsSome || anyBody
+                      Remnants = remnants
+                      RemnantExtra = (match actor.Infusions with Some inf -> inf.ExtraRemnantChance | None -> 0.0)
+                      RemnantDelay = (match actor.Infusions with Some inf -> inf.Delay | None -> 0.0)
+                      BConsumedInfusion = buffs.Id "ConsumedInfusionRecently"
+                      WardRemnants = actor.WardRemnants
+                      ManaRemnants = actor.ManaRemnants
+                      CWardRemnant = count "ward remnant"
+                      CManaRemnant = count "mana remnant"
                       BMinionDied = buffs.Id "MinionDiedRecently"
                       BEmpowered = buffs.Id "Empowered"
                       CMinionDied = count "minion:died"
@@ -2204,6 +2254,9 @@ module Flat =
           mutable MinLife: float
           mutable LockedUntil: float
           mutable FreezeBuildup: float
+          /// When a stun last made a Runic Ward remnant, and a critical hit a mana remnant.
+          mutable LastStunRemnant: float
+          mutable LastManaRemnant: float
           /// Damage over time on the player: (until, per second, type).
           mutable Burning: (float * float * DamageType) list
           /// Charges per charm, by its buff.
@@ -3533,10 +3586,17 @@ module Flat =
                         && (if pi.NotEnraged then true
                             elif pi.NotWithCharge then not charged
                             elif pi.WithCharge then charged
+                            elif pi.OnlyInfused >= 0 then stacksOf s pi.OnlyInfused > 0
                             else not (info.HasChargedPart && charged && pi.Explosion))
                     if happens then
                         if pi.Passing then schedule s at EPassing part target mult (at - s.Time)
                         else schedule s at EStrike part target mult 0.0
+            // an infusion a part needed is used up
+            for k in 1 .. info.Parts.Length - 1 do
+                let infusion = (at p.Skills (at info.Parts k)).OnlyInfused
+                if infusion >= 0 && stacksOf s infusion > 0 then
+                    if (at s.A.BStacks infusion) > 1 then setBuff s infusion ((at s.A.BStacks infusion) - 1) (at s.A.BExpires infusion) (at s.A.BMods infusion)
+                    else removeBuff s infusion
             // an attack the player makes while empowered by a warcry uses one empowerment up,
             // and a Repeatable attack one of the repeats readied for it
             if useTime > 0.0 && (info.SpendsEmpowered || info.SpendsRepeats) then
@@ -4455,6 +4515,22 @@ module Flat =
                             s.Cause <- target
                             gainEnergy s rng i (amount * meta.Meta.EnergyMult)
                             s.Cause <- cause)
+                // infusion remnants: each freeze, shock or ignite inflicted may drop one
+                if p.Remnants.Length > 0 then
+                    if not dead then refreshStatus s e
+                    let frozen = at p.AilmentStatus (ailmentIndex Freeze)
+                    for k in 0 .. p.Remnants.Length - 1 do
+                        let a, resource, chance, dropped = at p.Remnants k
+                        let newly =
+                            match a with
+                            | Freeze ->
+                                if dead then inflicted.Exists(fun i -> match i with AddBuildup (Freeze, pct) -> (at e.Buildup (ailmentIndex Freeze)) + pct >= 100.0 | _ -> false)
+                                else (at e.SHas frozen) && not (at beforeHas frozen)
+                            | _ -> inflicted.Exists(fun i -> match i with Dot (x, _, _, _, _) | Status (x, _, _) -> x = a | _ -> false)
+                        if newly && rng.Chance chance then
+                            let n = if rng.Chance p.RemnantExtra then 2 else 1
+                            bump s dropped
+                            schedule s (s.Time + p.RemnantDelay) EGainStacks resource n 0.0 0.0
                 // Archon: gained on an ignite by a skill with the chance; none while one is active
                 // or during the recovery period after one ends
                 (let ignited = inflicted.Exists(fun i -> match i with Dot (Ignite, _, _, _, _) -> true | _ -> false)
@@ -4472,6 +4548,33 @@ module Flat =
                             expireAt s (s.Time + a.Duration)
                             bump s a.Gained)
                 // charms: charges from kills, and the ones used by killing a rare or unique monster
+                // Runic Ward remnants from kills and stuns
+                (match p.WardRemnants with
+                 | Some r when s.Main.Vitals.IsSome ->
+                    let stunned = at p.AilmentStatus (ailmentIndex HeavyStun)
+                    let stunnedNow = not dead && (refreshStatus s e; at e.SHas stunned) && not (at beforeHas stunned)
+                    let fromKill = dead && rng.Chance r.OnKillChance
+                    let fromStun = stunnedNow && s.Time - s.LastStunRemnant >= r.StunCooldown && rng.Chance r.OnStunChance
+                    if fromKill || fromStun then
+                        let count = if rng.Chance r.ExtraChance then 2.0 else 1.0
+                        if fromStun then s.LastStunRemnant <- s.Time
+                        bump s p.CWardRemnant
+                        schedule s (s.Time + r.Delay) EWard 0 0 (r.WardPerRemnant * count) 0.0
+                 | _ -> ())
+                // mana remnants: from a critical hit on, or the kill of, an enemy with an elemental ailment
+                (match p.ManaRemnants with
+                 | Some r when s.Main.Vitals.IsSome ->
+                    let had (a: Ailment) = at beforeHas (at p.AilmentStatus (ailmentIndex a))
+                    let ailing = had Ignite || had Chill || had Freeze || had Shock || had Electrocute
+                    let fromKill = dead && ailing && rng.Chance r.OnKillChance
+                    let fromCrit = crit && ailing && s.Time - s.LastManaRemnant >= r.CritCooldown
+                    if fromKill || fromCrit then
+                        let count = if rng.Chance r.ExtraChance then 2.0 else 1.0
+                        if fromCrit then s.LastManaRemnant <- s.Time
+                        bump s p.CManaRemnant
+                        let most = match p.Vitals with Some v -> v.Mana | None -> 0.0
+                        schedule s (s.Time + r.Delay) EMana 0 0 ((r.ManaPerRemnant + r.PercentOfMaxMana / 100.0 * most) * count) 0.0
+                 | _ -> ())
                 // (the player's charms, whoever made the kill)
                 if dead && s.Main.Charms.Length > 0 then
                     if s.Main.Vitals.IsSome then
@@ -4507,13 +4610,10 @@ module Flat =
         // Aim where the use was aimed; if that enemy died meanwhile, at the next one.
         let primary = if (at s.Foes aimedAt).Life > 0.0 then aimedAt else s.Aimed
         if primary >= 0 then
-            let info = (at p.Skills sid)
-            let skill = info.Skill
+            let plain = (at p.Skills sid)
             let primaryDef = (at s.Foes primary).Def
-            // (the buffs are the ones the strike began with, whatever its hits change)
-            let ev = acquire s sid
-            useBuffs s ev info true
-            let shape () =
+            let shape (ev: Ev) (info: SkillInfo) =
+                let skill = info.Skill
                 let areaMult = multQ ev qArea
                 let delivery =
                     match skill.Delivery with
@@ -4540,10 +4640,40 @@ module Flat =
             s.StrikeLeech <- 0.0
             s.StrikeLifeLeech <- 0.0
             // (the reference works the shape out twice, and each time rolls what it rolls)
-            (match skill.Delivery with
-             | Projectiles _ -> shape () |> ignore
+            (match plain.Skill.Delivery with
+             | Projectiles _ ->
+                let ev = acquire s sid
+                useBuffs s ev plain true
+                shape ev plain |> ignore
+                release s
              | _ -> ())
-            let areaMult, delivery = shape ()
+            // Infusions: each impact consumes one of the skill's element (or the one that does
+            // in its place) and is the infused copy; without one, the plain skill
+            let source =
+                if plain.Infusion < 0 then -1
+                elif stacksOf s plain.Infusion > 0 then plain.Infusion
+                elif plain.Wildcard >= 0 && stacksOf s plain.Wildcard > 0 then plain.Wildcard
+                else -1
+            let direct' = sid
+            let sid = if source >= 0 then plain.Infused else sid
+            let info = (at p.Skills sid)
+            let skill = info.Skill
+            // (the buffs are the ones the strike began with, whatever it and its hits change)
+            let ev = acquire s sid
+            useBuffs s ev info true
+            if plain.Infusion >= 0 then
+                if source < 0 then bump s plain.CUninfused
+                else
+                    let evE = acquireEmpty s sid
+                    let keep = sumQ evE qInfusionKeep
+                    let charges = int (sumQ evE qInfusionPower)
+                    release s
+                    bump s plain.CInfused
+                    markStatus s p.BConsumedInfusion
+                    // "Gain a Power Charge when you consume an Elemental Infusion"
+                    if charges > 0 then schedule s s.Time EGainStacks (at p.BCharges 0) charges 0.0 0.0
+                    if not (rng.Chance keep) then setStacks s false source (stacksOf s source - 1)
+            let areaMult, delivery = shape ev info
             let hitAll (names: string list) =
                 let mutable rest = names
                 while not rest.IsEmpty do
@@ -4558,7 +4688,7 @@ module Flat =
                         // what is inside the projectiles as they travel: every hit at its own time
                         for (t, target) in Geometry.dwellHits rng p.Fight.Walls pr p.Fight.Reach areaMult primaryDef alive do
                             if t <= 0.0 then hitEnemy s rng sid mult s.FoeIds.[target]
-                            else schedule s (s.Time + t) EDirect sid s.FoeIds.[target] mult 0.0
+                            else schedule s (s.Time + t) EDirect direct' s.FoeIds.[target] mult 0.0
                     | Projectiles pr when passing && pr.Passing > 0.0 ->
                         // where the projectile is by now, on its way towards where it was aimed
                         let at = Vec.scale (pr.Speed * elapsed) (Vec.ofAngle (Vec.angle primaryDef.Position))
@@ -5124,6 +5254,8 @@ module Flat =
                 | EExpose -> tell t "Expose" name (at s.Foes a).Def.Name (float q.Seq)
                 | ERevive -> tell t "ReviveMinions" "" "" (float q.Seq)
                 | ELeaves -> tell t "MinionLeaves" name "" (float q.Seq)
+                | EWard -> tell t "WardArrives" "" "" (float q.Seq)
+                | EMana -> tell t "ManaArrives" "" "" (float q.Seq)
                 | _ -> tell t "Expire" "" "" (float q.Seq)
              | None -> ())
             // a skill's hits roll from a stream of that skill alone: its first event, its second, ...
@@ -5184,6 +5316,14 @@ module Flat =
                         if not (minion.Gone || minion.Leaves <> x) then
                             leave s who
                             bump s p.CMinionLeft
+                    | EWard ->
+                        (match p.Vitals, p.WardRemnants with
+                         | Some v, Some r -> s.Ward <- min (v.Ward * r.Overflow) (s.Ward + x)
+                         | _ -> ())
+                    | EMana ->
+                        (match p.Vitals, p.ManaRemnants with
+                         | Some v, Some r -> s.Mana <- min (max s.Mana (v.Mana * r.Overflow)) (s.Mana + x * v.ManaRecoveryRate)
+                         | _ -> ())
                     | EExpire -> ()
                     | _ ->
                         // (what an actor does, it does in its own place)
@@ -5427,6 +5567,8 @@ module Flat =
               MinLife = 1.0
               LockedUntil = 0.0
               FreezeBuildup = 0.0
+              LastStunRemnant = -1e9
+              LastManaRemnant = -1e9
               Burning = []
               CharmCharges = Array.zeroCreate nb
               PEntropy = 0.0

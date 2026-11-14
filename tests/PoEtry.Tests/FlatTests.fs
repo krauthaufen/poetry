@@ -471,6 +471,34 @@ let randomFight (case: uint32) : Fight * string =
             { player with
                 Skills = player.Skills @ [ burst ]
                 OverkillBurns = [ { Skill = burst.Name; Filter = pick [ AnySkill; WithTag Attack; WithTag Spell ]; ThresholdPercent = pick [ 0.0; 5.0; 30.0 ]; PercentPerSecond = between 20.0 90.0 } ] }
+    // infusions: remnants from ailments, a skill whose impacts consume one and are its infused
+    // copy, a part that needs one; Runic Ward and mana remnants
+    let player =
+        if chance 0.75 then player
+        else
+            let infusions = [ "FireInfusion"; "ColdInfusion"; "LightningInfusion" ]
+            let copy = { skill 8 true with Name = names.Head + " infused" }
+            let needy = { skill 0 true with Name = names.Head + ": Infused"; Mods = [ Mod.flag (Named("OnlyInfused:" + pick infusions)) ] }
+            let withPart = chance 0.4
+            { player with
+                Skills = (player.Skills |> List.mapi (fun i s -> if i = 0 && withPart then { s with Parts = s.Parts @ [ needy ] } else s)) @ [ copy ]
+                Mods = [ if chance 0.4 then yield Mod.base' (Named "InfusionKeepChance") (between 10.0 80.0)
+                         if chance 0.3 then yield Mod.base' (Named "PowerChargeOnInfusionConsumed") 1.0 ] @ player.Mods
+                Resources = player.Resources @ [ for r in infusions do if chance 0.4 then yield r, whole 1 3 ] @ [ if chance 0.2 then yield "VerisiumInfusion", whole 1 2 ]
+                MaxResources = infusions |> List.fold (fun m r -> Map.add r 3 m) player.MaxResources
+                Infusions =
+                    Some
+                        { Remnants = [ for a, r in [ Ignite, "FireInfusion"; Freeze, "ColdInfusion"; Shock, "LightningInfusion"; Chill, "ColdInfusion" ] do if chance 0.7 then yield a, r, pick [ 100.0; between 10.0 90.0 ] ]
+                          ExtraRemnantChance = pick [ 0.0; between 10.0 60.0 ]
+                          Delay = between 0.05 1.0
+                          Consumers = (if chance 0.7 then Map.ofList [ names.Head, (pick infusions, copy.Name) ] else Map.empty)
+                          Wildcard = (if chance 0.5 then Some "VerisiumInfusion" else None) } }
+    let player =
+        if player.Vitals.IsNone || chance 0.75 then player
+        else
+            { player with
+                WardRemnants = (if chance 0.6 then Some { OnKillChance = between 0.0 100.0; OnStunChance = between 20.0 100.0; StunCooldown = between 0.0 3.0; WardPerRemnant = between 5.0 80.0; ExtraChance = between 0.0 50.0; Delay = between 0.1 1.5; Overflow = pick [ 1.0; 2.0 ] } else None)
+                ManaRemnants = (if chance 0.6 then Some { OnKillChance = between 0.0 100.0; CritCooldown = between 0.0 3.0; ManaPerRemnant = between 5.0 60.0; PercentOfMaxMana = pick [ 0.0; 5.0 ]; ExtraChance = between 0.0 50.0; Delay = between 0.1 1.5; Overflow = pick [ 1.0; 2.0 ] } else None) }
     let player = if player.Archons.IsEmpty then player else { player with Mods = Mod.base' (Named "ArchonOnIgnite") (between 20.0 100.0) :: player.Mods }
     // what it fights
     let enemies =
@@ -944,6 +972,38 @@ let run (test: string -> (unit -> unit) -> unit) =
         let hound = { Actor.make "Hound" [ sure ] [ bite "Bite" 150.0 ] with Body = Some(body 500.0 (Some 3.0)) }
         same { fight with Minions = [ hound; { hound with Name = "Hound 2" } ] } minionSeeds)
 
+    test "flat: infusions dropped by ailments and consumed by impacts; Runic Ward and mana remnants" (fun () ->
+        let bolt = { spell "Bolt" Lightning 60.0 240.0 with BaseTime = 0.5; Cost = 8.0 }
+        let burst = { spell "Bolt: Burst" Cold 100.0 150.0 with Mods = [ Mod.flag (Named "OnlyInfused:ColdInfusion") ]; Delivery = AreaAtTarget 20.0 }
+        let infused = { spell "Bolt infused" Lightning 200.0 500.0 with Delivery = AreaAtTarget 25.0; Mods = [ Mod.base' (Named "InfusionKeepChance") 25.0; Mod.base' (Named "PowerChargeOnInfusionConsumed") 1.0 ] }
+        let frost = { spell "Frost" Cold 150.0 300.0 with Cooldown = Some 2.0; BaseTime = 0.4 }
+        let player =
+            { Actor.make "Player" [ Mod.inc CritChance 200.0; Mod.inc (Buildup Freeze) 4000.0; Mod.base' (AilmentChance Shock) 60.0; Mod.inc (Buildup HeavyStun) 3000.0; Mod.more (Damage AllDamage) 15.0 |> Mod.whenever (WhileBuff "ConsumedInfusionRecently") ]
+                  [ frost; { bolt with Parts = [ burst ] }; infused ] with
+                Rotation = [ Actor.always "Frost"; Actor.always "Bolt" ]
+                Vitals = Some { PlayerStats.basic 2000.0 300.0 with ManaRegen = 6.0; Ward = 150.0; WardRegen = 0.0 }
+                MaxResources = Map.ofList [ "LightningInfusion", 3; "ColdInfusion", 3; "PowerCharge", 3 ]
+                Resources = [ "LightningInfusion", 1 ]
+                Infusions =
+                    Some
+                        { Remnants = [ Shock, "LightningInfusion", 70.0; Freeze, "ColdInfusion", 100.0; Chill, "ColdInfusion", 60.0 ]
+                          ExtraRemnantChance = 30.0
+                          Delay = 0.4
+                          Consumers = Map.ofList [ "Bolt", ("LightningInfusion", "Bolt infused") ]
+                          Wildcard = Some "VerisiumInfusion" }
+                WardRemnants = Some { OnKillChance = 60.0; OnStunChance = 100.0; StunCooldown = 1.0; WardPerRemnant = 40.0; ExtraChance = 30.0; Delay = 0.5; Overflow = 2.0 }
+                ManaRemnants = Some { OnKillChance = 80.0; CritCooldown = 0.6; ManaPerRemnant = 25.0; PercentOfMaxMana = 5.0; ExtraChance = 20.0; Delay = 0.3; Overflow = 2.0 } }
+        let weak i = { EnemyDef.atLevel 70 9000.0 with Name = sprintf "weak %d" i; Position = Vec.make (14.0 + float i) (float i - 2.0); Mods = [] }
+        let fight = { Fight.single (boss 1e12) player 20.0 with Enemies = boss 1e12 :: [ for i in 1 .. 4 -> weak i ]; Targeting = Nearest }
+        same fight seeds
+        let o = Sim.run fight 1u
+        for key in [ "infused:Bolt"; "remnant:LightningInfusion"; "remnant:ColdInfusion"; "hits:Bolt: Burst"; "mana remnant"; "ward remnant" ] do
+            if not (o.Counts.ContainsKey key) then failwithf "expected %s: %A" key o.Counts
+        // with remnants that are rare, most impacts are the plain skill's
+        let scarce = { fight with Player = { player with Infusions = player.Infusions |> Option.map (fun inf -> { inf with Remnants = [ Shock, "LightningInfusion", 15.0 ] }) } }
+        same scarce seeds
+        if not ((Sim.run scarce 1u).Counts.ContainsKey "uninfused:Bolt") then failwith "expected impacts without an infusion")
+
     test "flat: what is not built is refused, with every reason" (fun () ->
         let player = Actor.make "Player" [] [ spell "Bolt" Fire 1.0 2.0 ]
         let fine = Fight.single (boss 1e9) player 5.0
@@ -955,7 +1015,7 @@ let run (test: string -> (unit -> unit) -> unit) =
         refused { fine with Minions = [ { Actor.make "Hound" [] [ strike "Bite" 1.0 2.0 ] with Vitals = Some(PlayerStats.basic 100.0 0.0) } ] } "a minion with pools"
         refused { fine with Minions = [ Actor.make "Player" [] [ strike "Bite" 1.0 2.0 ] ] } "actors of the same name"
         refused { fine with Player = { player with Metas = [ Meta.simple "Cast on Crit" 100.0 "Bolt"; Meta.simple "Cast on Crit" 50.0 "Bolt" ] } } "meta gems of the same name"
-        refused { fine with Player = { player with Infusions = Some { Remnants = [ Ignite, "FireInfusion", 50.0 ]; ExtraRemnantChance = 0.0; Delay = 0.5; Consumers = Map.empty; Wildcard = None } } } "infusions"
+        refused { fine with Player = { player with Infusions = Some { Remnants = []; ExtraRemnantChance = 0.0; Delay = 0.5; Consumers = Map.ofList [ "Bolt", ("FireInfusion", "No such skill") ]; Wildcard = None } } } "an infusion of a skill"
         refused { fine with Player = { player with Skills = [ { spell "Bolt" Fire 1.0 2.0 with Mods = [ Mod.base' (Named "MaxSeals") 2.0 ] } ] } } "sealed skills"
         refused { fine with Player = { player with Rules = [ { Hook = OnHit; Filter = AnySkill; Chance = 100.0; Reaction = AttachPustule("Bolt", 3.0, 0.0, 0.0) } ] } } "the reaction AttachPustule"
         // both reasons of a fight with two
