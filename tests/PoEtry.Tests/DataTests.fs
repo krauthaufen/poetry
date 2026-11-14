@@ -818,6 +818,17 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         near dog.CompanionReservation (perMinion { blank with Groups = [ group "" "Companion: Rabid Dog" 0 ] } "Companion: Rabid Dog")
         near dog.SpectreReservation (perMinion { blank with Groups = [ group "" "Spectre: Rabid Dog" 0 ] } "Spectre: Rabid Dog")
         equal (box true) (box (Gems.data db.Value "Companion: Rabid Dog").IsSome)
+        // a grenade's blast and Frost Bomb's detonation come when the fuse ends: 3 s for
+        // Explosive Grenade, 4 s for Frost Bomb, 40% less with Short Fuse I
+        let delay gem supports =
+            match Gems.skill db.Value ModDb.empty None { Gem = gem; Level = 20; Quality = 0; StatSet = 1; Supports = supports } with
+            | Ok (s, _) -> s.HitDelay
+            | Error e -> failwith e
+        near 3.0 (delay "Explosive Grenade" [])
+        near 4.0 (delay "Frost Bomb" [])
+        near 2.4 (delay "Frost Bomb" [ "Short Fuse I", 1 ])
+        equal (box ([]: string list)) (box (Gems.unmodelledTypes db.Value "Frost Bomb" |> List.filter ((=) "DetonatesAfterTime")))
+        equal (box [ "DetonatesAfterTime" ]) (box (Gems.unmodelledTypes db.Value "Explosive Spear" |> List.filter ((=) "DetonatesAfterTime")))
         // a skill with no gem of its own, by its name: Punch (the unarmed attack) is an attack
         match Gems.data db.Value "Punch" with
         | Some d -> equal (box true) (box (d.Types.Contains "Attack" && d.Types.Contains "Melee"))

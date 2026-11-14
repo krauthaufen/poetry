@@ -347,7 +347,10 @@ module Gems =
         skillOfGem db name
         // an ammunition gem is judged by the shot it loads
         |> Option.map (fun d -> if d.Types.Contains "CrossbowAmmoSkill" then shotOf db name |> Option.defaultValue d else d)
-        |> Option.map (fun d -> d.Types |> Set.filter (fun t -> not (descriptiveTypes.Contains t) && not (modelledTypes.Contains t)) |> Set.toList)
+        |> Option.map (fun d ->
+            // (a detonation after a time is played for grenades and Frost Bomb: their hit's delay)
+            let fused = d.Types.Contains "Grenade" || d.Name = "Frost Bomb"
+            d.Types |> Set.filter (fun t -> not (descriptiveTypes.Contains t) && not (modelledTypes.Contains t) && not (fused && t = "DetonatesAfterTime")) |> Set.toList)
         |> Option.defaultValue []
 
     let isPersistentBuff (db: GameDb) name =
@@ -829,7 +832,14 @@ module Gems =
             |> Option.orElse (Map.tryFind (data.Name, "") partConditions |> Option.bind (List.tryPick (fun (c: string) -> if c.StartsWith "Consumes:" then Some(c.Substring 9) else None)))
           Cost = gemLevel |> Option.bind (fun l -> l.ManaCost) |> Option.defaultValue 0.0
           // "comet_fall_time_ms": hits land this long after the cast
-          HitDelay = (ownStats |> List.filter (fun (id, _) -> id.EndsWith "_fall_time_ms") |> List.sumBy snd) / 1000.0
+          HitDelay =
+            (ownStats |> List.filter (fun (id, _) -> id.EndsWith "_fall_time_ms") |> List.sumBy snd) / 1000.0
+            // a grenade, a Frost Bomb: "explodes when its fuse expires", "When the Orb's duration
+            // ends, it Detonates": the hit comes after the detonation time (x Fast Forward's less)
+            + (if data.Types.Contains "DetonatesAfterTime" && (data.Types.Contains "Grenade" || data.Name = "Frost Bomb") then
+                   (statOf "base_skill_detonation_time" |> Option.defaultValue 0.0) / 1000.0
+                   * (1.0 + (allStats |> List.filter (fun (id, _) -> id = "support_fast_forward_detonation_time_+%_final") |> List.sumBy snd) / 100.0)
+               else 0.0)
           // "base_chaos_damage_to_deal_per_minute": damage over time on what the skill hits
           Dots =
             DamageType.all

@@ -18,7 +18,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
    whose description or behaviour changed.
 5. Go through the lists below; the wiki's version history of a skill says what changed.
 
-## Rules (111)
+## Rules (112)
 
 ### Hit damage
 
@@ -165,6 +165,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | Rule | Source, and what is guessed | Confidence |
 |---|---|---|
 | Infusion remnants | gem data; pickup delay a guess | data + guess |
+| Fuses | gem data, descriptions | data; where it explodes is a guess |
 | Verisium in the rotation | player behaviour | guess |
 | Charged Staff's shockwave | `ChargedStaffShockwavePlayer` (baseMultiplier, `active_skill_base_area_of_effect_radius` 50, `charged_staff_cone_angle` 45, `charged_staff_bonus_width` 15, conversion 80); gem text ("adding Lightning damage and a Lightning shockwave to your Quarterstaff Attacks"); user: its hits deal a little physical damage and leech with the group's support. One per use and when it lands, 45 degrees being the whole angle, and what the bonus width widens are guesses | data / guess |
 | Block | data / game text | data + guess (cap) |
