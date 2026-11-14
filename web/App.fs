@@ -562,10 +562,10 @@ let private spotName (m : Model) (spot : string) : string =
     | None -> slotOf spot + " (empty)"
 
 let private sheetUrl (m : Model) = "__sim?op=character" + knobs m + passives m + "&build=" + m.Build
-let private fightOf (m : Model) (scenario : string) (ask : string) = "__sim?op=fight&runs=96" + (if scenario = "pack" || scenario = "surrounded" then "&time=8" else "&time=30&least=4") + ask + "&scenario=" + scenario + (if m.Pressing <> "" then "&gem=" + m.Pressing.Replace (" ", "%20") else "") + fightKnobs m + knobs m + passives m + "&build=" + m.Build
+let private fightOf (m : Model) (scenario : string) (ask : string) = "__sim?op=fight&runs=96" + (if scenario = "pack" then "&time=8" elif scenario = "endless" then "&time=30&least=4" else "&time=30") + ask + "&scenario=" + scenario + (if m.Pressing <> "" then "&gem=" + m.Pressing.Replace (" ", "%20") else "") + fightKnobs m + knobs m + passives m + "&build=" + m.Build
 let private fightUrl (m : Model) = fightOf m m.Scenario ("&round=" + string m.Round)
 
-let private scenarios = [ "boss"; "pinnacle"; "pack"; "surrounded" ]
+let private scenarios = [ "pack"; "boss"; "pinnacle"; "endless" ]
 
 /// The scenario whose fights are asked ahead now: the first not shown and not asked yet,
 /// once the shown one's fights are all in.
@@ -1680,6 +1680,13 @@ let rec private step (msg : Msg) (m : Model) : Model =
         | 200, Ok j when Json.string (Json.field "error" j) <> "" -> { m with Fighting = false; Status = "the fight failed: " + Json.string (Json.field "error" j) }
         | 200, Ok j ->
             let dps k = Json.field "dps" j |> Json.field k |> Json.number
+            // (a boss with the game's life: how soon it is dead comes first)
+            let rate = Json.number (Json.field "killRate" j)
+            let clear k = Json.field "clear" j |> Json.field k |> Json.number
+            let killed =
+                if m.Scenario <> "boss" && m.Scenario <> "pinnacle" then []
+                elif rate >= 1.0 then [ { Label = "Dead in"; Value = sprintf "%.2f s" (clear "mean") }; { Label = "one in ten slower than"; Value = sprintf "%.2f s" (clear "p90") } ]
+                else [ { Label = "Dead in"; Value = sprintf "%.0f%% of fights" (100.0 * rate) } ]
             // (while runs are still out the fight is asked again: the next answer is of more of them)
             let more = Json.bool (Json.field "more" j)
             let m = if m.Round = 0 || m.Happened.IsEmpty then readReplay j m else m
@@ -1695,7 +1702,7 @@ let rec private step (msg : Msg) (m : Model) : Model =
                 Round = (if more then m.Round + 1 else m.Round)
                 Gem = Json.string (Json.field "gem" j)
                 Play = Json.field "play" j |> Json.list |> List.map (fun x -> { Skill = Json.string (Json.field "gem" x); How = Json.string (Json.field "how" x); Face = picturesOf m (Json.string (Json.field "gem" x)); Code = Json.string (Json.field "cond" x) }) |> List.distinctBy (fun p -> p.Skill)
-                Dps = [ { Label = "DPS"; Value = short (dps "mean") }; { Label = "one in ten below"; Value = short (dps "p10") }; { Label = "median"; Value = short (dps "p50") }; { Label = "one in ten above"; Value = short (dps "p90") } ]
+                Dps = killed @ [ { Label = "DPS"; Value = short (dps "mean") }; { Label = "one in ten below"; Value = short (dps "p10") }; { Label = "median"; Value = short (dps "p50") }; { Label = "one in ten above"; Value = short (dps "p90") } ]
                 Shares =
                     Json.field "damageShare" j |> Json.list
                     |> List.map (fun x -> Json.string (Json.field "name" x), Json.number (Json.field "value" x) * 100.0)
@@ -1906,7 +1913,7 @@ let private analyse (m : Model) (about : string) : Node<Msg> =
         Dom.Class "analyse"
         button { Dom.Class "act"; Dom.OnClick (fun _ -> Analyse); label }
         span { Dom.Class "depth"; about }
-        span { Dom.Class "depth"; "The four numbers: boss, pinnacle, pack, surrounded." }
+        span { Dom.Class "depth"; "The four numbers: pack, map boss and pinnacle (how soon they are dead), and the pinnacle that lasts (damage)." }
         span { Dom.Class "legend"; span { Dom.Class "w3"; "much" }; span { Dom.Class "w2"; "some" }; span { Dom.Class "w1"; "little" }; span { Dom.Class "w0"; "none" }; span { Dom.Class "wneg"; "costs damage" } }
     }
 
@@ -2415,7 +2422,7 @@ let view (m : Model) : Node<Msg> =
     // character's passives belong to is the one)
     // (never the head of a list that may be empty: the text is worked out again before the
     // element that holds it is taken away)
-    let headline = match m.Dps with | d :: _ -> d.Value + " DPS" | [] -> ""
+    let headline = match m.Dps with | d :: _ when d.Label = "DPS" -> d.Value + " DPS" | d :: _ -> "dead in " + d.Value | [] -> ""
     let undo = "Undo (" + string m.GemEdits.Length + ")"
     let here = m.Characters |> List.exists (fun (_, _, url) -> url = m.Build)
     let found = if m.Sought.Trim().Length >= 2 then string m.Hits + " found" else ""
@@ -2510,10 +2517,10 @@ let view (m : Model) : Node<Msg> =
                 div {
                     Dom.Class "survival"
                     nav {
-                        scenario m "boss" "Boss"
-                        scenario m "pinnacle" "Pinnacle"
                         scenario m "pack" "Pack"
-                        scenario m "surrounded" "Surrounded"
+                        scenario m "boss" "Map boss"
+                        scenario m "pinnacle" "Pinnacle"
+                        scenario m "endless" "Endless"
                     }
                     panel "In this fight" m.Survival
                 }
@@ -2609,10 +2616,10 @@ let view (m : Model) : Node<Msg> =
                 div {
                     Dom.Class "column wide"
                     nav {
-                        scenario m "boss" "Boss"
-                        scenario m "pinnacle" "Pinnacle"
                         scenario m "pack" "Pack"
-                        scenario m "surrounded" "Surrounded"
+                        scenario m "boss" "Map boss"
+                        scenario m "pinnacle" "Pinnacle"
+                        scenario m "endless" "Endless"
                     }
                     section {
                         Dom.Class "panel going"
