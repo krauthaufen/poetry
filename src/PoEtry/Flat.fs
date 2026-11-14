@@ -5842,6 +5842,10 @@ module Flat =
         if (at s.A.BHas charge) && not spared then
             // "still count as consuming": the consumed-recently status starts either way
             markStatus s (at p.ConsumedRecently charge)
+            // mana for consuming power charges: once for the use, kept or not (`Sim.step`, ConsumeCharges)
+            (match p.Vitals with
+             | Some v when charge = (at p.BCharges 0) -> gainMana s v 6 (v.Mana * p.ConsumePowerMana / 100.0)
+             | _ -> ())
             if rng.Chance skip then
                 bump s info.CKept
                 let pause = p.Actor.KeptChargesPause
@@ -5857,13 +5861,6 @@ module Flat =
                         put s.A.BPaused charge (newUntil)
                         expireAt s expires
             else
-                // mana for each power charge that goes (`Sim.step`, ConsumeCharges)
-                (match p.Vitals with
-                 | Some v when charge = (at p.BCharges 0) ->
-                    let have = stacksOf s charge
-                    let gone = if count > 0 && have > count then count else have
-                    gainMana s v 6 (float gone * v.Mana * p.ConsumePowerMana / 100.0)
-                 | _ -> ())
                 // one charge, a set number, or all of them (0)
                 if (at s.A.BHas charge) && count > 0 && (at s.A.BStacks charge) > count then setBuff s charge ((at s.A.BStacks charge) - count) (at s.A.BExpires charge) (at s.A.BMods charge)
                 else removeBuff s charge
@@ -5952,12 +5949,12 @@ module Flat =
                 if stacksOf s r <> 0 then
                     let have = stacksOf s r
                     markStatus s (at p.ConsumedRecently r)
+                    // (mana for consuming power charges: once, kept or not)
+                    (match p.Vitals with
+                     | Some v when r = (at p.BCharges 0) -> gainMana s v 6 (v.Mana * p.ConsumePowerMana / 100.0)
+                     | _ -> ())
                     if rng.Chance p.SheetSkip then bump s (at p.CKeptOf r)
                     else
-                        // (mana for a power charge that goes, not for one that is kept)
-                        (match p.Vitals with
-                         | Some v when r = (at p.BCharges 0) -> gainMana s v 6 (v.Mana * p.ConsumePowerMana / 100.0)
-                         | _ -> ())
                         setStacks s false r (have - 1)
                         bump s (at p.CLostOf r)
 

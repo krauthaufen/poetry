@@ -242,7 +242,7 @@ module Report =
                                                                    // (the supports still on: those of the group as the character was built)
                                                                    let on = List.tryItem i c.Build.Groups |> Option.map (fun h -> h.Gems |> List.filter (fun y -> y.Enabled && y.IsSupport) |> List.map (fun y -> y.Name, y.Level)) |> Option.defaultValue all
                                                                    let own = if levelsWithSupports then max 1 (x.Level - Gems.supportLevels c.Db (setup all)) else x.Level
-                                                                   Gems.level c.Db sheetMods { setup on with Level = own }
+                                                                   Gems.level c.Db sheetMods c.Sheet.Weapons { setup on with Level = own }
                                                            yield obj [ "name", JStr x.Name; "at", num (float at); "level", num (float level); "socketed", num (float x.Level); "quality", num (float x.Quality); "support", JBool x.IsSupport
                                                                        "icon", JStr((Map.tryFind x.Name icons |> Option.defaultValue "|").Split('|').[0])
                                                                        "gemIcon", JStr((Map.tryFind x.Name icons |> Option.defaultValue "|").Split('|').[1])

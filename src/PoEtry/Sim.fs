@@ -3347,15 +3347,14 @@ module Sim =
                         if stacksOf st r = 0 then w
                         else
                             let w = markStatus actorName ("Consumed" + r + "Recently") w
+                            // (mana for consuming power charges: once, kept or not)
+                            let w =
+                                match actor.Vitals with
+                                | Some v when r = "PowerCharge" ->
+                                    gainMana v "consume" (v.Mana * Mods.sumBase Ctx.empty [ Named "ManaPercentOnConsumePower" ] (ModDb.ofList actor.Mods) / 100.0) w
+                                | _ -> w
                             if rng.Chance skip then { w with Counts = bump ("kept:" + r) w.Counts }
-                            else
-                                // (mana for a power charge that goes, not for one that is kept)
-                                let w =
-                                    match actor.Vitals with
-                                    | Some v when r = "PowerCharge" ->
-                                        gainMana v "consume" (v.Mana * Mods.sumBase Ctx.empty [ Named "ManaPercentOnConsumePower" ] (ModDb.ofList actor.Mods) / 100.0) w
-                                    | _ -> w
-                                setStacksWith env actorName false r (stacksOf st r - 1) w |> fun w -> { w with Counts = bump ("lost:" + r) w.Counts })
+                            else setStacksWith env actorName false r (stacksOf st r - 1) w |> fun w -> { w with Counts = bump ("lost:" + r) w.Counts })
                     w
 
     let private step env rng (w: World) =
@@ -3605,6 +3604,14 @@ module Sim =
                     let w =
                         updateActor name (fun st -> { st with Buffs = Map.add recent { Name = recent; Mods = []; Stacks = 1; Expires = w.Time + 4.0 } st.Buffs }) w
                         |> schedule (w.Time + 4.0) Expire
+                    // "Recover N% of maximum Mana when you consume a Power Charge": once for a use
+                    // that consumes them, however many, and whether they are kept or not (user,
+                    // in game: "happens but only once per Falling Thunder or Charged Staff")
+                    let w =
+                        match actor.Vitals with
+                        | Some v when charge = "PowerCharge" ->
+                            gainMana v "consume" (v.Mana * Mods.sumBase Ctx.empty [ Named "ManaPercentOnConsumePower" ] (ModDb.ofList actor.Mods) / 100.0) w
+                        | _ -> w
                     if rng.Chance skip then
                         let w = { w with Counts = bump ("kept:" + charge) w.Counts }
                         if actor.KeptChargesPause > 0.0 then
@@ -3624,16 +3631,6 @@ module Sim =
                     else
                         // one charge, a set number, or all of them (0)
                         let count = int (Mods.sumBase Ctx.empty [ Named "ConsumeChargeCount" ] (skillDb env actor (skillOf actor skillName) st))
-                        // "Recover N% of maximum Mana when you consume a Power Charge": for each
-                        // charge that goes. (Not for charges a skill keeps: the user, with charges
-                        // that are all but never removed, runs out of mana after four uses.)
-                        let w =
-                            match actor.Vitals with
-                            | Some v when charge = "PowerCharge" ->
-                                let have = stacksOf st charge
-                                let gone = if count > 0 && have > count then count else have
-                                gainMana v "consume" (float gone * v.Mana * Mods.sumBase Ctx.empty [ Named "ManaPercentOnConsumePower" ] (ModDb.ofList actor.Mods) / 100.0) w
-                            | _ -> w
                         updateActor name (fun st ->
                             match Map.tryFind charge st.Buffs with
                             | Some e when count > 0 && e.Stacks > count -> { st with Buffs = Map.add charge { e with Stacks = e.Stacks - count } st.Buffs }

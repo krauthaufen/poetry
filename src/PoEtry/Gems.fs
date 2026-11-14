@@ -1040,13 +1040,22 @@ module Gems =
             | None -> []
         { Ctx.empty with SkillName = gem; SkillTags = Set.ofList tags }
 
-    /// The level a socketed gem really has: its own, what the character adds and what its supports add.
-    let level (db: GameDb) (characterMods: ModDb) (setup: GemSetup) : int =
+    /// The level a socketed gem really has: its own, what the character adds and what its supports
+    /// add. (`weapons`: an attack is made with one of them, and what that weapon is counts: a
+    /// weapon of the second set gives its skills what holds "in weapon set two".)
+    let level (db: GameDb) (characterMods: ModDb) (weapons: Weapon list) (setup: GemSetup) : int =
         match skillOfGem db setup.Gem with
         | None -> setup.Level
         | Some data ->
             let maxLevel = data.Levels |> Map.toList |> List.map fst |> List.fold max 1
-            min maxLevel (setup.Level + int (Mods.sumBase (ctxOf db setup.Gem) [ Named "GemLevel" ] characterMods) + supportLevels db setup)
+            let ctx = ctxOf db setup.Gem
+            let ctx =
+                if not (data.Types.Contains "Attack") then ctx
+                else
+                    match chooseWeapon db setup.Gem weapons with
+                    | Some w -> { ctx with SkillTags = Set.union ctx.SkillTags (Set.ofList w.Tags) }
+                    | None -> ctx
+            min maxLevel (setup.Level + int (Mods.sumBase ctx [ Named "GemLevel" ] characterMods) + supportLevels db setup)
 
     /// Levels the character's mods add to a gem ("+ to Level of all Spell Skills").
     let bonusLevels (db: GameDb) (characterMods: ModDb) (gem: string) =
