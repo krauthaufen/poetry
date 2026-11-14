@@ -612,17 +612,26 @@ let randomFight (case: uint32) : Fight * string =
             { fight with Player = player'; Enemies = enemies'; Minions = persistent @ totems @ pack }
     // now and then something the fast engine does not play: it must say so
     let fight =
-        match (if chance 0.12 then pick [ 1; 3; 5 ] else -1) with
+        match (if chance 0.12 then pick [ 1; 3 ] else -1) with
         | 1 ->
             note "pustule"
             { fight with Player = { fight.Player with Rules = { Hook = OnHit; Filter = AnySkill; Chance = 100.0; Reaction = AttachPustule(fight.Player.Skills.Head.Name, 3.0, 0.0, 0.0) } :: fight.Player.Rules } }
         | 3 ->
             note "seals"
             { fight with Player = { fight.Player with Skills = fight.Player.Skills |> List.map (fun s -> { s with Mods = Mod.base' (Named "MaxSeals") 2.0 :: Mod.base' (Named "SealIntervalMs") 900.0 :: Mod.base' (Named "SealRepeats") 1.0 :: s.Mods }) } }
-        | 5 ->
-            note "replace"
-            { fight with Replace = true }
         | _ -> fight
+    // a pack that never ends: the dead are replaced (several enemies, most of them weak enough to die)
+    let fight =
+        if not (chance 0.2) then fight
+        else
+            note "replaced"
+            let extra =
+                [ for i in 1 .. whole 0 3 ->
+                    let d = EnemyDef.make Rarity.defaults (whole 60 83) (pick [ Normal; Magic ]) (sprintf "Pack %d" i) (Vec.make (between 5.0 50.0) (between -30.0 30.0))
+                    { d with Life = between 40.0 1500.0; Speed = between 5.0 60.0; Attack = (if chance 0.5 then d.Attack else None) } ]
+            { fight with
+                Replace = true
+                Enemies = (fight.Enemies |> List.map (fun e -> if chance 0.6 then { e with Life = between 40.0 3000.0 } else e)) @ extra }
     let described =
         sprintf "case %d: %d skills (%s), %d rules (%s), %d mods, %d enemies, vitals %b, %.2f s%s"
             case fight.Player.Skills.Length
@@ -919,6 +928,22 @@ let run (test: string -> (unit -> unit) -> unit) =
                 Rules = [ { Hook = OnUse; Filter = Called "Bind"; Chance = 100.0; Reaction = SummonPerWard("Casters", 30.0, 2.5) } ] }
         same { Fight.single (boss 1e12) binder 12.0 with Minions = casters } minionSeeds)
 
+    test "flat: a pack whose dead are replaced; minions beside the player in it" (fun () ->
+        let weak i = { EnemyDef.make Rarity.defaults 75 (if i % 3 = 0 then Magic else Normal) (sprintf "pack %d" i) (Vec.make (12.0 + 4.0 * float i) (float (i % 4) * 6.0 - 9.0)) with Life = 400.0 + 150.0 * float i; Speed = 25.0 }
+        let pack = [ for i in 1 .. 11 -> weak i ]
+        let player =
+            { Actor.make "Player" [ Mod.inc CritChance 80.0; Mod.base' (AilmentChance Poison) 60.0 ] [ { spell "Nova" Fire 80.0 160.0 with Delivery = AreaAroundSelf 35.0; BaseTime = 0.6 }; { spell "Hex" Chaos 1.0 2.0 with Cooldown = Some 3.0; Hits = [ 1.0, 1.0 ] } ] with
+                Vitals = Some { PlayerStats.basic 6000.0 500.0 with Evasion = 900.0; LifeRegen = 80.0; ManaRegen = 40.0 }
+                Rules =
+                    [ { Hook = OnHit; Filter = Called "Hex"; Chance = 100.0; Reaction = ApplyCurse("Hex", 5.0, [ Mod.base' (Resist Fire) -20.0 ]) }
+                      { Hook = OnKill; Filter = AnySkill; Chance = 100.0; Reaction = GrantBuff("Rampage", 3.0, 5, [ Mod.inc (Damage AllDamage) 8.0 ]) } ] }
+        let fight = { Fight.single pack.Head player 14.0 with Enemies = pack; Replace = true; Targeting = Nearest }
+        same fight minionSeeds
+        let o = Sim.run fight 1u
+        if o.Kills.Length <= pack.Length then failwithf "expected replacements to be killed too: %d kills" o.Kills.Length
+        let hound = { Actor.make "Hound" [ sure ] [ bite "Bite" 150.0 ] with Body = Some(body 500.0 (Some 3.0)) }
+        same { fight with Minions = [ hound; { hound with Name = "Hound 2" } ] } minionSeeds)
+
     test "flat: what is not built is refused, with every reason" (fun () ->
         let player = Actor.make "Player" [] [ spell "Bolt" Fire 1.0 2.0 ]
         let fine = Fight.single (boss 1e9) player 5.0
@@ -934,7 +959,7 @@ let run (test: string -> (unit -> unit) -> unit) =
         refused { fine with Player = { player with Skills = [ { spell "Bolt" Fire 1.0 2.0 with Mods = [ Mod.base' (Named "MaxSeals") 2.0 ] } ] } } "sealed skills"
         refused { fine with Player = { player with Rules = [ { Hook = OnHit; Filter = AnySkill; Chance = 100.0; Reaction = AttachPustule("Bolt", 3.0, 0.0, 0.0) } ] } } "the reaction AttachPustule"
         // both reasons of a fight with two
-        let two = { fine with Replace = true; Player = { player with Banners = [ { Name = "War Banner"; Glory = 100.0; PerAttackHit = 5.0; Duration = 10.0; Mods = [] } ] } }
+        let two = { fine with Enemies = [ { boss 1e9 with Name = "boss+" } ]; Replace = true; Player = { player with Banners = [ { Name = "War Banner"; Glory = 100.0; PerAttackHit = 5.0; Duration = 10.0; Mods = [] } ] } }
         if (Flat.unsupported two).Length <> 2 then failwithf "expected two reasons, got %A" (Flat.unsupported two))
 
     test "flat: random fights give the reference's outcome, or are refused" (fun () ->

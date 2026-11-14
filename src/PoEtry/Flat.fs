@@ -28,8 +28,8 @@ namespace PoEtry
 /// are a short list of its own. The arithmetic of a hit follows `Hit` and `Ailments` line by
 /// line; who is hit is `Geometry`'s own code.
 ///
-/// Played: the player and its minions and totems against any number of enemies that are not
-/// replaced; skills with parts, cooldowns, costs and charges; the rules whose reactions are
+/// Played: the player and its minions and totems against any number of enemies, the dead
+/// replaced where the fight says so; skills with parts, cooldowns, costs and charges; the rules whose reactions are
 /// listed in `Re`; ailments, damage over time, curses, exposure, armour break; meta gems;
 /// cycles, periodic actions, archons, rage, charms; the player's pools, with monsters
 /// walking up and hitting back; minions that are hurt, killed and revived, temporary ones
@@ -847,6 +847,8 @@ module Flat =
               Reviving: int[]
               AnyPool: bool
               Walks: bool
+              /// Whether monsters attack at all (the player or a minion can be hurt).
+              Attacked: bool
               BMinionDied: int
               BEmpowered: int
               CMinionDied: int
@@ -919,10 +921,8 @@ module Flat =
               RageOnKill: float
               BerserkLoss: float
               MaxRage: int
-              /// The enemies that attack, in the order the fight names them, and the names of
-              /// their streams of random numbers (by enemy).
+              /// The enemies that attack, in the order the fight names them.
               Attackers: int[]
-              AttackKeys: uint32[]
               /// The character's own chance to keep a charge, and the mana (a share of the most)
               /// that consuming a Power Charge gives.
               SheetSkip: float
@@ -1111,7 +1111,8 @@ module Flat =
         let sources = Names()
 
         // ---- the fight ----
-        if fight.Replace then reject "enemies that are replaced"
+        // (a replacement is named after the enemy it replaces, with a + more)
+        if fight.Replace && fight.Enemies |> List.exists (fun e -> e.Name.EndsWith "+") then reject "an enemy named like a replacement"
         if fight.Enemies.IsEmpty then reject "a fight without enemies"
         if (fight.Enemies |> List.map (fun e -> e.Name) |> List.distinct).Length <> fight.Enemies.Length then reject "enemies of the same name"
         // (the player's evasion entropy goes by this name in the reference, whatever the player is called)
@@ -1648,6 +1649,7 @@ module Flat =
                       Reviving = reviving
                       AnyPool = anyPool
                       Walks = fight.Player.Vitals.IsSome
+                      Attacked = fight.Player.Vitals.IsSome || anyBody
                       BMinionDied = buffs.Id "MinionDiedRecently"
                       BEmpowered = buffs.Id "Empowered"
                       CMinionDied = count "minion:died"
@@ -1716,7 +1718,6 @@ module Flat =
                       Attackers =
                         (if actor.Vitals.IsNone && not anyBody then [||]
                          else fight.Enemies |> List.filter (fun e -> e.Attack.IsSome) |> List.map (fun e -> enemyIds.[e.Name]) |> Array.ofList)
-                      AttackKeys = enemies |> Array.map (fun e -> Sim.streamHash ("E|" + e.Name))
                       SheetSkip = Mods.sumBase Ctx.empty [ Named "ChargeSkipConsume" ] sheet
                       ConsumePowerMana = Mods.sumBase Ctx.empty [ Named "ManaPercentOnConsumePower" ] sheet
                       Enemies = enemyInfos
@@ -1957,6 +1958,11 @@ module Flat =
     type private Foe =
         { Info: EnemyInfo
           Index: int
+          /// The enemy of the fight's own that it is or stands in for (its place among them),
+          /// and its stream of random numbers for its attacks, with how many it has served.
+          Root: int
+          AttackKey: uint32
+          mutable AttackN: int
           /// The enemy as it is now (it walks).
           mutable Def: EnemyDef
           mutable Life: float
@@ -2140,7 +2146,11 @@ module Flat =
           Tell: (float -> string -> string -> string -> float -> unit) option
           mutable Time: float
           mutable Seq: int
-          Foes: Foe[]
+          /// Every enemy there has been, by its number; those still in the fight, in the order of
+          /// their names (the dead stay in it until they are replaced, if they are); the numbers by name.
+          mutable Foes: Foe[]
+          mutable Live: int[]
+          mutable FoeIds: Dictionary<string, int>
           mutable AliveCount: int
           /// The living enemies' definitions in the order of their names, and the one aimed at
           /// (-1: none), good until one dies.
@@ -2202,7 +2212,6 @@ module Flat =
           mutable PEntropy: float
           mutable PEntropyAt: float
           mutable PHasEntropy: bool
-          AttackStream: int[]
           /// The defences for the sets of buffs they were asked for (`Actor.VitalsAt`), by the
           /// buffs written out; and the last set asked for, with its defences.
           VitalsSeen: Dictionary<string, PlayerStats>
@@ -2675,12 +2684,13 @@ module Flat =
     let private refreshAlive (s: State) =
         if s.AliveStale then
             let mutable living : EnemyDef list = []
-            for i in s.Foes.Length - 1 .. -1 .. 0 do
-                if (at s.Foes i).Life > 0.0 then living <- (at s.Foes i).Def :: living
+            for k in s.Live.Length - 1 .. -1 .. 0 do
+                let e = at s.Foes (at s.Live k)
+                if e.Life > 0.0 then living <- e.Def :: living
             s.Living <- living
             s.Aimed <-
                 match Geometry.aim s.P.Fight.Targeting s.Living with
-                | Some d -> s.P.EnemyIds.[d.Name]
+                | Some d -> s.FoeIds.[d.Name]
                 | None -> -1
             s.AliveStale <- false
 
@@ -2695,12 +2705,13 @@ module Flat =
         elif (at s.Foes s.Aim).Life > 0.0 then s.Aim
         elif s.AliveCount > 0 then
             // (the cause died of the hit: the skill lands where it was, on whoever is nearest to there)
-            let at = (at s.Foes s.Aim).Def.Position
+            let spot = (at s.Foes s.Aim).Def.Position
             let mutable best = -1
             let mutable least = infinity
-            for e in s.Foes do
+            for k in 0 .. s.Live.Length - 1 do
+                let e = at s.Foes (at s.Live k)
                 if e.Life > 0.0 then
-                    let d = Vec.dist e.Def.Position at
+                    let d = Vec.dist e.Def.Position spot
                     if best < 0 || d < least then
                         best <- e.Index
                         least <- d
@@ -2714,8 +2725,8 @@ module Flat =
         let dt = t - s.Time
         if dt > 0.0 then
             let n = float s.AliveCount
-            for i__26 in 0 .. s.Foes.Length - 1 do
-                let e = at s.Foes i__26
+            for i__26 in 0 .. s.Live.Length - 1 do
+                let e = at s.Foes (at s.Live i__26)
                 if e.Life > 0.0 then
                     if e.Dots.IsEmpty then
                         refreshStatus s e
@@ -2771,8 +2782,8 @@ module Flat =
                         if dead then kill s e (s.Time + span) else e.Life <- life
             // monsters walk towards the player until they're in attack range
             if s.P.Walks then
-                for i__27 in 0 .. s.Foes.Length - 1 do
-                    let e = at s.Foes i__27
+                for i__27 in 0 .. s.Live.Length - 1 do
+                    let e = at s.Foes (at s.Live i__27)
                     match e.Def.Attack with
                     | Some atk when e.Life > 0.0 ->
                         let d = Vec.length e.Def.Position
@@ -2922,8 +2933,8 @@ module Flat =
 
     /// What has run out of the enemies' debuffs and damage over time goes (`Sim.prune`).
     let private pruneFoes (s: State) =
-        for i__29 in 0 .. s.Foes.Length - 1 do
-            let e = at s.Foes i__29
+        for i__29 in 0 .. s.Live.Length - 1 do
+            let e = at s.Foes (at s.Live i__29)
             if not (e.Soonest > s.Time) then
                 let mutable soonest = infinity
                 for id in 0 .. e.Has.Length - 1 do
@@ -3341,8 +3352,8 @@ module Flat =
         | REmpower (b, perPower, cap, counts) ->
             // a warcry: one attack per so much monster power among the living, at least one
             let mutable power = 0.0
-            for i__32 in 0 .. s.Foes.Length - 1 do
-                let e = at s.Foes i__32
+            for i__32 in 0 .. s.Live.Length - 1 do
+                let e = at s.Foes (at s.Live i__32)
                 if e.Life > 0.0 then power <- power + MonsterPower.ofRarity e.Def.Rarity
             let n = max 1 (int (floor (min cap power / max 1.0 perPower)))
             bump s (at counts n)
@@ -3401,7 +3412,7 @@ module Flat =
                 let there = others |> Array.filter (fun o -> (at e.Has o) && (at e.Expires o) > s.Time) |> List.ofArray |> List.sortBy (fun o -> (at e.Expires o))
                 for o in there |> List.truncate (max 0 (there.Length + 1 - limit)) do
                     removeDebuff e o
-                addDebuff s e id duration 1 (at mods target)
+                addDebuff s e id duration 1 (at mods e.Root)
                 bump s count
         | RApplyExposure (dt, amount, duration) -> if onTarget () then expose s target dt amount duration
         | RGrowExposure (dt, start, perPulse, cap, every, pulses, duration) ->
@@ -4123,8 +4134,8 @@ module Flat =
             let beforeHas, beforeStacks = e.SHas, e.SStacks
             // Isolated: none of its allies within 6 m; Close Range: within 2 m of the player (keyword text)
             let mutable alone = true
-            for i__46 in 0 .. s.Foes.Length - 1 do
-                let o = at s.Foes i__46
+            for i__46 in 0 .. s.Live.Length - 1 do
+                let o = at s.Foes (at s.Live i__46)
                 if o.Life > 0.0 && o.Index <> e.Index && not (Vec.dist o.Def.Position def0.Position > 60.0) then alone <- false
             ev.Iso <- alone
             ev.Close <- Vec.length def0.Position - def0.Size <= 20.0
@@ -4296,7 +4307,8 @@ module Flat =
                             let seconds = b.Seconds * multQ bev qSkillDuration
                             release s
                             let dps = overkill * b.PercentPerSecond / 100.0
-                            for o in s.Foes do
+                            for k in 0 .. s.Live.Length - 1 do
+                                let o = at s.Foes (at s.Live k)
                                 if o.Life > 0.0 && o.Index <> e.Index && Vec.dist o.Def.Position def0.Position <= radius + o.Def.Size then
                                     bump s b.Ignited
                                     // (an ignite, counted as the explosion's damage)
@@ -4535,7 +4547,7 @@ module Flat =
             let hitAll (names: string list) =
                 let mutable rest = names
                 while not rest.IsEmpty do
-                    hitEnemy s rng sid mult p.EnemyIds.[rest.Head]
+                    hitEnemy s rng sid mult s.FoeIds.[rest.Head]
                     rest <- rest.Tail
             let strike () =
                 if direct then
@@ -4545,8 +4557,8 @@ module Flat =
                     | Projectiles pr when not passing && pr.Passing > 0.0 && pr.HitInterval > 0.0 ->
                         // what is inside the projectiles as they travel: every hit at its own time
                         for (t, target) in Geometry.dwellHits rng p.Fight.Walls pr p.Fight.Reach areaMult primaryDef alive do
-                            if t <= 0.0 then hitEnemy s rng sid mult p.EnemyIds.[target]
-                            else schedule s (s.Time + t) EDirect sid p.EnemyIds.[target] mult 0.0
+                            if t <= 0.0 then hitEnemy s rng sid mult s.FoeIds.[target]
+                            else schedule s (s.Time + t) EDirect sid s.FoeIds.[target] mult 0.0
                     | Projectiles pr when passing && pr.Passing > 0.0 ->
                         // where the projectile is by now, on its way towards where it was aimed
                         let at = Vec.scale (pr.Speed * elapsed) (Vec.ofAngle (Vec.angle primaryDef.Position))
@@ -5062,8 +5074,8 @@ module Flat =
         set 8 (s.Recoups |> List.exists (fun (until, _, pool) -> pool.StartsWith "Leech" && until > s.Time))
         // surrounded: at least 5 monsters within 3 m
         let mutable near = 0
-        for i__52 in 0 .. s.Foes.Length - 1 do
-            let e = at s.Foes i__52
+        for i__52 in 0 .. s.Live.Length - 1 do
+            let e = at s.Foes (at s.Live i__52)
             if e.Life > 0.0 && Vec.length e.Def.Position - e.Def.Size <= 30.0 then near <- near + 1
         set 9 (near >= max 1 v.SurroundedAt)
         // charge states: "while at maximum Power Charges", "while you have no Frenzy Charges"
@@ -5107,9 +5119,9 @@ module Flat =
                 | EConsume | EGainStacks | ESpendBuff -> tell t (kindName kind) name (at p.BuffNames a) (float q.Seq)
                 | ECycle -> tell t "CycleTick" name (at p.BuffNames ((at p.Cycles a).Buff)) (float q.Seq)
                 | EPeriodic -> tell t "PeriodicTick" name p.Actor.Periodics.[a].Name (float q.Seq)
-                | EEnemyAttack -> tell t "EnemyAttack" (at p.Enemies a).Def.Name "" (float q.Seq)
+                | EEnemyAttack -> tell t "EnemyAttack" (at s.Foes a).Def.Name "" (float q.Seq)
                 | EEnergy -> tell t "EnergyArrives" name (at p.Metas a).Meta.Name (float q.Seq)
-                | EExpose -> tell t "Expose" name (at p.Enemies a).Def.Name (float q.Seq)
+                | EExpose -> tell t "Expose" name (at s.Foes a).Def.Name (float q.Seq)
                 | ERevive -> tell t "ReviveMinions" "" "" (float q.Seq)
                 | ELeaves -> tell t "MinionLeaves" name "" (float q.Seq)
                 | _ -> tell t "Expire" "" "" (float q.Seq)
@@ -5126,9 +5138,10 @@ module Flat =
                     put s.A.ConsumeStream b (n + 1)
                     Rng(Sim.streamSeedOf s.Seed (at p.Skills b).ConsumeKey n)
                 | EEnemyAttack ->
-                    let n = (at s.AttackStream a)
-                    put s.AttackStream a (n + 1)
-                    Rng(Sim.streamSeedOf s.Seed (at p.AttackKeys a) n)
+                    let e = at s.Foes a
+                    let n = e.AttackN
+                    e.AttackN <- n + 1
+                    Rng(Sim.streamSeedOf s.Seed e.AttackKey n)
                 | EPeriodic ->
                     let n = (at s.A.PeriodicStream a)
                     put s.A.PeriodicStream a (n + 1)
@@ -5202,85 +5215,90 @@ module Flat =
 
     let private newKept () : Kept = { Queue = Queue(); Evs = ResizeArray(); Vitals = Dictionary() }
 
+    /// An enemy as it comes into the fight (`fresh` in `Sim.runWith`): `root` is the enemy
+    /// the fight names that it is, or that it replaces.
+    let private makeFoe (ns: int) (info: EnemyInfo) (index: int) (root: int) (def: EnemyDef) : Foe =
+        let e =
+            { Info = info
+              Index = index
+              Root = root
+              AttackKey = Sim.streamHash ("E|" + def.Name)
+              AttackN = 0
+              Def = def
+              Life = def.Life
+              Has = Array.create ns false
+              Stacks = Array.zeroCreate ns
+              Expires = Array.zeroCreate ns
+              DMods = Array.create ns []
+              Soonest = infinity
+              Dots = []
+              Active = []
+              ActiveOf = []
+              Rates = [||]
+              RateLabels = [||]
+              RateTypes = [||]
+              RateSum = 0.0
+              RatesOf = []
+              RatesVersion = -1
+              Buildup = Array.zeroCreate 13
+              StunBuildupAt = 0.0
+              FlamValue = Array.zeroCreate 16
+              FlamUntil = Array.zeroCreate 16
+              FlamFrom = 0
+              FlamTo = 0
+              FlamSum = 0.0
+              Entropy = 0.0
+              EntropyAt = 0.0
+              HasEntropy = false
+              Status = Map.empty
+              SHas = [||]
+              SStacks = [||]
+              StatusMapStale = true
+              Nums =
+                { Version = -1; X = 0.0; MaxRes = Array.create 5 nan; Res = Array.create 5 nan; Taken = Array.create 5 nan
+                  TakenInc = Array.create 5 nan; TakenMore = Array.create 5 nan
+                  Poise = Array.create 13 nan; Armour = nan; PhysFlat = nan; Threshold = nan; Flam = nan }
+              DefVersion = 0
+              DStat = [||]
+              DCode = [||]
+              DName = [||]
+              DKind = [||]
+              DVal = [||]
+              DShock = [||]
+              DCount = 0
+              DListVersion = -1
+              ShockInc = 0.0
+              ShockOdd = false
+              DotTakenVersion = -1
+              UpPending = 0.0
+              UpAny = false
+              RatePending = 0.0
+              RateAny = false
+              StatusKeys = [||]
+              StatusStale = true
+              StatusDots = []
+              WasCullable = false
+              WasLow = false
+              WasFull = false
+              HitStatus = Map.empty
+              HitStatusOf = Map.empty
+              HitIsolated = false
+              HitClose = false
+              HitStatusMade = false
+              Defender = { Level = info.Def.Level; Mods = info.Db }
+              DefenderStale = true
+              DotTaken = Array.create 5 nan }
+        for (id, stacks, mods) in info.Auras do
+            setDebuff e id stacks infinity mods
+        e
+
     let private start (p: Program) (seed: uint32) (tell: (float -> string -> string -> string -> float -> unit) option) (kept: Kept) : State =
         kept.Queue.Clear()
         let fight = p.Fight
         let player = fight.Player
         let nb = p.BuffNames.Length
         let ns = p.StatusNames.Length
-        let foes =
-            p.Enemies
-            |> Array.mapi (fun i info ->
-                let e =
-                    { Info = info
-                      Index = i
-                      Def = info.Def
-                      Life = info.Def.Life
-                      Has = Array.create ns false
-                      Stacks = Array.zeroCreate ns
-                      Expires = Array.zeroCreate ns
-                      DMods = Array.create ns []
-                      Soonest = infinity
-                      Dots = []
-                      Active = []
-                      ActiveOf = []
-                      Rates = [||]
-                      RateLabels = [||]
-                      RateTypes = [||]
-                      RateSum = 0.0
-                      RatesOf = []
-                      RatesVersion = -1
-                      Buildup = Array.zeroCreate 13
-                      StunBuildupAt = 0.0
-                      FlamValue = Array.zeroCreate 16
-                      FlamUntil = Array.zeroCreate 16
-                      FlamFrom = 0
-                      FlamTo = 0
-                      FlamSum = 0.0
-                      Entropy = 0.0
-                      EntropyAt = 0.0
-                      HasEntropy = false
-                      Status = Map.empty
-                      SHas = [||]
-                      SStacks = [||]
-                      StatusMapStale = true
-                      Nums =
-                        { Version = -1; X = 0.0; MaxRes = Array.create 5 nan; Res = Array.create 5 nan; Taken = Array.create 5 nan
-                          TakenInc = Array.create 5 nan; TakenMore = Array.create 5 nan
-                          Poise = Array.create 13 nan; Armour = nan; PhysFlat = nan; Threshold = nan; Flam = nan }
-                      DefVersion = 0
-                      DStat = [||]
-                      DCode = [||]
-                      DName = [||]
-                      DKind = [||]
-                      DVal = [||]
-                      DShock = [||]
-                      DCount = 0
-                      DListVersion = -1
-                      ShockInc = 0.0
-                      ShockOdd = false
-                      DotTakenVersion = -1
-                      UpPending = 0.0
-                      UpAny = false
-                      RatePending = 0.0
-                      RateAny = false
-                      StatusKeys = [||]
-                      StatusStale = true
-                      StatusDots = []
-                      WasCullable = false
-                      WasLow = false
-                      WasFull = false
-                      HitStatus = Map.empty
-                      HitStatusOf = Map.empty
-                      HitIsolated = false
-                      HitClose = false
-                      HitStatusMade = false
-                      Defender = { Level = info.Def.Level; Mods = info.Db }
-                      DefenderStale = true
-                      DotTaken = Array.create 5 nan }
-                for (id, stacks, mods) in info.Auras do
-                    setDebuff e id stacks infinity mods
-                e)
+        let foes = p.Enemies |> Array.mapi (fun i info -> makeFoe ns info i i info.Def)
         let v = p.Vitals
         let progs = Array.append [| p |] p.Minions
         let agents =
@@ -5365,6 +5383,8 @@ module Flat =
               Time = 0.0
               Seq = 0
               Foes = foes
+              Live = Array.init foes.Length id
+              FoeIds = (if fight.Replace then Dictionary<string, int>(p.EnemyIds) else p.EnemyIds)
               AliveCount = foes |> Array.filter (fun e -> e.Life > 0.0) |> Array.length
               Living = []
               Aimed = -1
@@ -5412,7 +5432,6 @@ module Flat =
               PEntropy = 0.0
               PEntropyAt = 0.0
               PHasEntropy = false
-              AttackStream = Array.zeroCreate p.Enemies.Length
               VitalsSeen = kept.Vitals
               VitalsOf = -1
               VitalsLast = None
@@ -5459,6 +5478,33 @@ module Flat =
         expireAt s fight.MaxTime
         s
 
+    /// Those that died in the last step are replaced: one of the same kind comes from where
+    /// the first of them began, further out and somewhat to the side, and walks in
+    /// (`Sim.runWith`). `from`: the first of the kills that are new.
+    let private replace (s: State) (from: int) =
+        let p = s.Main
+        let ns = p.StatusNames.Length
+        for k in from .. s.Kills.Count - 1 do
+            let name, _, _ = s.Kills.[k]
+            let root = (at s.Foes s.FoeIds.[name]).Root
+            let d = (at p.Enemies root).Def
+            let position = Vec.scale (Vec.length d.Position * 1.25 + 10.0) (Vec.ofAngle (Vec.angle d.Position + (s.Rng.Float() - 0.5) * 1.2))
+            let def = { d with Name = name + "+"; Position = position }
+            let index = s.Foes.Length
+            s.Foes <- Array.append s.Foes [| makeFoe ns (at p.Enemies root) index root def |]
+            s.FoeIds.[def.Name] <- index
+            s.AliveCount <- s.AliveCount + 1
+            if p.Attacked then
+                match d.Attack with
+                | Some attack -> schedule s (s.Time + s.Rng.Float() * attack.Interval) EEnemyAttack index 0 0.0 0.0
+                | None -> ()
+        // those in the fight now, in the order of their names: the dead are out of it for good
+        s.Live <-
+            [| for e in s.Foes do if e.Life > 0.0 then yield e |]
+            |> Array.sortWith (fun a b -> compare a.Def.Name b.Def.Name)
+            |> Array.map (fun e -> e.Index)
+        s.AliveStale <- true
+
     /// The fight played, for at most so many events.
     let private played (p: Program) (seed: uint32) (tell: (float -> string -> string -> string -> float -> unit) option) (maxEvents: int) (kept: Kept) : State =
         let s = start p seed tell kept
@@ -5471,7 +5517,9 @@ module Flat =
                 bump s p.CAborted
                 go <- false
             else
+                let before = s.Kills.Count
                 step s
+                if p.Fight.Replace && s.Kills.Count > before then replace s before
                 n <- n + 1
         s
 
