@@ -865,6 +865,21 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         equal (box 0) (box (count (Sim.run (fight false) 1u) ("uses:" + boom.Name)))
         same (fight true) seeds)
 
+    // ---- secondary radius and duration ----
+
+    test "a part whose only radius is the secondary one has that area; the secondary duration is read where a mechanic is built" (fun () ->
+        let mace = (Items.parse db.Value "Rarity: Normal\nAkoyan Club\n--------\n").Weapon
+        match Gems.skill db.Value ModDb.empty mace { Gem = "Sunder"; Level = 20; Quality = 0; StatSet = 1; Supports = [] } with
+        | Ok (s, cov) ->
+            // "Shockwave radius is 1.2 metres"
+            let wave = s.Parts |> List.find (fun p -> p.Name.EndsWith "Shockwave")
+            equal (box (AreaAtTarget 12.0)) (box wave.Delivery)
+            equal (box false) (box (cov.Unsimulated |> List.exists (fun (k, _) -> k = "active_skill_base_secondary_area_of_effect_radius")))
+        | Error e -> failwith e
+        match Gems.skill db.Value ModDb.empty None { Gem = "Frost Bomb"; Level = 20; Quality = 0; StatSet = 1; Supports = [] } with
+        | Ok (_, cov) -> equal (box false) (box (cov.Unsimulated |> List.exists (fun (k, _) -> k = "base_secondary_skill_effect_duration")))
+        | Error e -> failwith e)
+
     // ---- Scarred Faith ----
 
     test "Scarred Faith: prevented physical damage recouped as energy shield per enemy power; no regeneration; none above armour" (fun () ->

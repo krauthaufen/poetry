@@ -498,6 +498,9 @@ module Gems =
               // consumes it (Behaviours.whirlwind)
               ("Whirling Slash", "Whirlwind"), [ "NoHit" ] ]
 
+    /// Skills whose `base_secondary_skill_effect_duration` is read where their mechanic is built.
+    let private secondaryDurationRead = set [ "Freezing Mark"; "Frost Bomb"; "Kelari's Malediction" ]
+
     let private conditionMods (skill: string) (label: string) (isMain: bool) : Mod list =
         (Map.tryFind (skill, label) partConditions |> Option.defaultValue [])
         @ (if isMain then Map.tryFind (skill, "") partConditions |> Option.defaultValue [] else [])
@@ -685,6 +688,7 @@ module Gems =
             ownStats
             |> List.tryPick (fun (id, v) -> if id.EndsWith "_number_of_projectiles_per_power_charge" then Some("PowerCharge", int v) else None)
         let isProjectileSet = List.contains "base_is_projectile" set.Stats
+        let secondary = statOf "active_skill_base_secondary_area_of_effect_radius"
         // things that burst out of the ground all over the skill's area and wait there
         // ("Creates 1 Spear per N metres of Radius"): each at a random spot, going off (secondary
         // radius) when an enemy touches it
@@ -767,7 +771,9 @@ module Gems =
                             | _ -> None
                         Explosion = if data.Types.Contains "Area" && not (List.contains "is_area_damage" set.Stats) then radius else None }
             else
-                match radius with
+                // a part whose only radius is the skill's secondary one ("Explosion radius is",
+                // "Shockwave radius is" in its own description): that is its area
+                match radius |> Option.orElse secondary with
                 // a nova is around the caster (Ice Nova too: it is cast on a Frostbolt only when one
                 // is flying, user observation), unless Astral Projection puts it at the target
                 | Some r when data.Types.Contains "Nova" && flagAny "nova_skills_cast_at_target_location" -> AreaAtTarget r
@@ -863,7 +869,20 @@ module Gems =
           Clip = 0
           ReloadTime = 0.0
           CostPerSecond = (gemLevel |> Option.bind (fun l -> l.ManaPerMinute) |> Option.defaultValue 0.0) / 60.0 },
-        cov
+        // the secondary radius is read where this set's delivery is built from it: a field's
+        // blasts, a rain's impacts, a part with no other radius
+        (let used =
+            secondary.IsSome
+            && (field.IsSome
+                || (match delivery with
+                    | Projectiles { Rain = Some _ } -> true
+                    | Projectiles _ -> false
+                    | _ -> radius.IsNone))
+         let cov = if used then { cov with Unsimulated = cov.Unsimulated |> List.filter (fun (k, _) -> k <> "active_skill_base_secondary_area_of_effect_radius") } else cov
+         // the secondary duration is read where the skill's mechanic is built: Freezing Mark's
+         // buff (Behaviours.markBuff), Frost Bomb's exposure (useRules), the time between Kelari's
+         // Malediction's corpses (summons)
+         if secondaryDurationRead.Contains data.Name then { cov with Unsimulated = cov.Unsimulated |> List.filter (fun (k, _) -> k <> "base_secondary_skill_effect_duration") } else cov)
 
     /// Build a simulator Skill from a socketed gem. `characterMods` are needed for
     /// "+N to level of ... gems". Attacks need a weapon. Stat sets that belong to the
