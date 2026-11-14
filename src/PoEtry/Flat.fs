@@ -906,6 +906,14 @@ module Flat =
           /// A form that is switched on: its buff (-1: the skill is none). One that is in it
           /// does not press the skill again.
           Form: int
+          /// A warp into one's own projectile: the skills whose strikes it can warp into (empty:
+          /// the skill is no warp), the buff of theirs that goes with the projectile, the buff
+          /// that says the warp went into one, and where that is counted.
+          WarpsInto: int[]
+          Warps: bool
+          WarpBuff: int
+          Warped: int
+          CWarped: int
           /// Whether a use asks how long the skill's effects last, and how large its area is.
           AsksDuration: bool
           AsksArea: bool }
@@ -1175,8 +1183,7 @@ module Flat =
           "SpendsRage", "parts that spend Rage"
           "RecordsDamage", "debuffs that record damage (Inevitable Agony)" ]
 
-    let private unbuiltPrefixes =
-        [ "WarpsInto:", "warps into projectiles" ]
+    let private unbuiltPrefixes : (string * string) list = []
 
     /// Buffs the reference treats in a way of its own that is not built here.
     let private unbuiltBuffs : (string * string) list = []
@@ -1807,6 +1814,14 @@ module Flat =
                       SeqHits = (match s.Mods |> List.tryPick (fun m -> if m.Stat = Named "SeqHits" then Some(int m.Value) else None) with Some n -> n | None -> 1)
                       SeqKey = "Seq:" + s.Name
                       Form = (match named' "ToggleBuff:" with Some form -> buffs.Id form | None -> -1)
+                      WarpsInto =
+                        (match named' "WarpsInto:" with
+                         | Some gem -> [| for (i, o) in List.indexed all do if skillIds.[o.Name] = i && (o.Name = gem || o.Name.StartsWith(gem + " ")) then yield i |]
+                         | None -> [||])
+                      Warps = (named' "WarpsInto:").IsSome
+                      WarpBuff = (match named' "WarpsInto:" with Some gem -> buffs.Id(gem + " buff") | None -> -1)
+                      Warped = (match named' "WarpsInto:" with Some _ -> buffs.Id("Warped:" + s.Name) | None -> -1)
+                      CWarped = (match named' "WarpsInto:" with Some gem -> counts.Id("warped into:" + gem) | None -> -1)
                       AsksDuration = ownBase s "BarrageRepeats" > 0.0 || flag "DetonatedByDamage" || (s :: s.Parts) |> List.exists (fun part -> part.Mods |> List.exists (fun m -> m.Stat = Named "Crystals"))
                       AsksArea = (s :: s.Parts) |> List.exists (fun part -> part.Mods |> List.exists (fun m -> m.Stat = Named "Crystals")) })
                 |> Array.ofList
@@ -2400,6 +2415,10 @@ module Flat =
           LoadDue: bool[]
           /// By sealed skill: when its seals were last broken (NaN: never).
           SealBreak: float[]
+          /// By skill: how many of its strikes are on their way (in the queue), and a count of
+          /// the times those were called off (a warp into the projectile: it is gone).
+          InFlight: int[]
+          Flight: int[]
           /// A minion's life and energy shield, when it was last hit, whether it is out of the
           /// fight (killed, or not summoned), and when a temporary one's time is up.
           mutable Health: float
@@ -2527,14 +2546,24 @@ module Flat =
 
     let private gainedNames = [| "regen"; "leech"; "flask"; "recoup"; "hit"; "kill"; "consume" |]
 
+    /// What tells an event that still counts from one that was lost: the time in the fight
+    /// its actor is in and, of a strike on its way, which of the skill's flights it belongs
+    /// to (see `Agent.Epoch`, `Agent.Flight`). A strike that is put in the queue is counted
+    /// as on its way.
+    let private stamp (agent: Agent) (kind: int) (skill: int) : int =
+        if kind = EStrike || kind = EPassing then
+            put agent.InFlight skill ((at agent.InFlight skill) + 1)
+            agent.Epoch * 65536 + (at agent.Flight skill)
+        else agent.Epoch * 65536
+
     /// An event of the actor that acts now.
     let private schedule (s: State) (t: float) kind a b x y =
-        s.Queue.Push(t, s.Seq, kind, s.Cur, s.A.Epoch, a, b, x, y)
+        s.Queue.Push(t, s.Seq, kind, s.Cur, stamp s.A kind a, a, b, x, y)
         s.Seq <- s.Seq + 1
 
     /// An event of another actor.
     let private scheduleFor (s: State) (who: int) (t: float) kind a b x y =
-        s.Queue.Push(t, s.Seq, kind, who, (at s.Agents who).Epoch, a, b, x, y)
+        s.Queue.Push(t, s.Seq, kind, who, stamp (at s.Agents who) kind a, a, b, x, y)
         s.Seq <- s.Seq + 1
 
     /// From here on this actor acts: its buffs are the buffs, its program the program.
@@ -3591,6 +3620,8 @@ module Flat =
         let a = at s.Agents who
         s.RoomAt <- -2
         a.Epoch <- a.Epoch + 1
+        for skill in 0 .. a.InFlight.Length - 1 do
+            put a.InFlight skill 0
         a.Gone <- true
         a.Health <- 0.0
         a.Barrier <- 0.0
@@ -3916,6 +3947,16 @@ module Flat =
                 s.A.Energy <- Map.remove (fst (at info.Requires k)) s.A.Energy
             // (a skill whose rule says what it does with corpses takes them there)
             if info.TakesCorpse && corpses s > 0 then s.CorpsesUsed <- s.CorpsesUsed + 1
+            // a warp into one's own projectile: the projectile is gone (what it had still to do
+            // with it), and the warp's explosion happens whatever state the enemy is in
+            if info.Warps && info.WarpsInto |> Array.exists (fun into -> (at s.A.InFlight into) > 0) then
+                for k in 0 .. info.WarpsInto.Length - 1 do
+                    let into = at info.WarpsInto k
+                    put s.A.Flight into ((at s.A.Flight into) + 1)
+                    put s.A.InFlight into 0
+                bump s info.CWarped
+                removeBuff s info.WarpBuff
+                setBuff s info.Warped 1 infinity []
             if step >= 0 then s.A.Energy <- Map.add info.SeqKey (float (step + 1)) s.A.Energy
             if useTime > 0.0 then s.A.LastUsed <- sid
             let hits = patAt.Length
@@ -4193,6 +4234,8 @@ module Flat =
                 // a skill that works on a corpse needs one, unless it does without
                 && (info.NeedsCorpse = 0 || corpses s > 0 || (info.NeedsCorpse = 2 && held s info.CorpseElse))
                 && (not info.NeedsCharge || info.Consumes < 0 || held s info.Consumes)
+                // a warp needs something to warp into: an enemy that can be culled, or a projectile
+                && (not info.Warps || info.WarpsInto |> Array.exists (fun skill -> (at s.A.InFlight skill) > 0) || (t >= 0 && v.EnemyStatus.ContainsKey "Cullable"))
                 // a form one is in is not pressed again (that would end it)
                 && (info.Form < 0 || not (at s.A.BHas info.Form))
                 // a seed still in an enemy is not planted over
@@ -4747,7 +4790,10 @@ module Flat =
                 else 100.0
             // a part that only happens against an enemy in some state: nothing otherwise; and one
             // that gives way to another part against a state
-            let mutable met = info.OnlyVs.Length = 0
+            // (a warp into a projectile explodes there, whatever the enemy's state)
+            let warped = info.Warped >= 0 && (at s.A.BHas info.Warped)
+            if warped then removeBuff s info.Warped
+            let mutable met = warped || info.OnlyVs.Length = 0
             for k in 0 .. info.OnlyVs.Length - 1 do
                 if hasStatus ev (at info.OnlyVs k) then met <- true
             for k in 0 .. info.NotVs.Length - 1 do
@@ -4771,7 +4817,7 @@ module Flat =
                     put e.DMods id []
                     e.StatusStale <- true
                 bump s count
-            if met && info.ConsumesVs && info.OnlyVs.Length > 0 then
+            if met && not warped && info.ConsumesVs && info.OnlyVs.Length > 0 then
                 let mutable first = -1
                 for k in 0 .. info.OnlyVs.Length - 1 do
                     if first < 0 && hasStatus ev (at info.OnlyVs k) then first <- k
@@ -5956,7 +6002,13 @@ module Flat =
         let q = s.Queue
         q.Pop()
         // what a minion had begun when it left the fight is lost (the reference takes it out of the queue)
-        let lost = (q.Kind = EReady || q.Kind = EStrike || q.Kind = EPassing || q.Kind = EDirect) && q.Tag <> (at s.Agents q.Who).Epoch
+        let lost =
+            let agent = at s.Agents q.Who
+            if q.Kind = EStrike || q.Kind = EPassing then
+                let still = q.Tag = agent.Epoch * 65536 + (at agent.Flight q.A)
+                if still then put agent.InFlight q.A ((at agent.InFlight q.A) - 1)
+                not still
+            else (q.Kind = EReady || q.Kind = EDirect) && q.Tag <> agent.Epoch * 65536
         if not lost then
             let t, kind, who, a, b, x, y = q.Time, q.Kind, q.Who, q.A, q.B, q.X, q.Y
             let dt = t - s.Time
@@ -6269,6 +6321,8 @@ module Flat =
                   Ammo = Array.create nk -1
                   LoadDue = Array.create nk false
                   SealBreak = Array.create nk nan
+                  InFlight = Array.zeroCreate nk
+                  Flight = Array.zeroCreate nk
                   Health = (match pr.Body with Some body -> body.Life | None -> 0.0)
                   Barrier = (match pr.Body with Some body -> body.EnergyShield | None -> 0.0)
                   HitAt = -1e9

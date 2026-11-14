@@ -554,6 +554,18 @@ let randomFight (case: uint32) : Fight * string =
                     [ for i in 1 .. whole 1 2 ->
                         { Name = sprintf "Banner %d" i; Glory = between 5.0 80.0; PerAttackHit = between 100.0 2000.0; Duration = between 1.0 6.0
                           Mods = [ Mod.inc (Damage AllDamage) (between 5.0 40.0); Mod.inc Speed (between 5.0 20.0) ] } ] }
+    // a warp into one's own projectile while one is on its way, or onto an enemy that can be culled
+    let player =
+        if chance 0.9 then player
+        else
+            let warp =
+                { skill 6 false with
+                    Name = "Warp"
+                    Cooldown = (if chance 0.7 then Some(between 0.3 3.0) else None)
+                    Mods = [ Mod.flag (Named("WarpsInto:" + names.Head)) ] @ (if chance 0.6 then [ Mod.flag (Named "OnlyVs:Cullable|Frozen|Shocked"); Mod.flag (Named "ConsumesVs") ] else []) }
+            { player with
+                Skills = (player.Skills |> List.map (fun s -> if s.Name = names.Head && s.HitDelay <= 0.0 && chance 0.7 then { s with HitDelay = between 0.3 1.5 } else s)) @ [ warp ]
+                Rotation = Actor.always "Warp" :: player.Rotation }
     // a form that is switched on, and costs life the longer it lasts (Demon Form)
     let player =
         if player.Vitals.IsNone || chance 0.9 then player
@@ -714,8 +726,8 @@ let randomFight (case: uint32) : Fight * string =
     let fight =
         match (if chance 0.06 then 1 else -1) with
         | 1 ->
-            note "warp"
-            { fight with Player = { fight.Player with Skills = fight.Player.Skills |> List.map (fun s -> { s with Mods = Mod.flag (Named "WarpsInto:Ball") :: s.Mods }) } }
+            note "triskelion"
+            { fight with Player = { fight.Player with Skills = fight.Player.Skills |> List.map (fun s -> { s with Mods = Mod.base' (Named "TriskelionArms") 2.0 :: s.Mods }) } }
         | _ -> fight
     // a pack that never ends: the dead are replaced (several enemies, most of them weak enough to die)
     let fight =
@@ -1143,9 +1155,9 @@ let run (test: string -> (unit -> unit) -> unit) =
         refused { fine with Minions = [ Actor.make "Player" [] [ strike "Bite" 1.0 2.0 ] ] } "actors of the same name"
         refused { fine with Player = { player with Metas = [ Meta.simple "Cast on Crit" 100.0 "Bolt"; Meta.simple "Cast on Crit" 50.0 "Bolt" ] } } "meta gems of the same name"
         refused { fine with Player = { player with Infusions = Some { Remnants = []; ExtraRemnantChance = 0.0; Delay = 0.5; Consumers = Map.ofList [ "Bolt", ("FireInfusion", "No such skill") ]; Wildcard = None } } } "an infusion of a skill"
-        refused { fine with Player = { player with Skills = [ { spell "Bolt" Fire 1.0 2.0 with Mods = [ Mod.flag (Named "WarpsInto:Ball") ] } ] } } "warps into projectiles"
+        refused { fine with Player = { player with Skills = [ { spell "Bolt" Fire 1.0 2.0 with Mods = [ Mod.base' (Named "TriskelionArms") 2.0 ] } ] } } "Triskelion Cascade"
         // both reasons of a fight with two
-        let two = { fine with Enemies = [ { boss 1e9 with Name = "boss+" } ]; Replace = true; Player = { player with Skills = [ { spell "Bolt" Fire 1.0 2.0 with Mods = [ Mod.flag (Named "WarpsInto:Ball") ] } ] } }
+        let two = { fine with Enemies = [ { boss 1e9 with Name = "boss+" } ]; Replace = true; Player = { player with Skills = [ { spell "Bolt" Fire 1.0 2.0 with Mods = [ Mod.base' (Named "TriskelionArms") 2.0 ] } ] } }
         if (Flat.unsupported two).Length <> 2 then failwithf "expected two reasons, got %A" (Flat.unsupported two))
 
     test "flat: random fights give the reference's outcome, or are refused" (fun () ->
