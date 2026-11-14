@@ -722,6 +722,34 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         equal (box [ 9.0; 9.0 ]) (box (longer |> List.map (fun r -> match r.Reaction with ApplyExposure (_, _, d) | ApplyDebuff (_, d, _, _) -> d | _ -> 0.0)))
         equal (box ([]: string list)) (box (Gems.unmodelledTypes db.Value "Oil Barrage" |> List.filter ((=) "CreatesGroundEffect"))))
 
+    test "Combat Frenzy: a Frenzy Charge for a freeze, electrocute or pin, at most once every few seconds" (fun () ->
+        let c = load { blank with Groups = [ group [ gem "Combat Frenzy" ] ]; ExtraLines = [ "+100 to Spirit" ] } Options.defaults
+        let player = Setup.player c Options.defaults [] None
+        let periodic = player.Periodics |> List.find (fun p -> p.Name = "Combat Frenzy")
+        // the gem's own number at level 20: 6.1 s
+        let raw = Gems.rawStats db.Value ModDb.empty { Gem = "Combat Frenzy"; Level = 20; Quality = 0; StatSet = 1; Supports = [] }
+        near (raw |> List.pick (fun (k, v) -> if k = "skill_combat_frenzy_x_ms_cooldown" then Some(v / 1000.0) else None)) periodic.Every
+        near 6.1 periodic.Every
+        equal (box 1) (box player.MaxResources.["CombatFrenzyReady"])
+        equal (box 3) (box (player.Rules |> List.filter (fun r -> match r.Reaction with SpendStack ("CombatFrenzyReady", GainResource ("FrenzyCharge", 1)) -> true | _ -> false)).Length)
+        // in a fight: a spell that freezes or electrocutes at nearly every hit (no poise), its
+        // statuses ending fast; the charges come no faster than one per 6.1 s
+        let bolt = { Skill.make "Bolt" [ Spell ] with BaseDamage = Map.ofList [ Cold, { Min = 100.0; Max = 100.0 }; Lightning, { Min = 100.0; Max = 100.0 } ]; BaseTime = 0.25; BaseCrit = 0.0 }
+        let seen = System.Collections.Generic.List<float * int>()
+        let actor =
+            { Actor.make "Player" [ Mod.flag (Named "CanElectrocute") ] [ bolt ] with
+                Rules = player.Rules |> List.filter (fun r -> match r.Reaction with SpendStack ("CombatFrenzyReady", _) -> true | _ -> false)
+                Periodics = [ periodic ]
+                MaxResources = Map.ofList [ "CombatFrenzyReady", 1; "FrenzyCharge", 20 ]
+                Resources = [ "CombatFrenzyReady", 1 ]
+                Rotation = [ { Use = "Bolt"; When = fun v -> seen.Add(v.Time, Map.tryFind "FrenzyCharge" v.Buffs |> Option.defaultValue 0); true } ] }
+        let fight = Fight.single { EnemyDef.atLevel 83 1e9 with Mods = [ Mod.more PoiseThreshold -99.999 ] } actor 20.0
+        Sim.run fight 1u |> ignore
+        let charges = seen |> Seq.map snd |> Seq.max
+        // 20 s: the one ready at the start and at most one per 6.1 s after: 4
+        if charges < 2 || charges > 4 then failwithf "%d charges in 20 s" charges
+        same fight seeds)
+
     // ---- Scarred Faith ----
 
     test "Scarred Faith: prevented physical damage recouped as energy shield per enemy power; no regeneration; none above armour" (fun () ->

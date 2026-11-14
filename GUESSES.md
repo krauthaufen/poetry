@@ -18,7 +18,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
    whose description or behaviour changed.
 5. Go through the lists below; the wiki's version history of a skill says what changed.
 
-## Rules (114)
+## Rules (115)
 
 ### Hit damage
 
@@ -116,6 +116,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | Lightning Warp | description ("Can also be used on Ball Lightning Projectiles", "Creates a Lightning Infusion on successful use") | guess |
 | Rain of Arrows | `active_skill_base_area_of_effect_radius`, `active_skill_base_secondary_area_of_effect_radius`; uniform landing is a guess | data / guess |
 | Volcano | `volcano_fires_projectiles_every_x_ms`, `volcano_initial_explosion_number_of_additional_projectiles_per_additional_stage`, the stat sets' radii; uniform landing is a guess | data / guess |
+| Combat Frenzy | gem data and description; the fixed beat is a simplification | data / guess |
 | Sigil of Power | `circle_of_power_*` gem stats and descriptions ("Gains a Stage when you Spend a total of {0}% of your Maximum Mana while in Area", "Minimum 1 second between gaining Stages") | data / guess |
 | Temper Weapon | `temper_weapon_empowers_per_strike`, `imbue_weapon_max_exerts`, `TemperWeaponCombustionPlayer` | data / guess |
 | Freezing Mark, Voltaic Mark | `*_damage_buff_damage_%_to_gain_as_cold`, `base_secondary_skill_effect_duration`, description | data / guess |

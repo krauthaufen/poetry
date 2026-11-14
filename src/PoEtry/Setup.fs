@@ -654,6 +654,8 @@ module Setup =
                     elif sk.Tags |> Set.exists novas.Contains then
                         { sk with Mods = sk.Mods @ [ Mod.base' (Named "NovaOnBoltSpeed") speed; Mod.base' (Named "NovaOnBoltLife") life ] }
                     else sk)
+        // Combat Frenzy: a Frenzy Charge for a freeze, electrocute or pin, once every few seconds
+        let frenzy = Behaviours.combatFrenzy db sheet c.Build
         // "X% increased Glory generation": every amount a skill builds
         let gloryGeneration (skills: Skill list) =
             skills |> List.map (fun (sk: Skill) ->
@@ -666,6 +668,8 @@ module Setup =
             OverkillBurns = overkillBurns
             HitPattern = used |> List.choose (fun (_, p) -> p.Pattern |> Option.map (fun pat -> p.Skill.Name, pat)) |> Map.ofList
             Rules =
+                (frenzy |> Option.map snd |> Option.defaultValue [])
+                @
                 // ("Buffs on you expire X% faster": the buffs these give the character)
                 Behaviours.buffsExpire sheet (grantRules @ (used |> List.collect (fun (_, p) -> p.Rules)) @ heraldRules @ Behaviours.keywordRules sheet pressedSkills)
                 @ Behaviours.selfIgnite sheet
@@ -694,6 +698,7 @@ module Setup =
                    let onTheMove (g: string) = Gems.data db g |> Option.exists (fun d -> d.Types.Contains "UsableWhileMoving")
                    if not spammed.IsEmpty && spammed |> List.forall onTheMove && (gains sheet.Mods || used |> List.exists (fun (_, p) -> gains p.Skill.Mods)) then [ "Moving", 1 ]
                    else [])
+                @ (if frenzy.IsSome then [ "CombatFrenzyReady", 1 ] else [])
                 @ (match infusionSetup with
                    | Some inf ->
                        let usedInf = (consumers |> List.map (fun (_, el, _) -> el)) @ Option.toList inf.Wildcard |> List.distinct
@@ -704,8 +709,8 @@ module Setup =
             // (with the weapon set in hand: the buffs of the moment don't say which it is)
             VitalsAt = Some(fun current -> Defence.computeWith (if c.SheetSetTwo then Map.add "WeaponSetTwo" 1 current else current) c.Bases sheet)
             VitalsReads = Some(Defence.reads sheet)
-            Periodics = c.Periodics @ snd (Behaviours.summons db sheet c.Build pressedSkills) @ starPeriodics
-            MaxResources = Map.fold (fun m k v -> Map.add k v m) c.MaxResources infusionMaxima
+            Periodics = c.Periodics @ snd (Behaviours.summons db sheet c.Build pressedSkills) @ starPeriodics @ (frenzy |> Option.map fst |> Option.toList)
+            MaxResources = Map.fold (fun m k v -> Map.add k v m) c.MaxResources infusionMaxima |> (if frenzy.IsSome then Map.add "CombatFrenzyReady" 1 else id)
             ResourceDurations = Map.fold (fun m k v -> Map.add k v m) (Behaviours.chargeDurations sheet) (Behaviours.infusionDurations db sheet c.Build)
             KeptChargesPause = o.KeptChargesPause
             // user: stored uses are "just two cooldowns"

@@ -688,6 +688,9 @@ module StatMap =
         // "while stationary": the player stands (RULES.md). (The pools' recovery is worked out
         // once, for the standing character: one that is taken to move, because it gains from
         // moving, keeps these all the same.)
+        // the player stands: what holds while moving does not (the pools' recovery is worked out
+        // for the standing character; RULES.md, "While stationary")
+        | "mana_regeneration_rate_+%_while_moving" -> Some NotOffensive
         | "life_regeneration_rate_+%_while_stationary" -> one (Mod.inc LifeRegen v |> Mod.whenever (Not(WhileBuff "Moving")))
         | "life_regeneration_rate_per_minute_%_while_stationary" -> one (Mod.base' LifeRegenPercent (v / 60.0) |> Mod.whenever (Not(WhileBuff "Moving")))
         | "mana_regeneration_rate_+%_while_stationary" -> one (Mod.inc ManaRegen v |> Mod.whenever (Not(WhileBuff "Moving")))
@@ -848,6 +851,8 @@ module StatMap =
         // where a Flame of Chayula appears and from how far it is seen: every flame is taken
         // to be picked up at once (RULES.md, Flames of Chayula)
         | "breach_flame_spawn_radius" | "breach_walk_base_visibility_range" -> Some Structural
+        // Combat Frenzy's time between charges: read by Behaviours.combatFrenzy
+        | "skill_combat_frenzy_x_ms_cooldown" -> Some Structural
         // Tame Beast's own use: hindering and capturing a beast, and which monsters it can see.
         // A companion gem is that gem with the beast already captured, and the capture is never
         // used in a fight

@@ -1290,6 +1290,26 @@ module Behaviours =
             elif has "can_create_jagged_ground" && sum "skill_jagged_ground_base_duration_ms" > 0.0 then onHit debuff
             else []
 
+    /// Combat Frenzy: "While active, grants you a Frenzy Charge when you Freeze, Electrocute or
+    /// Pin an enemy. This can only occur once every few seconds" (`skill_combat_frenzy_x_ms_cooldown`).
+    /// A stack "CombatFrenzyReady" (at most one, there at the start) comes back that often; the
+    /// first freeze, electrocute or pin while it is there takes it and grants the charge.
+    /// Returns the periodic, the rules and the seconds.
+    let combatFrenzy (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) : (Periodic * Rule list) option =
+        let charMods = ModDb.ofList sheet.Mods
+        build.Groups
+        |> List.filter (fun g -> g.Enabled)
+        |> List.collect (fun g -> g.Gems |> List.filter (fun x -> x.Enabled && not x.IsSupport))
+        |> List.tryPick (fun gem ->
+            let raw = Gems.rawStats db charMods { Gem = gem.Name; Level = gem.Level; Quality = gem.Quality; StatSet = 1; Supports = [] }
+            let ms = raw |> List.filter (fun (k, _) -> k = "skill_combat_frenzy_x_ms_cooldown") |> List.sumBy snd
+            if ms <= 0.0 then None
+            else
+                let grant = SpendStack("CombatFrenzyReady", GainResource("FrenzyCharge", 1))
+                Some(
+                    { Name = "Combat Frenzy"; Every = ms / 1000.0; Action = GainAnyRandom [ "CombatFrenzyReady" ] },
+                    [ for a in [ Freeze; Electrocute; Pin ] -> { Hook = OnInflict a; Filter = AnySkill; Chance = 100.0; Reaction = grant } ]))
+
     /// Oil Ground (Oil Barrage without a charge): "creating Oil Ground where the Projectiles
     /// land"; it slows movement ("Oil Slows enemy movement speed by X%") and inflicts Fire
     /// Exposure ("Oiled Ground": "inflicted with Fire Exposure"), whose 20% "Exposure lowers
