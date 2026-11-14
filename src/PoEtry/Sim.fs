@@ -2002,7 +2002,8 @@ module Sim =
             match actor.Vitals, w.Player with
             | Some pools, Some p when pools.CostsInfernalFlame -> true
             | Some pools, Some p when pools.CostsLife -> (let c = costOf skill in c <= 0.0 || p.Life - c >= 1.0)
-            | Some _, Some p -> p.Mana >= costOf skill
+            // (enough within rounding: a wait for mana ends with exactly the cost, give or take the last bit)
+            | Some _, Some p -> (let cost = costOf skill in not (p.Mana < cost - 1e-9 * max 1.0 cost))
             | _ -> true
         // the first step that is ready and can be paid for; if none can be paid, wait for the first
         let choice =
@@ -2143,12 +2144,12 @@ module Sim =
                         |> takeDamage v (Map.ofList [ Fire, burn ])
                     else { w with Player = Some { p with InfernalFlame = flame } }
                 go w
-            | Some v, Some p when p.Mana < cost && cost > v.Mana ->
+            | Some v, Some p when p.Mana < cost - 1e-9 * max 1.0 cost && cost > v.Mana ->
                 // costs more than the whole mana pool: this skill can never be used
                 { w with Counts = bump ("cannot afford:" + skill.Name) w.Counts }
                 |> updateActor name (fun st -> { st with Cooldowns = Map.add skill.Name infinity st.Cooldowns })
                 |> schedule (w.Time + Constants.serverTick) (Ready name)
-            | Some v, Some p when p.Mana < cost ->
+            | Some v, Some p when p.Mana < cost - 1e-9 * max 1.0 cost ->
                 // not enough mana: wait until regeneration and leech have covered it
                 let rate =
                     v.ManaRegen + (p.Recoups |> List.sumBy (fun (until, rate, pool) -> if pool = "LeechMana" && until > w.Time then rate else 0.0))
@@ -2156,7 +2157,7 @@ module Sim =
                 let wait = max Constants.serverTick (if rate > 0.0 then (cost - p.Mana) / rate else 1.0)
                 { w with Player = Some { p with Starved = p.Starved + wait } } |> schedule (w.Time + wait) (Ready name)
             | Some v, Some p ->
-                { w with Player = Some { p with Mana = p.Mana - cost } } |> sigilSpend name cost v.Mana |> go
+                { w with Player = Some { p with Mana = max 0.0 (p.Mana - cost) } } |> sigilSpend name cost v.Mana |> go
             | _ -> go w
         | None ->
             // Nothing usable: wait for the next cooldown, or a server tick.

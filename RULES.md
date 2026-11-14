@@ -168,7 +168,7 @@ Confidence levels:
 | Mana regeneration | 4% of max mana per second × inc | Character.ot 240 per minute | data |
 | Energy shield recharge | 12.5% per second after 4 s without being hit | Character.ot 750 per minute; PoB delay 4 s | data + pob |
 | Skill cost | gem level cost × support cost multipliers (`manaMultiplier`, percent more) × increased cost / (1 + cost efficiency) | skill data; PoB SupportManaMultiplier | data (efficiency formula: guess) |
-| Not enough mana | the use waits until regeneration and leech cover it | — | modelling choice |
+| Not enough mana | the use waits until regeneration and leech cover it, and is then made: mana that is short of the cost by no more than rounding (a billionth of it) is enough, and paying leaves no less than 0 | — | modelling choice |
 | Mana leech | % of physical attack damage dealt, each hit counted as at most 40,000 damage, from **one enemy per hit event** (the largest instance), recovered over one second; only the strongest instance runs | GameConstants EffectiveMaxDamageForLeech; wiki Leech; one enemy: user | data + user |
 | Mana on kill | flat and % of max mana per kill, also for damage-over-time kills? no: hit kills only | game text | guess (DoT kills) |
 | Monster hits | 1.5 × level damage × (1/4.4 normal/magic/rare, 4/4.4 unique) × rarity damage modifier, every 1.5 s, 40% physical / 20% each element | PoB enemy presets; rarity mod from Mods.dat | pob heuristic + guess |

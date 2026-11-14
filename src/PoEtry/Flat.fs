@@ -4742,7 +4742,8 @@ module Flat =
                         | Some _ ->
                             costed <- sid
                             costedAt <- costOf s sid nan
-                            s.Mana >= costedAt
+                            // (enough within rounding: a wait for mana ends with exactly the cost, give or take the last bit)
+                            not (s.Mana < costedAt - 1e-9 * max 1.0 costedAt)
                         | None -> true
                     if affordable then choice <- sid
         let choice = if choice >= 0 then choice else firstUsable
@@ -4789,12 +4790,12 @@ module Flat =
                         takeDamage s pools (Map.ofList [ Fire, burn ])
                     else s.InfernalFlame <- flame
                     useNow s rng sid t
-                elif s.Mana < cost && cost > pools.Mana then
+                elif s.Mana < cost - 1e-9 * max 1.0 cost && cost > pools.Mana then
                     // costs more than the whole mana pool: this skill can never be used
                     bump s info.CCannotAfford
                     put s.A.Cooldowns sid (infinity)
                     schedule s (s.Time + Constants.serverTick) EReady 0 0 0.0 0.0
-                elif s.Mana < cost then
+                elif s.Mana < cost - 1e-9 * max 1.0 cost then
                     // not enough mana: wait until regeneration and leech have covered it
                     let rate =
                         pools.ManaRegen + (s.Recoups |> List.sumBy (fun (until, rate, pool) -> if pool = PLeechMana && until > s.Time then rate else 0.0))
@@ -4803,7 +4804,7 @@ module Flat =
                     s.Starved <- s.Starved + wait
                     schedule s (s.Time + wait) EReady 0 0 0.0 0.0
                 else
-                    s.Mana <- s.Mana - cost
+                    s.Mana <- max 0.0 (s.Mana - cost)
                     if p.HasSigil then sigilSpend s cost pools.Mana
                     useNow s rng sid t
         else

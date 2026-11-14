@@ -1137,6 +1137,25 @@ let run (test: string -> (unit -> unit) -> unit) =
                             | _ -> ()
         if compared < 100 then failwithf "only %d runs compared" compared)
 
+    test "flat: a use that waited for mana is made when the wait is over, in both engines" (fun () ->
+        // regeneration alone pays: every use but the first few waits for its mana
+        let bolt = { spell "Bolt" Fire 100.0 300.0 with Cost = 61.3; BaseTime = 0.37 }
+        let chilling = { spell "Frost" Cold 400.0 900.0 with Cost = 97.7; BaseTime = 0.61; Cooldown = Some 2.3 }
+        let player =
+            { Actor.make "Player" [ Mod.inc CritChance 100.0; Mod.base' (AilmentChance Chill) 100.0 ] [ chilling; bolt ] with
+                Rotation = [ Actor.always "Frost"; Actor.always "Bolt" ]
+                Vitals = Some { PlayerStats.basic 50000.0 180.0 with ManaRegen = 37.9 } }
+        let fight = Fight.single (boss 1e12) player 40.0
+        same fight [ 1u .. 60u ]
+        // after a wait the next turn is the use: no turn finds the mana short twice running
+        for seed in [ 1u; 2u; 3u ] do
+            let readies = ResizeArray<float>()
+            let o = Sim.traced (fun t kind who _ _ -> if kind = "Ready" && who = "Player" then readies.Add t) fight seed
+            if not (o.ManaStarved > 5.0) then failwithf "seed %d: expected waiting for mana, got %g s" seed o.ManaStarved
+            let uses = (Map.tryFind "uses:Bolt" o.Counts |> Option.defaultValue 0) + (Map.tryFind "uses:Frost" o.Counts |> Option.defaultValue 0)
+            // (a turn is a use or the wait before one: at most two turns a use)
+            if readies.Count > 2 * uses + 2 then failwithf "seed %d: %d turns for %d uses" seed readies.Count uses)
+
     // ---- minions and totems ----
     let bite name dmg = { Skill.make name [ Attack; Melee ] with BaseDamage = Map.ofList [ Physical, { Min = dmg * 0.8; Max = dmg * 1.2 } ]; BaseCrit = 6.0 }
     let sure = Mod.base' (Named "Accuracy") 1e12
