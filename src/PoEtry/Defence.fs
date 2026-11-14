@@ -224,6 +224,8 @@ module Defence =
           ManaRegen =
             ((if flag "NoInherentManaRegen" then 0.0 else mana * manaRegenPercent / 100.0) + life * named "ManaRegenPercentOfLife" / 100.0)
             * Mods.mult c [ ManaRegen ] db * manaRecovery
+            // "Lose X% of maximum Mana per Second": not regeneration, so no recovery rate on it
+            - mana * named "ManaDegenPercent" / 100.0
             // a flask that applies its effect constantly: recovery, not regeneration
             + (if bloodMagic then 0.0 else named "ConstantManaRecovery" * manaRecovery)
           EnergyShieldRecharge =

@@ -675,3 +675,31 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         let radius = "Notable Passive Skills in Radius also grant 10% increased Critical Damage Bonus"
         let grant = "{\"id\": \"C\", \"stats\": {\"local_jewel_notables_in_radius_grant_critical_strike_multiplier_+%\": 10}}"
         equal (box [ radius ]) (box (parsed (item grant radius)).Coverage.UnknownText))
+
+    // ---- mana lost, Glory gained ----
+
+    test "mana degeneration lowers mana regeneration, and mana never falls below nothing" (fun () ->
+        let v lines = (load { blank with ExtraLines = lines } Options.defaults).Vitals
+        let plain = v []
+        // "Lose 1% of maximum Mana per Second": 4% regeneration less 1% of maximum mana
+        near (plain.ManaRegen - plain.Mana * 0.01) (v [ "Lose 1% of maximum Mana per Second" ]).ManaRegen
+        // and it is no regeneration: "increased Mana Regeneration Rate" does not raise it
+        let more = v [ "Lose 1% of maximum Mana per Second"; "50% increased Mana Regeneration Rate" ]
+        near (plain.ManaRegen * 1.5 - plain.Mana * 0.01) more.ManaRegen
+        // a pool that drains: 100 mana losing 10 a second, a spell of 30 every 0.5 s while it can
+        let bolt = { Skill.make "Bolt" [ Spell ] with BaseDamage = Map.ofList [ Chaos, { Min = 1.0; Max = 1.0 } ]; BaseTime = 0.5; Cost = 30.0 }
+        let fight = Fight.single { EnemyDef.atLevel 83 1e9 with Mods = [] } { Actor.make "Player" [] [ bolt ] with Vitals = Some { PlayerStats.basic 1e6 100.0 with ManaRegen = -10.0 } } 6.0
+        let out = Sim.run fight 1u
+        // three casts (100 -> 70 -> 35 -> 0 with the drain between), then none
+        equal (box 3) (box (count out "uses:Bolt"))
+        same fight seeds)
+
+    test "increased Glory generation scales what each event builds" (fun () ->
+        let mace = "Weapon 1", "Rarity: Normal\nPlated Mace\n--------\n"
+        let builds lines =
+            let c = load { blank with Items = [ mace ]; Groups = [ group [ gem "Hammer of the Gods" ] ]; ExtraLines = lines } Options.defaults
+            let p = Setup.player c Options.defaults [ Spam "Hammer of the Gods" ] None
+            p.Skills |> List.collect (fun s -> s.Mods) |> List.filter (fun m -> match m.Stat with Named n -> n.StartsWith "Builds:Glory" | _ -> false) |> List.sumBy (fun m -> m.Value)
+        let plain = builds []
+        if plain <= 0.0 then failwith "Hammer of the Gods builds no Glory"
+        near (plain * 1.25) (builds [ "25% increased Glory generation" ]))

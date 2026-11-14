@@ -1123,7 +1123,7 @@ module Sim =
             // leech: each instance is recovered over one second (keyword text)
             let leech = stream "LeechMana"
             let regen = v.ManaRegen * dt
-            let mana = min v.Mana (p.Mana + regen + leech)
+            let mana = min v.Mana (max 0.0 (p.Mana + regen + leech))
             let es =
                 (if w.Time - p.LastHit >= v.ESRechargeDelay then p.EnergyShield + v.EnergyShieldRecharge * dt else p.EnergyShield)
                 + v.ESRegen * dt + stream "ES" + stream "ShroudES"

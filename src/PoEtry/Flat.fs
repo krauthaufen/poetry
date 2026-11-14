@@ -3607,7 +3607,7 @@ module Flat =
             let streams = s.Streams
             let leech = at streams PLeechMana
             let regen = v.ManaRegen * dt
-            let mana = min v.Mana (s.Mana + regen + leech)
+            let mana = min v.Mana (max 0.0 (s.Mana + regen + leech))
             let es =
                 (if s.Time - s.LastHit >= v.ESRechargeDelay then s.Shield + v.EnergyShieldRecharge * dt else s.Shield)
                 + v.ESRegen * dt + (at streams PES) + (at streams PShroudES)

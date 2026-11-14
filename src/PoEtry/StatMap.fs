@@ -269,6 +269,9 @@ module StatMap =
         | "mana_%_to_gain_as_armour" -> one (Mod.base' (Named "ManaGainedAsArmour") v)
         | "self_take_no_extra_damage_from_critical_strikes" -> one (Mod.base' (Named "LessCritDamageTaken") 100.0)
         | "no_inherent_mana_regeneration" -> one (Mod.flag (Named "NoInherentManaRegen"))
+        // "Lose X% of maximum Mana per Second" (per minute in the id; "not in grace": once the
+        // area's grace period is over, as it is in a fight)
+        | "mana_degeneration_%_per_minute_not_in_grace" -> one (Mod.base' (Named "ManaDegenPercent") (v / 60.0))
         | "regenerate_mana_equal_to_x%_of_life_per_minute" -> one (Mod.base' (Named "ManaRegenPercentOfLife") (v / 60.0))
         | "energy_shield_delay_-%_while_affected_by_archon" -> one (Mod.inc (Named "ESRechargeFaster") v |> Mod.whenever (WhileBuff "Elemental Archon"))
         | "maximum_life_mana_and_energy_shield_+%" -> Some(Mods [ Mod.inc MaxLife v; Mod.inc MaxMana v; Mod.inc MaxEnergyShield v ])
@@ -342,6 +345,8 @@ module StatMap =
         | "damage_+%_per_5_of_your_lowest_attribute" -> one (Mod.inc (Damage AllDamage) v |> Mod.whenever (PerStack("LowestAttribute", 5.0)))
         // Glory and Combo: what a skill needs before it can be used, and what builds it (the engine
         // counts per skill; "mp_%" is a share of the monster's power per event)
+        // "X% increased Glory generation": scales what each event builds (Setup.player, Behaviours.banners)
+        | "glory_generation_+%" -> one (Mod.inc (Named "GloryGeneration") v)
         | "active_skill_requires_X_glory" -> one (Mod.base' (Named "Requires:Glory") v)
         | "support_glory_required_+%_final" -> one (Mod.base' (Named "GloryRequiredMore") v)
         | "active_skill_generates_mp_%_glory_per_attack_hit" -> one (Mod.base' (Named "Builds:Glory:AttackHit") v)

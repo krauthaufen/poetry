@@ -653,7 +653,14 @@ module Setup =
                     elif sk.Tags |> Set.exists novas.Contains then
                         { sk with Mods = sk.Mods @ [ Mod.base' (Named "NovaOnBoltSpeed") speed; Mod.base' (Named "NovaOnBoltLife") life ] }
                     else sk)
-        { Actor.make "Player" (sheet.Mods @ (used |> List.collect (fun (_, p) -> p.Grants))) (onBolts (pressedSkills @ (metas |> List.collect (fun (_, s, _) -> s)) @ (consumers |> List.map (fun (_, _, cp) -> cp)) @ heraldSkills @ (used |> List.collect (fun (_, p) -> p.Extra)))) with
+        // "X% increased Glory generation": every amount a skill builds
+        let gloryGeneration (skills: Skill list) =
+            skills |> List.map (fun (sk: Skill) ->
+                let ctx = { Ctx.empty with SkillName = sk.Name; SkillTags = sk.Tags }
+                let k = Mods.inc ctx [ Named "GloryGeneration" ] (ModDb.ofList (sheet.Mods @ sk.Mods))
+                if k = 1.0 then sk
+                else { sk with Mods = sk.Mods |> List.map (fun m -> match m.Stat with Named n when n.StartsWith "Builds:Glory" -> { m with Value = m.Value * k } | _ -> m) })
+        { Actor.make "Player" (sheet.Mods @ (used |> List.collect (fun (_, p) -> p.Grants))) (gloryGeneration << onBolts <| (pressedSkills @ (metas |> List.collect (fun (_, s, _) -> s)) @ (consumers |> List.map (fun (_, _, cp) -> cp)) @ heraldSkills @ (used |> List.collect (fun (_, p) -> p.Extra)))) with
             Rotation = steps
             OverkillBurns = overkillBurns
             HitPattern = used |> List.choose (fun (_, p) -> p.Pattern |> Option.map (fun pat -> p.Skill.Name, pat)) |> Map.ofList
