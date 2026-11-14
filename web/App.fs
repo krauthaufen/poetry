@@ -831,13 +831,14 @@ let private readReplay (j : Json) (m : Model) : Model =
 let private ribbonAt (width : float) (at : Map<int, V2d>) (middle : V2d) (scale : float) (edge : float list) : V3f list =
     // (an ascendancy's connections are drawn around the middle of the tree: `middle` is
     // where they are laid out, `scale` how much smaller they are drawn)
-    let at = at |> Map.map (fun _ p -> (p - middle) * scale)
+    // (only the two passives asked for: this is called once a connection)
+    let place (id : int) = (at.[id] - middle) * scale
     let quad (p0 : V2d) (p1 : V2d) (q0 : V2d) (q1 : V2d) =
         let v (p : V2d) = V3f (float32 p.X, float32 -p.Y, 0.0f)
         [ v p0; v p1; v q0; v q0; v p1; v q1 ]
     match edge with
     | [ a; b ] ->
-        let p, q = at.[int a], at.[int b]
+        let p, q = place (int a), place (int b)
         let d = q - p
         let len = sqrt (d.X * d.X + d.Y * d.Y)
         if len <= 0.0 then []
