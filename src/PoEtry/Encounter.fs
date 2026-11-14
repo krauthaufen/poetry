@@ -2,6 +2,7 @@ namespace PoEtry
 
 /// 2D position in game units (10 units = 1 metre). The player stands at the origin
 /// facing +X.
+[<Struct>]
 type Vec =
     { X: float
       Y: float }
@@ -319,17 +320,35 @@ module Geometry =
                 Some(t, Vec.sub dir (Vec.scale (2.0 * dot dir n) n))
             else None
 
+    /// The enemy the ray enters first, of those it has not hit yet and (`within`) enters no
+    /// further on than that, with the distance to it; of several at the same distance the
+    /// first in the list. (What sorting them by the distance and taking the first gives.)
+    let private nearest (origin: Vec) (dir: Vec) (hit: string list) (within: float) (alive: EnemyDef list) : (float * EnemyDef) option =
+        let mutable best : (float * EnemyDef) option = None
+        let mutable least = infinity
+        let mutable rest = alive
+        while not rest.IsEmpty do
+            let e = rest.Head
+            if not (List.contains e.Name hit) then
+                match entry origin dir e with
+                | Some t when t <= within && (best.IsNone || t < least) ->
+                    best <- Some(t, e)
+                    least <- t
+                | _ -> ()
+            rest <- rest.Tail
+        best
+
+    /// The wall the ray meets first (`within`: no further on than that), likewise.
+    let private nearestWall (origin: Vec) (dir: Vec) (within: float) (walls: Wall list) : (float * Vec) option =
+        if walls.IsEmpty then None
+        else walls |> List.choose (wallHit origin dir) |> List.filter (fun (t, _) -> t <= within) |> List.sortBy fst |> List.tryHead
+
     /// Fly one projectile: enemies in its way are hit (pierce lets it continue), a wall
     /// stops it unless the terrain-chain roll lets it bounce (once).
     let trace (rng: Rng) (walls: Wall list) (p: ProjectileShape) (origin: Vec) (dir0: Vec) (alive: EnemyDef list) : Path =
         let rec go (pos: Vec) (dir: Vec) remaining (hit: string list) bounced (points: Vec list) (dists: float list) =
-            let enemy =
-                alive
-                |> List.filter (fun e -> not (List.contains e.Name hit))
-                |> List.choose (fun e -> entry pos dir e |> Option.map (fun t -> t, e))
-                |> List.sortBy fst
-                |> List.tryHead
-            let wall = walls |> List.choose (wallHit pos dir) |> List.sortBy fst |> List.tryHead
+            let enemy = nearest pos dir hit infinity alive
+            let wall = nearestWall pos dir infinity walls
             let wallT = wall |> Option.map fst |> Option.defaultValue infinity
             match enemy with
             | Some (t, e) when t <= remaining && t <= wallT ->
@@ -375,14 +394,8 @@ module Geometry =
                     else
                         let legDir = Vec.scale (1.0 / len) leg
                         let flown = p.Range - remaining
-                        let enemy =
-                            alive
-                            |> List.filter (fun e -> not (List.contains e.Name hit))
-                            |> List.choose (fun e -> entry pos legDir e |> Option.map (fun t -> t, e))
-                            |> List.filter (fun (t, _) -> t <= len)
-                            |> List.sortBy fst
-                            |> List.tryHead
-                        let wall = walls |> List.choose (wallHit pos legDir) |> List.filter (fun (t, _) -> t <= len) |> List.sortBy fst |> List.tryHead
+                        let enemy = nearest pos legDir hit len alive
+                        let wall = nearestWall pos legDir len walls
                         match enemy, wall with
                         | Some (t, e), w when (match w with Some (wt, _) -> t <= wt | None -> true) ->
                             let at = Vec.add pos (Vec.scale t legDir)
@@ -427,33 +440,84 @@ module Geometry =
     let dwellHits (rng: Rng) (walls: Wall list) (p: ProjectileShape) (reach: float) (areaMult: float) (primary: EnemyDef) (alive: EnemyDef list) : (float * string) list =
         let r = radius p.Passing areaMult
         let tick = Constants.serverTick
-        let along (points: Vec list) =
-            // where the flight is after every tick
-            let rec walk (pts: Vec list) (carry: float) acc =
-                match pts with
-                | a :: (b :: _ as rest) ->
-                    let len = Vec.dist a b
-                    let step = p.Speed * tick
-                    let rec onLeg d acc = if d <= len then onLeg (d + step) (Vec.add a (Vec.scale (d / max 1e-9 len) (Vec.sub b a)) :: acc) else d - len, acc
-                    let carry, acc = onLeg carry acc
-                    walk rest carry acc
-                | _ -> List.rev acc
-            walk points 0.0 []
-        paths rng walls { p with Pierce = 1000 } reach primary []
-        |> List.collect (fun path -> along path.Points |> List.mapi (fun k at -> float k * tick, at))
-        |> List.sortBy fst
-        |> List.fold
-            (fun (acc, last: Map<string, float>) (t, at) ->
-                alive
-                |> List.filter (within at r)
-                |> List.fold
-                    (fun (acc, last: Map<string, float>) e ->
-                        if Map.tryFind e.Name last |> Option.exists (fun t0 -> t - t0 < p.HitInterval - 1e-9) then acc, last
-                        else (t, e.Name) :: acc, Map.add e.Name t last)
-                    (acc, last))
-            ([], Map.empty)
-        |> fst
-        |> List.rev
+        // where the flight is after every tick
+        let along (points: Vec list) : Vec[] =
+            let places = ResizeArray<Vec>()
+            let step = p.Speed * tick
+            let mutable carry = 0.0
+            let mutable from = points
+            while not from.IsEmpty && not from.Tail.IsEmpty do
+                let a, b = from.Head, from.Tail.Head
+                let len = Vec.dist a b
+                let mutable d = carry
+                while d <= len do
+                    places.Add(Vec.add a (Vec.scale (d / max 1e-9 len) (Vec.sub b a)))
+                    d <- d + step
+                carry <- d - len
+                from <- from.Tail
+            places.ToArray()
+        // every flight tick by tick, all the flights' places of one tick before those of the
+        // next, the flights in their order (what sorting all their places by the time gives)
+        let flights = paths rng walls { p with Pierce = 1000 } reach primary [] |> List.map (fun path -> along path.Points) |> Array.ofList
+        let mutable ticks = 0
+        for flight in flights do
+            if flight.Length > ticks then ticks <- flight.Length
+        let last = System.Collections.Generic.Dictionary<string, float>()
+        let hits = ResizeArray<float * string>()
+        for k in 0 .. ticks - 1 do
+            let t = float k * tick
+            for flight in flights do
+                if k < flight.Length then
+                    let at = flight.[k]
+                    let mutable rest = alive
+                    while not rest.IsEmpty do
+                        let e = rest.Head
+                        if within at r e then
+                            let tooSoon =
+                                match last.TryGetValue e.Name with
+                                | true, t0 -> t - t0 < p.HitInterval - 1e-9
+                                | _ -> false
+                            if not tooSoon then
+                                hits.Add((t, e.Name))
+                                last.[e.Name] <- t
+                        rest <- rest.Tail
+        List.ofSeq hits
+
+    /// The places of the numbers in rising order, equal ones in the order they stand in (a
+    /// stable sort, as `List.sortBy` is one, without what that costs for a short list).
+    let private rising (keys: float[]) : int[] =
+        let n = keys.Length
+        let order = Array.init n id
+        if n > 1 then
+            let spare : int[] = Array.zeroCreate n
+            // merge sort, runs of 1, 2, 4... merged from one array into the other
+            let mutable from = order
+            let mutable into = spare
+            let mutable width = 1
+            while width < n do
+                let mutable lo = 0
+                while lo < n do
+                    let mid = min n (lo + width)
+                    let hi = min n (lo + 2 * width)
+                    let mutable i = lo
+                    let mutable j = mid
+                    for k in lo .. hi - 1 do
+                        // (the left one unless the right one is smaller: equal ones keep their order)
+                        if i < mid && (j >= hi || not (keys.[from.[j]] < keys.[from.[i]])) then
+                            into.[k] <- from.[i]
+                            i <- i + 1
+                        else
+                            into.[k] <- from.[j]
+                            j <- j + 1
+                    lo <- hi
+                let swap = from
+                from <- into
+                into <- swap
+                width <- width * 2
+            if not (obj.ReferenceEquals(from, order)) then
+                for k in 0 .. n - 1 do
+                    order.[k] <- from.[k]
+        order
 
     /// Enemies hit by one use: names, each once per hit it receives.
     /// Whom a use hits. `marks`, if given, is told what the use looks like (the very places
@@ -505,21 +569,38 @@ module Geometry =
             // every crossing of every projectile, in the order they happen: a target takes a
             // hit from this volley only if the last one is long enough ago; a projectile that
             // may not hit passes through, one that hits is spent (pierce: so many more)
-            let crossings =
-                paths rng walls { p with Pierce = 1000 } reach primary alive
-                |> List.map (fun path -> mark (Flight path.Points); path)
-                |> List.mapi (fun i path -> List.zip path.Hit path.Dist |> List.map (fun (n, d) -> d / p.Speed, i, n))
-                |> List.concat
-                |> List.sortBy (fun (t, _, _) -> t)
-            crossings
-            |> List.fold
-                (fun (acc, last: Map<string, float>, used: Map<int, int>) (t, i, n) ->
-                    let spent = (Map.tryFind i used |> Option.defaultValue 0) > p.Pierce
-                    let tooSoon = Map.tryFind n last |> Option.exists (fun t0 -> t - t0 < p.HitInterval)
-                    if spent || tooSoon then acc, last, used
-                    else n :: acc, Map.add n t last, Map.add i ((Map.tryFind i used |> Option.defaultValue 0) + 1) used)
-                ([], Map.empty, Map.empty)
-            |> fun (acc, _, _) -> List.rev acc
+            let flights = paths rng walls { p with Pierce = 1000 } reach primary alive |> Array.ofList
+            let times = ResizeArray<float>()
+            let which = ResizeArray<int>()
+            let whom = ResizeArray<string>()
+            for i in 0 .. flights.Length - 1 do
+                let path = flights.[i]
+                mark (Flight path.Points)
+                let mutable hit = path.Hit
+                let mutable dist = path.Dist
+                while not hit.IsEmpty do
+                    times.Add(dist.Head / p.Speed)
+                    which.Add i
+                    whom.Add hit.Head
+                    hit <- hit.Tail
+                    dist <- dist.Tail
+            let order = rising (times.ToArray())
+            let last = System.Collections.Generic.Dictionary<string, float>()
+            let used : int[] = Array.zeroCreate flights.Length
+            let hits = ResizeArray<string>()
+            for k in 0 .. order.Length - 1 do
+                let at = order.[k]
+                let t, i, n = times.[at], which.[at], whom.[at]
+                let spent = used.[i] > p.Pierce
+                let tooSoon =
+                    match last.TryGetValue n with
+                    | true, t0 -> t - t0 < p.HitInterval
+                    | _ -> false
+                if not (spent || tooSoon) then
+                    hits.Add n
+                    last.[n] <- t
+                    used.[i] <- used.[i] + 1
+            List.ofSeq hits
         | Projectiles p ->
             let explode (at: Vec) =
                 match p.Explosion with
@@ -532,13 +613,21 @@ module Geometry =
             let rec chain (from: EnemyDef) left (seen: Set<string>) =
                 if left = 0 then []
                 else
-                    alive
-                    |> List.filter (fun e -> not (seen.Contains e.Name) && Vec.dist from.Position e.Position <= p.ChainRange)
-                    |> List.sortBy (fun e -> Vec.dist from.Position e.Position)
-                    |> List.tryHead
-                    |> function
-                        | Some next -> next :: chain next (left - 1) (seen.Add next.Name)
-                        | None -> []
+                    // (the nearest in range that it has not been to; of equals the first)
+                    let mutable best : EnemyDef option = None
+                    let mutable least = infinity
+                    let mutable rest = alive
+                    while not rest.IsEmpty do
+                        let e = rest.Head
+                        if not (seen.Contains e.Name) then
+                            let d = Vec.dist from.Position e.Position
+                            if d <= p.ChainRange && (best.IsNone || d < least) then
+                                best <- Some e
+                                least <- d
+                        rest <- rest.Tail
+                    match best with
+                    | Some next -> next :: chain next (left - 1) (seen.Add next.Name)
+                    | None -> []
             paths rng walls p reach primary alive
             |> List.fold
                 (fun (acc, hitByUse: Set<string>) path ->
