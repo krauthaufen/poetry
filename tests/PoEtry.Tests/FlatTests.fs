@@ -1156,6 +1156,11 @@ let run (test: string -> (unit -> unit) -> unit) =
         refused { fine with Player = { player with Metas = [ Meta.simple "Cast on Crit" 100.0 "Bolt"; Meta.simple "Cast on Crit" 50.0 "Bolt" ] } } "meta gems of the same name"
         refused { fine with Player = { player with Infusions = Some { Remnants = []; ExtraRemnantChance = 0.0; Delay = 0.5; Consumers = Map.ofList [ "Bolt", ("FireInfusion", "No such skill") ]; Wildcard = None } } } "an infusion of a skill"
         refused { fine with Player = { player with Skills = [ { spell "Bolt" Fire 1.0 2.0 with Mods = [ Mod.base' (Named "TriskelionArms") 2.0 ] } ] } } "Triskelion Cascade"
+        // (two of one name that are the same skill are that skill; two that differ are refused)
+        let twice = { player with Skills = [ spell "Bolt" Fire 1.0 2.0; spell "Bolt" Fire 1.0 2.0 ] }
+        if not (Flat.unsupported { fine with Player = twice }).IsEmpty then failwith "the same skill twice is refused"
+        same { fine with Player = twice } [ 1u; 2u; 3u ]
+        refused { fine with Player = { player with Skills = [ spell "Bolt" Fire 1.0 2.0; spell "Bolt" Cold 5.0 6.0 ] } } "skills or parts of the same name that differ"
         // both reasons of a fight with two
         let two = { fine with Enemies = [ { boss 1e9 with Name = "boss+" } ]; Replace = true; Player = { player with Skills = [ { spell "Bolt" Fire 1.0 2.0 with Mods = [ Mod.base' (Named "TriskelionArms") 2.0 ] } ] } }
         if (Flat.unsupported two).Length <> 2 then failwithf "expected two reasons, got %A" (Flat.unsupported two))

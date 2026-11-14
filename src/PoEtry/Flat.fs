@@ -29,12 +29,14 @@ namespace PoEtry
 /// line; who is hit is `Geometry`'s own code.
 ///
 /// Played: the player and its minions and totems against any number of enemies, the dead
-/// replaced where the fight says so; skills with parts, cooldowns, costs and charges; the rules whose reactions are
-/// listed in `Re`; ailments, damage over time, curses, exposure, armour break; meta gems;
-/// cycles, periodic actions, archons, rage, charms; the player's pools, with monsters
-/// walking up and hitting back; minions that are hurt, killed and revived, temporary ones
-/// that are summoned and leave, corpses. Everything else is refused by `compile`, by name
-/// (`unsupported` lists it): the lists at `build` say what.
+/// replaced where the fight says so; skills with parts, cooldowns, costs, charges and
+/// ammunition; the rules whose reactions are listed in `Re`; ailments, damage over time,
+/// curses, exposure, armour break; meta gems; cycles, periodic actions, archons, rage,
+/// charms; infusions and remnants; Glory, Combo and banners; seals, Barrage and chained
+/// attacks; what is planted in or beside an enemy (seeds, pustules, Ice Crystals); the
+/// player's pools, with monsters walking up and hitting back; minions that are hurt, killed
+/// and revived, temporary ones that are summoned and leave, corpses. What is left is refused
+/// by `compile`, by name (`unsupported` lists it): the lists at `build` say what.
 ///
 /// Every actor has a program of its own (`Program`: the player's, with the minions' in it)
 /// and a state of its own during a run (`Agent`); the names (buffs, statuses, counts) have
@@ -1328,7 +1330,10 @@ module Flat =
 
             // ---- its skills ----
             let all = actor.Skills @ (actor.Skills |> List.collect (fun s -> s.Parts))
-            if (all |> List.map (fun s -> s.Name) |> List.distinct).Length <> all.Length then reject "skills or parts of the same name"
+            // (the reference finds a skill by its name, the first of that name: two of one name
+            // that are the same skill are that skill; of two that differ it mixes the two)
+            if all |> List.groupBy (fun s -> s.Name) |> List.exists (fun (_, same) -> same |> List.exists (fun s -> s <> same.Head)) then
+                reject "skills or parts of the same name that differ"
             if actor.Skills |> List.exists (fun s -> s.Parts |> List.exists (fun p -> not p.Parts.IsEmpty)) then reject "parts that have parts"
             // (the reference keeps these beside the skills' cooldowns, under these names)
             if all |> List.exists (fun s -> s.Name = "ArchonRecovery" || s.Name.StartsWith "invocation:" || s.Name.StartsWith "SealBreak:") then reject "a skill named like a cooldown of the engine's own"
