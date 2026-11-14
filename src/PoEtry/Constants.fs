@@ -233,6 +233,11 @@ module Constants =
     /// spark; the angle is not in the data). A guess.
     let erraticFanStep = 15.0
 
+    /// Fork: the two projectiles of a fork fly "away from each other at a 120º angle" (the
+    /// community wiki for the first game, quoted by poedb's Fork Support page): 60 degrees off
+    /// the line each. Not in the data of this game. A guess.
+    let forkAngle = 60.0
+
     /// The player's Presence: "By default this has a 4 metre radius" (keyword text, poe2db).
     let presenceRadius = 40.0
 

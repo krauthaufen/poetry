@@ -59,7 +59,15 @@ type ProjectileShape =
       Speed: float
       /// Seconds between the projectiles of a rain ("One arrow lands every 0.08 seconds"); with
       /// HitInterval, an enemy is hit by the rain at most once per interval.
-      Every: float }
+      Every: float
+      /// How many times a projectile forks: the first time it hits an enemy it does not pierce,
+      /// it splits into two that fly on and cannot hit what it hit; those fork again while
+      /// times are left.
+      Forks: int
+      /// Chance (%) for a fork to make three projectiles in place of two.
+      ForkExtraChance: float
+      /// Degrees between the projectile's line and each projectile of a fork.
+      ForkAngle: float }
 
 /// How a skill use finds its targets.
 type Delivery =
@@ -101,7 +109,10 @@ module ProjectileShape =
           SpreadPerProjectile = 0.0
           HitInterval = 0.0
           Speed = 0.0
-          Every = 0.0 }
+          Every = 0.0
+          Forks = 0
+          ForkExtraChance = 0.0
+          ForkAngle = Constants.forkAngle }
 
 /// A skill as the engine sees it: where its damage comes from and how long it takes.
 type Skill =

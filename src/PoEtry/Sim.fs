@@ -2946,7 +2946,14 @@ module Sim =
                                        else 0)
                                 Pierce = p.Pierce + int (Mods.sumBase ctx [ Pierce ] mods) + (if rng.Chance(Mods.sumBase ctx [ Named "PierceChance" ] mods) then 1 else 0)
                                 Chains = p.Chains + int (Mods.sumBase ctx [ Chains ] mods)
-                                TerrainChain = p.TerrainChain + Mods.sumBase ctx [ Named "TerrainChain" ] mods }
+                                TerrainChain = p.TerrainChain + Mods.sumBase ctx [ Named "TerrainChain" ] mods
+                                // "Projectiles Fork" (a chance of 100%), "Fork an additional time"
+                                Forks =
+                                    (let chance = Mods.sumBase ctx [ Named "ForkChance" ] mods
+                                     if Mods.flag ctx (Named "CannotFork") mods || not (rng.Chance chance) then 0
+                                     else p.Forks + 1 + int (Mods.sumBase ctx [ Named "AdditionalForks" ] mods))
+                                ForkExtraChance = p.ForkExtraChance + Mods.sumBase ctx [ Named "ForkExtraChance" ] mods
+                                ForkAngle = p.ForkAngle * Mods.inc ctx [ Named "ForkAngle" ] mods }
                     | d -> d
                 ctx, mods, areaMult, delivery
             // Infusions: each impact consumes one of the skill's element (or the wildcard) and
@@ -3071,12 +3078,18 @@ module Sim =
                         let w = if w.Tracing then { w with Shown = Used(w.Time, name, sk.Name, [ Ring(at, Geometry.radius p.Passing areaMult, 0.0) ]) :: w.Shown } else w
                         living |> List.filter (Geometry.within at (Geometry.radius p.Passing areaMult)) |> List.map (fun e -> e.Name)
                         |> List.fold (fun w target -> hitEnemy env rng actor sk mult target w) w
-                    | _ when w.Tracing ->
-                        let hit, marks = Geometry.targetsShown rng env.Fight.Walls env.Fight.Reach delivery areaMult primary living
-                        hit |> List.fold (fun w target -> hitEnemy env rng actor sk mult target w) { w with Shown = Used(w.Time, name, sk.Name, marks) :: w.Shown }
                     | _ ->
-                        Geometry.targetsFrom rng env.Fight.Walls env.Fight.Reach delivery areaMult primary living
-                        |> List.fold (fun w target -> hitEnemy env rng actor sk mult target w) w
+                        // forked projectiles: "Forked Projectiles deal N% less damage" (Fork)
+                        let forkMult = mult * Mods.mult ctx [ Named "ForkedDamage" ] mods
+                        let hit, forked, w =
+                            if w.Tracing then
+                                let hit, forked, marks = Geometry.targetsShown rng env.Fight.Walls env.Fight.Reach delivery areaMult primary living
+                                hit, forked, { w with Shown = Used(w.Time, name, sk.Name, marks) :: w.Shown }
+                            else
+                                let hit, forked = Geometry.targetsParted rng env.Fight.Walls env.Fight.Reach delivery areaMult primary living
+                                hit, forked, w
+                        let w = hit |> List.fold (fun w target -> hitEnemy env rng actor sk mult target w) w
+                        forked |> List.fold (fun w target -> hitEnemy env rng actor sk forkMult target w) w
                 let w = strike w
                 // Aftershock: a slam has a chance to hit its area once more
                 if sk.Tags.Contains Slam && rng.Chance(Mods.sumBase ctx [ Named "AftershockChance" ] mods) then

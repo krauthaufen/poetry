@@ -507,6 +507,19 @@ module StatMap =
         | "number_of_additional_poison_stacks" -> one (Mod.base' (AilmentStacks Poison) v)
         | "poison_on_critical_strike" -> one (Mod.base' (AilmentChance Poison) 100.0 |> Mod.whenever IsCrit)
         | "attacks_num_of_additional_chains" -> one (Mod.base' Chains v |> Mod.whenever (SkillIs Attack))
+        // Fork: "Projectiles Fork" is a chance of 100% to fork once; times more, three in place
+        // of two, the angle, and what the forked ones deal
+        | "projectiles_fork" -> one (Mod.base' (Named "ForkChance") 100.0)
+        | "arrows_fork" -> one (Mod.base' (Named "ForkChance") 100.0 |> Mod.whenever (SkillIs Bow))
+        | "attack_projectiles_fork" -> one (Mod.base' (Named "ForkChance") 100.0 |> Mod.whenever (SkillIs Attack))
+        | "projectiles_from_spells_fork" -> one (Mod.base' (Named "ForkChance") 100.0 |> Mod.whenever (SkillIs Spell))
+        | "projectile_chance_to_fork_%" -> one (Mod.base' (Named "ForkChance") v)
+        | "number_of_additional_forks_base" -> one (Mod.base' (Named "AdditionalForks") v)
+        | "attack_projectiles_fork_additional_times" -> one (Mod.base' (Named "AdditionalForks") v |> Mod.whenever (SkillIs Attack))
+        | "projectiles_cannot_fork" -> one (Mod.flag (Named "CannotFork"))
+        | "chance_to_fork_extra_projectile_%" -> one (Mod.base' (Named "ForkExtraChance") v)
+        | "forking_angle_+%" -> one (Mod.inc (Named "ForkAngle") v)
+        | "support_fork_forked_projectile_damage_+%_final" -> one (Mod.more (Named "ForkedDamage") v)
         | "critical_strike_multiplier_with_dagger_+" -> one (Mod.inc CritBonus v |> Mod.whenever (SkillIs Dagger))
         | "invocation_spell_damage_+%" -> one (Mod.inc (Damage AllDamage) v |> Mod.whenever (SkillIs Spell) |> Mod.whenever (SkillIs Triggered))
         | "cannot_be_blinded" | "you_cannot_be_hindered" | "weapon_swap_speed_+%" -> Some Structural

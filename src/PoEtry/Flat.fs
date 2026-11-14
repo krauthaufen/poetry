@@ -611,6 +611,12 @@ module Flat =
     let private qPierceChance = site MSkill Base (named "PierceChance")
     let private qChains = site MSkill Base [ Chains ]
     let private qTerrainChain = site MSkill Base (named "TerrainChain")
+    let private qForkChance = site MSkill Base (named "ForkChance")
+    let private qCannotFork = site MSkill Flag (named "CannotFork")
+    let private qAdditionalForks = site MSkill Base (named "AdditionalForks")
+    let private qForkExtra = site MSkill Base (named "ForkExtraChance")
+    let private qForkAngle = site MSkill Inc (named "ForkAngle")
+    let private qForkedDamage = siteMult MSkill (named "ForkedDamage")
     let private qAftershock = site MSkill Base (named "AftershockChance")
     let private qLaunchesBolt = site MSkill Flag (named "LaunchesBolt")
     let private qNovaBoltSpeed = site MSkill Base (named "NovaOnBoltSpeed")
@@ -5981,8 +5987,15 @@ module Flat =
                     let pierce = pr.Pierce + int (sumQ ev qPierce) + (if rng.Chance(sumQ ev qPierceChance) then 1 else 0)
                     let chains = pr.Chains + int (sumQ ev qChains)
                     let terrainChain = pr.TerrainChain + sumQ ev qTerrainChain
-                    if not wanted || (count = pr.Count && pierce = pr.Pierce && chains = pr.Chains && terrainChain = pr.TerrainChain) then skill.Delivery
-                    else Projectiles { pr with Count = count; Pierce = pierce; Chains = chains; TerrainChain = terrainChain }
+                    // "Projectiles Fork" (a chance of 100%), "Fork an additional time"
+                    let forks =
+                        let chance = sumQ ev qForkChance
+                        if flagQ ev qCannotFork || not (rng.Chance chance) then 0
+                        else pr.Forks + 1 + int (sumQ ev qAdditionalForks)
+                    let forkExtra = pr.ForkExtraChance + sumQ ev qForkExtra
+                    let forkAngle = pr.ForkAngle * (1.0 + sumQ ev qForkAngle / 100.0)
+                    if not wanted || (count = pr.Count && pierce = pr.Pierce && chains = pr.Chains && terrainChain = pr.TerrainChain && forks = pr.Forks && forkExtra = pr.ForkExtraChance && forkAngle = pr.ForkAngle) then skill.Delivery
+                    else Projectiles { pr with Count = count; Pierce = pierce; Chains = chains; TerrainChain = terrainChain; Forks = forks; ForkExtraChance = forkExtra; ForkAngle = forkAngle }
                 | d -> d
             s.StrikeLeech <- 0.0
             s.StrikeLifeLeech <- 0.0
@@ -6133,7 +6146,16 @@ module Flat =
                             let spot = Vec.scale (pr.Speed * elapsed) (Vec.ofAngle (Vec.angle primaryDef.Position))
                             alive |> List.filter (Geometry.within spot (Geometry.radius pr.Passing areaMult)) |> List.map (fun e -> e.Name) |> hitAll
                         | Single -> hitEnemy s rng impact mult primary
-                        | _ -> Geometry.targetsFrom rng p.Fight.Walls p.Fight.Reach delivery areaMult primaryDef alive |> hitAll
+                        | _ ->
+                            let hit, forked = Geometry.targetsParted rng p.Fight.Walls p.Fight.Reach delivery areaMult primaryDef alive
+                            hitAll hit
+                            // forked projectiles: "Forked Projectiles deal N% less damage" (Fork)
+                            if not forked.IsEmpty then
+                                let forkMult = mult * multQ ev qForkedDamage
+                                let mutable rest = forked
+                                while not rest.IsEmpty do
+                                    hitEnemy s rng impact forkMult s.FoeIds.[rest.Head]
+                                    rest <- rest.Tail
                 strike ()
                 // Aftershock: a slam has a chance to hit its area once more
                 if info.IsSlam && rng.Chance(sumQ ev qAftershock) then

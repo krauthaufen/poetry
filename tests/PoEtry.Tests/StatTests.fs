@@ -775,6 +775,38 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         equal (box 3) (box seen.Value)
         same (fight true) seeds)
 
+    // ---- Fork ----
+
+    test "Fork: at the first enemy it does not pierce a projectile splits in two, 60 degrees off its line, and forked ones deal less" (fun () ->
+        equal (box [ Named "ForkChance", 100.0 ]) (box (mods "projectiles_fork" 1.0 |> List.map (fun m -> m.Stat, m.Value)))
+        equal (box [ Named "ForkedDamage", More ]) (box (mods "support_fork_forked_projectile_damage_+%_final" -30.0 |> List.map (fun m -> m.Stat, m.Kind)))
+        equal (box [ Named "CannotFork" ]) (box (mods "projectiles_cannot_fork" 1.0 |> List.map (fun m -> m.Stat)))
+        let dummy name x y = { EnemyDef.atLevel 83 1e9 with Name = name; Position = Vec.make x y; Size = 4.0; Mods = []; Attack = None }
+        // the projectile meets a at (26, 0); 20 further at 60 degrees either way: b and c; d behind a
+        let a = { dummy "a" 30.0 0.0 with Life = 2e9 }
+        let off deg = Vec.add (Vec.make 26.0 0.0) (Vec.scale 20.0 (Vec.ofAngle (deg * System.Math.PI / 180.0)))
+        let b, c, d = { dummy "b" 0.0 0.0 with Position = off 60.0 }, { dummy "c" 0.0 0.0 with Position = off -60.0 }, dummy "d" 60.0 0.0
+        let all = [ a; b; c; d ]
+        let p = { ProjectileShape.make 1 with Range = 200.0 }
+        let parted shape = Geometry.targetsParted (Rng 1u) [] infinity (Projectiles shape) 1.0 a all
+        equal (box ([ "a" ], ([]: string list))) (box (parted p))
+        equal (box ([ "a" ], [ "c"; "b" ])) (box (parted { p with Forks = 1 }))
+        // three in place of two: one flies on along the line, to d
+        equal (box ([ "a" ], [ "c"; "d"; "b" ])) (box (parted { p with Forks = 1; ForkExtraChance = 100.0 }))
+        // a projectile that pierces a forks at d, whose forks find nothing
+        equal (box ([ "a"; "d" ], ([]: string list))) (box (parted { p with Forks = 1; Pierce = 1 }))
+        // forked projectiles fork no more than they have times left: of b's and c's forks none meets anything
+        equal (box ([ "a" ], [ "c"; "b" ])) (box (parted { p with Forks = 2 }))
+        // in a fight: a spell that forks, its forked projectiles dealing 30% less: a, and b and c at 70%
+        let bolt fork = { Skill.make "Bolt" [ Spell; Projectile ] with BaseDamage = Map.ofList [ Chaos, { Min = 100.0; Max = 100.0 } ]; BaseTime = 0.5; BaseCrit = 0.0; Delivery = Projectiles p; Mods = (if fork then [ Mod.base' (Named "ForkChance") 100.0 ] else []) @ [ Mod.more (Named "ForkedDamage") -30.0 ] }
+        let fight fork = { Fight.single a (Actor.make "Player" [] [ bolt fork ]) 10.0 with Enemies = all }
+        let total f = (Sim.run f 1u).DamageBy |> Map.toList |> List.sumBy snd
+        near 2.4 (total (fight true) / total (fight false))
+        // and a skill that cannot fork does not
+        let cannot = { fight true with Player = Actor.make "Player" [ Mod.flag (Named "CannotFork") ] [ bolt true ] }
+        near 1.0 (total cannot / total (fight false))
+        same (fight true) seeds)
+
     // ---- Scarred Faith ----
 
     test "Scarred Faith: prevented physical damage recouped as energy shield per enemy power; no regeneration; none above armour" (fun () ->

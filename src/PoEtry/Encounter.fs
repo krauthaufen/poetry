@@ -506,8 +506,8 @@ module Geometry =
         elif p.Spread >= 360.0 then [ for k in 0 .. p.Count - 1 -> aimAngle + 2.0 * System.Math.PI * float k / float p.Count ]
         else [ for k in 0 .. p.Count - 1 -> aimAngle - spread / 2.0 + spread * float k / float (p.Count - 1) ]
 
-    /// `paths`; `keep`, `pierce`: see `traceWith`.
-    let private pathsWith (keep: bool) (pierce: int) (rng: Rng) (walls: Wall list) (p: ProjectileShape) (reach: float) (primary: EnemyDef) (alive: EnemyDef list) =
+    /// `paths`; `keep`, `pierce`: see `traceWith`. With how far each one flies.
+    let private rangedPaths (keep: bool) (pierce: int) (rng: Rng) (walls: Wall list) (p: ProjectileShape) (reach: float) (primary: EnemyDef) (alive: EnemyDef list) =
         let origin = if p.FromImpact then impactPoint reach primary else Vec.zero
         let alive = if p.SkipPrimary then alive |> List.filter (fun e -> e.Name <> primary.Name) else alive
         // a full circle from the player is not aimed: it lies at a random angle to the enemy
@@ -516,7 +516,10 @@ module Geometry =
         |> List.map (fun a ->
             let dir = Vec.ofAngle a
             let range = if p.RangeVariation > 0.0 then p.Range * (1.0 + p.RangeVariation * (2.0 * rng.Float() - 1.0)) else p.Range
-            traceWith keep rng walls p range pierce (Vec.add origin (Vec.scale p.StartOffset dir)) dir alive)
+            range, traceWith keep rng walls p range pierce (Vec.add origin (Vec.scale p.StartOffset dir)) dir alive)
+
+    let private pathsWith (keep: bool) (pierce: int) (rng: Rng) (walls: Wall list) (p: ProjectileShape) (reach: float) (primary: EnemyDef) (alive: EnemyDef list) =
+        rangedPaths keep pierce rng walls p reach primary alive |> List.map snd
 
     /// All projectile flights of one use.
     let paths (rng: Rng) (walls: Wall list) (p: ProjectileShape) (reach: float) (primary: EnemyDef) (alive: EnemyDef list) =
@@ -647,7 +650,8 @@ module Geometry =
     /// Enemies hit by one use: names, each once per hit it receives.
     /// Whom a use hits. `marks`, if given, is told what the use looks like (the very places
     /// and ways rolled here), for showing the fight.
-    let private targetsWith (marks: ResizeArray<Mark> option) (rng: Rng) (walls: Wall list) (reach: float) (delivery: Delivery) (areaMult: float) (primary: EnemyDef) (alive: EnemyDef list) : string list =
+    /// `forked`: where the hits of forked projectiles go (None: with the others, after them).
+    let private targetsWith (marks: ResizeArray<Mark> option) (forked: ResizeArray<string> option) (rng: Rng) (walls: Wall list) (reach: float) (delivery: Delivery) (areaMult: float) (primary: EnemyDef) (alive: EnemyDef list) : string list =
         let mark (m: Mark) = match marks with Some ms -> ms.Add m | None -> ()
         match delivery with
         | Single ->
@@ -768,43 +772,77 @@ module Geometry =
                     | Some next -> next :: chain next (left - 1) (seen.Add next.Name)
                     | None -> []
             let names = ResizeArray<string>()
+            let forkedNames = match forked with Some f -> f | None -> ResizeArray<string>()
             let hitByUse = System.Collections.Generic.HashSet<string>()
-            let mutable flights = pathsWith marks.IsSome p.Pierce rng walls p reach primary alive
+            // a flight: its path, how far it could fly, the hits before it (a fork's: those of
+            // the projectile it split from, which it cannot hit), how many it flies on through,
+            // the forks left, whether it is a fork's
+            let mutable flights =
+                rangedPaths marks.IsSome p.Pierce rng walls p reach primary alive
+                |> List.map (fun (range, path) -> struct (path, range, 0, p.Pierce, p.Forks, false))
             while not flights.IsEmpty do
-                let path = flights.Head
+                let struct (path, range, prior, pierce, forksLeft, isFork) = flights.Head
+                flights <- flights.Tail
                 if marks.IsSome then mark (Flight path.Points)
+                let own = if prior = 0 then path.Hit else List.skip prior path.Hit
                 // (a projectile that hit nothing does nothing more)
-                if not path.Hit.IsEmpty then
+                if not own.IsEmpty then
                     // without shotgun, a later projectile ignores enemies an earlier one hit
-                    let hits = if p.CanShotgun then path.Hit else path.Hit |> List.filter (fun n -> not (hitByUse.Contains n))
+                    let hits = if p.CanShotgun then own else own |> List.filter (fun n -> not (hitByUse.Contains n))
                     let struck = hits |> List.map byName
+                    // Fork: the first enemy it does not pierce splits it (before any chain)
+                    let forks = forksLeft > 0 && path.Hit.Length > pierce && path.Points.Length >= 2
+                    if forks then
+                        let at = List.last path.Points
+                        let before = path.Points.[path.Points.Length - 2]
+                        let d = Vec.sub at before
+                        let dir = Vec.scale (1.0 / max 1e-9 (Vec.length d)) d
+                        let left = range - List.last path.Dist
+                        let n = if rng.Chance p.ForkExtraChance then 3 else 2
+                        let a = p.ForkAngle * System.Math.PI / 180.0
+                        let turns = if n = 3 then [ -a; 0.0; a ] else [ -a; a ]
+                        let children =
+                            turns |> List.map (fun t ->
+                                let nd = Vec.ofAngle (Vec.angle dir + t)
+                                let child = straight rng walls p left path.Hit.Length alive at nd left path.Hit false [ at ] []
+                                struct (child, left, path.Hit.Length, path.Hit.Length, forksLeft - 1, true))
+                        flights <- children @ flights
                     let chained =
                         match List.tryLast struck with
-                        | Some last -> chain last p.Chains (hits |> Set.ofList)
-                        | None -> []
+                        | Some last when not forks -> chain last p.Chains ((if prior = 0 then hits else path.Hit) |> Set.ofList)
+                        | _ -> []
                     (match List.tryLast struck with
                      | Some last -> chained |> List.fold (fun (from: EnemyDef) next -> mark (Line(from.Position, next.Position)); next) last |> ignore
                      | None -> ())
                     let all = struck @ chained
-                    let from = names.Count
+                    let into = if isFork then forkedNames else names
+                    let from = into.Count
                     for e in all do
-                        names.Add e.Name
+                        into.Add e.Name
                     for e in all do
                         for n in explode e.Position do
-                            names.Add n
-                    for k in from .. names.Count - 1 do
-                        hitByUse.Add names.[k] |> ignore
-                flights <- flights.Tail
+                            into.Add n
+                    for k in from .. into.Count - 1 do
+                        hitByUse.Add into.[k] |> ignore
+            if forked.IsNone then names.AddRange forkedNames
             List.ofSeq names
 
     let targetsFrom (rng: Rng) (walls: Wall list) (reach: float) (delivery: Delivery) (areaMult: float) (primary: EnemyDef) (alive: EnemyDef list) : string list =
-        targetsWith None rng walls reach delivery areaMult primary alive
+        targetsWith None None rng walls reach delivery areaMult primary alive
+
+    /// `targetsFrom`, the hits of forked projectiles apart: (the others, the forks').
+    let targetsParted (rng: Rng) (walls: Wall list) (reach: float) (delivery: Delivery) (areaMult: float) (primary: EnemyDef) (alive: EnemyDef list) : string list * string list =
+        let forked = ResizeArray<string>()
+        let hit = targetsWith None (Some forked) rng walls reach delivery areaMult primary alive
+        hit, List.ofSeq forked
 
     /// `targetsFrom`, and what the use looks like.
-    let targetsShown (rng: Rng) (walls: Wall list) (reach: float) (delivery: Delivery) (areaMult: float) (primary: EnemyDef) (alive: EnemyDef list) : string list * Mark list =
+    /// (with the forks' hits apart, as `targetsParted` has them)
+    let targetsShown (rng: Rng) (walls: Wall list) (reach: float) (delivery: Delivery) (areaMult: float) (primary: EnemyDef) (alive: EnemyDef list) : string list * string list * Mark list =
         let marks = ResizeArray<Mark>()
-        let hit = targetsWith (Some marks) rng walls reach delivery areaMult primary alive
-        hit, List.ofSeq marks
+        let forked = ResizeArray<string>()
+        let hit = targetsWith (Some marks) (Some forked) rng walls reach delivery areaMult primary alive
+        hit, List.ofSeq forked, List.ofSeq marks
 
     /// `targetsFrom` with the slam landing on the aimed enemy.
     let targets delivery areaMult primary alive = targetsFrom (Rng 1u) [] infinity delivery areaMult primary alive
