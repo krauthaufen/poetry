@@ -2385,6 +2385,17 @@ module Flat =
           /// By damage type: what it takes of damage over time (NaN: not worked out for this defender).
           DotTaken: float[] }
 
+    /// The buffs' map as an actor's first asking of a run made it, with the buffs it is of:
+    /// the next run of the same runner starts from it (see `buffMap`) and changes only
+    /// what differs, where it would otherwise put every buff the fight starts with into
+    /// an empty map again.
+    type private MapSeed =
+        { mutable Taken: bool
+          mutable Seed: Map<string, int>
+          mutable SeedHas: bool[]
+          mutable SeedStacks: int[]
+          mutable SeedIds: int[] }
+
     /// The player or a minion during a run (`Sim.ActorState`): its buffs, what is kept of
     /// its skills' answers, its cooldowns and rolls, and a minion's body.
     type private Agent =
@@ -2402,6 +2413,7 @@ module Flat =
           mutable BuffMap: Map<string, int>
           mutable BuffMapStale: bool
           BChanged: ResizeArray<int>
+          MapSeed: MapSeed
           /// By buff: what the map `BuffMap` says of it.
           MapHas: bool[]
           MapStacks: int[]
@@ -2745,6 +2757,16 @@ module Flat =
             changed.Clear()
             s.A.BuffMap <- m
             s.A.BuffMapStale <- false
+            let seed = s.A.MapSeed
+            if not seed.Taken then
+                seed.Taken <- true
+                seed.Seed <- m
+                seed.SeedHas <- Array.copy s.A.MapHas
+                seed.SeedStacks <- Array.copy s.A.MapStacks
+                let ids = ResizeArray<int>()
+                for id in 0 .. s.A.MapHas.Length - 1 do
+                    if (at s.A.MapHas id) then ids.Add id
+                seed.SeedIds <- ids.ToArray()
         s.A.BuffMap
 
     /// Buff stacks as a skill sees them (`Sim.skillStacks`).
@@ -6446,9 +6468,11 @@ module Flat =
           Answers: ResizeArray<float[][] * int[][] * int[][] * int[] * int[]>
           /// By actor and buff: the mods last compiled for it and what they compiled to (a
           /// function of the mods alone, so good in every run).
-          Comps: ResizeArray<(int * Item)[][] * Mod list[]> }
+          Comps: ResizeArray<(int * Item)[][] * Mod list[]>
+          /// By actor: see `MapSeed`.
+          Seeds: ResizeArray<MapSeed> }
 
-    let private newKept () : Kept = { Queue = Queue(); Evs = ResizeArray(); Vitals = Dictionary(); Answers = ResizeArray(); Comps = ResizeArray() }
+    let private newKept () : Kept = { Queue = Queue(); Evs = ResizeArray(); Vitals = Dictionary(); Answers = ResizeArray(); Comps = ResizeArray(); Seeds = ResizeArray() }
 
     /// An enemy as it comes into the fight (`fresh` in `Sim.runWith`): `root` is the enemy
     /// the fight names that it is, or that it replaces.
@@ -6537,7 +6561,10 @@ module Flat =
         let ns = p.StatusNames.Length
         let foes = p.Enemies |> Array.mapi (fun i info -> makeFoe ns info i i info.Def)
         let v = p.Vitals
-        let progs = Array.append [| p |] p.Minions
+        let progs : Program[] = Array.zeroCreate (1 + p.Minions.Length)
+        put progs 0 p
+        for m in 0 .. p.Minions.Length - 1 do
+            put progs (m + 1) (at p.Minions m)
         let agents =
             progs
             |> Array.mapi (fun who (pr: Program) ->
@@ -6547,6 +6574,8 @@ module Flat =
                 let kVal, kBuffs, kStatus, kgBuffs, kgStatus = kept.Answers.[who]
                 if kept.Comps.Count <= who then kept.Comps.Add((Array.create nb [||], Array.create nb []))
                 let comp, compOf = kept.Comps.[who]
+                if kept.Seeds.Count <= who then kept.Seeds.Add({ Taken = false; Seed = Map.empty; SeedHas = [||]; SeedStacks = [||]; SeedIds = [||] })
+                let seed = kept.Seeds.[who]
                 { BKept = false
                   BHas = Array.create nb false
                   BStacks = Array.zeroCreate nb
@@ -6554,11 +6583,13 @@ module Flat =
                   BMods = Array.create nb []
                   BPaused = Array.create nb nan
                   BSoonest = infinity
-                  BuffMap = Map.empty
+                  BuffMap = seed.Seed
                   BuffMapStale = true
-                  BChanged = ResizeArray()
-                  MapHas = Array.zeroCreate nb
-                  MapStacks = Array.zeroCreate nb
+                  // (every buff of the map it starts from is looked at when it is first asked for)
+                  BChanged = (if seed.Taken then ResizeArray(seed.SeedIds) else ResizeArray())
+                  MapSeed = seed
+                  MapHas = (if seed.Taken then Array.copy seed.SeedHas else Array.zeroCreate nb)
+                  MapStacks = (if seed.Taken then Array.copy seed.SeedStacks else Array.zeroCreate nb)
                   ModsVersion = 0
                   BuffsVersion = 0
                   VitalsVersion = 0

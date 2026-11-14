@@ -535,6 +535,11 @@ module Geometry =
         let step = p.Speed * tick
         let from = pathsWith true 1000 rng walls p reach primary [] |> List.map (fun path -> path.Points) |> Array.ofList
         let gone : float[] = Array.zeroCreate from.Length
+        // per flight, the leg it was last asked of and whether an enemy is so near that leg
+        // that a place on it can reach one (no place on a leg is further from the leg's
+        // start than the leg is long); where none is, the places are not worked out
+        let asked : Vec list[] = Array.create from.Length []
+        let near : bool[] = Array.create from.Length false
         let last = System.Collections.Generic.Dictionary<string, float>()
         let hits = ResizeArray<float * string>()
         let mutable flying = from.Length
@@ -562,9 +567,19 @@ module Geometry =
                 if not points.IsEmpty then
                     flying <- flying + 1
                     let a, b = points.Head, points.Tail.Head
-                    let at = Vec.add a (Vec.scale (d / max 1e-9 len) (Vec.sub b a))
                     gone.[flight] <- d + step
-                    let mutable rest = alive
+                    if not (obj.ReferenceEquals(asked.[flight], points)) then
+                        asked.[flight] <- points
+                        let mutable any = false
+                        let mutable rest = alive
+                        while not any && not rest.IsEmpty do
+                            let e = rest.Head
+                            let away = Vec.dist a e.Position
+                            if not (away - len > r + e.Size + 1e-3 + 1e-6 * away) then any <- true
+                            rest <- rest.Tail
+                        near.[flight] <- any
+                    let at = Vec.add a (Vec.scale (d / max 1e-9 len) (Vec.sub b a))
+                    let mutable rest = if near.[flight] then alive else []
                     while not rest.IsEmpty do
                         let e = rest.Head
                         if within at r e then
