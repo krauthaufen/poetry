@@ -936,6 +936,104 @@ let run (test: string -> (unit -> unit) -> unit) =
         if bare.Counts.ContainsKey "uses:Charged Staff: Shockwave" then failwith "expected no shockwave without the buff"
         if not (count "hits:Charged Staff: Shockwave" > count "uses:Charged Staff: Shockwave") then failwith "expected the cone to hit several enemies")
 
+    // ---- what was refused until it was built ----
+
+    test "flat: Triskelion Cascade, centred on the player and used up by the spell it empowers" (fun () ->
+        let cascadable = Mod.whenever (SkillIs(Tag "Type:Cascadable"))
+        let tri = { Skill.make "Triskelion" [ Spell ] with Hits = []; Cooldown = Some 3.0 }
+        let nova = { spell "Nova" Fire 300.0 900.0 with Tags = Set.ofList [ Spell; Tag "Type:Cascadable" ]; Delivery = AreaAtTarget 12.0 }
+        let ring = { spell "Ring" Cold 200.0 400.0 with Tags = Set.ofList [ Spell; Tag "Type:Cascadable" ]; Delivery = AreaAroundSelf 15.0; Cooldown = Some 2.5 }
+        let player =
+            { Actor.make "Player" [ Mod.inc AreaOfEffect 30.0; Mod.inc CritChance 150.0 ] [ tri; ring; nova ] with
+                Rules = [ { Hook = OnUse; Filter = Called "Triskelion"; Chance = 100.0
+                            Reaction = GrantBuff("Triskelion buff", 4.0, 1, [ Mod.base' (Named "TriskelionArms") 2.0 |> cascadable; Mod.more (Damage AllDamage) -50.0 |> cascadable ]) } ] }
+        let pack = Encounter.pack 80 Rarity.defaults [ Normal, 8; Magic, 3; Rare, 1 ] 20.0 25.0 true 5u |> List.map (fun e -> { e with Life = e.Life * 20.0 })
+        let fight = { Fight.single pack.Head player 20.0 with Enemies = pack; CascadeSpacing = 1.2 }
+        same fight seeds
+        // (a skill that always has the arms: every use is one)
+        same { fight with Player = Actor.make "Player" [ Mod.inc AreaOfEffect 30.0 ] [ { nova with Mods = [ Mod.base' (Named "TriskelionArms") 3.0 ] } ] } seeds
+        let o = Sim.run fight 1u
+        if not (o.Counts.["hits:Nova"] > o.Counts.["uses:Nova"]) then failwithf "expected the arms to hit: %A" o.Counts)
+
+    test "flat: Hexblast waits for a ripe curse, detonates it, and has nothing to detonate after" (fun () ->
+        let hex = { spell "Hex" Fire 0.0 0.0 with BaseDamage = Map.empty; Cooldown = Some 6.0 }
+        let blast = { spell "Blast" Chaos 500.0 900.0 with Mods = [ Mod.flag (Named "DetonatesCurse") ]; Delivery = AreaAtTarget 30.0 }
+        let player =
+            { Actor.make "Player" [ Mod.inc CritChance 100.0; Mod.inc (Damage AllDamage) 40.0 |> Mod.whenever (EnemyHas "Curse:Hex") ] [ blast; hex; spell "Bolt" Fire 10.0 30.0 ] with
+                Rules =
+                    [ { Hook = OnHit; Filter = Called "Hex"; Chance = 100.0; Reaction = ApplyCurse("Curse:Hex", 4.0, [ Mod.inc (DamageTaken AllDamage) 25.0 ]) }
+                      // (a curse no rule of the actor's own gives a duration: ripe at any time)
+                      { Hook = OnCrit; Filter = Called "Bolt"; Chance = 30.0; Reaction = ApplyDebuff("Curse:Stray", 3.0, 1, [ Mod.inc (DamageTaken(OfType Chaos)) 10.0 ]) } ] }
+        let pack = Encounter.pack 80 Rarity.defaults [ Magic, 3; Rare, 1 ] 20.0 12.0 false 3u |> List.map (fun e -> { e with Life = e.Life * 50.0 })
+        let fight = { Fight.single pack.Head player 30.0 with Enemies = pack }
+        same fight seeds
+        same (Fight.single (boss 1e12) player 20.0) seeds
+        let o = Sim.run (Fight.single (boss 1e12) player 20.0) 1u
+        if not (o.Counts.ContainsKey "curse detonated" && o.Counts.ContainsKey "hits:Blast") then failwithf "expected a detonation: %A" o.Counts)
+
+    test "flat: a skill that keeps its cooldown while it is empowered by what it consumes" (fun () ->
+        let leap = { strike "Leap" 2000.0 4000.0 with Cooldown = Some 5.0; Consumes = Some "Shard"; Mods = [ Mod.flag (Named "NoCooldownWithCharge"); Mod.base' (Named "ConsumeChargeCount") 1.0 ] }
+        let player shards =
+            { Actor.make "Player" [ Mod.inc CritChance 200.0 ] [ leap; strike "Swing" 500.0 900.0 ] with
+                Rotation = [ Actor.always "Leap"; Actor.always "Swing" ]
+                Rules = [ { Hook = OnCrit; Filter = Called "Swing"; Chance = 60.0; Reaction = GainResource("Shard", 1) } ]
+                Resources = [ "Shard", 2 ]
+                MaxResources = (if shards then Map.ofList [ "Shard", 3 ] else Map.empty) }
+        // where the character makes the shards the leap waits for one; where it does not, it
+        // is used on its cooldown
+        same (Fight.single (boss 1e12) (player true) 30.0) seeds
+        same (Fight.single (boss 1e12) (player false) 30.0) seeds
+        let o = Sim.run (Fight.single (boss 1e12) (player true) 30.0) 1u
+        if not (o.Counts.["uses:Leap"] > 7) then failwithf "expected leaps without their cooldown: %A" o.Counts)
+
+    test "flat: a skill with a window: its cost opens it, and it charges again after it" (fun () ->
+        let requiem = { spell "Requiem" Lightning 300.0 700.0 with Cost = 60.0; BaseTime = 0.4; Mods = [ Mod.base' (Named "WindowSeconds") 3.0; Mod.base' (Named "WindowRecharge") 5.0 ] }
+        let player =
+            { Actor.make "Player" [ Mod.inc CritChance 100.0 ] [ requiem; { spell "Bolt" Fire 50.0 90.0 with Cost = 12.0 } ] with
+                Rotation = [ Actor.always "Requiem"; { Use = "Bolt"; When = fun v -> not (v.Energy.ContainsKey "Window:Requiem") || v.Time > 4.0 } ]
+                Vitals = Some(PlayerStats.basic 3000.0 400.0) }
+        let fight = Fight.single { boss 1e12 with Attack = None } player 30.0
+        same fight seeds
+        same { fight with Player = { player with Vitals = None } } seeds
+        let o = Sim.run fight 1u
+        if not (o.Counts.["window:Requiem"] >= 3 && o.Counts.ContainsKey "uses:Bolt") then failwithf "expected windows and bolts between them: %A" o.Counts)
+
+    test "flat: a part that spends Rage in place of the plain hit while there is enough" (fun () ->
+        let big = { strike "Slam: Enraged" 3000.0 5000.0 with Mods = [ Mod.base' (Named "SpendsRage") 10.0 ] }
+        let slam = { strike "Slam" 1000.0 2000.0 with Mods = [ Mod.flag (Named "NotEnraged") ]; Parts = [ big ] }
+        let player =
+            { Actor.make "Player" [ Mod.base' (Named "RageOnHit") 4.0; Mod.inc CritChance 100.0 ] [ slam ] with
+                MaxResources = Map.ofList [ "Rage", 30 ]; Resources = [ "Rage", 25 ] }
+        let fight = Fight.single (boss 1e12) player 30.0
+        same fight seeds
+        same { fight with Player = { player with Vitals = Some(PlayerStats.basic 5000.0 100.0) } } seeds
+        let o = Sim.run fight 1u
+        if not (o.Counts.["enraged:Slam"] > 2 && o.Counts.ContainsKey "hits:Slam") then failwithf "expected both kinds of slam: %A" o.Counts)
+
+    test "flat: a debuff that records hit damage and takes a share of it again, also when that kills" (fun () ->
+        let agony = { Skill.make "Agony" [ Spell ] with Hits = []; Duration = 4.0; Mods = [ Mod.base' (Named "RecordsDamage") 25.0 ]; BaseTime = 0.5 }
+        let player = Actor.make "Player" [ Mod.inc CritChance 100.0; Mod.inc SkillDuration 30.0 ] [ agony; spell "Bolt" Fire 300.0 900.0 ]
+        same (Fight.single (boss 1e12) player 30.0) seeds
+        // enemies that die: of the hits, of what is taken again, and replaced
+        let pack = Encounter.pack 80 Rarity.defaults [ Normal, 4; Magic, 2 ] 20.0 12.0 false 3u |> List.map (fun e -> { e with Life = 2600.0 })
+        let dying = { Fight.single pack.Head player 40.0 with Enemies = pack }
+        same dying seeds
+        same { dying with Replace = true } seeds
+        let o = Sim.run dying 1u
+        if not (o.DamageBy.ContainsKey "Agony" && o.DamageByType.ContainsKey "Other") then failwithf "expected damage taken again: %A" o.DamageBy)
+
+    test "flat: a buff that says a warp went into a projectile, given by a rule" (fun () ->
+        let blast = { spell "Warp: Blast" Lightning 400.0 800.0 with Mods = [ Mod.flag (Named "OnlyVs:Shocked") ]; Delivery = AreaAtTarget 20.0 }
+        let warp = { spell "Warp" Lightning 100.0 200.0 with Parts = [ blast ]; Cooldown = Some 1.5 }
+        let player =
+            { Actor.make "Player" [ Mod.inc CritChance 100.0 ] [ warp; spell "Bolt" Fire 50.0 90.0 ] with
+                Rotation = [ Actor.always "Warp"; Actor.always "Bolt" ]
+                Rules = [ { Hook = OnCrit; Filter = Called "Bolt"; Chance = 100.0; Reaction = GrantBuff("Warped:Warp: Blast", 6.0, 1, []) } ] }
+        let fight = Fight.single (boss 1e12) player 30.0
+        same fight seeds
+        let o = Sim.run fight 1u
+        if not (o.Counts.ContainsKey "hits:Warp: Blast") then failwithf "expected the blast whatever the enemy's state: %A" o.Counts)
+
     // ---- minions and totems ----
     let bite name dmg = { Skill.make name [ Attack; Melee ] with BaseDamage = Map.ofList [ Physical, { Min = dmg * 0.8; Max = dmg * 1.2 } ]; BaseCrit = 6.0 }
     let sure = Mod.base' (Named "Accuracy") 1e12
@@ -1182,14 +1280,13 @@ let run (test: string -> (unit -> unit) -> unit) =
         refused { fine with Minions = [ Actor.make "Player" [] [ strike "Bite" 1.0 2.0 ] ] } "actors of the same name"
         refused { fine with Player = { player with Metas = [ Meta.simple "Cast on Crit" 100.0 "Bolt"; Meta.simple "Cast on Crit" 50.0 "Bolt" ] } } "meta gems of the same name"
         refused { fine with Player = { player with Infusions = Some { Remnants = []; ExtraRemnantChance = 0.0; Delay = 0.5; Consumers = Map.ofList [ "Bolt", ("FireInfusion", "No such skill") ]; Wildcard = None } } } "an infusion of a skill"
-        refused { fine with Player = { player with Skills = [ { spell "Bolt" Fire 1.0 2.0 with Mods = [ Mod.base' (Named "TriskelionArms") 2.0 ] } ] } } "Triskelion Cascade"
         // (two of one name that are the same skill are that skill; two that differ are refused)
         let twice = { player with Skills = [ spell "Bolt" Fire 1.0 2.0; spell "Bolt" Fire 1.0 2.0 ] }
         if not (Flat.unsupported { fine with Player = twice }).IsEmpty then failwith "the same skill twice is refused"
         same { fine with Player = twice } [ 1u; 2u; 3u ]
         refused { fine with Player = { player with Skills = [ spell "Bolt" Fire 1.0 2.0; spell "Bolt" Cold 5.0 6.0 ] } } "skills or parts of the same name that differ"
         // both reasons of a fight with two
-        let two = { fine with Enemies = [ { boss 1e9 with Name = "boss+" } ]; Replace = true; Player = { player with Skills = [ { spell "Bolt" Fire 1.0 2.0 with Mods = [ Mod.base' (Named "TriskelionArms") 2.0 ] } ] } }
+        let two = { fine with Enemies = [ { boss 1e9 with Name = "boss+" } ]; Replace = true; Player = { player with Skills = [ spell "Bolt" Fire 1.0 2.0; spell "Bolt" Cold 5.0 6.0 ] } }
         if (Flat.unsupported two).Length <> 2 then failwithf "expected two reasons, got %A" (Flat.unsupported two))
 
     test "flat: random fights give the reference's outcome, or are refused" (fun () ->

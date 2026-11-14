@@ -630,6 +630,7 @@ module Flat =
     let private qTrinityLoss = site MSkill Base (named "TrinityLoss")
     let private qCascades = site MSkill Base (named "CascadesPerSide")
     let private qCascadeArea = site MSkill More (named "CascadeArea")
+    let private qTriskelion = site MSkill Base (named "TriskelionArms")
     let private qInfusionKeep = site MEmpty Base (named "InfusionKeepChance")
     let private qInfusionPower = site MEmpty Base (named "PowerChargeOnInfusionConsumed")
 
@@ -928,6 +929,30 @@ module Flat =
           WarpBuff: int
           Warped: int
           CWarped: int
+          /// Hexblast: a hit of this does nothing without a curse on the enemy that is ripe,
+          /// and takes the ripe ones off (see `Program.CurseRipe`).
+          DetonatesCurse: bool
+          /// "Does not use up its Cooldown when empowered" (by what it consumes); `MustHold`:
+          /// it waits for that where the character can have it at all.
+          NoCooldown: bool
+          MustHold: bool
+          /// A skill with a window (Requiem): how long it lasts and how long it charges again
+          /// after it (0: no window), the names its times go by, and where it is counted.
+          WindowSecs: float
+          WindowRecharge: float
+          WindowKey: string
+          WindowNextKey: string
+          CWindow: int
+          /// The Rage a use of this part spends (it happens only with that much), what the
+          /// skill's parts spend together, and where a use that spent it is counted.
+          RageFor: float
+          RageNeed: float
+          CEnraged: int
+          /// A debuff that records the hit damage its enemy takes (Inevitable Agony): the
+          /// percent of it taken again (NaN: none), where it is counted and what it deals as.
+          Records: float
+          CRecording: int
+          RecordSource: int
           /// Whether a use asks how long the skill's effects last, and how large its area is.
           AsksDuration: bool
           AsksArea: bool }
@@ -1068,6 +1093,11 @@ module Flat =
               CountNames: string[]
               SourceNames: string[]
               Skills: SkillInfo[]
+              /// By status: for a curse, how long it may still last at most to be ripe for
+              /// Hexblast (half the duration the actor's own curse rule gives; infinity where
+              /// no rule of the actor makes it: any time); NaN for what is no curse.
+              CurseRipe: float[]
+              CCurseDetonated: int
               /// The skill the mods of a gained charge are asked of (the actor's first).
               FirstSkill: int
               Rotation: (int * (View -> bool))[]
@@ -1194,18 +1224,13 @@ module Flat =
     /// Stats that make the reference do something that is not built here. A fight with a mod
     /// of one of them, wherever the mod is, is not compiled.
     let private unbuiltStats =
-        [ "TriskelionArms", "Triskelion Cascade"
-          "DetonatesCurse", "curse detonation (Hexblast)"
-          "NoCooldownWithCharge", "skills that skip their cooldown when empowered"
-          "WindowSeconds", "skills with a window (Requiem)"
-          "SpendsRage", "parts that spend Rage"
-          "RecordsDamage", "debuffs that record damage (Inevitable Agony)" ]
+        ([] : (string * string) list)
 
     let private unbuiltPrefixes : (string * string) list = []
 
     /// Buffs the reference treats in a way of its own that is not built here.
     let private unbuiltBuffs : (string * string) list = []
-    let private unbuiltBuffPrefixes = [ "Warped:", "warps into projectiles" ]
+    let private unbuiltBuffPrefixes : (string * string) list = []
 
     let private recentlyNames = [ "HitRecently"; "NonCritRecently"; "CritRecently"; "CritInPast8Seconds"; "KilledRecently" ]
 
@@ -1856,7 +1881,21 @@ module Flat =
                       WarpBuff = (match named' "WarpsInto:" with Some gem -> buffs.Id(gem + " buff") | None -> -1)
                       Warped = (match named' "WarpsInto:" with Some _ -> buffs.Id("Warped:" + s.Name) | None -> -1)
                       CWarped = (match named' "WarpsInto:" with Some gem -> counts.Id("warped into:" + gem) | None -> -1)
-                      AsksDuration = ownBase s "BarrageRepeats" > 0.0 || flag "DetonatedByDamage" || (s :: s.Parts) |> List.exists (fun part -> part.Mods |> List.exists (fun m -> m.Stat = Named "Crystals"))
+                      DetonatesCurse = flag "DetonatesCurse"
+                      NoCooldown = flag "NoCooldownWithCharge"
+                      MustHold = flag "NoCooldownWithCharge" && (match s.Consumes with Some charge -> (Map.tryFind charge actor.MaxResources |> Option.defaultValue 0) <> 0 | None -> false)
+                      WindowSecs = ownBase s "WindowSeconds"
+                      WindowRecharge = ownBase s "WindowRecharge"
+                      WindowKey = "Window:" + s.Name
+                      WindowNextKey = "WindowNext:" + s.Name
+                      CWindow = counts.Id("window:" + s.Name)
+                      RageFor = anyKind s "SpendsRage"
+                      RageNeed = s.Parts |> List.sumBy (fun part -> anyKind part "SpendsRage")
+                      CEnraged = counts.Id("enraged:" + s.Name)
+                      Records = (match s.Mods |> List.tryPick (fun m -> if m.Stat = Named "RecordsDamage" then Some m.Value else None) with Some pct when s.Duration > 0.0 -> pct | _ -> nan)
+                      CRecording = counts.Id("recording:" + s.Name)
+                      RecordSource = sources.Id s.Name
+                      AsksDuration = ownBase s "BarrageRepeats" > 0.0 || flag "DetonatedByDamage" || flag "RecordsDamage" || (s :: s.Parts) |> List.exists (fun part -> part.Mods |> List.exists (fun m -> m.Stat = Named "Crystals"))
                       AsksArea = (s :: s.Parts) |> List.exists (fun part -> part.Mods |> List.exists (fun m -> m.Stat = Named "Crystals")) })
                 |> Array.ofList
             let sIso, sClose, sOpen = statuses.Id "Isolated", statuses.Id "Close", statuses.Id "OpenWeakness"
@@ -2024,7 +2063,28 @@ module Flat =
                       StatusCurse = statusNames |> Array.map (fun n -> n.StartsWith "Curse:")
                       StatusMark = statusNames |> Array.map (fun n -> n.StartsWith "Mark:")
                       StatusExposure = statusNames |> Array.map (fun n -> n.StartsWith "Exposure:")
-                      Skills = skills
+                      // (a buff that says a warp went into a projectile can also be given by a
+                      // rule: every skill of which there is one looks for it)
+                      Skills =
+                        skills |> Array.map (fun k ->
+                            if k.Warped >= 0 then k
+                            else
+                                match buffs.Ids.TryGetValue("Warped:" + k.Skill.Name) with
+                                | true, id -> { k with Warped = id }
+                                | _ -> k)
+                      CurseRipe =
+                        statusNames |> Array.map (fun k ->
+                            if not (k.StartsWith "Curse:") then nan
+                            else
+                                let rec find (reaction: Reaction) =
+                                    match reaction with
+                                    | ApplyCurse (n, d, _) when n = k || "Curse:" + n = k -> Some d
+                                    | IfEnemyHas (_, next) | IfBuff (_, next) | SpendStack (_, next) -> find next
+                                    | _ -> None
+                                match actor.Rules |> List.tryPick (fun r -> find r.Reaction) with
+                                | Some d -> d / 2.0
+                                | None -> infinity)
+                      CCurseDetonated = count "curse detonated"
                       FirstSkill = (if actor.Skills.IsEmpty then -1 else 0)
                       Rotation = rotation
                       OnUse = onUse |> Array.map fixCurses
@@ -2534,6 +2594,12 @@ module Flat =
           /// Seeds planted in enemies: owner, skill, enemy, the enemy's life when planted, the
           /// damage it takes to set the seed off, when it fizzles. Newest first.
           mutable Seeds: (int * int * int * float * float * float) list
+          /// Debuffs that record damage (`World.Agonies`): whose, of which skill, on which
+          /// enemy, the hit damage recorded, the share of it taken again, when it ends.
+          mutable Agonies: (int * int * int * float * float * float) list
+          /// Damage that has no type (what a recording debuff takes again).
+          mutable Other: float
+          mutable OtherSeen: bool
           /// Pustules on enemies: owner, part, enemy, the Poison damage dealt when it was
           /// attached, Poison per 1% more damage, the most (%), when it bursts at the latest.
           mutable Pustules: (int * int * int * float * float * float * float) list
@@ -4045,7 +4111,10 @@ module Flat =
             let lasting = if info.AsksDuration then multQ ev qSkillDuration else 1.0
             let areaMult = if info.AsksArea then multQ ev qArea else 1.0
             release s
+            // "does not use up its Cooldown when empowered" (by what it consumes)
+            let free = info.NoCooldown && info.Consumes >= 0 && held s info.Consumes
             match skill.Cooldown with
+            | Some _ when free -> ()
             | Some cd ->
                 let uses = skill.StoredUses * (if doubled then 2 else 1)
                 let pending = (at s.A.Recharges sid) |> List.filter (fun t -> t > s.Time)
@@ -4066,6 +4135,14 @@ module Flat =
              | None -> ())
             // (what the use reads of the buffs as they were when it began)
             let charged = info.Consumes >= 0 && stacksOf s info.Consumes > 0
+            // a part that spends Rage happens when there is enough, in place of the plain one
+            let rage = stacksOf s p.BRage
+            let rageExpires, rageMods = (at s.A.BExpires p.BRage), (at s.A.BMods p.BRage)
+            let mutable enraged = false
+            if info.RageNeed > 0.0 then
+                for k in 1 .. info.Parts.Length - 1 do
+                    let needs = (at p.Skills (at info.Parts k)).RageFor
+                    if needs > 0.0 && float rage >= needs then enraged <- true
             // chained attacks: this use's place in the chain, and the next
             let step = seqStep s sid info
             let barrage = p.BBarrage
@@ -4173,7 +4250,8 @@ module Flat =
                         System.Double.IsNaN pi.Seed
                         && (at <= first || not pi.OncePerUse)
                         && (part = sid || not pi.OnlyTriggered)
-                        && (if pi.NotEnraged then true
+                        && (if pi.RageFor > 0.0 then enraged
+                            elif pi.NotEnraged then not enraged
                             elif pi.NotWithCharge then not charged
                             elif pi.WithCharge then charged
                             elif pi.Waits then false
@@ -4240,6 +4318,17 @@ module Flat =
                 let owner = s.Cur
                 s.Seeds <- (owner, sid, target, foe.Life, needed, s.Time + useTime + lasts) :: (s.Seeds |> List.filter (fun (a, b, _, _, _, _) -> not (a = owner && b = sid)))
                 bump s info.CPlanted
+            // the Rage a part spent
+            if info.RageNeed > 0.0 && (at s.A.BHas p.BRage) && float rage >= info.RageNeed then
+                bump s info.CEnraged
+                let left = rage - int info.RageNeed
+                if left > 0 then setBuff s p.BRage left rageExpires rageMods else removeBuff s p.BRage
+            // a debuff that records damage, on the enemy aimed at
+            if not (System.Double.IsNaN info.Records) then
+                let lasts = skill.Duration * lasting
+                let owner = s.Cur
+                s.Agonies <- (owner, sid, target, 0.0, info.Records / 100.0, s.Time + useTime + lasts) :: (s.Agonies |> List.filter (fun (a, b, _, _, _, _) -> not (a = owner && b = sid)))
+                bump s info.CRecording
             // an infusion a part needed is used up; a part that waits is put down
             // (which parts had their infusion is seen before any is used up)
             if info.Parts.Length > 1 then
@@ -4272,8 +4361,9 @@ module Flat =
                     for place in 0 .. p.Readied.Length - 1 do
                         let b = at p.Readied place
                         if (at s.A.BHas b) then schedule s (last + 1e-9) ESpendBuff b 0 0.0 0.0
+            // ("Consume it when you leap": at the start, where that is what empowers the use)
             if info.Consumes >= 0 then
-                schedule s (last + 1e-9) EConsume info.Consumes sid 0.0 0.0
+                schedule s ((if info.NoCooldown then s.Time else last) + 1e-9) EConsume info.Consumes sid 0.0 0.0
             if useTime > 0.0 && p.Metas.Length > 0 then
                 // Cast on Dodge: energy per unit travelled by a dodge roll, there when the roll ends
                 if info.IsDodgeRoll then
@@ -4376,6 +4466,19 @@ module Flat =
             s.A.HeldStale <- false
         s.A.Energy
 
+    /// Is the skill's window shut (the next use opens one)? (`Sim.windowShut`)
+    let private windowShut (s: State) (info: SkillInfo) =
+        info.WindowSecs > 0.0 && s.Time >= (Map.tryFind info.WindowKey s.A.Energy |> Option.defaultValue -1.0)
+
+    /// Has the enemy a curse that Hexblast can detonate: one that lasts, and (where the
+    /// actor's own rule makes it) is at least half over? (`Sim.ripeCurses`)
+    let private anyRipe (s: State) (e: Foe) =
+        let ripe = s.P.CurseRipe
+        let mutable any = false
+        for id in 0 .. ripe.Length - 1 do
+            if not (System.Double.IsNaN(at ripe id)) && (at e.Has id) && (at e.Expires id) > s.Time && (at e.Expires id) - s.Time <= (at ripe id) then any <- true
+        any
+
     /// What the player sees when choosing a skill (`Sim.view`).
     let private view (s: State) : View =
         let t = aimed s
@@ -4425,7 +4528,10 @@ module Flat =
         let efficiency = incQ ev qCostEfficiency
         release s
         // crossbow ammunition: the cost is for loading, paid with the first shot of a new load
-        let ownCost = if skill.Clip > 0 && not (at s.A.LoadDue sid) then 0.0 else skill.Cost
+        // (a skill with a window: the cost is for opening it)
+        let ownCost =
+            if info.WindowSecs > 0.0 then (if windowShut s info then skill.Cost else 0.0)
+            elif skill.Clip > 0 && not (at s.A.LoadDue sid) then 0.0 else skill.Cost
         let ownCost =
             if skill.CostPerSecond <= 0.0 then ownCost
             else
@@ -4439,6 +4545,10 @@ module Flat =
         let p = s.P
         let info = (at p.Skills sid)
         let clip = info.Skill.Clip
+        // the use that opens a window: it lasts so long, and charges again after it
+        if windowShut s info then
+            bump s info.CWindow
+            s.A.Energy <- s.A.Energy |> Map.add info.WindowKey (s.Time + info.WindowSecs) |> Map.add info.WindowNextKey (s.Time + info.WindowSecs + info.WindowRecharge)
         if clip <= 0 then
             startUse s rng sid t
             schedule s (s.Time + t + 0.0) EReady 0 0 0.0 0.0
@@ -4490,6 +4600,14 @@ module Flat =
                 // a skill that works on a corpse needs one, unless it does without
                 && (info.NeedsCorpse = 0 || corpses s > 0 || (info.NeedsCorpse = 2 && held s info.CorpseElse))
                 && (not info.NeedsCharge || info.Consumes < 0 || held s info.Consumes)
+                // a skill with a window waits until it is charged again
+                && (not (windowShut s info) || s.Time >= (Map.tryFind info.WindowNextKey s.A.Energy |> Option.defaultValue 0.0))
+                // a skill that is empowered by something lying about waits for it, where the character makes it
+                && (not info.MustHold || held s info.Consumes)
+                // Hexblast waits for a curse that can be detonated
+                && (not info.DetonatesCurse || (t >= 0 && anyRipe s (at s.Foes t)))
+                // a recording debuff is left to run out
+                && (s.Agonies.IsEmpty || not (s.Agonies |> List.exists (fun (a, b, _, _, _, _) -> a = s.Cur && b = sid)))
                 // a warp needs something to warp into: an enemy that can be culled, or a projectile
                 && (not info.Warps || info.WarpsInto |> Array.exists (fun skill -> (at s.A.InFlight skill) > 0) || (t >= 0 && v.EnemyStatus.ContainsKey "Cullable"))
                 // a form one is in is not pressed again (that would end it)
@@ -5076,17 +5194,26 @@ module Flat =
             // a part that only happens against an enemy in some state: nothing otherwise; and one
             // that gives way to another part against a state
             // (a warp into a projectile explodes there, whatever the enemy's state)
-            let warped = info.Warped >= 0 && (at s.A.BHas info.Warped)
+            // Hexblast: nothing without a curse that is ripe; the curses it detonates are gone
+            let barred = info.DetonatesCurse && not (anyRipe s e)
+            // a state the hit takes off the enemy: the hit itself still meets the enemy as it
+            // was (its mods as a defender, its shock, its broken armour), what the hit leaves
+            // on it finds the state gone
+            let mutable taken = false
+            if info.DetonatesCurse && not barred then
+                let ripe = p.CurseRipe
+                for id in 0 .. ripe.Length - 1 do
+                    if not (System.Double.IsNaN(at ripe id)) && (at e.Has id) && (at e.Expires id) > s.Time && (at e.Expires id) - s.Time <= (at ripe id) then
+                        if takeState s e id taken then taken <- true
+                bump s p.CCurseDetonated
+            let warped = not barred && info.Warped >= 0 && (at s.A.BHas info.Warped)
             if warped then removeBuff s info.Warped
             let mutable met = warped || info.OnlyVs.Length = 0
             for k in 0 .. info.OnlyVs.Length - 1 do
                 if hasStatus ev (at info.OnlyVs k) then met <- true
             for k in 0 .. info.NotVs.Length - 1 do
                 if hasStatus ev (at info.NotVs k) then met <- false
-            // a state the hit takes off the enemy: the hit itself still meets the enemy as it
-            // was (its mods as a defender, its shock, its broken armour), what the hit leaves
-            // on it finds the state gone
-            let mutable taken = false
+            if barred then met <- false
             if met && not warped && info.ConsumesVs && info.OnlyVs.Length > 0 then
                 let mutable first = -1
                 for k in 0 .. info.OnlyVs.Length - 1 do
@@ -5234,6 +5361,10 @@ module Flat =
                     if (at has t) && (at de t) > 0.0 then addByType s t ((at de t) * k))
                 bump s info.CHits
                 if crit then bump s info.CCrits
+                // "Hit Damage dealt to them while Debuffed": hits are what is recorded
+                if not s.Agonies.IsEmpty then
+                    let got = min dealt lifeBefore
+                    s.Agonies <- s.Agonies |> List.map (fun ((o, k, en, recorded, share, until) as a) -> if en = target && until > s.Time then (o, k, en, recorded + got, share, until) else a)
                 if dead then kill s e s.Time else e.Life <- life
                 // overkill explosions: nearby enemies are ignited for a share of the overkill
                 (let overkill = dealt - lifeBefore
@@ -5648,7 +5779,36 @@ module Flat =
                 match plain.Skill.Delivery with
                 | AreaAtTarget _ -> int (sumQ began qCascades)
                 | _ -> 0
-            if cascades > 0 then
+            // Triskelion Cascade: the empowered spell is centred on the player and cascades along
+            // three arms a third of a turn apart; the empowerment is used up
+            let arms =
+                match plain.Skill.Delivery with
+                | AreaAtTarget _ | AreaAroundSelf _ -> int (sumQ began qTriskelion)
+                | _ -> 0
+            if arms > 0 then
+                let impact = variant ()
+                let info = at p.Skills impact
+                let ev = ask impact
+                let areaMult = multQ ev qArea
+                let delivery = shape ev info true
+                release s
+                let r = match delivery with AreaAtTarget r | AreaAroundSelf r -> Geometry.radius r areaMult | _ -> 0.0
+                let turn = rng.Float() * 2.0 * System.Math.PI
+                for place in 0 .. 3 * arms do
+                    let centre =
+                        if place = 0 then Vec.make 0.0 0.0
+                        else
+                            let arm = (place - 1) / arms
+                            let k = (place - 1) % arms + 1
+                            Vec.scale (float k * r * p.Fight.CascadeSpacing) (Vec.ofAngle (turn + float arm * 2.0 * System.Math.PI / 3.0))
+                    let mutable rest = alive
+                    while not rest.IsEmpty do
+                        let d = rest.Head
+                        if Vec.dist centre d.Position <= r + d.Size then hitEnemy s rng impact mult s.FoeIds.[d.Name]
+                        rest <- rest.Tail
+                for id in 0 .. s.A.BHas.Length - 1 do
+                    if (at s.A.BHas id) && (at s.A.BMods id) |> List.exists (fun m -> m.Stat = Named "TriskelionArms") then removeBuff s id
+            elif cascades > 0 then
                 let axis = Vec.ofAngle (rng.Float() * 2.0 * System.Math.PI)
                 let mutable step = 0.0
                 // the centre impact first (it takes the first infusion); its radius sets the spacing
@@ -6282,6 +6442,21 @@ module Flat =
                     bump s (at (at s.Progs owner).Skills part).CShattered
                 elif e.Life > 0.0 && s.Time < until then kept <- crystal :: kept
             s.Crystals <- List.rev kept
+        // recorded damage is taken again as life when the debuff ends, or as soon as that kills
+        if not s.Agonies.IsEmpty then
+            let mutable kept = []
+            for ((owner, skill, enemy, mark, share, until) as agony) in s.Agonies do
+                let e = at s.Foes enemy
+                if e.Life > 0.0 then
+                    let owed = share * mark
+                    if s.Time >= until || owed >= e.Life then
+                        let dealt = min owed e.Life
+                        addDamage s (at (at s.Progs owner).Skills skill).RecordSource dealt
+                        s.Other <- s.Other + dealt
+                        s.OtherSeen <- true
+                        if owed >= e.Life then kill s e s.Time else e.Life <- e.Life - dealt
+                    else kept <- agony :: kept
+            s.Agonies <- List.rev kept
 
     /// What has run out of every actor's buffs goes (`Sim.prune`).
     let private pruneAll (s: State) =
@@ -6358,7 +6533,7 @@ module Flat =
             recover s dt
             if s.AliveCount > 0 && alive s then
                 pruneAll s
-                if not (s.Seeds.IsEmpty && s.Pustules.IsEmpty && s.Crystals.IsEmpty) then planted s
+                if not (s.Seeds.IsEmpty && s.Pustules.IsEmpty && s.Crystals.IsEmpty && s.Agonies.IsEmpty) then planted s
                 // Demon Form: a Demonflame for every second in the form (at most 10), life lost for
                 // each; at 1 life the form ends and its cooldown starts
                 if (at s.A.BHas p.BDemonForm) && p.Vitals.IsSome then
@@ -6680,6 +6855,9 @@ module Flat =
               Kills = ResizeArray()
               CorpsesUsed = 0
               Seeds = []
+              Agonies = []
+              Other = 0.0
+              OtherSeen = false
               Pustules = []
               Crystals = []
               Plants = ResizeArray()
@@ -6844,7 +7022,9 @@ module Flat =
           Duration = (match cleared with Some t -> t | None -> min s.Time maxTime)
           Kills = List.ofSeq s.Kills
           DamageBy = floats p.SourceNames s.Damage s.DamageSeen
-          DamageByType = floats (DamageType.all |> List.map DamageType.name |> Array.ofList) s.ByType s.ByTypeSeen
+          DamageByType =
+            (let byType = floats (DamageType.all |> List.map DamageType.name |> Array.ofList) s.ByType s.ByTypeSeen
+             if s.OtherSeen then Map.add "Other" s.Other byType else byType)
           Counts =
             (let mutable m = Map.empty
              for i in 0 .. p.CountNames.Length - 1 do
