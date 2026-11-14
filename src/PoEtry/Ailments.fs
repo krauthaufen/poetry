@@ -171,11 +171,14 @@ module Ailments =
     /// Multiplier the enemy applies to a damage-over-time of this type right now.
     let dotTakenMult (defender: Defender) t =
         let dctx = Ctx.empty
+        let own (t: DamageType) =
+            Mods.sumBase dctx [ Resist t ] defender.Mods
+            |> min (min Constants.resistCeiling (Constants.enemyBaseMaxResist + Mods.sumBase dctx [ MaxResist t ] defender.Mods))
+            |> max Constants.resistFloor
         let resist =
             match t with
             | Physical -> 0.0 // bleeding ignores armour
-            | _ ->
-                Mods.sumBase dctx [ Resist t ] defender.Mods
-                |> min (min Constants.resistCeiling (Constants.enemyBaseMaxResist + Mods.sumBase dctx [ MaxResist t ] defender.Mods))
-                |> max Constants.resistFloor
+            // "Resist Elemental Damage based on their Lowest Resistance"
+            | _ when DamageType.isElemental t && Mods.sumBase dctx [ Named "ResistByLowest" ] defender.Mods > 0.0 -> DamageType.elemental |> List.map own |> List.min
+            | _ -> own t
         (1.0 - resist / 100.0) * Hit.damageTakenMult defender t * Mods.mult dctx [ DotTaken ] defender.Mods

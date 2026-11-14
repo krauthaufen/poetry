@@ -284,6 +284,80 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         // a whole fight with them is the same in both engines
         same { f with MaxTime = 6.0 } [ 1u; 2u; 3u ])
 
+    test "Presence: enemies in it resist elemental damage by their lowest resistance" (fun () ->
+        // 60% fire, 10% cold, 30% lightning resistance; 100 fire a hit, six hits
+        let enemy = { EnemyDef.atLevel 83 1e9 with Mods = [ Mod.base' (Resist Fire) 60.0; Mod.base' (Resist Cold) 10.0; Mod.base' (Resist Lightning) 30.0 ] }
+        let bolt = { Skill.make "Bolt" [ Spell ] with BaseDamage = Map.ofList [ Fire, { Min = 100.0; Max = 100.0 } ]; BaseTime = 0.5; BaseCrit = 0.0 }
+        let noIgnite = Mod.more (AilmentChance Ignite) -100.0
+        let fight (ms: Mod list) lowest =
+            { Fight.single enemy (Actor.make "Player" ms [ bolt ]) 3.2 with
+                PresenceAuras = (if lowest then [ "Presence: Lowest Resistance", 1, [ Mod.base' (Named "ResistByLowest") 1.0 ] ] else []) }
+        let dealt f = (Sim.run f 1u).DamageBy |> Map.toList |> List.sumBy snd
+        near (6.0 * 40.0) (dealt (fight [ noIgnite ] false))
+        // by the lowest, cold's 10%
+        near (6.0 * 90.0) (dealt (fight [ noIgnite ] true))
+        // penetration of the damage's own type then applies to that (and stops at zero)
+        near (6.0 * 100.0) (dealt (fight [ noIgnite; Mod.base' (Penetration Fire) 20.0 ] true))
+        // the Ignite of such a hit burns against the lowest too: 20 a second for 4 s from the
+        // first hit (0.5 s), 2.7 s of it in the fight: x 0.9 in place of x 0.4
+        near (6.0 * 90.0 + 2.7 * 20.0 * 0.9) (dealt (fight [ Mod.base' (AilmentChance Ignite) 100.0 ] true))
+        near (6.0 * 40.0 + 2.7 * 20.0 * 0.4) (dealt (fight [ Mod.base' (AilmentChance Ignite) 100.0 ] false))
+        same (fight [] true) seeds
+        same (fight [ Mod.base' (Penetration Fire) 20.0; Mod.base' (AilmentChance Ignite) 100.0 ] true) seeds
+        same (fight [] false) seeds
+        // the character's line is that aura
+        let o = Options.defaults
+        let c = load { blank with ExtraLines = [ "Enemies in your Presence Resist Elemental Damage based on their Lowest Resistance" ] } o
+        let f = Setup.fight c o (Setup.player c o [] None) (Encounter.boss 83 Rarity.defaults 30.0)
+        equal (box [ "Presence: Lowest Resistance", [ Named "ResistByLowest", 1.0 ] ]) (box (f.PresenceAuras |> List.map (fun (n, _, ms) -> n, ms |> List.map (fun m -> m.Stat, m.Value)))))
+
+    test "projectile speed as projectile damage: its increases, and a share of a spell's increased cast speed" (fun () ->
+        let damageFromSpeed supports lines =
+            let c = load { blank with Groups = [ group (gem "Spark" :: (supports |> List.map support)) ]; ExtraLines = lines } Options.defaults
+            match Setup.pressed c Options.defaults "Spark" with
+            | Some p -> p.Skill.Mods |> List.filter (fun m -> m.Source = "projectile speed") |> List.map (fun m -> m.Stat, m.Kind, m.Value)
+            | None -> failwith "Spark not built"
+        // without the support the speed is nothing
+        equal (box ([]: (Stat * ModKind * float) list)) (box (damageFromSpeed [] [ "30% increased Projectile Speed" ]))
+        // Projectile Acceleration III: 30% increased speed is 30% increased damage (its own 40% more speed is no increase)
+        equal (box [ Damage AllDamage, Inc, 30.0 ]) (box (damageFromSpeed [ "Projectile Acceleration III" ] [ "30% increased Projectile Speed" ]))
+        equal (box ([]: (Stat * ModKind * float) list)) (box (damageFromSpeed [ "Projectile Acceleration III" ] []))
+        // with Vilenta's Propulsion 75% of increased cast speed counts as projectile speed: 30 + 0.75 x 20
+        equal (box [ Damage AllDamage, Inc, 45.0 ]) (box (damageFromSpeed [ "Projectile Acceleration III"; "Vilenta's Propulsion" ] [ "30% increased Projectile Speed"; "20% increased Cast Speed" ]))
+        // and in a fight: a hit deals 1.3 times as much
+        let dealt lines =
+            let o = { Options.defaults with MaxTime = 10.0; Immortal = true }
+            let c = load { blank with Groups = [ group [ gem "Spark"; support "Projectile Acceleration III" ] ]; ExtraLines = lines } o
+            let out = Sim.run (Setup.fight c o (Setup.player c o [ Spam "Spark" ] None) (Encounter.boss 83 Rarity.defaults 30.0 |> List.map (fun e -> { e with Life = 1e13 }))) 1u
+            (Map.tryFind "Spark (hit)" out.DamageBy |> Option.defaultValue 0.0) / float (max 1 (count out "hits:Spark"))
+        let fast, plain = dealt [ "30% increased Projectile Speed"; "Never deal Critical Hits" ], dealt [ "Never deal Critical Hits" ]
+        if abs (fast / plain - 1.3) > 0.06 then failwithf "%.1f a hit with the speed, %.1f without" fast plain)
+
+    test "stats: penetration of attacks, mace slams' aftershocks, what holds within 2 m or against marked or poisoned enemies" (fun () ->
+        equal (box [ for t in DamageType.elemental -> Mod.base' (Penetration t) 15.0 |> Mod.whenever (SkillIs Attack) ]) (box (mods "base_attack_damage_penetrates_elemental_resist_%" 15.0))
+        equal (box [ Mod.base' (Named "AftershockChance") 25.0 |> Mod.whenever (SkillIs Slam) |> Mod.whenever (SkillIs Mace) ]) (box (mods "your_mace_slam_aftershock_chance_%" 25.0))
+        equal (box [ Mod.inc CritBonus 20.0 |> Mod.whenever (SkillIs Projectile) |> Mod.whenever (EnemyHas "Close") ]) (box (mods "critical_hit_damage_bonus_+%_vs_enemies_within_2m_distance" 20.0))
+        equal (box [ Mod.inc (Damage AllDamage) 20.0 |> Mod.whenever (SkillIs Projectile) |> Mod.whenever (EnemyHas "Close") ]) (box (mods "projectile_damage_+%_vs_enemies_within_2m_distance" 20.0))
+        equal (box [ Mod.inc (AilmentMagnitude None) 20.0 |> Mod.whenever (EnemyHas "Marked") ]) (box (mods "ailment_magnitude_+%_vs_marked_enemies" 20.0))
+        equal (box [ Mod.base' (AilmentChance Maim) 30.0 |> Mod.whenever (SkillIs Attack) |> Mod.whenever (EnemyHas "Poisoned") ]) (box (mods "maim_on_hit_%_vs_poisoned_enemies" 30.0))
+        // a random element: 6% is 2% as each, of every type
+        equal (box 15) (box (mods "non_skill_base_all_damage_%_to_gain_as_random_element" 6.0).Length)
+        near 2.0 (mods "non_skill_base_all_damage_%_to_gain_as_random_element" 6.0).Head.Value
+        // within 2 m: a projectile at an enemy 1 m off deals the more, at one 5 m off not
+        let bolt = { Skill.make "Bolt" [ Spell; Projectile ] with BaseDamage = Map.ofList [ Chaos, { Min = 100.0; Max = 100.0 } ]; BaseTime = 0.5; BaseCrit = 0.0 }
+        let fight distance =
+            let enemy = { EnemyDef.atLevel 83 1e9 with Mods = []; Position = Vec.make distance 0.0; Size = 5.0 }
+            Fight.single enemy (Actor.make "Player" (mods "projectile_damage_+%_vs_enemies_within_2m_distance" 50.0) [ bolt ]) 3.2
+        let dealt f = (Sim.run f 1u).DamageBy |> Map.toList |> List.sumBy snd
+        near (6.0 * 150.0) (dealt (fight 15.0))
+        near (6.0 * 100.0) (dealt (fight 50.0))
+        same (fight 15.0) seeds
+        // a character's chance of an additional Remnant counts for its skills' remnants
+        let c = load { blank with Groups = [ group [ gem "Frost Bomb" ] ]; ExtraLines = [ "15% chance for Remnants you pick up to count as picking up an additional Remnant" ] } Options.defaults
+        match Setup.pressed c Options.defaults "Frost Bomb" with
+        | Some p -> equal (box [ 15.0 ]) (box (p.Rules |> List.choose (fun r -> match r.Reaction with DropRemnant (_, _, extra) -> Some extra | _ -> None)))
+        | None -> failwith "Frost Bomb not built")
+
     // ---- allies, recovery while standing, stun recovery, what monsters never do ----
 
     test "stats: what allies in the Presence gain and regenerate; costs without energy shield; recovery while stationary" (fun () ->

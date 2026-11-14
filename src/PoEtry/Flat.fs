@@ -945,7 +945,10 @@ module Flat =
           /// Its own mods as a defender has them: newest first, with their values.
           Own: (Stat * ModKind * float * bool)[]
           /// The debuffs it has for the whole fight: status, stacks, mods.
-          Auras: (int * int * Mod list) list }
+          Auras: (int * int * Mod list) list
+          /// Whether anything in the fight can make it resist elemental damage by its lowest
+          /// resistance (only then is it asked at a hit).
+          MayResistByLowest: bool }
 
     type private CycleInfo =
         { Buff: int
@@ -1313,7 +1316,11 @@ module Flat =
                     fight.EnemyAuras
                     |> List.map (fun (name, stacks, mods) ->
                         let k = if name.StartsWith "Curse:" then Mods.more Ctx.empty [ Named "CurseEffectOnSelf" ] db else 1.0
-                        statuses.Id name, stacks, mods |> List.map (Mod.scaled k)) })
+                        statuses.Id name, stacks, mods |> List.map (Mod.scaled k))
+                  MayResistByLowest =
+                    (let lowest (ms: Mod list) = ms |> List.exists (fun m -> m.Stat = Named "ResistByLowest")
+                     lowest d.Mods || (fight.EnemyAuras @ fight.PresenceAuras) |> List.exists (fun (_, _, ms) -> lowest ms)
+                     || (fight.Player :: fight.Minions) |> List.exists (fun a -> a.Rules |> List.exists (fun r -> match r.Reaction with ApplyDebuff (_, _, _, ms) | ApplyCurse (_, _, ms) -> lowest ms | _ -> false))) })
         let enemyIds = Dictionary<string, int>()
         enemies |> Array.iteri (fun i e -> enemyIds.[e.Name] <- i)
 
@@ -3273,12 +3280,15 @@ module Flat =
                                 let t = typeIndex d.Of
                                 if System.Double.IsNaN (at e.DotTaken t) then
                                     // (`Ailments.dotTakenMult`: bleeding ignores armour)
+                                    let own (t: int) =
+                                        dsum e Base (at resistOf t) 0.0
+                                        |> min (min Constants.resistCeiling (Constants.enemyBaseMaxResist + dsum e Base (at maxResistOf t) 0.0))
+                                        |> max Constants.resistFloor
                                     let resist =
                                         if t = 0 then 0.0
-                                        else
-                                            dsum e Base (at resistOf t) 0.0
-                                            |> min (min Constants.resistCeiling (Constants.enemyBaseMaxResist + dsum e Base (at maxResistOf t) 0.0))
-                                            |> max Constants.resistFloor
+                                        // "Resist Elemental Damage based on their Lowest Resistance"
+                                        elif t <= 3 && e.Info.MayResistByLowest && dsum e Base (Named "ResistByLowest") 0.0 > 0.0 then min (own 1) (min (own 2) (own 3))
+                                        else own t
                                     put e.DotTaken t ((1.0 - resist / 100.0) * dmult e (at takenStats t) * dmult e dotTakenStats)
                                 put rates i (d.Dps * k * (at e.DotTaken t))
                                 put labels i (d.Label)
@@ -4766,9 +4776,18 @@ module Flat =
         min Constants.enemyMaxPhysReduction (fromArmour + n.PhysFlat)
 
     /// `Hit.effectiveResist`.
+    let private resistByLowest = Named "ResistByLowest"
+
     let private effectiveResist (ev: Ev) (n: Foe) (t: int) =
-        let maxRes = nMaxRes n t
-        let res = nRes n t + sumQ ev (at qEnemyResist t) |> min maxRes |> max Constants.resistFloor
+        let res =
+            // "Resist Elemental Damage based on their Lowest Resistance": the lowest of the three
+            if t >= 1 && t <= 3 && n.Info.MayResistByLowest && dsum n Base resistByLowest 0.0 > 0.0 then
+                let mutable low = infinity
+                for other in 1 .. 3 do
+                    let r = nRes n other + sumQ ev (at qEnemyResist other) |> min (nMaxRes n other) |> max Constants.resistFloor
+                    if r < low then low <- r
+                low
+            else nRes n t + sumQ ev (at qEnemyResist t) |> min (nMaxRes n t) |> max Constants.resistFloor
         let pen = sumQ ev (at qPen t)
         let floor' =
             if t >= 1 && t <= 3 then

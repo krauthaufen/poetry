@@ -334,7 +334,7 @@ module Behaviours =
                               OnStunChance = sum "ward_remnants_chance_to_spawn_remnant_on_stun_%"
                               StunCooldown = sum "ward_remnants_spawn_remnant_on_stun_cooldown_ms" / 1000.0
                               WardPerRemnant = sum "ward_remnants_gain_per_globe" * (1.0 + sum "remnant_effect_+%" / 100.0)
-                              ExtraChance = sum "chance_%_to_create_additional_remnant"
+                              ExtraChance = (sum "chance_%_to_create_additional_remnant" + Mods.sumBase Ctx.empty [ Named "ExtraRemnantChance" ] charMods)
                               Delay = pickupSeconds + sum "remnant_delay_X_ms" / 1000.0
                               Overflow = 1.5 }))
 
@@ -361,7 +361,7 @@ module Behaviours =
                               CritCooldown = sum "mana_remnants_spawn_remnant_on_crit_vs_elemental_ailment_enemy_every_X_ms" / 1000.0
                               ManaPerRemnant = sum "mana_remnants_mana_gain_per_globe" * (1.0 + (sum "remnant_effect_+%" + Mods.sumInc Ctx.empty [ Named "RemnantEffect" ] charMods) / 100.0)
                               PercentOfMaxMana = Mods.sumBase Ctx.empty [ Named "RemnantRecoverManaPercent" ] charMods
-                              ExtraChance = sum "chance_%_to_create_additional_remnant"
+                              ExtraChance = (sum "chance_%_to_create_additional_remnant" + Mods.sumBase Ctx.empty [ Named "ExtraRemnantChance" ] charMods)
                               Delay = pickupSeconds + sum "remnant_delay_X_ms" / 1000.0
                               Overflow = 2.0 }))
 
@@ -453,7 +453,7 @@ module Behaviours =
                               Shock, "LightningInfusion", sum "infusion_remnants_%_chance_to_spawn_lightning_infusion_on_shocking_an_enemy" ]
                             |> List.filter (fun (_, _, c) -> c > 0.0)
                         if r.IsEmpty then None
-                        else Some(r, sum "chance_%_to_create_additional_remnant", pickupSeconds + sum "remnant_delay_X_ms" / 1000.0)))
+                        else Some(r, (sum "chance_%_to_create_additional_remnant" + Mods.sumBase Ctx.empty [ Named "ExtraRemnantChance" ] charMods), pickupSeconds + sum "remnant_delay_X_ms" / 1000.0)))
             |> Option.defaultValue ([], 0.0, pickupSeconds)
         if remnants.IsEmpty && consumers.IsEmpty then None
         else
@@ -1110,7 +1110,9 @@ module Behaviours =
           if has "Exposure" then
               let k = Mods.inc Ctx.empty [ Named "ExposureEffect" ] db
               for t in DamageType.elemental -> "Exposure:" + DamageType.name t, 1, [ Mod.base' (Resist t) (-Constants.exposureMagnitude * k) |> Mod.from "Presence" ]
-          if fire <> 0.0 then yield "Presence: Fire Resistance", 1, [ Mod.base' (Resist Fire) fire |> Mod.from "Presence" ] ]
+          if fire <> 0.0 then yield "Presence: Fire Resistance", 1, [ Mod.base' (Resist Fire) fire |> Mod.from "Presence" ]
+          // "Enemies in your Presence Resist Elemental Damage based on their Lowest Resistance" (Hit.effectiveResist)
+          if has "LowestResist" then yield "Presence: Lowest Resistance", 1, [ Mod.base' (Named "ResistByLowest") 1.0 |> Mod.from "Presence" ] ]
 
     /// Charms from the equipped items (API layout: "Flask: Lasts N Seconds", "Flask: Consumes N
     /// of M Charges on use", "Utility: <effect>", "Used when you ..."). Returns the charms and
@@ -1241,7 +1243,7 @@ module Behaviours =
                     // "Creates a Lightning Infusion on successful use") when it does
                     let seed = sum "living_bomb_damage_threshold_%_of_ailment_threshold" > 0.0 || raw |> List.exists (fun (k, _) -> k = "active_skill_show_cull_range")
                     [ { Hook = (if seed then OnHit else OnUse); Filter = Called skillName; Chance = 100.0
-                        Reaction = DropRemnant(el + "Infusion", detonation + pickupSeconds, sum "chance_%_to_create_additional_remnant") } ]
+                        Reaction = DropRemnant(el + "Infusion", detonation + pickupSeconds, (sum "chance_%_to_create_additional_remnant" + Mods.sumBase Ctx.empty [ Named "ExtraRemnantChance" ] charMods)) } ]
                 | _ -> []
             | _ -> []
         exposure @ remnant

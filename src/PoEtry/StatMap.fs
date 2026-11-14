@@ -394,6 +394,7 @@ module StatMap =
         | "base_enemies_in_your_presence_are_hindered" -> one (Mod.flag (Named "PresenceAura:Hindered"))
         | "enemies_in_presence_are_blinded" -> one (Mod.flag (Named "PresenceAura:Blinded"))
         | "enemies_in_presence_have_exposure" -> one (Mod.flag (Named "PresenceAura:Exposure"))
+        | "enemies_in_presence_elemental_damage_resisted_by_lowest_elemental_resistance" -> one (Mod.flag (Named "PresenceAura:LowestResist"))
         | "enemies_in_presence_have_fire_resistance_%" -> one (Mod.base' (Named "PresenceResist:Fire") v)
         | "charm_charges_gained_+%" -> one (Mod.inc (Named "CharmChargesGained") v)
         | "primalist_charm_charges_gained_+%_final" -> one (Mod.more (Named "CharmChargesGained") v)
@@ -858,6 +859,29 @@ module StatMap =
         // "Supported Spells have X% increased Cooldown Recovery Rate"
         | "base_spell_cooldown_speed_+%" -> one (Mod.inc CooldownRecovery v |> Mod.whenever (SkillIs Spell))
         | "base_cooldown_speed_+%_final" -> one (Mod.more CooldownRecovery v)
+        // "Attack Damage Penetrates X% of Enemy Elemental Resistances"
+        | "base_attack_damage_penetrates_elemental_resist_%" -> Some(Mods(DamageType.elemental |> List.map (fun t -> Mod.base' (Penetration t) v |> Mod.whenever (SkillIs Attack))))
+        // "X% chance for Mace Slam Skills you use yourself to cause an additional Aftershock"
+        | "your_mace_slam_aftershock_chance_%" -> one (Mod.base' (Named "AftershockChance") v |> Mod.whenever (SkillIs Slam) |> Mod.whenever (SkillIs Mace))
+        // "X% increased Magnitude of Non-Damaging Ailments you inflict with Critical Hits"
+        | "non_damaging_ailment_effect_+%_with_critical_strikes" -> Some(Mods([ Shock; Chill ] |> List.map (fun a -> Mod.inc (AilmentMagnitude(Some a)) v |> Mod.whenever IsCrit)))
+        // "X% increased Magnitude of Ailments you inflict against Marked Enemies"
+        | "ailment_magnitude_+%_vs_marked_enemies" -> one (Mod.inc (AilmentMagnitude None) v |> Mod.whenever (EnemyHas "Marked"))
+        // "Projectiles have X% increased Critical Damage Bonus against Enemies within 2m", "Projectiles
+        // deal X% increased Damage with Hits against Enemies within 2m" (Close Range: within 2 m)
+        | "critical_hit_damage_bonus_+%_vs_enemies_within_2m_distance" -> one (Mod.inc CritBonus v |> Mod.whenever (SkillIs Projectile) |> Mod.whenever (EnemyHas "Close"))
+        | "projectile_damage_+%_vs_enemies_within_2m_distance" -> one (Mod.inc (Damage AllDamage) v |> Mod.whenever (SkillIs Projectile) |> Mod.whenever (EnemyHas "Close"))
+        // "X% chance for Attacks to Maim on Hit against Poisoned Enemies"
+        | "maim_on_hit_%_vs_poisoned_enemies" -> one (Mod.base' (AilmentChance Maim) v |> Mod.whenever (SkillIs Attack) |> Mod.whenever (EnemyHas "Poisoned"))
+        // "Gain X% of Damage as Extra Damage of a random Element": a third of it as each (the
+        // average; which element, and how often it is chosen anew, is not in the text)
+        | "non_skill_base_all_damage_%_to_gain_as_random_element" ->
+            Some(Mods [ for into in DamageType.elemental do for from in DamageType.all do yield Mod.base' (GainAs(from, into)) (v / 3.0) ])
+        | "grenade_skill_number_of_additional_projectiles" -> one (Mod.base' AdditionalProjectiles v |> Mod.whenever (SkillIs(Tag "Grenade")))
+        | "hazard_damage_+%" -> one (Mod.inc (Damage AllDamage) v |> Mod.whenever (SkillIs(Tag "Type:Hazard")))
+        // "X% chance for Remnants you pick up to count as picking up an additional Remnant": as a
+        // chance of an additional Remnant (the two added up: a guess)
+        | "created_remnants_have_%_chance_to_duplicate_pick_up_results" -> one (Mod.base' (Named "ExtraRemnantChance") v)
         // "X% more Mana Cost of Skills if you have no Energy Shield"
         | "lich_mana_cost_+%_final_if_you_have_no_energy_shield" -> one (Mod.more ManaCost v |> Mod.whenever (Not(WhileBuff "HasEnergyShield")))
         // "Physical Spell Critical Hits build Pin"
@@ -988,6 +1012,15 @@ module StatMap =
                   || id = "base_remnant_duration_ms" || id = "verisium_infusion_skill_number_of_verisium_infusion_to_grant" -> Some Structural
         // ---- more offence ----
         // projectile speed changes nothing here: projectiles land when the use hits
+        // "increased Projectile Speed": nothing by itself (below), but kept for "Increases and
+        // reductions to Projectile speed also apply to Projectile Damage" (Gems.speedAsDamage)
+        | "base_projectile_speed_+%" | "projectile_speed_+%" -> one (Mod.inc (Named "ProjectileSpeed") v)
+        | "spell_skill_projectile_speed_+%" -> one (Mod.inc (Named "ProjectileSpeed") v |> Mod.whenever (SkillIs Spell))
+        | "projectile_speed_+%_with_crossbow_skills" -> one (Mod.inc (Named "ProjectileSpeed") v |> Mod.whenever (SkillIs Crossbow))
+        | "projectile_speed_additive_modifiers_also_apply_to_projectile_damage" -> one (Mod.flag (Named "ProjectileSpeedAsDamage"))
+        | "arrow_speed_additive_modifiers_also_apply_to_bow_damage" -> one (Mod.flag (Named "ProjectileSpeedAsDamage") |> Mod.whenever (SkillIs Bow))
+        // "X% of increases and reductions to Cast speed also apply to Projectile Speed"
+        | "cast_speed_additive_modifiers_also_apply_to_projectile_speed_at_%_value" -> one (Mod.base' (Named "CastSpeedAsProjectileSpeed") v)
         // (how much the speed varies from one projectile to the next: read for shards that live
         // a fixed time, Gems `RangeVariation`; for the others as their speed)
         | id when id.EndsWith "projectile_speed_+%" || id.EndsWith "projectile_speed_+%_final" || id = "active_skill_projectile_speed_+%_variation_final" -> Some NotOffensive
@@ -1065,9 +1098,12 @@ module StatMap =
         | "marauder_hidden_ascendancy_damage_+%_final" ->
             Some(Mods([ "Type:Storm"; "Type:Plant" ] |> List.map (fun t -> Mod.more (Damage AllDamage) v |> Mod.whenever (SkillIs Spell) |> Mod.whenever (SkillIs(Tag t)))))
         | "base_life_leech_does_not_stop_at_full_life" | "can_wield_2h_axe_sword_mace_in_one_hand" -> Some Structural
-        | "keystone_conduit" | "minions_get_amulet_stats_instead_of_you" | "can_have_2_companions" | "keystone_ancestral_bond" ->
+        | "keystone_conduit" | "minions_get_amulet_stats_instead_of_you" | "keystone_ancestral_bond" ->
             Some(Unsimulated "minions / allies")
         | "keystone_bulwark" -> Some(Unsimulated "movement")
+        // "When you kill a Rare monster, you gain its Modifiers for 60 seconds": the monsters of a
+        // fight have no modifiers of their own (only what their rarity makes of them)
+        | "gain_rare_monster_mods_on_kill_ms" -> Some(Unsimulated "rare monsters' modifiers")
         | "critical_strike_chance_+%_if_triggered_skill_recently" -> one (Mod.inc CritChance v |> Mod.whenever (WhileBuff "TriggeredRecently"))
         | "critical_strike_multiplier_+_if_have_not_dealt_critical_strike_recently" -> one (Mod.inc CritBonus v |> Mod.whenever (Not(WhileBuff "CritRecently")))
         | "ailment_chance_+%_vs_exposed" ->
@@ -1436,7 +1472,24 @@ module StatMap =
           // "Deflected Hits cannot inflict Maim / Bleeding on you"
           "deflected_hits_cannot_directly_inflict_maim_on_self"; "deflected_hits_cannot_inflict_bleeding_on_self"
           // "Enemies in your Presence have X% reduced Life Regeneration rate / Cooldown Recovery Rate"
-          "enemies_in_presence_life_regeneration_+%"; "enemies_in_presence_cooldown_recovery_+%" ]
+          "enemies_in_presence_life_regeneration_+%"; "enemies_in_presence_cooldown_recovery_+%"
+          // the player is never Heavily Stunned (RULES.md, "Heavy stun on the player"), and of the
+          // damaging ailments only Ignite is ever on it: "increased Attack Damage if you have been
+          // Heavy Stunned Recently", "Cannot be Heavy Stunned while Sprinting", "Damaging Ailments
+          // Cannot Be inflicted on you while you already have one"
+          "attack_damage_+%_if_been_heavy_stunned_recently"; "cannot_be_heavy_stunned_while_sprinting"; "cannot_have_more_than_1_damaging_ailment" ]
+        |> List.contains id
+
+    /// What decides how a character can be built, and is all there in the build as it is read:
+    /// another ring slot (the ring is among the items), companions beyond the first (they are
+    /// among the gems), passives allocated without a path to them (they are among the
+    /// passives), more room in the inventory, which beasts can be tamed. And "Gain the
+    /// benefits of Bonded modifiers on Runes and Idols": read where the items are (RULES.md,
+    /// "Bonded: lines").
+    let private howItIsBuilt (id: string) =
+        [ "enable_ring_slot_3"; "titan_additional_inventory"; "can_have_2_companions"; "can_have_unlimited_companions"
+          "ascendancy_disconnected_passives_can_be_allocated_around_allocated_keystones"; "local_unique_jewel_nearby_disconnected_passives_can_be_allocated"
+          "tame_beast_can_target_unique_beasts"; "ascendancy_shaman_gain_additional_socketable_mods" ]
         |> List.contains id
 
     /// "X% increased Explicit Resistance Modifier magnitudes" and the like on an item: the
@@ -1447,7 +1500,7 @@ module StatMap =
     let private isNonOffensive (id: string) =
         let words = split id
         // A penetration / enemy debuff line mentions resistance but is offensive.
-        words |> List.exists noCombatWords.Contains || ownMovement id || monstersNeverDo id || shownOnTheItem id
+        words |> List.exists noCombatWords.Contains || ownMovement id || monstersNeverDo id || shownOnTheItem id || howItIsBuilt id
 
     let rec private direct (id: string) value =
         match explicit id value with
