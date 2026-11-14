@@ -238,6 +238,9 @@ module Constants =
     /// the line each. Not in the data of this game. A guess.
     let forkAngle = 60.0
 
+    /// Combo: what was built "in the last 8 seconds" (keyword text, poe2db).
+    let comboWindow = 8.0
+
     /// The player's Presence: "By default this has a 4 metre radius" (keyword text, poe2db).
     let presenceRadius = 40.0
 

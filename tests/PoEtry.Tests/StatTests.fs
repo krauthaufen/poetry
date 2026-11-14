@@ -901,6 +901,25 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         if crits 0.0 > 1 then failwithf "%d crits of a blinded monster" (crits 0.0)
         same (fight 0.5) seeds)
 
+    // ---- Combo consumed ----
+
+    test "damage per Combo consumed: a skill that requires Combo consumes it at every use, up to 40% increased" (fun () ->
+        let staff = "Weapon 1", "Rarity: Rare\nTest Staff\nWrapped Quarterstaff\n--------\n"
+        let bell lines =
+            let c = load { blank with Items = [ staff ]; Groups = [ group [ gem "Tempest Bell" ] ]; ExtraLines = lines } Options.defaults
+            let player = Setup.player c Options.defaults [ Spam "Tempest Bell" ] None
+            player.Skills |> List.find (fun s -> s.Name = "Tempest Bell")
+        let combo = (bell []).Mods |> List.sumBy (fun m -> if m.Stat = Named "Requires:Combo" && m.Kind = Base then m.Value else 0.0)
+        if combo <= 0.0 then failwith "Tempest Bell requires no Combo"
+        let consumed (sk: Skill) = sk.Mods |> List.filter (fun m -> m.Source = "Combo consumed") |> List.map (fun m -> m.Stat, m.Kind, m.Value)
+        equal (box ([]: (Stat * ModKind * float) list)) (box (consumed (bell [])))
+        equal (box [ Damage AllDamage, Inc, min 40.0 (2.0 * combo) ]) (box (consumed (bell [ "Skills deal 2% increased Damage per Combo consumed, up to 40%" ])))
+        equal (box [ Damage AllDamage, Inc, 40.0 ]) (box (consumed (bell [ "Skills deal 30% increased Damage per Combo consumed, up to 40%" ])))
+        // "Skills lose Combo 100% faster": what was built is lost after 4 s without a gain, not 8
+        let window (sk: Skill) = sk.Mods |> List.sumBy (fun m -> if m.Stat = Named "ComboWindow" then m.Value else 0.0)
+        near 0.0 (window (bell []))
+        near 4.0 (window (bell [ "Skills lose Combo 100% faster" ])))
+
     // ---- Scarred Faith ----
 
     test "Scarred Faith: prevented physical damage recouped as energy shield per enemy power; no regeneration; none above armour" (fun () ->

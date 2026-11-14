@@ -688,7 +688,23 @@ module Setup =
                 let k = Mods.inc ctx [ Named "GloryGeneration" ] (ModDb.ofList (sheet.Mods @ sk.Mods))
                 if k = 1.0 then sk
                 else { sk with Mods = sk.Mods |> List.map (fun m -> match m.Stat with Named n when n.StartsWith "Builds:Glory" -> { m with Value = m.Value * k } | _ -> m) })
-        { Actor.make "Player" (sheet.Mods @ (used |> List.collect (fun (_, p) -> p.Grants))) (gloryGeneration << onBolts <| (pressedSkills @ (metas |> List.collect (fun (_, s, _) -> s)) @ (consumers |> List.map (fun (_, _, cp) -> cp)) @ heraldSkills @ (used |> List.collect (fun (_, p) -> p.Extra)))) with
+        // "Skills deal X% increased Damage per Combo consumed, up to 40%": a skill that requires
+        // Combo consumes that much at every use
+        let comboConsumed (skills: Skill list) =
+            skills |> List.map (fun (sk: Skill) ->
+                let ctx = { Ctx.empty with SkillName = sk.Name; SkillTags = sk.Tags }
+                let db = ModDb.ofList (sheet.Mods @ sk.Mods)
+                let per = Mods.sumBase ctx [ Named "DamagePerComboConsumed" ] db
+                let combo = sk.Mods |> List.sumBy (fun m -> if m.Stat = Named "Requires:Combo" && m.Kind = Base then m.Value else 0.0)
+                let falloff = Mods.inc ctx [ Named "ComboFalloff" ] db
+                let sk =
+                    if combo > 0.0 && falloff <> 1.0 then { sk with Mods = sk.Mods @ [ Mod.base' (Named "ComboWindow") (Constants.comboWindow / max 0.01 falloff) |> Mod.from "Combo lost faster" ] }
+                    else sk
+                if per = 0.0 || combo <= 0.0 then sk
+                else
+                    let inc = if per > 0.0 then min 40.0 (per * combo) else max -40.0 (per * combo)
+                    { sk with Mods = sk.Mods @ [ Mod.inc (Damage AllDamage) inc |> Mod.from "Combo consumed" ] })
+        { Actor.make "Player" (sheet.Mods @ (used |> List.collect (fun (_, p) -> p.Grants))) (comboConsumed << gloryGeneration << onBolts <| (pressedSkills @ (metas |> List.collect (fun (_, s, _) -> s)) @ (consumers |> List.map (fun (_, _, cp) -> cp)) @ heraldSkills @ (used |> List.collect (fun (_, p) -> p.Extra)))) with
             Rotation = steps
             OverkillBurns = overkillBurns
             HitPattern = used |> List.choose (fun (_, p) -> p.Pattern |> Option.map (fun pat -> p.Skill.Name, pat)) |> Map.ofList

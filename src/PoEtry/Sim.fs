@@ -2715,9 +2715,10 @@ module Sim =
                             // "Skills lose 2 Glory per second if they haven't gained Glory in the past 15 seconds"
                             |> add ("Glory:" + s.Name) glory (own "Requires:Glory" * (1.0 + own "GloryRequiredMore" / 100.0)) target 0.5
                                    (fun have idle -> if idle > 15.0 && idle < 1e8 then max 0.0 (have - 2.0 * (idle - 15.0)) else have)
-                            // Combo counts the strikes "in the last 8 seconds"
+                            // Combo counts the strikes "in the last 8 seconds" (less, where Combo is lost faster)
                             |> add ("Combo:" + s.Name) combo (own "Requires:Combo") "strike" 1e-9
-                                   (fun have idle -> if idle > 8.0 && idle < 1e8 then 0.0 else have)) w
+                                   (let window = match own "ComboWindow" with 0.0 -> Constants.comboWindow | w -> w
+                                    fun have idle -> if idle > window && idle < 1e8 then 0.0 else have)) w
                 // Banners: attack hits build Glory; a full banner is placed at once
                 let w =
                     if actor.Banners.IsEmpty || not (skill.Tags.Contains Attack) then w

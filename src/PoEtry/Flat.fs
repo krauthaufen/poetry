@@ -768,6 +768,8 @@ module Flat =
           /// The most Glory it holds (what it needs, with "more Glory required").
           GloryCap: float
           Combo: float
+          /// Seconds without a gain after which its Combo is lost.
+          ComboWindow: float
           AttackHit: float
           ElementalHit: float
           ChaosHit: float
@@ -2028,6 +2030,7 @@ module Flat =
                        Glory = own "Requires:Glory"
                        GloryCap = own "Requires:Glory" * (1.0 + own "GloryRequiredMore" / 100.0)
                        Combo = own "Requires:Combo"
+                       ComboWindow = (match own "ComboWindow" with 0.0 -> Constants.comboWindow | w -> w)
                        AttackHit = own "Builds:Glory:AttackHit"
                        ElementalHit = own "Builds:Glory:ElementalHit"
                        ChaosHit = own "Builds:Glory:ChaosHit"
@@ -5775,7 +5778,7 @@ module Flat =
                         // "Skills lose 2 Glory per second if they haven't gained Glory in the past 15 seconds"
                         add b.GloryKey glory b.GloryCap def0.Name 0.5 (fun have idle -> if idle > 15.0 && idle < 1e8 then max 0.0 (have - 2.0 * (idle - 15.0)) else have)
                         // Combo counts the strikes "in the last 8 seconds"
-                        add b.ComboKey combo b.Combo "strike" 1e-9 (fun have idle -> if idle > 8.0 && idle < 1e8 then 0.0 else have)
+                        add b.ComboKey combo b.Combo "strike" 1e-9 (fun have idle -> if idle > b.ComboWindow && idle < 1e8 then 0.0 else have)
                 // Banners: attack hits build Glory; a full banner is placed at once
                 if p.Banners.Length > 0 && info.IsAttack then
                     let power = MonsterPower.ofRarity def0.Rarity

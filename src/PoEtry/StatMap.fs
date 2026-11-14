@@ -363,6 +363,11 @@ module StatMap =
         | "active_skill_required_number_of_combo_stacks" | "support_combo_finisher_required_number_of_combo_stacks" -> one (Mod.base' (Named "Requires:Combo") v)
         | "support_combo_finisher_damage_+%_final" -> one (Mod.more (Damage AllDamage) v)
         | "additional_combo_gain_chance_%" -> one (Mod.base' (Named "ComboExtraChance") v)
+        // "Skills deal X% increased Damage per Combo consumed, up to 40%" (Setup.player: a skill
+        // consumes the Combo it requires)
+        | "combo_finisher_damage_+%_up_to_40%" -> one (Mod.base' (Named "DamagePerComboConsumed") v)
+        // "Skills lose Combo X% faster": the 8 s it lasts without a gain, shorter (Setup.player)
+        | "combo_falloff_speed_+%" -> one (Mod.inc (Named "ComboFalloff") v)
         | "living_bomb_damage_threshold_%_of_ailment_threshold" -> one (Mod.base' (Named "DetonatedByDamage") v)
         // Bloodstone Lances: "Spear Skills inflict a Bloodstone Lance on Hit, up to a maximum of 30"
         | "spear_skills_inflict_bloodstone_lance_on_hit" -> one (Mod.base' (Named "Rule:OnHit:BloodstoneLance:1000000") 100.0 |> Mod.whenever (SkillIs Spear))
