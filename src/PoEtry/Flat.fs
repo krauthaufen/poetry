@@ -1787,6 +1787,8 @@ module Flat =
           mutable FlamUntil: float[]
           mutable FlamFrom: int
           mutable FlamTo: int
+          /// What they add up to (kept as they come and go: the same as their sum but for rounding).
+          mutable FlamSum: float
           mutable Entropy: float
           mutable EntropyAt: float
           mutable HasEntropy: bool
@@ -2248,19 +2250,25 @@ module Flat =
             if def.Rarity = Rare || def.Rarity = Unique then set 8
             if low then set 9
             if full then set 10
-            e.SHas <- has
-            e.SStacks <- stacks
-            let mutable count = 0
-            for id in 0 .. has.Length - 1 do
-                if (at has id) then count <- count + 1
-            let keys = Array.zeroCreate count
-            let mutable k = 0
-            for id in 0 .. has.Length - 1 do
-                if (at has id) then
-                    put keys k (id)
-                    k <- k + 1
-            e.StatusKeys <- keys
-            e.StatusMapStale <- true
+            // (the same statuses as before: the arrays stay, and with them what was worked out for them)
+            let mutable same = e.SHas.Length = has.Length
+            if same then
+                for id in 0 .. has.Length - 1 do
+                    if (at has id) <> (at e.SHas id) || (at stacks id) <> (at e.SStacks id) then same <- false
+            if not same then
+                e.SHas <- has
+                e.SStacks <- stacks
+                let mutable count = 0
+                for id in 0 .. has.Length - 1 do
+                    if (at has id) then count <- count + 1
+                let keys = Array.zeroCreate count
+                let mutable k = 0
+                for id in 0 .. has.Length - 1 do
+                    if (at has id) then
+                        put keys k (id)
+                        k <- k + 1
+                e.StatusKeys <- keys
+                e.StatusMapStale <- true
             e.StatusStale <- false
             e.StatusDots <- e.Dots
             e.WasCullable <- cullable
@@ -2522,15 +2530,15 @@ module Flat =
                     let e = at s.Foes i__27
                     match e.Def.Attack with
                     | Some atk when e.Life > 0.0 ->
-                        let st = status s e
-                        let stopped = [ "Frozen"; "HeavilyStunned"; "Electrocuted"; "Pinned" ] |> List.exists st.ContainsKey
-                        let slow =
-                            (if st.ContainsKey "Maimed" then 1.0 - Constants.maimSlow / 100.0 else 1.0)
-                            * (if st.ContainsKey "Hindered" then 1.0 - Constants.hinderSlow / 100.0 else 1.0)
-                            * (1.0 - (if (at e.Has s.P.SChilled) then (at e.DMods s.P.SChilled) |> List.sumBy (fun m -> m.Value) else 0.0) / 100.0)
                         let d = Vec.length e.Def.Position
                         let gap = d - e.Def.Size - atk.Range
-                        if not (stopped || gap <= 0.0) then
+                        // (one that has arrived walks no further: its statuses are not asked)
+                        if not (gap <= 0.0) && (let st = status s e in not ([ "Frozen"; "HeavilyStunned"; "Electrocuted"; "Pinned" ] |> List.exists st.ContainsKey)) then
+                            let st = status s e
+                            let slow =
+                                (if st.ContainsKey "Maimed" then 1.0 - Constants.maimSlow / 100.0 else 1.0)
+                                * (if st.ContainsKey "Hindered" then 1.0 - Constants.hinderSlow / 100.0 else 1.0)
+                                * (1.0 - (if (at e.Has s.P.SChilled) then (at e.DMods s.P.SChilled) |> List.sumBy (fun m -> m.Value) else 0.0) / 100.0)
                             let step = min gap (e.Def.Speed * slow * dt)
                             e.Def <- { e.Def with Position = Vec.scale ((d - step) / d) e.Def.Position }
                             s.AliveStale <- true
@@ -2975,10 +2983,11 @@ module Flat =
         let sid = skill * 3 + role
         let snap = if ev.BOn then s.BuffsVersion else -2
         if (at s.KVal sid).Length = 0 then
+            // (after the answers: the damage ranges `ranges` worked out, and again for critical hits)
             let n = ev.Q.Length * 2
-            put s.KVal sid (Array.zeroCreate n)
-            put s.KBuffs sid (Array.create n -1)
-            put s.KStatus sid (Array.create n -1)
+            put s.KVal sid (Array.zeroCreate (n + 30))
+            put s.KBuffs sid (Array.create (n + 2) -1)
+            put s.KStatus sid (Array.create (n + 2) -1)
         if (at s.KSnap sid) <> snap || (at s.KDyn sid) <> s.DynVersion then
             put s.KSnap sid (snap)
             put s.KDyn sid (s.DynVersion)
@@ -3445,7 +3454,7 @@ module Flat =
         any
 
     /// `Hit.ranges`: the damage ranges ready to roll, into the ev's `RMin`, `RMax`, `RHas`.
-    let private ranges (p: Program) (ev: Ev) (info: SkillInfo) =
+    let private rangesAnew (p: Program) (ev: Ev) (info: SkillInfo) =
         let skill = info.Skill
         let rMin, rMax, rHas = ev.RMin, ev.RMax, ev.RHas
         let oMin, oMax, oHas = ev.OMin, ev.OMax, ev.OHas
@@ -3507,6 +3516,28 @@ module Flat =
         if flagQ ev qNoNonFire then
             for t in 0 .. 4 do
                 if t <> 3 then rHas.[t] <- false
+
+    /// The same, kept like the answers it is made of: good while neither the buffs nor the
+    /// enemy's statuses have changed (see `keepAnswers`; the ranges stand after the answers).
+    let private ranges (p: Program) (ev: Ev) (info: SkillInfo) =
+        if not ev.Keeping then rangesAnew p ev info
+        else
+            let rMin, rMax, rHas = ev.RMin, ev.RMax, ev.RHas
+            let stamp = ev.Q.Length * 2 + (if ev.Crit then 1 else 0)
+            let from = ev.Q.Length * 2 + (if ev.Crit then 15 else 0)
+            if (at ev.KBuffs stamp) = ev.GBuffs && (at ev.KStatus stamp) = ev.GStatus then
+                for t in 0 .. 4 do
+                    put rMin t (at ev.KVal (from + t))
+                    put rMax t (at ev.KVal (from + 5 + t))
+                    put rHas t ((at ev.KVal (from + 10 + t)) <> 0.0)
+            else
+                rangesAnew p ev info
+                for t in 0 .. 4 do
+                    put ev.KVal (from + t) (at rMin t)
+                    put ev.KVal (from + 5 + t) (at rMax t)
+                    put ev.KVal (from + 10 + t) (if (at rHas t) then 1.0 else 0.0)
+                put ev.KBuffs stamp ev.GBuffs
+                put ev.KStatus stamp ev.GStatus
 
     /// `Hit.critMultiplier`.
     let private critMultiplier (ev: Ev) =
@@ -3757,10 +3788,10 @@ module Flat =
                         put de t ((at de t) * mult)
                 // ailments are rolled before the damage lands
                 while e.FlamFrom < e.FlamTo && not ((at e.FlamUntil e.FlamFrom) > s.Time) do
+                    e.FlamSum <- e.FlamSum - (at e.FlamValue e.FlamFrom)
                     e.FlamFrom <- e.FlamFrom + 1
-                let mutable flammable = 0.0
-                for i in e.FlamTo - 1 .. -1 .. e.FlamFrom do
-                    flammable <- flammable + (at e.FlamValue i)
+                if e.FlamFrom = e.FlamTo then e.FlamSum <- 0.0
+                let flammable = e.FlamSum
                 let inflicted = fromHit p ev info rng nums flammable crit un
                 // the Flammability this hit leaves (`Ailments.flammability`)
                 (ev.Crit <- crit
@@ -3786,7 +3817,8 @@ module Flat =
                             e.FlamTo <- live
                         put e.FlamValue e.FlamTo f
                         put e.FlamUntil e.FlamTo (s.Time + Constants.flammabilityDuration)
-                        e.FlamTo <- e.FlamTo + 1)
+                        e.FlamTo <- e.FlamTo + 1
+                        e.FlamSum <- e.FlamSum + f)
                 ev.Crit <- false
                 if flagQ ev qNoHitDamage then
                     for t in 0 .. 4 do
@@ -4586,6 +4618,7 @@ module Flat =
                       FlamUntil = Array.zeroCreate 16
                       FlamFrom = 0
                       FlamTo = 0
+                      FlamSum = 0.0
                       Entropy = 0.0
                       EntropyAt = 0.0
                       HasEntropy = false
