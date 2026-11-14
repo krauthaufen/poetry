@@ -642,11 +642,17 @@ let run (test: string -> (unit -> unit) -> unit) =
     let same (fight: Fight) (seeds: uint32 list) =
         match Flat.compile fight with
         | Error why -> failwithf "does not compile: %s" why
-        | Ok _ ->
+        | Ok program ->
             for seed in seeds do
                 match check fight seed with
                 | Some (Error d) -> failwith d
                 | _ -> ()
+            // and what the two tell of the fight as it goes: every event and every hit
+            match seeds with
+            | seed :: _ ->
+                let parted, where = divergence fight program seed
+                if parted || not (where.EndsWith "told the same") then failwithf "seed %d: %s" seed where
+            | [] -> ()
     let seeds = [ 1u .. 25u ]
 
     test "flat: a spell with critical hits against a boss that does not die" (fun () ->
@@ -813,6 +819,13 @@ let run (test: string -> (unit -> unit) -> unit) =
         if not (o.DamageBy.ContainsKey "Bite (hit)" && o.DamageBy.ContainsKey "Peck (hit)" && o.DamageBy.ContainsKey "Bolt (hit)") then failwith "expected every actor to hit"
         // and a fight that ends when the enemies die
         same { fight with Enemies = [ boss 3000.0; { boss 5000.0 with Name = "other"; Position = Vec.make 25.0 10.0 } ] } minionSeeds)
+
+    test "flat: poisons of an actor that lets several count beside those of one that lets one count" (fun () ->
+        // (the weaker poisons of the one are kept: they count once the other's hit lets more stack)
+        let venom = Mod.base' (AilmentChance Poison) 100.0
+        let player = Actor.make "Player" [ noIgnite; venom ] [ { spell "Dart" Chaos 20.0 200.0 with BaseTime = 0.35 } ]
+        let spider = Actor.make "Spider" [ sure; venom; Mod.base' (AilmentStacks Poison) 3.0 ] [ { bite "Fang" 60.0 with BaseTime = 0.8 } ]
+        same { Fight.single (boss 1e12) player 12.0 with Minions = [ spider ] } minionSeeds)
 
     test "flat: monsters kill minions, which are revived together; one that does not revive is gone" (fun () ->
         let skeleton i = { Actor.make (sprintf "Skeleton %d" i) [ sure ] [ bite "Bite" 100.0 ] with Body = Some { body 150.0 (Some 5.0) with Evasion = 800.0; Armour = 300.0; LifeRegen = 5.0 } }

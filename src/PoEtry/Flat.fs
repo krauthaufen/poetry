@@ -831,6 +831,9 @@ module Flat =
               /// The minions that can be hurt, and those that come back when killed (by their
               /// places among the actors); whether any minion is a temporary one; whether
               /// monsters walk up (the player has pools).
+              /// By ailment: whether only one of it ever counts on an enemy (no skill of any
+              /// actor can have it stack, whatever the buffs).
+              OneOfAilment: bool[]
               Bodies: int[]
               Reviving: int[]
               AnyPool: bool
@@ -1627,6 +1630,7 @@ module Flat =
                       Body = actor.Body
                       ActiveBuff = (match actor.ActiveWhile with Some name -> buffs.Id name | None -> -1)
                       Explodes = explodes
+                      OneOfAilment = [||]
                       Bodies = [| for (i, m) in List.indexed fight.Minions do if m.Body.IsSome then yield i + 1 |]
                       Reviving = reviving
                       AnyPool = anyPool
@@ -1776,8 +1780,12 @@ module Flat =
         if no.Count > 0 then Error(List.ofSeq no)
         else
             let programs = finishers |> List.map (fun finish -> finish ()) |> Array.ofList
+            // (an ailment of which one counts: no skill of any actor is ever asked for more stacks of it)
+            let oneOf =
+                qAilStacks |> Array.map (fun site ->
+                    programs |> Array.forall (fun p -> p.Skills |> Array.forall (fun k -> (at k.Q site).Items.Length = 0 && (at k.Q site).Init = 0.0)))
             // (the counts and sources are every actor's)
-            let programs = programs |> Array.map (fun p -> { p with CountNames = counts.Names; SourceNames = sources.Names })
+            let programs = programs |> Array.map (fun p -> { p with CountNames = counts.Names; SourceNames = sources.Names; OneOfAilment = oneOf })
             Ok { programs.[0] with Minions = programs.[1..] }
 
     /// Everything about a fight that this engine does not play yet (empty: it compiles).
@@ -2897,9 +2905,8 @@ module Flat =
             addGained s slot (m - s.Mana)
             s.Mana <- m
 
-    /// What has run out goes (`Sim.prune`).
-    let private prune (s: State) =
-        let p = s.P
+    /// What has run out of the enemies' debuffs and damage over time goes (`Sim.prune`).
+    let private pruneFoes (s: State) =
         for i__29 in 0 .. s.Foes.Length - 1 do
             let e = at s.Foes i__29
             if not (e.Soonest > s.Time) then
@@ -2913,6 +2920,10 @@ module Flat =
                 for d in List.toArray e.Dots do
                     if d.Until < soonest then soonest <- d.Until
                 e.Soonest <- soonest
+
+    /// What has run out of the buffs of the actor that acts now goes (`Sim.prune`).
+    let private prune (s: State) =
+        let p = s.P
         if not (s.A.BSoonest > s.Time) then
             let mutable soonest = infinity
             for id in 0 .. s.A.BHas.Length - 1 do
@@ -3004,9 +3015,11 @@ module Flat =
     /// those that can never count are not kept: an older one that is weaker and gone no
     /// later than the new one, and a new one that an older one outlasts and is no weaker
     /// than. (The reference keeps them all and finds the strongest each time; what counts
-    /// at any time is the same.)
-    let private addDot (e: Foe) (d: FDot) =
-        let mutable alone = d.Most = 1
+    /// at any time is the same.) `single`: no hit of any actor lets more than one of the
+    /// label count, now or later; where one may, all are kept, as one dropped now could
+    /// count beside a later one.
+    let private addDot (e: Foe) (single: bool) (d: FDot) =
+        let mutable alone = single && d.Most = 1
         let mutable beaten = false
         let mutable beats = false
         for x in List.toArray e.Dots do
@@ -3024,7 +3037,7 @@ module Flat =
         match i with
         | Dot (a, t, dps, duration, maxStacks) ->
             let d = { Ailing = Some a; Label = (at p.AilmentSource (ailmentIndex a)); Of = t; Dps = dps; Until = s.Time + duration; Most = maxStacks }
-            addDot e d
+            addDot e (at p.OneOfAilment (ailmentIndex a)) d
             if not (d.Until >= e.Soonest) then e.Soonest <- d.Until
             expireAt s d.Until
         | Status (Shock, magnitude, duration) ->
@@ -5038,6 +5051,7 @@ module Flat =
 
     /// What has run out of every actor's buffs goes (`Sim.prune`).
     let private pruneAll (s: State) =
+        pruneFoes s
         prune s
         if s.Agents.Length > 1 then
             for i in 1 .. s.Agents.Length - 1 do
