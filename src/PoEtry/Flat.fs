@@ -791,6 +791,11 @@ module Flat =
           SpellDot: bool
           IsMelee: bool
           IsTriggered: bool
+          IsDodgeRoll: bool
+          /// The game's own "Melee" type (what Combo counts), apart from the tag.
+          IsMeleeType: bool
+          /// Whether modifiers to the number of projectiles do not apply to it.
+          FixedProjectiles: bool
           /// Whether a hit of it can find an Open Weakness at all (Revealed Weaknesses).
           CanReveal: bool
           /// The buff whose stacks add projectiles (-1: none).
@@ -1731,6 +1736,9 @@ module Flat =
                       SpellDot = s.Tags.Contains(Tag "SpellDot")
                       IsMelee = s.Tags.Contains Melee
                       IsTriggered = s.Tags.Contains Triggered
+                      IsDodgeRoll = s.Tags.Contains(Tag "DodgeRoll")
+                      IsMeleeType = s.Tags.Contains(Tag "Type:Melee")
+                      FixedProjectiles = s.Tags.Contains(Tag "Type:ProjectilesNumberModifiersNotApplied")
                       CanReveal = (let q = at answers qReveal in not (q.Items.Length = 0 && q.Init = 0.0))
                       PerChargeBuff = (match s.Delivery with Projectiles { PerCharge = Some (charge, _) } -> buffs.Id charge | _ -> -1)
                       StackExtra = stackExtra
@@ -3999,7 +4007,7 @@ module Flat =
             let recovery = if skill.Cooldown.IsSome then multQ ev qCooldownRecovery else 1.0
             let doubled = skill.Cooldown.IsSome && sumQ ev qDoubleUses > 0.0
             let lose = if p.Vitals.IsSome then sumQ ev qLosePools / 100.0 else 0.0
-            let dodge = if p.Metas.Length > 0 && skill.Tags.Contains(Tag "DodgeRoll") then Constants.dodgeRollDistance + sumQ ev qDodgeDistance else 0.0
+            let dodge = if p.Metas.Length > 0 && info.IsDodgeRoll then Constants.dodgeRollDistance + sumQ ev qDodgeDistance else 0.0
             let lasting = if info.AsksDuration then multQ ev qSkillDuration else 1.0
             let areaMult = if info.AsksArea then multQ ev qArea else 1.0
             release s
@@ -4234,7 +4242,7 @@ module Flat =
                 schedule s (last + 1e-9) EConsume info.Consumes sid 0.0 0.0
             if useTime > 0.0 && p.Metas.Length > 0 then
                 // Cast on Dodge: energy per unit travelled by a dodge roll, there when the roll ends
-                if skill.Tags.Contains(Tag "DodgeRoll") then
+                if info.IsDodgeRoll then
                     let distance = dodge
                     for i in 0 .. p.Metas.Length - 1 do
                         let meta = at p.Metas i
@@ -5350,7 +5358,7 @@ module Flat =
                                 + (0.0 + (if newly Ignite then b.FlatIgnited else 0.0) + (if newly Shock then b.FlatShocked else 0.0))
                         // Combo: from melee attack hits with other skills
                         let combo =
-                            if b.Combo <= 0.0 || ownHit || not info.IsAttack || not (skill.Tags.Contains(Tag "Type:Melee")) then 0.0
+                            if b.Combo <= 0.0 || ownHit || not info.IsAttack || not info.IsMeleeType then 0.0
                             else 1.0 + (if rng.Chance b.ComboExtraChance then 1.0 else 0.0)
                         // "Skills lose 2 Glory per second if they haven't gained Glory in the past 15 seconds"
                         add b.GloryKey glory b.GloryCap def0.Name 0.5 (fun have idle -> if idle > 15.0 && idle < 1e8 then max 0.0 (have - 2.0 * (idle - 15.0)) else have)
@@ -5526,31 +5534,30 @@ module Flat =
         if primary >= 0 then
             let plain = (at p.Skills sid)
             let primaryDef = (at s.Foes primary).Def
-            let shape (ev: Ev) (info: SkillInfo) =
+            // how the skill is delivered by this strike: what its mods and the buffs add to its
+            // projectiles (the skill's own delivery where they add nothing)
+            let shape (ev: Ev) (info: SkillInfo) : Delivery =
                 let skill = info.Skill
-                let areaMult = multQ ev qArea
-                let delivery =
-                    match skill.Delivery with
-                    | Projectiles pr ->
-                        let fromCharges =
-                            match pr.PerCharge with
-                            | Some (_, per) -> per * buffStacksOf ev info.PerChargeBuff
-                            | None -> 0
-                        Projectiles
-                            { pr with
-                                Count =
-                                    pr.Count + fromCharges
-                                    + (if pr.Count + fromCharges > 0 && not (skill.Tags.Contains(Tag "Type:ProjectilesNumberModifiersNotApplied")) then
-                                           int (sumQ ev qProjectiles)
-                                           + (if rng.Chance(sumQ ev qExtraProjectiles2) then 2 else 0)
-                                           + (let c = sumQ ev qExtraProjectiles1
-                                              int (c / 100.0) + (if rng.Chance(c - 100.0 * floor (c / 100.0)) then 1 else 0))
-                                       else 0)
-                                Pierce = pr.Pierce + int (sumQ ev qPierce) + (if rng.Chance(sumQ ev qPierceChance) then 1 else 0)
-                                Chains = pr.Chains + int (sumQ ev qChains)
-                                TerrainChain = pr.TerrainChain + sumQ ev qTerrainChain }
-                    | d -> d
-                areaMult, delivery
+                match skill.Delivery with
+                | Projectiles pr ->
+                    let fromCharges =
+                        match pr.PerCharge with
+                        | Some (_, per) -> per * buffStacksOf ev info.PerChargeBuff
+                        | None -> 0
+                    let count =
+                        pr.Count + fromCharges
+                        + (if pr.Count + fromCharges > 0 && not info.FixedProjectiles then
+                               int (sumQ ev qProjectiles)
+                               + (if rng.Chance(sumQ ev qExtraProjectiles2) then 2 else 0)
+                               + (let c = sumQ ev qExtraProjectiles1
+                                  int (c / 100.0) + (if rng.Chance(c - 100.0 * floor (c / 100.0)) then 1 else 0))
+                           else 0)
+                    let pierce = pr.Pierce + int (sumQ ev qPierce) + (if rng.Chance(sumQ ev qPierceChance) then 1 else 0)
+                    let chains = pr.Chains + int (sumQ ev qChains)
+                    let terrainChain = pr.TerrainChain + sumQ ev qTerrainChain
+                    if count = pr.Count && pierce = pr.Pierce && chains = pr.Chains && terrainChain = pr.TerrainChain then skill.Delivery
+                    else Projectiles { pr with Count = count; Pierce = pierce; Chains = chains; TerrainChain = terrainChain }
+                | d -> d
             s.StrikeLeech <- 0.0
             s.StrikeLifeLeech <- 0.0
             // (the buffs are the ones the strike began with, whatever it and its hits change)
@@ -5614,7 +5621,8 @@ module Flat =
                     let impact = variant ()
                     let info = at p.Skills impact
                     let ev = ask impact
-                    let areaMult, delivery = shape ev info
+                    let areaMult = multQ ev qArea
+                    let delivery = shape ev info
                     let r = match delivery with AreaAtTarget r -> r | _ -> 0.0
                     let centreR = Geometry.radius r areaMult
                     if k = 0 then step <- centreR * p.Fight.CascadeSpacing
@@ -5630,7 +5638,8 @@ module Flat =
                 let impact = variant ()
                 let info = at p.Skills impact
                 let ev = ask impact
-                let areaMult, delivery = shape ev info
+                let areaMult = multQ ev qArea
+                let delivery = shape ev info
                 let hitAll (names: string list) =
                     let mutable rest = names
                     while not rest.IsEmpty do
@@ -6417,9 +6426,14 @@ module Flat =
     type private Kept =
         { Queue: Queue
           Evs: ResizeArray<Ev>
-          Vitals: Dictionary<string, PlayerStats> }
+          Vitals: Dictionary<string, PlayerStats>
+          /// By actor: the answers kept per skill and way of asking (see `keepAnswers`), and
+          /// the counts they are stamped with. The counts only ever go up, so an answer of an
+          /// earlier run is good in a later one exactly where it can change with nothing (it
+          /// is the program's own), and is worked out anew everywhere else.
+          Answers: ResizeArray<float[][] * int[][] * int[][] * int[] * int[]> }
 
-    let private newKept () : Kept = { Queue = Queue(); Evs = ResizeArray(); Vitals = Dictionary() }
+    let private newKept () : Kept = { Queue = Queue(); Evs = ResizeArray(); Vitals = Dictionary(); Answers = ResizeArray() }
 
     /// An enemy as it comes into the fight (`fresh` in `Sim.runWith`): `root` is the enemy
     /// the fight names that it is, or that it replaces.
@@ -6511,8 +6525,11 @@ module Flat =
         let progs = Array.append [| p |] p.Minions
         let agents =
             progs
-            |> Array.map (fun (pr: Program) ->
+            |> Array.mapi (fun who (pr: Program) ->
                 let nk = pr.Skills.Length
+                if kept.Answers.Count <= who then
+                    kept.Answers.Add((Array.create (nk * 3) [||], Array.create (nk * 3) [||], Array.create (nk * 3) [||], Array.zeroCreate (nk * 3), Array.zeroCreate (nk * 3)))
+                let kVal, kBuffs, kStatus, kgBuffs, kgStatus = kept.Answers.[who]
                 { BKept = false
                   BHas = Array.create nb false
                   BStacks = Array.zeroCreate nb
@@ -6536,11 +6553,11 @@ module Flat =
                   BCompOf = Array.create nb []
                   RageMore = Array.create nk nan
                   RageVer = Array.create nk -1
-                  KVal = Array.create (nk * 3) [||]
-                  KBuffs = Array.create (nk * 3) [||]
-                  KStatus = Array.create (nk * 3) [||]
-                  KGBuffs = Array.zeroCreate (nk * 3)
-                  KGStatus = Array.zeroCreate (nk * 3)
+                  KVal = kVal
+                  KBuffs = kBuffs
+                  KStatus = kStatus
+                  KGBuffs = kgBuffs
+                  KGStatus = kgStatus
                   KSnap = Array.create (nk * 3) -1
                   KDyn = Array.create (nk * 3) -1
                   KFoe = Array.create (nk * 3) -1
