@@ -1245,13 +1245,14 @@ let private passiveAt (m : Model) (x : float) (y : float) : Passive option =
 
 /// What an analysis found is written to what it is about: the items' lines, the gems.
 let private weigh (m : Model) : Model =
-    let of' (key : string) = m.Worth |> List.tryFind (fun (k, _) -> k = key) |> Option.map snd |> Option.defaultValue nan
+    // (found in every scene; the one number a thing has is that of the scene looked at)
+    let of' (key : string) = m.Worth |> List.tryFind (fun (k, _) -> k = key + "@" + m.Scenario) |> Option.map snd |> Option.defaultValue nan
     let item (i : Item) = { i with Weighs = of' ("item:" + string i.Place); Lines = i.Lines |> List.mapi (fun n l -> { l with Lost = of' ("line:" + string i.Place + ":" + string n) }) }
     { m with
         Items = m.Items |> List.map item
         Groups = m.Groups |> List.map (fun g -> { g with Gems = g.Gems |> List.map (fun x -> { x with Gives = of' ("gem:" + x.Key) }) })
         Offers = m.Offers |> List.map (fun o -> { o with Adds = of' ("pick:" + o.Choice) })
-        NodeWorth = m.Worth |> List.filter (fun (k, _) -> k.StartsWith "node:") |> List.map (fun (k, v) -> int (k.Substring 5), v) |> Map.ofList }
+        NodeWorth = m.Worth |> List.filter (fun (k, _) -> k.StartsWith "node:" && k.EndsWith ("@" + m.Scenario)) |> List.map (fun (k, v) -> int (k.Substring (5, k.IndexOf '@' - 5)), v) |> Map.ofList }
 
 /// The gems shown in the list to choose from: of the kind asked for, those that are searched
 /// (without a search: those that fit), the ones known to add most first.
@@ -1415,7 +1416,7 @@ let rec private step (msg : Msg) (m : Model) : Model =
         match Native.queryParam "build" href with
         | Some b -> { m with Build = b; Status = "reading the character" }
         | None -> { m with Status = "" }
-    | Scenario s -> { m with Scenario = s; Fighting = true; Dps = []; Shares = []; Types = []; Runs = 0; Round = 0; Happened = [] }
+    | Scenario s -> offer (weigh { m with Scenario = s; Fighting = true; Dps = []; Shares = []; Types = []; Runs = 0; Round = 0; Happened = [] })
     | Begin (name, count) ->
         let most = m.Counts |> List.tryFind (fun (k, _) -> k = name) |> Option.map snd |> Option.defaultValue 0
         { m with Start = (if count < 0 || count > most then Map.remove name m.Start else Map.add name count m.Start); Fighting = true; Dps = []; Shares = []; Types = []; Runs = 0; Round = 0; Happened = []; Warm = [] }
@@ -1462,7 +1463,7 @@ let rec private step (msg : Msg) (m : Model) : Model =
                     let b, c = Json.number (Json.field "base" x), Json.number (Json.field "changed" x)
                     // (for a gem to choose: what it adds; otherwise what is lost without)
                     let key = Json.string (Json.field "key" x)
-                    if b > 0.0 then Some (key, (if key.StartsWith "pick:" then (c / b - 1.0) else (1.0 - c / b)) * 100.0) else None)
+                    if b > 0.0 then Some (key + "@" + Json.string (Json.field "scenario" x), (if key.StartsWith "pick:" then (c / b - 1.0) else (1.0 - c / b)) * 100.0) else None)
             let more = Json.bool (Json.field "more" j)
             let kept = m.Worth |> List.filter (fun (k, _) -> not (found |> List.exists (fun (f, _) -> f = k)))
             offer (weigh { m with Worth = kept @ found; Probing = more; ProbeRound = m.ProbeRound + 1
@@ -1718,7 +1719,7 @@ let update (msg : Msg) (m : Model) : Model =
         && n.Swapped = m.Swapped && n.Aim = m.Aim && n.Bag.Length = m.Bag.Length
     let n = if same then n else { n with Ask = compareOf n false; AskMore = compareOf n true }
     // (what an analysis found is of the character as it was then)
-    let n = if n.Probe = "" || (match msg with | Rank | Analyse -> true | _ -> false) || (knobs n + fightKnobs n + passives n + n.Scenario = knobs m + fightKnobs m + passives m + m.Scenario) then n else weigh { n with Probe = ""; Probing = false; Probed = ""; Worth = [] }
+    let n = if n.Probe = "" || (match msg with | Rank | Analyse -> true | _ -> false) || (knobs n + fightKnobs n + passives n = knobs m + fightKnobs m + passives m) then n else weigh { n with Probe = ""; Probing = false; Probed = ""; Worth = [] }
     // (what is kept between visits: after anything but the pointer, a frame, an answer)
     let n =
         match msg with
@@ -1778,6 +1779,19 @@ let private worthClass (v : float) : string =
 let private worthText (v : float) : string =
     if System.Double.IsNaN v then "" elif abs v < 0.5 then "~0" else sprintf "%+.0f%%" v
 
+/// What something is worth in every scene, in the order of the tabs (the scene looked at
+/// stands out; "·": not known yet). Nothing before an analysis.
+let private worths (m : Model) (key : string) : Node<Msg> =
+    let found = scenarios |> List.map (fun s -> s, (m.Worth |> List.tryFind (fun (k, _) -> k = key + "@" + s) |> Option.map snd |> Option.defaultValue nan))
+    let any = found |> List.exists (fun (_, v) -> not (System.Double.IsNaN v))
+    let shown = found |> List.map (fun (s, v) -> s, (if s = m.Scenario then "here" else "") + worthClass v, (if System.Double.IsNaN v then "·" else worthText v))
+    span {
+        Dom.Class "worth four"
+        if any then
+            for (s, cls, text) in shown do
+                span { Dom.Class cls; Dom.Attr ("title", s); text }
+    }
+
 /// A gem as the game's skill panel shows it: its picture (a skill's with its name beside).
 /// What it is in a tooltip, under the mouse or once pressed; pressed, the tooltip stays and
 /// has the button that turns the gem off (and the fights are fought again) or on.
@@ -1795,7 +1809,6 @@ let private gem (m : Model) (g : Gem) : Node<Msg> =
     let what = if g.Support then "Support gem" elif g.Persistent then "Persistent skill" else "Skill gem"
     let group = g.Key.Substring (0, g.Key.IndexOf ':')
     let place = "|" + group + "|" + string g.At + "|"
-    let worth = worthText g.Gives
     let without = sprintf "%.1f%% of the damage is lost without it" g.Gives
     let known = not (System.Double.IsNaN g.Gives)
     let least = if g.Support then 1 else 1
@@ -1808,7 +1821,7 @@ let private gem (m : Model) (g : Gem) : Node<Msg> =
             if picture <> "" then img { Dom.Attr ("src", picture); Dom.Attr ("alt", "") }
             span { Dom.Class "name"; g.Named }
             span { Dom.Class "lvl"; lvl }
-            if known then span { Dom.Class "worth"; worth }
+            if known then worths m ("gem:" + g.Key)
         }
         div {
             Dom.Class "gem-tip"
@@ -1881,7 +1894,7 @@ let private picker (m : Model) : Node<Msg> =
                     Dom.OnClick (fun _ -> Choose o.Choice)
                     span { Dom.Class "name"; o.Choice }
                     span { Dom.Class "tags"; o.Tags }
-                    span { Dom.Class "worth"; worthText o.Adds }
+                    worths m ("pick:" + o.Choice)
                 }
         }
     }
@@ -1893,6 +1906,7 @@ let private analyse (m : Model) (about : string) : Node<Msg> =
         Dom.Class "analyse"
         button { Dom.Class "act"; Dom.OnClick (fun _ -> Analyse); label }
         span { Dom.Class "depth"; about }
+        span { Dom.Class "depth"; "The four numbers: boss, pinnacle, pack, surrounded." }
         span { Dom.Class "legend"; span { Dom.Class "w3"; "much" }; span { Dom.Class "w2"; "some" }; span { Dom.Class "w1"; "little" }; span { Dom.Class "w0"; "none" }; span { Dom.Class "wneg"; "costs damage" } }
     }
 
@@ -1996,9 +2010,9 @@ let private item (m : Model) (i : Item) (where : string) : Node<Msg> =
                         if g.Shows <> "" then img { Dom.Attr ("src", g.Shows); Dom.Attr ("alt", "") }
                         span { g.Grant }
                     }
-                for l in i.Lines do
-                    div { Dom.Class ("mod " + l.Mark + worthClass l.Lost); span { l.Reads }; span { Dom.Class "worth"; worthText l.Lost } }
-                if weighed then div { Dom.Class ("depth" + worthClass i.Weighs); weight }
+                for (n, l) in List.indexed i.Lines do
+                    div { Dom.Class ("mod " + l.Mark + worthClass l.Lost); span { l.Reads }; worths m ("line:" + string i.Place + ":" + string n) }
+                if weighed then div { Dom.Class ("depth" + worthClass i.Weighs); weight; worths m ("item:" + string i.Place) }
                 if i.Spoiled then div { Dom.Class "corrupted"; "Corrupted" }
                 for h in i.Holds do
                     if h.Rune <> "" then
@@ -2355,7 +2369,7 @@ let private tooltip (m : Model) : Node<Msg> =
                         div { Dom.Class (if l = "Corrupted" then "corrupted" else "mod"); l }
                 }
             if cost <> "" then div { Dom.Class costs; Dom.Attr ("data-check", "cost"); cost }
-            if worth <> "" then div { Dom.Class ("cost" + worthClass weighs); worth }
+            if worth <> "" then div { Dom.Class ("cost" + worthClass weighs); worth; worths m ("node:" + string p.Id) }
             if not p.Options.IsEmpty && pinned then
                 div {
                     Dom.Class "select"

@@ -210,7 +210,8 @@
       // fought a few times as it is and with each change alone, on the same seeds. "list":
       // entries apart by a line "@@", each a key, the parameter that is another, and its value
       // on lines of their own. Answered like a fight, with what is known so far:
-      // { done, total, more, results: [{ key, base, changed }] }
+      // in every scene (the one asked for first):
+      // { done, total, more, results: [{ key, scenario, base, changed }] }
       const analyses = new Map();
       const told = (a) => {
         if (!a.waiters.length || (a.results.length <= a.told && a.results.length < a.total)) return;
@@ -224,17 +225,20 @@
           for (let i = jobs.length - 1; i >= 0; i--) if (jobs[i].fight === "analyse") jobs.splice(i, 1)[0].done(JSON.stringify({ error: "dropped" }));
           analyses.clear();
           const { op, list, scenario, seeds, ...rest } = request;
-          const scene = scenes(1).find((s) => s[0] === scenario) || scenes(1)[0];
+          // (every scene, the one that is looked at first)
+          const all = scenes(1), order = [...all.filter((s) => s[0] === scenario), ...all.filter((s) => s[0] !== scenario)];
           const entries = String(list || "").split("\n@@\n").filter((e) => e).map((e) => { const [k, param, ...v] = e.split("\n"); return { key: k, param, value: v.join("\n") }; });
-          a = { results: [], total: entries.length, told: -1, waiters: [] };
+          a = { results: [], total: entries.length * order.length, told: -1, waiters: [] };
           analyses.set(key, a);
           const dps = (text) => { try { const r = JSON.parse(text); return r.error ? null : (r.dpsEvened != null && r.killRate === 0 ? r.dpsEvened : r.dps.mean); } catch { return null; } };
-          const fought = (extra, seed) => ({ ...rest, ...extra, op: "fight", scenario: scene[0], time: scene[1], runs: 1, seed, ...(scene[2] ? { life: scene[2] } : scene[4] ? { least: scene[4] } : {}) });
-          const scale = ask(fought({}, 1), "analyse").then(scaleOf);
-          const several = (extra) => scale.then((k) => Promise.all(Array.from({ length: seeds || 12 }, (_, i) => ask({ ...fought(extra, i + 1), scale: k }, "analyse").then(dps))))
-            .then((xs) => (xs.some((x) => x == null) ? null : mean(xs)));
-          const base = several({});
-          entries.forEach((e) => several({ [e.param]: e.value }).then(async (changed) => { a.results.push({ key: e.key, base: await base, changed }); told(a); }));
+          order.forEach((scene) => {
+            const fought = (extra, seed) => ({ ...rest, ...extra, op: "fight", scenario: scene[0], time: scene[1], runs: 1, seed, ...(scene[2] ? { life: scene[2] } : scene[4] ? { least: scene[4] } : {}) });
+            const scale = ask(fought({}, 1), "analyse").then(scaleOf);
+            const several = (extra) => scale.then((k) => Promise.all(Array.from({ length: seeds || 12 }, (_, i) => ask({ ...fought(extra, i + 1), scale: k }, "analyse").then(dps))))
+              .then((xs) => (xs.some((x) => x == null) ? null : mean(xs)));
+            const base = several({});
+            entries.forEach((e) => several({ [e.param]: e.value }).then(async (changed) => { a.results.push({ key: e.key, scenario: scene[0], base: await base, changed }); told(a); }));
+          });
         }
         return new Promise((done) => { a.waiters.push(done); told(a); });
       };
@@ -681,6 +685,9 @@
     #app .item.w3 { box-shadow: inset 0 0 0 2px #ff9a3c; } #app .item.w2 { box-shadow: inset 0 0 0 2px #e6c15a; } #app .item.w1 { box-shadow: inset 0 0 0 1px #b9b08c; }
     #app .item.w0 { box-shadow: inset 0 0 0 1px #4a4a4a; } #app .item.wneg { box-shadow: inset 0 0 0 2px #e0507a; }
     #app .gem .face .worth { margin-left: 8px; font-size: 12px; }
+    /* (one number a scene, in the order of the tabs; the scene looked at stands out) */
+    #app .worth.four { display: inline-flex; gap: 6px; font-size: 11px; } #app .worth.four span { min-width: 34px; text-align: right; }
+    #app .gem .face { flex-wrap: wrap; row-gap: 0; } #app .gem .face .worth.four { flex: 1 0 100%; justify-content: flex-end; margin-left: 0; } #app .worth.four .here { font-weight: 700; text-decoration: underline; }
     #app .gem.w3 .face, #app .gem.w2 .face, #app .gem.w1 .face, #app .gem.w0 .face, #app .gem.wneg .face { border-left: 3px solid currentColor; }
     #app .analyse { flex: 1 1 100%; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
     #app .analyse .legend { display: flex; gap: 10px; font-size: 12px; }
