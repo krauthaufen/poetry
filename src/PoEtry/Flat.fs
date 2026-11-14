@@ -903,6 +903,9 @@ module Flat =
           SeqSteps: int[]
           SeqHits: int
           SeqKey: string
+          /// A form that is switched on: its buff (-1: the skill is none). One that is in it
+          /// does not press the skill again.
+          Form: int
           /// Whether a use asks how long the skill's effects last, and how large its area is.
           AsksDuration: bool
           AsksArea: bool }
@@ -973,6 +976,9 @@ module Flat =
               BConsumedInfusion: int
               BReloaded: int
               BSealsBroken: int
+              BDemonForm: int
+              BDemonflame: int
+              CDemonEnded: int
               BBarrage: int
               CBarrageReadied: int
               /// The actor's skills and parts by name.
@@ -1170,11 +1176,10 @@ module Flat =
           "RecordsDamage", "debuffs that record damage (Inevitable Agony)" ]
 
     let private unbuiltPrefixes =
-        [ "WarpsInto:", "warps into projectiles"
-          "ToggleBuff:", "forms that are switched on" ]
+        [ "WarpsInto:", "warps into projectiles" ]
 
     /// Buffs the reference treats in a way of its own that is not built here.
-    let private unbuiltBuffs = [ "Demon Form", "Demon Form" ]
+    let private unbuiltBuffs : (string * string) list = []
     let private unbuiltBuffPrefixes = [ "Warped:", "warps into projectiles" ]
 
     let private recentlyNames = [ "HitRecently"; "NonCritRecently"; "CritRecently"; "CritInPast8Seconds"; "KilledRecently" ]
@@ -1801,6 +1806,7 @@ module Flat =
                       SeqSteps = (match named' "SeqSteps:" with Some steps -> steps.Split ',' |> Array.map int | None -> [||])
                       SeqHits = (match s.Mods |> List.tryPick (fun m -> if m.Stat = Named "SeqHits" then Some(int m.Value) else None) with Some n -> n | None -> 1)
                       SeqKey = "Seq:" + s.Name
+                      Form = (match named' "ToggleBuff:" with Some form -> buffs.Id form | None -> -1)
                       AsksDuration = ownBase s "BarrageRepeats" > 0.0 || flag "DetonatedByDamage" || (s :: s.Parts) |> List.exists (fun part -> part.Mods |> List.exists (fun m -> m.Stat = Named "Crystals"))
                       AsksArea = (s :: s.Parts) |> List.exists (fun part -> part.Mods |> List.exists (fun m -> m.Stat = Named "Crystals")) })
                 |> Array.ofList
@@ -1841,6 +1847,8 @@ module Flat =
             buffs.Id "ConsumedInfusionRecently" |> ignore
             buffs.Id "ReloadedRecently" |> ignore
             buffs.Id "SealsBroken" |> ignore
+            buffs.Id "Demon Form" |> ignore
+            buffs.Id "Demonflame" |> ignore
             buffs.Id "Barrage" |> ignore
             for t in DamageType.elemental do
                 buffs.Id("Resonance:" + DamageType.name t) |> ignore
@@ -1903,6 +1911,9 @@ module Flat =
                       BConsumedInfusion = buffs.Id "ConsumedInfusionRecently"
                       BReloaded = buffs.Id "ReloadedRecently"
                       BSealsBroken = buffs.Id "SealsBroken"
+                      BDemonForm = buffs.Id "Demon Form"
+                      BDemonflame = buffs.Id "Demonflame"
+                      CDemonEnded = count "demon form ended"
                       BBarrage = buffs.Id "Barrage"
                       CBarrageReadied = count "barrage readied"
                       SkillIds = skillIds
@@ -4182,6 +4193,8 @@ module Flat =
                 // a skill that works on a corpse needs one, unless it does without
                 && (info.NeedsCorpse = 0 || corpses s > 0 || (info.NeedsCorpse = 2 && held s info.CorpseElse))
                 && (not info.NeedsCharge || info.Consumes < 0 || held s info.Consumes)
+                // a form one is in is not pressed again (that would end it)
+                && (info.Form < 0 || not (at s.A.BHas info.Form))
                 // a seed still in an enemy is not planted over
                 && (s.Seeds.IsEmpty || not (s.Seeds |> List.exists (fun (a, b, _, _, _, _) -> a = s.Cur && b = sid)))
                 // the Glory or Combo it needs has been built
@@ -5997,6 +6010,35 @@ module Flat =
             if s.AliveCount > 0 && alive s then
                 pruneAll s
                 if not (s.Seeds.IsEmpty && s.Pustules.IsEmpty && s.Crystals.IsEmpty) then planted s
+                // Demon Form: a Demonflame for every second in the form (at most 10), life lost for
+                // each; at 1 life the form ends and its cooldown starts
+                if (at s.A.BHas p.BDemonForm) && p.Vitals.IsSome then
+                    let form = p.BDemonForm
+                    let mods = at s.A.BMods form
+                    let value (stat: string) = mods |> List.sumBy (fun m -> if m.Stat = Named stat then m.Value else 0.0)
+                    let since = (at s.A.BExpires form) - 1e9
+                    let flames = min 10 (int (s.Time - since))
+                    // the life lost since the last event, at the Demonflame held then
+                    let before = max 0 (min 10 (int (s.Time - dt - since)))
+                    let life = s.Life - value "DemonLifeLossPerStack" * float before * max 0.0 dt
+                    if life <= 1.0 then
+                        let back = s.Time + value "DemonCooldown"
+                        s.Life <- min s.Life 1.0
+                        bump s p.CDemonEnded
+                        removeBuff s form
+                        removeBuff s p.BDemonflame
+                        // (the form's skill is named by where its mods are from)
+                        match mods |> List.tryPick (fun m -> if m.Source <> "" then Some m.Source else None) with
+                        | Some name ->
+                            match p.SkillIds.TryGetValue name with
+                            | true, skill ->
+                                put s.A.Cooldowns skill back
+                                put s.A.Recharges skill [ back ]
+                            | _ -> ()
+                        | None -> ()
+                    else
+                        s.Life <- life
+                        if flames > 0 then setBuff s p.BDemonflame flames infinity []
                 // rage: regenerated all the time, lost once none has been gained for a while
                 (let have = stacksOf s p.BRage
                  if not (dt <= 0.0 || p.MaxRage <= 0 || (p.RageRegen <= 0.0 && have = 0)) then

@@ -554,6 +554,18 @@ let randomFight (case: uint32) : Fight * string =
                     [ for i in 1 .. whole 1 2 ->
                         { Name = sprintf "Banner %d" i; Glory = between 5.0 80.0; PerAttackHit = between 100.0 2000.0; Duration = between 1.0 6.0
                           Mods = [ Mod.inc (Damage AllDamage) (between 5.0 40.0); Mod.inc Speed (between 5.0 20.0) ] } ] }
+    // a form that is switched on, and costs life the longer it lasts (Demon Form)
+    let player =
+        if player.Vitals.IsNone || chance 0.9 then player
+        else
+            let first = names.Head
+            { player with
+                Skills = player.Skills |> List.map (fun s -> if s.Name = first then { s with Mods = Mod.flag (Named "ToggleBuff:Demon Form") :: s.Mods } else s)
+                Rules =
+                    { Hook = OnUse; Filter = Called first; Chance = 100.0
+                      Reaction = GrantBuff("Demon Form", 1e9, 1, [ Mod.base' (Named "DemonLifeLossPerStack") (between 5.0 150.0) |> Mod.from first; Mod.base' (Named "DemonCooldown") (between 0.5 4.0); Mod.more (Damage AllDamage) 20.0 ]) }
+                    :: player.Rules
+                Mods = (Mod.inc Speed 20.0 |> Mod.whenever (WhileBuff "Demon Form")) :: (Mod.more (Damage AllDamage) 3.0 |> Mod.whenever (PerStack("Demonflame", 1.0))) :: player.Mods }
     // Pyromantic Pact: costs build Infernal Flame, which burns when full
     let player =
         match player.Vitals with
