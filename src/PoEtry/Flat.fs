@@ -1312,12 +1312,9 @@ module Flat =
         let sources = Names()
 
         // ---- the fight ----
-        // (a replacement is named after the enemy it replaces, with a + more, and is of the kind
+        // (A replacement is named after the enemy it replaces, with a + more, and is of the kind
         // of the enemy that goes by the name without the +. Where that name with a + is an
-        // enemy's own, the reference puts the replacement in that enemy's place, alive or not:
-        // not built here.)
-        if fight.Replace && fight.Enemies |> List.exists (fun e -> e.Name.EndsWith "+" && fight.Enemies |> List.exists (fun o -> o.Name = e.Name.TrimEnd('+'))) then
-            reject "an enemy named like the replacement of another"
+        // enemy's own, the replacement takes that enemy's place, alive or not: see `replace`.)
         let actors = fight.Player :: fight.Minions
         if (actors |> List.map (fun a -> a.Name) |> List.distinct).Length <> actors.Length then reject "actors of the same name"
         // (The reference keeps what decides whether an attack lands by the defender's name:
@@ -7054,10 +7051,27 @@ module Flat =
                 let d = info.Def
                 let position = Vec.scale (Vec.length d.Position * 1.25 + 10.0) (Vec.ofAngle (Vec.angle d.Position + (s.Rng.Float() - 0.5) * 1.2))
                 let def = { d with Name = name + "+"; Position = position }
-                let index = s.Foes.Length
-                s.Foes <- Array.append s.Foes [| makeFoe s.Entropies ns info index (at s.Foes s.FoeIds.[name]).Root def |]
-                s.FoeIds.[def.Name] <- index
-                s.AliveCount <- s.AliveCount + 1
+                let index =
+                    match s.FoeIds.TryGetValue def.Name with
+                    | true, taken ->
+                        // (an enemy goes by that name already: the new one is in its place, and
+                        // what was aimed at it, or waits on it, is the new one's; its attacks
+                        // go on beside the new one's own)
+                        let old = at s.Foes taken
+                        flushUptime s old
+                        flushDots s old
+                        let fresh = makeFoe s.Entropies ns info taken old.Root def
+                        fresh.AttackN <- old.AttackN
+                        if not (old.Life > 0.0) then s.AliveCount <- s.AliveCount + 1
+                        put s.Foes taken fresh
+                        s.RoomAt <- -2
+                        taken
+                    | _ ->
+                        let index = s.Foes.Length
+                        s.Foes <- Array.append s.Foes [| makeFoe s.Entropies ns info index (at s.Foes s.FoeIds.[name]).Root def |]
+                        s.FoeIds.[def.Name] <- index
+                        s.AliveCount <- s.AliveCount + 1
+                        index
                 if p.Attacked then
                     match d.Attack with
                     | Some attack -> schedule s (s.Time + s.Rng.Float() * attack.Interval) EEnemyAttack index 0 0.0 0.0

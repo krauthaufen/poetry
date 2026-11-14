@@ -1077,6 +1077,10 @@ let run (test: string -> (unit -> unit) -> unit) =
         // a name with a + that is no replacement's: no one comes for it; one comes for the others
         same { fine with Enemies = [ { weak with Name = "boss+" } ]; Replace = true } few
         same { fine with Enemies = [ { weak with Name = "a+" }; { weak with Name = "b" }; { weak with Name = "c++" } ]; Replace = true } few
+        // a replacement that takes the name of an enemy there is: it takes its place, alive or dead
+        let burning = { fine with Player = { player with Mods = [ Mod.inc CritChance 100.0; Mod.base' (AilmentChance Ignite) 100.0; Mod.base' (AilmentChance Shock) 100.0 ]; Skills = [ { spell "Bolt" Fire 100.0 200.0 with Delivery = AreaAtTarget 30.0 }; { spell "Arc" Lightning 50.0 150.0 with Cooldown = Some 1.0 } ]; Rotation = [ Actor.always "Arc"; Actor.always "Bolt" ] } }
+        same { burning with Enemies = [ { weak with Name = "a" }; { strong with Name = "a+"; Position = Vec.make 14.0 -6.0 }; { weak with Name = "a+++"; Life = 400.0 } ]; Replace = true } few
+        same { burning with Enemies = [ { weak with Name = "a"; Life = 600.0 }; { weak with Name = "a+"; Life = 150.0; Position = Vec.make 14.0 -6.0 }; { strong with Name = "a++"; Life = 300.0 } ]; Replace = true } seeds
         // a player that is out until summoned, or stands only while a buff is up, or has a body
         same { fine with Player = { player with Pool = Some "Pack" } } few
         same { fine with Player = { player with ActiveWhile = Some "Totem" } } few
@@ -1377,14 +1381,12 @@ let run (test: string -> (unit -> unit) -> unit) =
         if not (Flat.unsupported fine).IsEmpty then failwithf "a plain fight is refused: %A" (Flat.unsupported fine)
         refused { fine with Minions = [ Actor.make "Player" [] [ strike "Bite" 1.0 2.0 ] ] } "actors of the same name"
         // both reasons of a fight with two
-        // (a replacement of "boss" would take the place of the enemy that is called "boss+" already)
-        refused { fine with Enemies = [ boss 1e9; { boss 1e9 with Name = (boss 1.0).Name + "+" } ]; Replace = true } "an enemy named like the replacement of another"
         // (a skill that goes by a name the reference keeps a cooldown of its own under)
         let sealed = { spell "Bolt" Fire 1.0 2.0 with Mods = [ Mod.base' (Named "MaxSeals") 3.0; Mod.base' (Named "SealIntervalMs") 500.0 ] }
         refused { fine with Player = Actor.make "Player" [] [ sealed; spell "SealBreak:Bolt" Cold 1.0 2.0 ] } "a skill named like a cooldown of the engine's own"
         same { fine with Player = Actor.make "Player" [] [ spell "Bolt" Fire 1.0 2.0; { spell "SealBreak:Bolt" Cold 1.0 2.0 with Cooldown = Some 1.0 }; { spell "ArchonRecovery" Cold 1.0 2.0 with Cooldown = Some 0.7 } ] } [ 1u; 2u; 3u ]
         // both reasons of a fight with two
-        let two = { fine with Enemies = [ boss 1e9; { boss 1e9 with Name = (boss 1.0).Name + "+" } ]; Replace = true; Minions = [ Actor.make "Player" [] [ strike "Bite" 1.0 2.0 ] ] }
+        let two = { fine with Player = Actor.make "Player" [] [ sealed; spell "SealBreak:Bolt" Cold 1.0 2.0 ]; Minions = [ Actor.make "Player" [] [ strike "Bite" 1.0 2.0 ] ] }
         if (Flat.unsupported two).Length <> 2 then failwithf "expected two reasons, got %A" (Flat.unsupported two))
 
     test "flat: skills and parts of one name, the same or not: a name is the first of it, a use reads its own parts" (fun () ->
