@@ -1031,8 +1031,10 @@ module Flat =
               CMinionLeft: int
               Vitals: PlayerStats option
               BuffNames: string[]
-              /// The buffs the defences depend on (`Actor.VitalsReads`; all of them where that is not said).
+              /// The buffs the defences depend on (`Actor.VitalsReads`; all of them where that is not said),
+              /// and by buff, whether it is one of them.
               VitalsOn: int[]
+              Vital: bool[]
               BuffIds: Dictionary<string, int>
               /// Where the mods of buffs go, by stat and kind; how many such places; those of
               /// gained and of converted damage; Rage's.
@@ -1985,6 +1987,10 @@ module Flat =
                         (match actor.VitalsReads with
                          | Some names -> [| for i in 0 .. buffNames.Length - 1 do if names.Contains (at buffNames i) then yield i |]
                          | None -> Array.init buffNames.Length id)
+                      Vital =
+                        (match actor.VitalsReads with
+                         | Some names -> buffNames |> Array.map names.Contains
+                         | None -> Array.create buffNames.Length true)
                       BuffIds = buffs.Ids
                       DynKeys = dynKeys
                       DynCount = dynStats.Count
@@ -2391,8 +2397,10 @@ module Flat =
           /// Counts the changes to what the buffs' mods are: a skill's mods with the buffs
           /// (`Sim.skillDb`) are good while this is what it was when they were made.
           mutable ModsVersion: int
-          /// Counts the changes to which buffs there are and their stacks.
+          /// Counts the changes to which buffs there are and their stacks; and those to the
+          /// buffs the defences depend on (`Program.Vital`).
           mutable BuffsVersion: int
+          mutable VitalsVersion: int
           /// The buffs' mods per stat (see `dyn`), for the mods as they were at `DynVersion`.
           mutable Dyn: Item[][]
           mutable DynVersion: int
@@ -2553,7 +2561,10 @@ module Flat =
           mutable LifeFlaskCharges: float
           mutable LifeFlaskUntil: float
           mutable LifeFlaskRate: float
-          mutable Recoups: (float * float * string) list
+          /// Recovery streams (recoup, leech): until when, per second, into which pool (see `PLeechMana`).
+          mutable Recoups: (float * float * int) list
+          /// Scratch: what the streams of each pool give over a step.
+          Streams: float[]
           /// When the player died (NaN: it lives), what it took, its lowest life.
           mutable Died: float
           mutable Taken: float
@@ -2585,6 +2596,36 @@ module Flat =
           /// Mana gained: regen, leech, flask, recoup, hit, kill, consume.
           Gained: float[]
           GainedSeen: bool[] }
+
+    // ---- the pools a recovery stream goes into (`Sim.PlayerState.Recoups`, by name there) ----
+
+    [<Literal>]
+    let private PLeechMana = 0
+    [<Literal>]
+    let private PES = 1
+    [<Literal>]
+    let private PShroudES = 2
+    [<Literal>]
+    let private PMana = 3
+    [<Literal>]
+    let private PLeechLife = 4
+    [<Literal>]
+    let private PLife = 5
+    /// (a pool of another name: nothing reads its stream; one named like a leech counts as leeching)
+    [<Literal>]
+    let private POther = 6
+    [<Literal>]
+    let private POtherLeech = 7
+
+    let private poolOf (name: string) : int =
+        match name with
+        | "LeechMana" -> PLeechMana
+        | "ES" -> PES
+        | "ShroudES" -> PShroudES
+        | "Mana" -> PMana
+        | "LeechLife" -> PLeechLife
+        | "Life" -> PLife
+        | other -> if other.StartsWith "Leech" then POtherLeech else POther
 
     let private gainedNames = [| "regen"; "leech"; "flask"; "recoup"; "hit"; "kill"; "consume" |]
 
@@ -2649,6 +2690,7 @@ module Flat =
             s.A.BuffMapStale <- true
             s.A.BChanged.Add id
             s.A.BuffsVersion <- s.A.BuffsVersion + 1
+            if (at s.P.Vital id) then s.A.VitalsVersion <- s.A.VitalsVersion + 1
         if not (had && (at s.A.BStacks id) = stacks && obj.ReferenceEquals((at s.A.BMods id), mods)) then
             if not mods.IsEmpty || (had && not (at s.A.BMods id).IsEmpty) || id = s.P.BRage then s.A.ModsVersion <- s.A.ModsVersion + 1
         put s.A.BHas id (true)
@@ -2663,6 +2705,7 @@ module Flat =
             s.A.BuffMapStale <- true
             s.A.BChanged.Add id
             s.A.BuffsVersion <- s.A.BuffsVersion + 1
+            if (at s.P.Vital id) then s.A.VitalsVersion <- s.A.VitalsVersion + 1
             if not (at s.A.BMods id).IsEmpty || id = s.P.BRage then s.A.ModsVersion <- s.A.ModsVersion + 1
             put s.A.BHas id (false)
             put s.A.BStacks id (0)
@@ -3255,7 +3298,7 @@ module Flat =
                     |> List.choose (fun (pool, types, pct) ->
                         let rate = match pool with "Life" -> pools.LifeRecoveryRate | "Mana" -> pools.ManaRecoveryRate | _ -> pools.ESRecoveryRate
                         let amount = (types |> List.sumBy (fun t -> Map.tryFind t damage |> Option.defaultValue 0.0)) * pct / 100.0 * rate
-                        if amount > 0.0 then Some(s.Time + pools.RecoupSeconds, amount / pools.RecoupSeconds, pool) else None)
+                        if amount > 0.0 then Some(s.Time + pools.RecoupSeconds, amount / pools.RecoupSeconds, poolOf pool) else None)
                 // (the lowest life counts the ward as it was before this damage)
                 s.MinLife <- min s.MinLife ((max 0.0 life + s.Ward) / max 1.0 (pools.Life + pools.Ward))
                 s.Mana <- s.Mana - fromMana
@@ -3274,23 +3317,28 @@ module Flat =
                     bump s s.P.CFlaskLife
                 | _ -> ()
 
-    /// What the recovery streams of a pool give from `t0` to now (recoup, leech: see `recover`).
-    let private recouped (s: State) (pool: string) (t0: float) : float =
-        if s.Recoups.IsEmpty then 0.0
-        else
+    /// What the recovery streams give from `t0` to now, by pool, into `State.Streams`
+    /// (recoup, leech: see `recover`).
+    let private recouped (s: State) (t0: float) =
+        let sums = s.Streams
+        for pool in 0 .. sums.Length - 1 do
+            put sums pool 0.0
+        if not s.Recoups.IsEmpty then
             // (leech: only the instance with the highest rate; the others add up, in their order)
-            let leech = pool.StartsWith "Leech"
-            let mutable acc = 0.0
-            let mutable any = false
+            let mutable anyMana = false
+            let mutable anyLife = false
             let mutable rest = s.Recoups
             while not rest.IsEmpty do
-                let until, rate, pl = rest.Head
-                if pl = pool then
-                    let part = rate * max 0.0 (min s.Time until - t0)
-                    acc <- (if leech then (if any then max acc part else part) else acc + part)
-                    any <- true
+                let until, rate, pool = rest.Head
+                let part = rate * max 0.0 (min s.Time until - t0)
+                if pool = PLeechMana then
+                    put sums pool (if anyMana then max (at sums pool) part else part)
+                    anyMana <- true
+                elif pool = PLeechLife then
+                    put sums pool (if anyLife then max (at sums pool) part else part)
+                    anyLife <- true
+                else put sums pool ((at sums pool) + part)
                 rest <- rest.Tail
-            acc
 
     /// The player's recovery and the damage over time on it during dt, ending now (`Sim.recover`).
     let private recover (s: State) (dt: float) =
@@ -3309,24 +3357,25 @@ module Flat =
         match s.P.Vitals with
         | Some v when dt > 0.0 && alive s ->
             let t0 = s.Time - dt
-            let stream (pool: string) = recouped s pool t0
-            let leech = stream "LeechMana"
+            recouped s t0
+            let streams = s.Streams
+            let leech = at streams PLeechMana
             let regen = v.ManaRegen * dt
             let mana = min v.Mana (s.Mana + regen + leech)
             let es =
                 (if s.Time - s.LastHit >= v.ESRechargeDelay then s.Shield + v.EnergyShieldRecharge * dt else s.Shield)
-                + v.ESRegen * dt + stream "ES" + stream "ShroudES"
+                + v.ESRegen * dt + (at streams PES) + (at streams PShroudES)
                 |> min (max s.Shield v.EnergyShield)
             let flask = s.FlaskRate * max 0.0 (min s.Time s.FlaskUntil - t0)
-            let recouped = stream "Mana"
+            let recouped = at streams PMana
             let mana = min v.Mana (mana + flask + recouped)
             addGained s 0 (min regen (v.Mana - s.Mana))
             addGained s 1 leech
             addGained s 2 flask
             if recouped > 0.0 then addGained s 3 recouped
-            let lifeLeech = stream "LeechLife"
+            let lifeLeech = at streams PLeechLife
             let lifeRecharge = if v.LifeRecharge > 0.0 && s.Time - s.LastHit >= v.ESRechargeDelay then v.LifeRecharge * dt else 0.0
-            let lifeGain = v.LifeRegen * dt + lifeLeech + lifeRecharge + s.LifeFlaskRate * max 0.0 (min s.Time s.LifeFlaskUntil - t0) + stream "Life"
+            let lifeGain = v.LifeRegen * dt + lifeLeech + lifeRecharge + s.LifeFlaskRate * max 0.0 (min s.Time s.LifeFlaskUntil - t0) + (at streams PLife)
             let lifeCharges =
                 match v.LifeFlask with
                 | Some f -> min f.MaxCharges (s.LifeFlaskCharges + f.ChargesPerSecond * f.ChargeGainMult * dt)
@@ -3784,7 +3833,7 @@ module Flat =
         | RRegenES (rate, duration, count) ->
             // (the player's, whoever the rule is of)
             if s.Main.Vitals.IsSome && alive s then
-                s.Recoups <- (s.Time + duration, rate, "ShroudES") :: (s.Recoups |> List.filter (fun (_, _, pool) -> pool <> "ShroudES"))
+                s.Recoups <- (s.Time + duration, rate, PShroudES) :: (s.Recoups |> List.filter (fun (_, _, pool) -> pool <> PShroudES))
                 bump s count
         | RGainEnergy (meta, amount) -> if meta >= 0 then gainEnergy s rng meta amount
         | REmpower (b, perPower, cap, counts) ->
@@ -4317,39 +4366,77 @@ module Flat =
           Energy = energyMap s
           LastUsed = (if s.A.LastUsed >= 0 then (at s.P.Skills s.A.LastUsed).Skill.Name else "") }
 
+    /// What a use of the skill costs now: base x increased cost / (1 + cost efficiency).
+    /// `seconds`: how long the use takes, for a skill that costs by the second (NaN: to be worked out).
+    let private costOf (s: State) (sid: int) (seconds: float) : float =
+        let p = s.P
+        let info = (at p.Skills sid)
+        let skill = info.Skill
+        // (asked with the skill known and nothing else: no buffs, no enemy)
+        let ev = acquire s sid
+        keepAnswers s ev sid -1 2
+        let extraCost =
+            match p.Vitals with
+            | Some pools -> pools.Mana * sumQ ev qExtraCost / 100.0
+            | None -> 0.0
+        let costMult = multQ ev qManaCost
+        let efficiency = incQ ev qCostEfficiency
+        release s
+        // crossbow ammunition: the cost is for loading, paid with the first shot of a new load
+        let ownCost = if skill.Clip > 0 && not (at s.A.LoadDue sid) then 0.0 else skill.Cost
+        let ownCost =
+            if skill.CostPerSecond <= 0.0 then ownCost
+            else
+                let seconds = if System.Double.IsNaN seconds then max Constants.serverTick (useTime s sid) else seconds
+                (if s.A.LastUsed = sid then 0.0 else ownCost) + skill.CostPerSecond * seconds
+        (ownCost + extraCost) * costMult / efficiency
+
+    /// The actor uses the skill now, for so long, and is free again after it (and after
+    /// reloading, where the last bolt of a load was shot).
+    let private useNow (s: State) (rng: Rng) (sid: int) (t: float) =
+        let p = s.P
+        let info = (at p.Skills sid)
+        let clip = info.Skill.Clip
+        if clip <= 0 then
+            startUse s rng sid t
+            schedule s (s.Time + t + 0.0) EReady 0 0 0.0 0.0
+        else
+            // after the last bolt of a load: reload (attack speed and reload speed shorten
+            // it), unless the reload is instant
+            // (asked of the mods as they are before the use, with the buffs as they are after it)
+            let ev = acquire s sid
+            startUse s rng sid t
+            ev.BOn <- true
+            ev.BHas <- s.A.BHas
+            ev.BStacks <- s.A.BStacks
+            s.A.BKept <- true
+            let left = if (at s.A.Ammo sid) < 0 then clip else (at s.A.Ammo sid)
+            let left = if rng.Chance(sumQ ev qKeepAmmo) then left else left - 1
+            put s.A.Ammo sid left
+            put s.A.LoadDue sid false
+            let extra =
+                if left > 0 then 0.0
+                else
+                    let speed = (1.0 + (sumQ ev qSpeed + sumQ ev qReloadSpeed) / 100.0) * moreQ ev (qSpeed + 1) * moreQ ev (qReloadSpeed + 1)
+                    let seconds = if rng.Chance(sumQ ev qInstantReload) then 0.0 else info.Skill.ReloadTime / max 0.1 speed
+                    put s.A.Ammo sid clip
+                    put s.A.LoadDue sid true
+                    setBuff s p.BReloaded 1 (s.Time + t + seconds + 4.0) []
+                    expireAt s (s.Time + t + seconds + 4.0)
+                    bump s info.CReload
+                    seconds
+            release s
+            schedule s (s.Time + t + extra) EReady 0 0 0.0 0.0
+
     /// The player is free to act: the first step of the rotation that can be used and paid
     /// for is used (`Sim.onReadyUnlocked`).
     let private act (s: State) (rng: Rng) =
         let p = s.P
         let v = view s
         let t = aimed s
-        // what a use of the skill costs now: base x increased cost / (1 + cost efficiency)
-        let costAt (sid: int) (seconds: unit -> float) =
-            let info = (at p.Skills sid)
-            let skill = info.Skill
-            // (asked with the skill known and nothing else: no buffs, no enemy)
-            let ev = acquire s sid
-            keepAnswers s ev sid -1 2
-            let extraCost =
-                match p.Vitals with
-                | Some pools -> pools.Mana * sumQ ev qExtraCost / 100.0
-                | None -> 0.0
-            let costMult = multQ ev qManaCost
-            let efficiency = incQ ev qCostEfficiency
-            release s
-            // crossbow ammunition: the cost is for loading, paid with the first shot of a new load
-            let ownCost = if skill.Clip > 0 && not (at s.A.LoadDue sid) then 0.0 else skill.Cost
-            let ownCost =
-                if skill.CostPerSecond <= 0.0 then ownCost
-                else (if s.A.LastUsed = sid then 0.0 else ownCost) + skill.CostPerSecond * seconds ()
-            (ownCost + extraCost) * costMult / efficiency
-        let costOf (sid: int) = costAt sid (fun () -> max Constants.serverTick (useTime s sid))
-        let affordable (sid: int) =
-            match p.Vitals with
-            | Some pools when pools.CostsInfernalFlame -> true
-            | Some pools when pools.CostsLife -> (let c = costOf sid in c <= 0.0 || s.Life - c >= 1.0)
-            | Some _ -> s.Mana >= costOf sid
-            | None -> true
+        // (what the affordable one was found to cost is what it costs)
+        let mutable costed = -1
+        let mutable costedAt = 0.0
         let mutable firstUsable = -1
         let mutable choice = -1
         // (every step's condition is asked, as the reference asks them all)
@@ -4373,49 +4460,30 @@ module Flat =
                 && (info.NeedsStacks.Length = 0 || info.NeedsStacks |> Array.forall (fun (status, n) -> t >= 0 && (Map.tryFind status v.EnemyStatus |> Option.defaultValue 0) >= n))
             if usable then
                 if firstUsable < 0 then firstUsable <- sid
-                if choice < 0 && affordable sid then choice <- sid
+                if choice < 0 then
+                    let affordable =
+                        match p.Vitals with
+                        | Some pools when pools.CostsInfernalFlame -> true
+                        | Some pools when pools.CostsLife ->
+                            costed <- sid
+                            costedAt <- costOf s sid nan
+                            costedAt <= 0.0 || s.Life - costedAt >= 1.0
+                        | Some _ ->
+                            costed <- sid
+                            costedAt <- costOf s sid nan
+                            s.Mana >= costedAt
+                        | None -> true
+                    if affordable then choice <- sid
         let choice = if choice >= 0 then choice else firstUsable
         if choice >= 0 then
             let sid = choice
             let info = (at p.Skills sid)
             // nothing is faster than a server tick (instant skills)
             let t = max Constants.serverTick (useTime s sid)
-            let go () =
-                let clip = info.Skill.Clip
-                if clip <= 0 then
-                    startUse s rng sid t
-                    schedule s (s.Time + t + 0.0) EReady 0 0 0.0 0.0
-                else
-                    // after the last bolt of a load: reload (attack speed and reload speed shorten
-                    // it), unless the reload is instant
-                    // (asked of the mods as they are before the use, with the buffs as they are after it)
-                    let ev = acquire s sid
-                    startUse s rng sid t
-                    ev.BOn <- true
-                    ev.BHas <- s.A.BHas
-                    ev.BStacks <- s.A.BStacks
-                    s.A.BKept <- true
-                    let left = if (at s.A.Ammo sid) < 0 then clip else (at s.A.Ammo sid)
-                    let left = if rng.Chance(sumQ ev qKeepAmmo) then left else left - 1
-                    put s.A.Ammo sid left
-                    put s.A.LoadDue sid false
-                    let extra =
-                        if left > 0 then 0.0
-                        else
-                            let speed = (1.0 + (sumQ ev qSpeed + sumQ ev qReloadSpeed) / 100.0) * moreQ ev (qSpeed + 1) * moreQ ev (qReloadSpeed + 1)
-                            let seconds = if rng.Chance(sumQ ev qInstantReload) then 0.0 else info.Skill.ReloadTime / max 0.1 speed
-                            put s.A.Ammo sid clip
-                            put s.A.LoadDue sid true
-                            setBuff s p.BReloaded 1 (s.Time + t + seconds + 4.0) []
-                            expireAt s (s.Time + t + seconds + 4.0)
-                            bump s info.CReload
-                            seconds
-                    release s
-                    schedule s (s.Time + t + extra) EReady 0 0 0.0 0.0
             match p.Vitals with
-            | None -> go ()
+            | None -> useNow s rng sid t
             | Some pools ->
-                let cost = costAt sid (fun () -> t)
+                let cost = if costed = sid then costedAt else costOf s sid t
                 // drink the mana flask when mana is getting low and it isn't already running
                 (match p.Actor.ManaFlask with
                  | Some f when s.Mana < 2.0 * cost && s.Time >= s.FlaskUntil && s.FlaskCharges >= f.ChargesPerUse ->
@@ -4429,7 +4497,7 @@ module Flat =
                     // Blood Magic: the cost is paid with life; a skill that would kill waits
                     if s.Life - cost >= 1.0 || cost <= 0.0 then
                         s.Life <- s.Life - cost
-                        go ()
+                        useNow s rng sid t
                     else
                         let wait = max Constants.serverTick 0.25
                         s.Starved <- s.Starved + wait
@@ -4446,7 +4514,7 @@ module Flat =
                         bump s p.CInfernalBurn
                         takeDamage s pools (Map.ofList [ Fire, burn ])
                     else s.InfernalFlame <- flame
-                    go ()
+                    useNow s rng sid t
                 elif s.Mana < cost && cost > pools.Mana then
                     // costs more than the whole mana pool: this skill can never be used
                     bump s info.CCannotAfford
@@ -4455,7 +4523,7 @@ module Flat =
                 elif s.Mana < cost then
                     // not enough mana: wait until regeneration and leech have covered it
                     let rate =
-                        pools.ManaRegen + (s.Recoups |> List.sumBy (fun (until, rate, pool) -> if pool = "LeechMana" && until > s.Time then rate else 0.0))
+                        pools.ManaRegen + (s.Recoups |> List.sumBy (fun (until, rate, pool) -> if pool = PLeechMana && until > s.Time then rate else 0.0))
                         + (if s.Time < s.FlaskUntil then s.FlaskRate else 0.0)
                     let wait = max Constants.serverTick (if rate > 0.0 then (cost - s.Mana) / rate else 1.0)
                     s.Starved <- s.Starved + wait
@@ -4463,7 +4531,7 @@ module Flat =
                 else
                     s.Mana <- s.Mana - cost
                     if p.HasSigil then sigilSpend s cost pools.Mana
-                    go ()
+                    useNow s rng sid t
         else
             // Nothing usable: wait for the next cooldown, or a server tick.
             let mutable next = infinity
@@ -5194,10 +5262,10 @@ module Flat =
                         | _ -> s.LifeFlaskCharges
                     if extra > 0.0 || (lifeLeech > 0.0 && v.Life > 1.0) then
                         s.Recoups <-
-                            (if extra > 0.0 then [ s.Time + Constants.leechSeconds, extra / Constants.leechSeconds, "LeechMana" ] else [])
+                            (if extra > 0.0 then [ s.Time + Constants.leechSeconds, extra / Constants.leechSeconds, PLeechMana ] else [])
                             @ (if lifeLeech > 0.0 && v.Life > 1.0 then
                                    (let t = Constants.leechSeconds / max 0.05 v.LifeLeechRate
-                                    [ s.Time + t, lifeLeech / t, "LeechLife" ])
+                                    [ s.Time + t, lifeLeech / t, PLeechLife ])
                                else [])
                             @ s.Recoups
                     s.StrikeLeech <- max leech s.StrikeLeech
@@ -5856,7 +5924,7 @@ module Flat =
                 match p.Fight.Player.VitalsAt with
                 | Some at ->
                     match s.VitalsLast with
-                    | Some v when s.VitalsOf = s.A.BuffsVersion -> v
+                    | Some v when s.VitalsOf = s.A.VitalsVersion -> v
                     | _ ->
                         // the buffs written out: which there are, and their stacks
                         let mutable key = ""
@@ -5869,7 +5937,7 @@ module Flat =
                                 let v = at (buffMap s)
                                 s.VitalsSeen.[key] <- v
                                 v
-                        s.VitalsOf <- s.A.BuffsVersion
+                        s.VitalsOf <- s.A.VitalsVersion
                         s.VitalsLast <- Some v
                         v
                 | None -> pools
@@ -5968,7 +6036,7 @@ module Flat =
                     // "Rage loss is paused for 4 seconds upon gaining Rage, or after taking damage"
                     s.A.RageAt <- s.Time
                     // charms used when a hit of their damage type is taken (they help from the next hit on)
-                    taken |> Map.iter (fun t d -> if d > 0.0 then charm s ("Hit:" + DamageType.name t) |> ignore)
+                    if p.Charms.Length > 0 then taken |> Map.iter (fun t d -> if d > 0.0 then charm s ("Hit:" + DamageType.name t) |> ignore)
                     if crit then bump s p.CEnemyCrit
                     setBuff s p.BBeenHit 1 (s.Time + 4.0) []
                     expireAt s (s.Time + 4.0)
@@ -6102,7 +6170,7 @@ module Flat =
          let mutable rest = s.Recoups
          while not rest.IsEmpty do
             let until, _, pool = rest.Head
-            if pool.StartsWith "Leech" && until > s.Time then leeching <- true
+            if (pool = PLeechMana || pool = PLeechLife || pool = POtherLeech) && until > s.Time then leeching <- true
             rest <- rest.Tail
          setState s 8 leeching)
         // surrounded: at least 5 monsters within 3 m
@@ -6457,6 +6525,7 @@ module Flat =
                   BChanged = ResizeArray()
                   ModsVersion = 0
                   BuffsVersion = 0
+                  VitalsVersion = 0
                   Dyn = pr.NoDyn
                   DynVersion = -1
                   DynOfSkill = false
@@ -6574,6 +6643,7 @@ module Flat =
               LifeFlaskUntil = 0.0
               LifeFlaskRate = 0.0
               Recoups = []
+              Streams = Array.zeroCreate 8
               Died = nan
               Taken = 0.0
               MinLife = 1.0

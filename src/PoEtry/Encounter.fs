@@ -9,12 +9,12 @@ type Vec =
 
 module Vec =
     let zero = { X = 0.0; Y = 0.0 }
-    let make x y = { X = x; Y = y }
-    let sub a b = { X = a.X - b.X; Y = a.Y - b.Y }
-    let add a b = { X = a.X + b.X; Y = a.Y + b.Y }
-    let scale k a = { X = a.X * k; Y = a.Y * k }
-    let length a = sqrt (a.X * a.X + a.Y * a.Y)
-    let dist a b = length (sub a b)
+    let inline make (x: float) (y: float) : Vec = { X = x; Y = y }
+    let inline sub (a: Vec) (b: Vec) : Vec = { X = a.X - b.X; Y = a.Y - b.Y }
+    let inline add (a: Vec) (b: Vec) : Vec = { X = a.X + b.X; Y = a.Y + b.Y }
+    let inline scale (k: float) (a: Vec) : Vec = { X = a.X * k; Y = a.Y * k }
+    let inline length (a: Vec) : float = sqrt (a.X * a.X + a.Y * a.Y)
+    let inline dist (a: Vec) (b: Vec) : float = length (sub a b)
     let angle a = atan2 a.Y a.X
     let ofAngle r = { X = cos r; Y = sin r }
 
@@ -354,111 +354,115 @@ module Geometry =
         if walls.IsEmpty then None
         else walls |> List.choose (wallHit origin dir) |> List.filter (fun (t, _) -> t <= within) |> List.sortBy fst |> List.tryHead
 
-    /// `trace`; `keep`: whether the points an erratic projectile passes are wanted (they
-    /// are for showing it, and for following it tick by tick).
-    let private traceWith (keep: bool) (rng: Rng) (walls: Wall list) (p: ProjectileShape) (origin: Vec) (dir0: Vec) (alive: EnemyDef list) : Path =
-        let rec go (pos: Vec) (dir: Vec) remaining (hit: string list) bounced (points: Vec list) (dists: float list) =
-            let enemy = nearest pos dir hit infinity alive
-            let wall = nearestWall pos dir infinity walls
-            let wallT = wall |> Option.map fst |> Option.defaultValue infinity
-            match enemy with
-            | ValueSome (struct (t, e)) when t <= remaining && t <= wallT ->
+    /// A projectile that flies straight (see `trace`), from where it is on.
+    let rec private straight (rng: Rng) (walls: Wall list) (p: ProjectileShape) (alive: EnemyDef list) (pos: Vec) (dir: Vec) remaining (hit: string list) bounced (points: Vec list) (dists: float list) : Path =
+        let enemy = nearest pos dir hit infinity alive
+        let wall = nearestWall pos dir infinity walls
+        let wallT = match wall with Some (t, _) -> t | None -> infinity
+        match enemy with
+        | ValueSome (struct (t, e)) when t <= remaining && t <= wallT ->
+            let at = Vec.add pos (Vec.scale t dir)
+            let hit = hit @ [ e.Name ]
+            let dists = dists @ [ p.Range - remaining + t ]
+            if hit.Length > p.Pierce then { Points = List.rev (at :: points); Hit = hit; Dist = dists }
+            else straight rng walls p alive at dir (remaining - t) hit bounced points dists
+        | _ ->
+            match wall with
+            | Some (t, reflected) when t <= remaining ->
                 let at = Vec.add pos (Vec.scale t dir)
-                let hit = hit @ [ e.Name ]
-                let dists = dists @ [ p.Range - remaining + t ]
-                if hit.Length > p.Pierce then { Points = List.rev (at :: points); Hit = hit; Dist = dists }
-                else go at dir (remaining - t) hit bounced points dists
-            | _ ->
-                match wall with
-                | Some (t, reflected) when t <= remaining ->
-                    let at = Vec.add pos (Vec.scale t dir)
-                    if not bounced && rng.Chance p.TerrainChain then
-                        // "Chain from terrain": like any chain, it seeks the nearest enemy in chain
-                        // range that this projectile hasn't hit. No target: mirror bounce (guess).
-                        let target =
-                            alive
-                            |> List.filter (fun e -> not (List.contains e.Name hit) && Vec.dist at e.Position - e.Size <= p.ChainRange)
-                            |> List.sortBy (fun e -> Vec.dist at e.Position)
-                            |> List.tryHead
-                        let next =
-                            match target with
-                            | Some e -> let d = Vec.sub e.Position at in Vec.scale (1.0 / Vec.length d) d
-                            | None -> reflected
-                        // step off the wall so the next segment doesn't hit it again
-                        go (Vec.add at (Vec.scale 1e-3 next)) next (remaining - t) hit true (at :: points) dists
-                    else { Points = List.rev (at :: points); Hit = hit; Dist = dists }
-                | _ -> { Points = List.rev (Vec.add pos (Vec.scale remaining dir) :: points); Hit = hit; Dist = dists }
-        // an erratic projectile: it strays sideways within its band, a new offset every band
-        // width travelled; each leg is flown and tested like a straight one. A wall ends
-        // it, unless it bounces: then it flies on in a random direction (wiki, Bounce).
-        let wander () =
-            let step = max 1.0 p.Wander
-            // (the points it passes are kept only for who asks for them)
-            let points = ResizeArray<Vec>()
-            if keep then points.Add origin
-            let mutable start = origin
-            let mutable dir = dir0
-            let mutable pos = origin
-            let mutable along = 0.0
-            let mutable remaining = p.Range
-            let mutable hit : string list = []
-            let mutable dists : float list = []
-            let mutable flying = true
-            while flying && not (remaining <= 1e-9) do
-                let advance = min remaining step
-                let perp = Vec.make -dir.Y dir.X
-                let next = Vec.add (Vec.add start (Vec.scale (along + advance) dir)) (Vec.scale ((rng.Float() - 0.5) * p.Wander) perp)
-                let leg = Vec.sub next pos
-                let len = Vec.length leg
-                if len < 1e-9 then
-                    pos <- next
-                    along <- along + advance
-                    remaining <- remaining - advance
-                else
-                    let legDir = Vec.scale (1.0 / len) leg
-                    let flown = p.Range - remaining
-                    let enemy = nearest pos legDir hit len alive
-                    let wall = nearestWall pos legDir len walls
-                    // an enemy in the way, unless a wall comes first
-                    let struck =
-                        match enemy with
-                        | ValueSome (struct (t, _)) -> (match wall with Some (wt, _) -> t <= wt | None -> true)
-                        | ValueNone -> false
-                    if struck then
-                        let struct (t, e) = enemy.Value
-                        let at = Vec.add pos (Vec.scale t legDir)
-                        hit <- hit @ [ e.Name ]
-                        dists <- dists @ [ flown + t * advance / len ]
-                        if hit.Length > p.Pierce then
-                            if keep then points.Add at
-                            flying <- false
-                        else
-                            pos <- next
-                            along <- along + advance
-                            remaining <- remaining - advance
-                            if keep then points.Add next
+                if not bounced && rng.Chance p.TerrainChain then
+                    // "Chain from terrain": like any chain, it seeks the nearest enemy in chain
+                    // range that this projectile hasn't hit. No target: mirror bounce (guess).
+                    let target =
+                        alive
+                        |> List.filter (fun e -> not (List.contains e.Name hit) && Vec.dist at e.Position - e.Size <= p.ChainRange)
+                        |> List.sortBy (fun e -> Vec.dist at e.Position)
+                        |> List.tryHead
+                    let next =
+                        match target with
+                        | Some e -> let d = Vec.sub e.Position at in Vec.scale (1.0 / Vec.length d) d
+                        | None -> reflected
+                    // step off the wall so the next segment doesn't hit it again
+                    straight rng walls p alive (Vec.add at (Vec.scale 1e-3 next)) next (remaining - t) hit true (at :: points) dists
+                else { Points = List.rev (at :: points); Hit = hit; Dist = dists }
+            | _ -> { Points = List.rev (Vec.add pos (Vec.scale remaining dir) :: points); Hit = hit; Dist = dists }
+
+    /// An erratic projectile (see `trace`): it strays sideways within its band, a new offset every band
+    /// width travelled; each leg is flown and tested like a straight one. A wall ends
+    /// it, unless it bounces: then it flies on in a random direction (wiki, Bounce).
+    /// `keep`: whether the points it passes are wanted (they are for showing it, and for
+    /// following it tick by tick).
+    let private erratic (keep: bool) (rng: Rng) (walls: Wall list) (p: ProjectileShape) (origin: Vec) (dir0: Vec) (alive: EnemyDef list) : Path =
+        let step = max 1.0 p.Wander
+        let points = ResizeArray<Vec>()
+        if keep then points.Add origin
+        let mutable start = origin
+        let mutable dir = dir0
+        let mutable pos = origin
+        let mutable along = 0.0
+        let mutable remaining = p.Range
+        let mutable hit : string list = []
+        let mutable dists : float list = []
+        let mutable flying = true
+        while flying && not (remaining <= 1e-9) do
+            let advance = min remaining step
+            let perp = Vec.make -dir.Y dir.X
+            let next = Vec.add (Vec.add start (Vec.scale (along + advance) dir)) (Vec.scale ((rng.Float() - 0.5) * p.Wander) perp)
+            let leg = Vec.sub next pos
+            let len = Vec.length leg
+            if len < 1e-9 then
+                pos <- next
+                along <- along + advance
+                remaining <- remaining - advance
+            else
+                let legDir = Vec.scale (1.0 / len) leg
+                let flown = p.Range - remaining
+                let enemy = nearest pos legDir hit len alive
+                let wall = nearestWall pos legDir len walls
+                // an enemy in the way, unless a wall comes first
+                let struck =
+                    match enemy with
+                    | ValueSome (struct (t, _)) -> (match wall with Some (wt, _) -> t <= wt | None -> true)
+                    | ValueNone -> false
+                if struck then
+                    let struct (t, e) = enemy.Value
+                    let at = Vec.add pos (Vec.scale t legDir)
+                    hit <- hit @ [ e.Name ]
+                    dists <- dists @ [ flown + t * advance / len ]
+                    if hit.Length > p.Pierce then
+                        if keep then points.Add at
+                        flying <- false
                     else
-                        match wall with
-                        | Some (t, _) when not p.Bounces ->
-                            if keep then points.Add(Vec.add pos (Vec.scale t legDir))
-                            flying <- false
-                        | Some (t, reflected) ->
-                            let at = Vec.add pos (Vec.scale t legDir)
-                            // away from the wall, anywhere within 60 degrees of the mirror direction
-                            let turned = Vec.ofAngle (Vec.angle reflected + (rng.Float() - 0.5) * System.Math.PI * 2.0 / 3.0)
-                            start <- Vec.add at (Vec.scale 1e-3 reflected)
-                            dir <- turned
-                            pos <- Vec.add at (Vec.scale 1e-3 reflected)
-                            along <- 0.0
-                            remaining <- remaining - t * advance / len
-                            if keep then points.Add at
-                        | None ->
-                            pos <- next
-                            along <- along + advance
-                            remaining <- remaining - advance
-                            if keep then points.Add next
-            { Points = List.ofSeq points; Hit = hit; Dist = dists }
-        if p.Wander > 0.0 then wander () else go origin dir0 p.Range [] false [ origin ] []
+                        pos <- next
+                        along <- along + advance
+                        remaining <- remaining - advance
+                        if keep then points.Add next
+                else
+                    match wall with
+                    | Some (t, _) when not p.Bounces ->
+                        if keep then points.Add(Vec.add pos (Vec.scale t legDir))
+                        flying <- false
+                    | Some (t, reflected) ->
+                        let at = Vec.add pos (Vec.scale t legDir)
+                        // away from the wall, anywhere within 60 degrees of the mirror direction
+                        let turned = Vec.ofAngle (Vec.angle reflected + (rng.Float() - 0.5) * System.Math.PI * 2.0 / 3.0)
+                        start <- Vec.add at (Vec.scale 1e-3 reflected)
+                        dir <- turned
+                        pos <- Vec.add at (Vec.scale 1e-3 reflected)
+                        along <- 0.0
+                        remaining <- remaining - t * advance / len
+                        if keep then points.Add at
+                    | None ->
+                        pos <- next
+                        along <- along + advance
+                        remaining <- remaining - advance
+                        if keep then points.Add next
+        { Points = List.ofSeq points; Hit = hit; Dist = dists }
+
+    /// `trace`; `keep`: see `erratic`.
+    let private traceWith (keep: bool) (rng: Rng) (walls: Wall list) (p: ProjectileShape) (origin: Vec) (dir0: Vec) (alive: EnemyDef list) : Path =
+        if p.Wander > 0.0 then erratic keep rng walls p origin dir0 alive
+        else straight rng walls p alive origin dir0 p.Range [] false [ origin ] []
 
     /// Fly one projectile: enemies in its way are hit (pierce lets it continue), a wall
     /// stops it unless the terrain-chain roll lets it bounce (once).
@@ -626,9 +630,9 @@ module Geometry =
             // hit from this volley only if the last one is long enough ago; a projectile that
             // may not hit passes through, one that hits is spent (pierce: so many more)
             let flights = pathsWith marks.IsSome rng walls { p with Pierce = 1000 } reach primary alive |> Array.ofList
-            let times = ResizeArray<float>()
-            let which = ResizeArray<int>()
-            let whom = ResizeArray<string>()
+            let times = ResizeArray<float>(flights.Length)
+            let which = ResizeArray<int>(flights.Length)
+            let whom = ResizeArray<string>(flights.Length)
             for i in 0 .. flights.Length - 1 do
                 let path = flights.[i]
                 if marks.IsSome then mark (Flight path.Points)
