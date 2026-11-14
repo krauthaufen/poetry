@@ -462,7 +462,8 @@ module Setup =
                     let offering = d.Types.Contains "Offering" && not p.Rules.IsEmpty
                     let skip = isDefaultAttack || (not offering && ([ "Travel"; "Minion"; "ModifiesNextSkill"; "Persistent" ] |> List.exists d.Types.Contains))
                     let empowers = p.Rules |> List.exists (fun r -> match r.Reaction with Empower _ -> true | _ -> false)
-                    let grantsBuff = p.Rules |> List.exists (fun r -> match r.Reaction with ChargeBuff _ | GrantBuff _ -> true | _ -> false)
+                    // (a buff the skill's use gives: not one that comes of what its hits inflict, like Ice Bite's)
+                    let grantsBuff = p.Rules |> List.exists (fun r -> match r.Hook, r.Reaction with OnInflict _, _ -> false | _, (ChargeBuff _ | GrantBuff _) -> true | _ -> false)
                     let cooldown = p.Skill.Cooldown |> Option.defaultValue 0.0
                     let needsBuilding = p.Skill.Mods |> List.exists (fun m -> match m.Stat with Named n -> (n.StartsWith "Requires:" || n.StartsWith "NeedsEnemyStacks:") && m.Value > 0.0 | _ -> false)
                     // Barrage is readied whenever it can be, for a main skill it can repeat
@@ -516,7 +517,7 @@ module Setup =
         // a main "skill" that only places a totem or grants a buff is kept up, not spammed
         let main =
             match pressed c o mainGem with
-            | Some p when (p.Skill.Hits.IsEmpty || p.Pattern.IsSome) && p.Rules |> List.exists (fun r -> match r.Reaction with ChargeBuff _ | GrantBuff _ -> true | _ -> false) -> KeepBuff mainGem
+            | Some p when (p.Skill.Hits.IsEmpty || p.Pattern.IsSome) && p.Rules |> List.exists (fun r -> match r.Hook, r.Reaction with OnInflict _, _ -> false | _, (ChargeBuff _ | GrantBuff _) -> true | _ -> false) -> KeepBuff mainGem
             | _ -> Spam mainGem
         // a main skill with a cooldown of its own goes first whenever it is ready: otherwise the
         // other cooldown skills would fill every gap and it would never be used
@@ -684,13 +685,17 @@ module Setup =
 
     /// A fight against these enemies.
     and fight (c: Loaded) (o: Options) (player: Actor) (enemies: EnemyDef list) : Fight =
-        // auras that weaken monsters near you (Overwhelming Presence); presence range is ignored
+        // auras that weaken monsters in your Presence (Overwhelming Presence)
         let db = ModDb.ofList c.Sheet.Mods
         let aura stat name =
             let k = Mods.more Ctx.empty [ Named name ] db
             if k <> 1.0 then [ Mod.more stat ((k - 1.0) * 100.0) |> Mod.from "aura" ] else []
         let auraMods = aura AilmentThreshold "EnemyAura:AilmentThreshold" @ aura PoiseThreshold "EnemyAura:PoiseThreshold"
-        let enemies = if auraMods.IsEmpty then enemies else enemies |> List.map (fun e -> { e with Mods = e.Mods @ auraMods })
+        // a condition on the enemy being in the Presence ("against targets in your Presence")
+        // is the status "InPresence": there only for a character that asks
+        let asksPresence =
+            let asks (ms: Mod list) = ms |> List.exists (fun m -> m.Conds |> List.exists (function EnemyHas "InPresence" | Not(EnemyHas "InPresence") -> true | _ -> false))
+            asks player.Mods || player.Skills |> List.exists (fun s -> asks s.Mods)
         let curses, curseGrants = Behaviours.curseAuras c.Db c.Sheet c.Build
         let player = if curseGrants.IsEmpty then player else { player with Mods = player.Mods @ curseGrants }
         // What the character brings into the fight. Charges: only those the build can generate,
@@ -728,7 +733,16 @@ module Setup =
             { a with Resources = a.Resources @ minionCounts; MaxResources = minionCounts |> List.fold (fun acc (k, n) -> Map.add k n acc) a.MaxResources }
         let player = counted player
         { Enemies = enemies
-          EnemyAuras = curses @ Behaviours.criticalWeaknessAura c.Sheet @ Behaviours.witheringPresence c.Db c.Sheet c.Build
+          // (Blasphemy's curses are an aura of their own size, which is not looked at)
+          EnemyAuras = curses
+          Presence = Behaviours.presenceRadius c.Sheet
+          PresenceAuras =
+            // (of two sources of Critical Weakness the one with more stacks)
+            ((Behaviours.criticalWeaknessAura c.Sheet @ Behaviours.malice c.Db c.Sheet c.Build) |> List.sortByDescending (fun (_, n, _) -> n) |> List.truncate 1)
+            @ Behaviours.witheringPresence c.Db c.Sheet c.Build
+            @ (if auraMods.IsEmpty then [] else [ "Overwhelming Presence", 1, auraMods ])
+            @ Behaviours.presenceAuras c.Sheet
+            @ (if asksPresence then [ "InPresence", 1, [] ] else [])
           Player = player
           // a totem uses its skill with the character's modifiers, so it also counts with the
           // character's numbers ("per 100 maximum Mana", "per 15 Strength", socketed gem colours)

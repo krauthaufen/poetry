@@ -413,6 +413,12 @@ type Fight =
       /// Debuffs every enemy has for the whole fight (curses applied as an aura): name, stacks
       /// and monster-side mods per stack; curses are scaled by the enemy's "curse effect on self".
       EnemyAuras: (string * int * Mod list) list
+      /// The radius of the player's Presence, game units (infinity: every enemy is in it), and
+      /// the debuffs an enemy has while it is in it (auras "on enemies in your Presence"):
+      /// name, stacks, monster-side mods per stack. An enemy is in it when its body reaches
+      /// into it; looked at whenever something happens in the fight.
+      Presence: float
+      PresenceAuras: (string * int * Mod list) list
       /// A dead enemy is replaced by a new one of its kind that walks in from further out
       /// (a pack that never ends: the fight lasts until MaxTime).
       Replace: bool
@@ -430,6 +436,8 @@ module Fight =
           Walls = []
           BankedInvocations = 1.0
           EnemyAuras = []
+          Presence = infinity
+          PresenceAuras = []
           Replace = false
           MaxTime = maxTime }
 
@@ -1001,6 +1009,31 @@ module Sim =
                 | _ -> w
             let w = alive w |> List.fold move w
             { w with Time = t }
+
+    /// Auras on enemies in the player's Presence: an enemy has them from when its body reaches
+    /// into the Presence, and loses them when it is out of it again. (One that is put on an
+    /// enemy by something else under the same name and runs out is the aura's again.)
+    let private syncPresence (fight: Fight) (w: World) =
+        if fight.PresenceAuras.IsEmpty then w
+        else
+            alive w
+            |> List.fold
+                (fun (w: World) e ->
+                    let inside = Vec.length e.Def.Position - e.Def.Size <= fight.Presence
+                    let debuffs =
+                        fight.PresenceAuras
+                        |> List.fold
+                            (fun (ds: Map<string, Effect>) (name, stacks, mods) ->
+                                match Map.tryFind name ds |> Option.filter (fun x -> x.Expires > w.Time) with
+                                | None when inside ->
+                                    // (an exposure is as strong as the enemy lets exposure be)
+                                    let mods = if name.StartsWith "Exposure:" then mods |> List.map (Mod.scaled (Mods.more Ctx.empty [ Named "ExposureEffectOnSelf" ] e.Db)) else mods
+                                    Map.add name { Name = name; Mods = mods; Stacks = stacks; Expires = infinity } ds
+                                | Some x when not inside && System.Double.IsPositiveInfinity x.Expires -> Map.remove name ds
+                                | _ -> ds)
+                            e.Debuffs
+                    if obj.ReferenceEquals(debuffs, e.Debuffs) then w else { w with Enemies = Map.add e.Def.Name { e with Debuffs = debuffs } w.Enemies })
+                w
 
     /// Mana recovery while time passes: regeneration, leech (rate-capped), ES recharge, life regen.
     /// Mitigated damage onto the player, by type: energy shield first (chaos damage removes
@@ -3444,7 +3477,7 @@ module Sim =
             else
                 let n = Map.tryFind key w.Streams |> Option.defaultValue 0
                 Rng(streamSeed w.Seed key n), { w with Streams = Map.add key (n + 1) w.Streams }
-        let w = { w with Queue = Map.remove (t, sq) w.Queue } |> advance t |> recover env.Fight.Player.Vitals env.Fight.Player.ManaFlask env.Fight.Player.Charms dt
+        let w = { w with Queue = Map.remove (t, sq) w.Queue } |> advance t |> syncPresence env.Fight |> recover env.Fight.Player.Vitals env.Fight.Player.ManaFlask env.Fight.Player.Charms dt
         if allDead w || (w.Player |> Option.exists (fun p -> p.Died.IsSome)) then
             w
         else

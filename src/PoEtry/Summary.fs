@@ -143,6 +143,8 @@ module Scenarios =
                   BankedInvocations = 0.0
                   Replace = false
                   EnemyAuras = []
+                  Presence = infinity
+                  PresenceAuras = []
                   Walls = []
                   MaxTime = maxTime })
 

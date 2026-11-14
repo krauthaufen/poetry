@@ -1075,6 +1075,43 @@ module Behaviours =
             else None)
         |> Option.defaultValue []
 
+    /// Malice: "emits an Aura that continuously inflicts Critical Weakness on enemies in your
+    /// Presence": a stack every `critical_chance_against_aura_apply_brittle_every_x_ms`, each for
+    /// the gem's duration: a steady duration / interval stacks (at most 20) on every enemy in it.
+    let malice (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) : (string * int * Mod list) list =
+        let charMods = ModDb.ofList sheet.Mods
+        build.Groups
+        |> List.filter (fun g -> g.Enabled)
+        |> List.collect (fun g -> g.Gems |> List.filter (fun x -> x.Enabled && not x.IsSupport))
+        |> List.tryPick (fun gem ->
+            let raw = Gems.rawStats db charMods { Gem = gem.Name; Level = gem.Level; Quality = gem.Quality; StatSet = 1; Supports = [] }
+            let sum id = raw |> List.filter (fun (k, _) -> k = id) |> List.sumBy snd
+            let every, lasts = sum "critical_chance_against_aura_apply_brittle_every_x_ms", sum "base_skill_effect_duration"
+            if every > 0.0 && lasts > 0.0 then Some [ "CriticalWeakness", min 20 (int (ceil (lasts / every))), [] ] else None)
+        |> Option.defaultValue []
+
+    /// The radius of the character's Presence, game units: 4 m, as an area scaled by "increased
+    /// Presence Area of Effect" (the radius by its square root, as for skills); "Presence
+    /// Radius is doubled" doubles the radius.
+    let presenceRadius (sheet: CharacterSheet) : float =
+        let db = ModDb.ofList sheet.Mods
+        Geometry.radius Constants.presenceRadius (Mods.mult Ctx.empty [ Named "PresenceArea" ] db)
+        * (if Mods.flag Ctx.empty (Named "PresenceRadiusDoubled") db then 2.0 else 1.0)
+
+    /// What enemies in the character's Presence have, beside the auras of its gems: "are
+    /// Hindered", "are Blinded", "have Exposure" (20% to each element, x exposure effect and
+    /// the enemy's own; the strongest exposure applies), "have -X% to Fire Resistance".
+    let presenceAuras (sheet: CharacterSheet) : (string * int * Mod list) list =
+        let db = ModDb.ofList sheet.Mods
+        let has name = Mods.flag Ctx.empty (Named("PresenceAura:" + name)) db
+        let fire = Mods.sumBase Ctx.empty [ Named "PresenceResist:Fire" ] db
+        [ if has "Hindered" then yield "Hindered", 1, []
+          if has "Blinded" then yield "Blinded", 1, []
+          if has "Exposure" then
+              let k = Mods.inc Ctx.empty [ Named "ExposureEffect" ] db
+              for t in DamageType.elemental -> "Exposure:" + DamageType.name t, 1, [ Mod.base' (Resist t) (-Constants.exposureMagnitude * k) |> Mod.from "Presence" ]
+          if fire <> 0.0 then yield "Presence: Fire Resistance", 1, [ Mod.base' (Resist Fire) fire |> Mod.from "Presence" ] ]
+
     /// Charms from the equipped items (API layout: "Flask: Lasts N Seconds", "Flask: Consumes N
     /// of M Charges on use", "Utility: <effect>", "Used when you ..."). Returns the charms and
     /// the sheet mods their effects are (conditional on the charm's buff).

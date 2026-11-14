@@ -232,3 +232,10 @@ module Constants =
     /// Degrees between neighbouring erratic projectiles (Spark's spray widens with every
     /// spark; the angle is not in the data). A guess.
     let erraticFanStep = 15.0
+
+    /// The player's Presence: "By default this has a 4 metre radius" (keyword text, poe2db).
+    let presenceRadius = 40.0
+
+    /// Exposure where nothing names its size: "By default it lowers Resistances by -20%"
+    /// (keyword text, poe2db).
+    let exposureMagnitude = 20.0

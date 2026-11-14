@@ -80,6 +80,10 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
                 near 6.0 seconds
                 equal (box [ for t in DamageType.all -> GainAs(t, Cold), 30.0 ]) (box (ms |> List.map (fun m -> m.Stat, m.Value)))
         | None -> failwith "Ice Nova not built"
+        // it is no buff to keep up by pressing the skill: the skill is played as it would be without
+        match Setup.auto c Options.defaults "Ice Nova" |> List.rev |> List.tryHead with
+        | Some (Spam "Ice Nova") -> ()
+        | other -> failwithf "Ice Nova is played as %A" (other |> Option.map (function Spam g -> "spam " + g | KeepBuff g -> "keep buff " + g | _ -> "?"))
         // without the support: no such rule
         let plain = load { blank with Groups = [ group [ gem "Ice Nova" ] ] } Options.defaults
         match Setup.pressed plain Options.defaults "Ice Nova" with
@@ -214,3 +218,68 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         let v = (load { blank with ExtraLines = [ "Debuffs on you expire 100% faster" ] } Options.defaults).Vitals
         near 0.5 v.SelfDuration.["Ignite"]
         near 0.5 v.SelfDuration.["Chill"])
+
+    // ---- Presence ----
+
+    test "Presence: an enemy has its auras from when its body reaches into it" (fun () ->
+        // a monster 10 m away, 0.5 m in radius, walks up at 2 m a second; an aura in the
+        // Presence doubles what it takes. 100 chaos damage every 0.5 s
+        let bolt = { Skill.make "Bolt" [ Spell ] with BaseDamage = Map.ofList [ Chaos, { Min = 100.0; Max = 100.0 } ]; BaseTime = 0.5; BaseCrit = 0.0 }
+        let walker =
+            { EnemyDef.make Rarity.defaults 70 Normal "walker" (Vec.make 100.0 0.0) with
+                Life = 1e9; Mods = []; Size = 5.0; Speed = 20.0
+                Attack = Some { Interval = 1.0; Damage = Map.ofList [ Physical, 1.0 ]; Accuracy = 100.0; Range = 6.0; CritChance = 0.0; Melee = true } }
+        let player = { Actor.make "Player" [] [ bolt ] with Vitals = Some(PlayerStats.basic 1e6 0.0) }
+        let fight presence =
+            { Fight.single walker player 5.2 with Presence = presence; PresenceAuras = [ "Weakened", 1, [ Mod.inc (DamageTaken AllDamage) 100.0 ] ] }
+        let dealt f = (Sim.run f 1u).DamageBy |> Map.toList |> List.sumBy snd
+        // 4 m: its edge is inside at 4.5 m, after 2.75 s; the hits at 3.0 to 5.0 s deal double
+        near (5.0 * 100.0 + 5.0 * 200.0) (dealt (fight 40.0))
+        // 8 m: inside at 8.5 m, after 0.75 s; all but the first hit
+        near (1.0 * 100.0 + 9.0 * 200.0) (dealt (fight 80.0))
+        // everywhere (a fight that names no Presence): every hit; without an aura: none
+        near (10.0 * 200.0) (dealt (fight infinity))
+        near (10.0 * 100.0) (dealt { fight 40.0 with PresenceAuras = [] })
+        // the time in the Presence is counted like any status
+        near (5.2 - 3.0) (Sim.run (fight 40.0) 1u).Uptime.["Weakened"]
+        for presence in [ 40.0; 80.0; infinity ] do
+            same (fight presence) seeds
+        // a debuff of the aura's name put on by a hit takes its place for its time; then the aura is back
+        let lapsing =
+            { fight 80.0 with
+                Player = { player with Rules = [ { Hook = OnHit; Filter = AnySkill; Chance = 30.0; Reaction = ApplyDebuff("Weakened", 0.7, 1, [ Mod.inc (DamageTaken AllDamage) 30.0 ]) } ] }
+                MaxTime = 12.0 }
+        same lapsing seeds)
+
+    test "Presence: 4 m, wider with its area, twice with a doubled radius; what the enemies in it have" (fun () ->
+        let radius lines = Behaviours.presenceRadius (load { blank with ExtraLines = lines } Options.defaults).Sheet
+        near 40.0 (radius [])
+        // 50% increased area: the radius by the square root, cut off like a skill's (1.22 x 40)
+        near 48.0 (radius [ "50% increased Presence Area of Effect" ])
+        near 80.0 (radius [ "Presence Radius is doubled" ])
+        near 96.0 (radius [ "50% increased Presence Area of Effect"; "Presence Radius is doubled" ])
+        // 50% reduced: 0.7 x 40
+        near 28.0 (radius [ "50% reduced Presence Area of Effect" ])
+        let fightOf gems lines =
+            let o = Options.defaults
+            let c = load { blank with Groups = [ group gems ]; ExtraLines = [ "+200 to Spirit" ] @ lines } o
+            Setup.fight c o (Setup.player c o [] None) (Encounter.boss 83 Rarity.defaults 30.0)
+        let f = fightOf [ gem "Overwhelming Presence" ] [ "Enemies in your Presence are Blinded"; "Enemies in your Presence have Exposure"; "Enemies in your Presence have -10% to Fire Resistance"; "Presence Radius is doubled" ]
+        near 80.0 f.Presence
+        let names = f.PresenceAuras |> List.map (fun (n, _, _) -> n)
+        for n in [ "Overwhelming Presence"; "Blinded"; "Exposure:Fire"; "Exposure:Cold"; "Exposure:Lightning"; "Presence: Fire Resistance" ] do
+            if not (List.contains n names) then failwithf "no %s among %A" n names
+        let modsOf n = f.PresenceAuras |> List.pick (fun (k, _, ms) -> if k = n then Some(ms |> List.map (fun m -> m.Stat, m.Kind, m.Value)) else None)
+        equal (box [ Resist Cold, Base, -20.0 ]) (box (modsOf "Exposure:Cold"))
+        equal (box [ Resist Fire, Base, -10.0 ]) (box (modsOf "Presence: Fire Resistance"))
+        // Overwhelming Presence: the monsters' thresholds are lower, and not on the monster itself any more
+        if not (modsOf "Overwhelming Presence" |> List.exists (fun (st, kind, v) -> st = AilmentThreshold && kind = More && v < 0.0)) then failwithf "%A" (modsOf "Overwhelming Presence")
+        // the auras of gems are the Presence's too: Malice's Critical Weakness
+        // (a stack every so often, each for 4 s: the gem's numbers at its level, at most 20 stacks)
+        let malice = fightOf [ gem "Malice" ] []
+        let raw = Gems.rawStats db.Value ModDb.empty { Gem = "Malice"; Level = 20; Quality = 0; StatSet = 1; Supports = [] }
+        let every = raw |> List.pick (fun (k, v) -> if k = "critical_chance_against_aura_apply_brittle_every_x_ms" then Some v else None)
+        equal (box [ "CriticalWeakness", min 20 (int (ceil (4000.0 / every))) ]) (box (malice.PresenceAuras |> List.map (fun (n, k, _) -> n, k)))
+        equal (box true) (box malice.EnemyAuras.IsEmpty)
+        // a whole fight with them is the same in both engines
+        same { f with MaxTime = 6.0 } [ 1u; 2u; 3u ])

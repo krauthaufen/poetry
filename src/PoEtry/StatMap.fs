@@ -387,6 +387,14 @@ module StatMap =
         | "%_chance_for_crossbow_reload_to_be_instant" -> one (Mod.base' (Named "InstantReloadChance") v)
         | "crossbow_attack_%_chance_to_not_consume_ammo_if_reloaded_recently" -> one (Mod.base' (Named "KeepAmmoChance") v |> Mod.whenever (WhileBuff "ReloadedRecently"))
         | "dodge_roll_base_travel_distance" -> one (Mod.base' (Named "DodgeRollDistance") v)
+        // the player's Presence (4 m; Setup.fight): its area, "Presence Radius is doubled", and
+        // what enemies in it have (auras: Behaviours.presenceAuras)
+        | "presence_area_+%" -> one (Mod.inc (Named "PresenceArea") v)
+        | "unique_double_presence_radius" -> one (Mod.flag (Named "PresenceRadiusDoubled"))
+        | "base_enemies_in_your_presence_are_hindered" -> one (Mod.flag (Named "PresenceAura:Hindered"))
+        | "enemies_in_presence_are_blinded" -> one (Mod.flag (Named "PresenceAura:Blinded"))
+        | "enemies_in_presence_have_exposure" -> one (Mod.flag (Named "PresenceAura:Exposure"))
+        | "enemies_in_presence_have_fire_resistance_%" -> one (Mod.base' (Named "PresenceResist:Fire") v)
         | "charm_charges_gained_+%" -> one (Mod.inc (Named "CharmChargesGained") v)
         | "primalist_charm_charges_gained_+%_final" -> one (Mod.more (Named "CharmChargesGained") v)
         | "charm_charges_used_+%" -> one (Mod.inc (Named "CharmChargesUsed") v)
@@ -432,7 +440,7 @@ module StatMap =
         // seconds added to the use time, not shortened by speed
         | "total_attack_time_+_ms" | "total_cast_time_+_ms" -> one (Mod.base' (Named "FixedUseTime") (v / 1000.0))
         // how a skill is aimed and animated, where remnants can be collected, things monsters never do to the player
-        | "skill_withering_presence_frequency_ms" | "herald_of_thunder_storm_max_hits" | "herald_of_ash_overkill_threshold_%" | "herald_of_ash_burning_%_overkill_damage_per_minute" | "action_requires_aiming_stance" | "action_required_target_facing_angle_tolerance_degrees" | "crossbow_barrage_recoil_per_shot"
+        | "critical_chance_against_aura_apply_brittle_every_x_ms" | "skill_withering_presence_frequency_ms" | "herald_of_thunder_storm_max_hits" | "herald_of_ash_overkill_threshold_%" | "herald_of_ash_burning_%_overkill_damage_per_minute" | "action_requires_aiming_stance" | "action_required_target_facing_angle_tolerance_degrees" | "crossbow_barrage_recoil_per_shot"
         | "crossbow_barrage_total_recoil_buff_count" | "crossbow_barrage_debuff_duration_ms" | "crossbow_barrage_attack_time_ratio_%"
         | "base_minimum_channel_time_ms" | "base_melee_dash_range" | "base_knockback_distance" | "main_hand_weapon_range_+"
         | "remnant_pickup_range_+%" | "immune_to_maim" | "immune_to_hinder" | "enemy_extra_damage_rolls_chance_%"

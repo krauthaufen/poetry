@@ -1099,6 +1099,9 @@ module Flat =
               RageWhenHit: float
               RageOnKill: float
               BerserkLoss: float
+              /// The debuffs an enemy has while it is in the player's Presence (`Fight.PresenceAuras`).
+              /// (with whether it is an exposure: as strong as the enemy lets exposure be)
+              PresenceAuras: (int * int * Mod list * bool)[]
               /// Chance (%) for a charm that is used to keep its charges, and where the count of that goes.
               CharmKeep: float
               CCharmKept: int
@@ -1288,7 +1291,7 @@ module Flat =
         // ---- the enemies ----
         let enemies = fight.Enemies |> List.sortBy (fun e -> e.Name) |> Array.ofList
         let curseK (e: EnemyDef) = Mods.more Ctx.empty [ Named "CurseEffectOnSelf" ] (ModDb.ofList e.Mods)
-        for (name, _, _) in fight.EnemyAuras do
+        for (name, _, _) in fight.EnemyAuras @ fight.PresenceAuras do
             statuses.Id name |> ignore
         let enemyInfos =
             enemies
@@ -2055,6 +2058,7 @@ module Flat =
                       RageOnKill = Mods.sumBase Ctx.empty [ Named "RageOnKill" ] sheet
                       BerserkLoss = Mods.sumBase Ctx.empty [ Named "LifeLossPercentPerMinutePerRage" ] sheet
                       CharmKeep = Mods.sumBase Ctx.empty [ Named "CharmKeepCharges" ] sheet
+                      PresenceAuras = fight.PresenceAuras |> List.map (fun (name, stacks, mods) -> statuses.Id name, stacks, mods, name.StartsWith "Exposure:") |> Array.ofList
                       CCharmKept = counts.Id "charm:kept charges"
                       MaxRage = Map.tryFind "Rage" actor.MaxResources |> Option.defaultValue 0
                       Attackers =
@@ -3317,6 +3321,22 @@ module Flat =
                             s.AliveStale <- true
                     | _ -> ()
             s.Time <- t
+
+    /// Auras on enemies in the player's Presence come and go with where the enemies are
+    /// (`Sim.syncPresence`).
+    let private syncPresence (s: State) =
+        let auras = s.Main.PresenceAuras
+        if auras.Length > 0 then
+            let reach = s.Main.Fight.Presence
+            for live in 0 .. s.Live.Length - 1 do
+                let e = at s.Foes (at s.Live live)
+                if e.Life > 0.0 then
+                    let inside = Vec.length e.Def.Position - e.Def.Size <= reach
+                    for place in 0 .. auras.Length - 1 do
+                        let id, stacks, mods, exposure = at auras place
+                        let has = (at e.Has id) && (at e.Expires id) > s.Time
+                        if inside && not has then setDebuff e id stacks infinity (if exposure then mods |> List.map (Mod.scaled e.Info.ExposureK) else mods)
+                        elif not inside && has && System.Double.IsPositiveInfinity(at e.Expires id) then removeDebuff e id
 
     let inline private alive (s: State) = System.Double.IsNaN s.Died
 
@@ -6392,6 +6412,7 @@ module Flat =
             enter s 0
             let p = s.P
             advance s t
+            syncPresence s
             recover s dt
             if s.AliveCount > 0 && alive s then
                 pruneAll s

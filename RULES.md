@@ -361,7 +361,7 @@ The game's standard buffs and debuffs, with the numbers of its keyword text. Sta
 | Unholy Might | 30% of damage gained as extra chaos (x magnitude); "You have Unholy Might", also "while not on Low Mana" and "while you have no Energy Shield"; minions likewise | keyword text | data |
 | Tailwind | per stack 2% increased skill speed and 10% increased evasion, up to 10; a stack per skill use, all lost when hit; it does not expire by itself (guess) | keyword text; buff table limit 10; wiki: 2% skill speed, 10% evasion, 1% movement speed per stack | data |
 | Withered | 5% increased chaos damage taken per stack, up to 10 (x magnitude), for the stated seconds (4 if none) | keyword text | data |
-| Critical Weakness | +0.5% crit chance against the enemy per stack, up to 20; "every second in your Presence for N seconds" is a steady N stacks on every enemy | keyword text; presence area ignored | data |
+| Critical Weakness | +0.5% crit chance against the enemy per stack, up to 20; "every second in your Presence for N seconds" is a steady N stacks on every enemy in the Presence | keyword text | data |
 | Culling Strike | an enemy at or below 35% / 20% / 10% / 5% life (normal / magic / rare / unique; x increased threshold) is killed, checked before the hit's damage | GameConstants, keyword text | data |
 | Not modelled | Impale, Incision, Sundered Armour, Volatility, Consecrated / Jagged Ground, Guard, Ancestral Boost, Decimating Strike | - | missing |
 
@@ -373,8 +373,10 @@ The game's standard buffs and debuffs, with the numbers of its keyword text. Sta
 | Increased damage taken | "Enemies you Curse / Mark take X% increased Damage": additive with the enemy's other increased damage taken (shock...) | stat text | data |
 | Faster damaging ailments | "deal damage X% faster": that much more per second for that much less time | stat text | data |
 | Exposure effect | "Exposure applied has X% increased effect" scales the exposure the character applies | stat text | data |
-| Withering Presence | Withered on every enemy: duration / interval stacks at any time, at most 10 (presence area ignored) | gem stats | data |
+| Withering Presence | Withered on every enemy in the Presence: duration / interval stacks at any time, at most 10 | gem stats | data |
 | Close Range | within 2 m of the player; Isolated: no ally within 6 m | keyword text | data |
+| Presence | a circle of 4 m around the player. "X% increased Presence Area of Effect" scales its area (the radius by the square root, cut off as a skill's radius is: 50% increased is 4.8 m), "Presence Radius is doubled" doubles the radius. An enemy is in it when its body reaches into it. What "enemies in your Presence" have, they have from then on and lose when they are out of it again: Malice's Critical Weakness, Withering Presence's Withered, Overwhelming Presence's lower thresholds, "are Hindered", "are Blinded", "have Exposure" (20% to each element, x exposure effect and the enemy's own), "have -X% to Fire Resistance". It is looked at whenever something happens in the fight (a monster walking in has them from the first event after it is inside). Blasphemy's curses are an aura of a size of their own, which is not looked at; allies (minions) are always taken to be in it | poe2db keyword text ("By default this has a 4 metre radius", "can be modified by Presence Area modifiers, but not by Skill Area modifiers"; Exposure: "By default it lowers Resistances by -20%"); stat descriptions. Square root and cut-off as for skill areas (PoB calcRadius) | data; rounding pob |
+| Malice | "emits an Aura that continuously inflicts Critical Weakness on enemies in your Presence": a stack every `critical_chance_against_aura_apply_brittle_every_x_ms`, each for the gem's duration: a steady duration / interval stacks, at most 20 | gem data and description; steady stacks from the moment the enemy is inside is a simplification | data |
 
 ### Warcries
 
