@@ -545,7 +545,15 @@ module Pob =
             |> Option.map (fun _ -> g))
         // only the buff gem's own stats reach the character: its group's supports modify the
         // buff skill (a herald's explosion), not everything the character does
-        |> List.map (fun g -> { g with Gems = g.Gems |> List.filter (fun x -> not x.IsSupport) })
+        // (but the levels and the quality the supports give the gem are the gem's)
+        |> List.map (fun g ->
+            let supports = g.Gems |> List.filter (fun x -> x.Enabled && x.IsSupport) |> List.map (fun x -> x.Name, x.Level)
+            { g with
+                Gems =
+                    g.Gems |> List.filter (fun x -> not x.IsSupport)
+                    |> List.map (fun x ->
+                        let setup = { Gem = x.Name; Level = x.Level; Quality = x.Quality; StatSet = 1; Supports = supports }
+                        { x with Level = x.Level + Gems.supportLevels db setup; Quality = x.Quality + Gems.supportQuality db setup }) })
         |> List.collect (groupSkill db sheet)
         |> List.fold
             (fun (sheet: CharacterSheet) r ->

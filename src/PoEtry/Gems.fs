@@ -898,6 +898,18 @@ module Gems =
             let data = { data with StatSets = data.StatSets |> List.map atLevel }
             skillFromData db ownerMods weapon { Gem = skillId; Level = 1; Quality = 0; StatSet = 1; Supports = supports } data
 
+    /// Quality a skill gets from its supports (Dialla's Desire: "supported_active_skill_gem_quality_%").
+    and supportQuality (db: GameDb) (setup: GemSetup) : int =
+        setup.Supports
+        |> List.sumBy (fun (name, lvl) ->
+            match supportOfGem db name with
+            | Some s when s.Support ->
+                s.StatSets |> List.tryHead
+                |> Option.map (fun set -> stats s set lvl 0 |> List.sumBy (fun (id, v) -> if id = "supported_active_skill_gem_quality_%" then v else 0.0))
+                |> Option.defaultValue 0.0
+            | _ -> 0.0)
+        |> int
+
     /// Levels a skill gets from its supports: a Mastery's "+1 Level of supported Cold Skills",
     /// Dialla's Desire, Uhtred's lineage supports (those count the other supports beside them).
     and supportLevels (db: GameDb) (setup: GemSetup) : int =
@@ -950,7 +962,7 @@ module Gems =
                 let level = setup.Level + int (Mods.sumBase ctx [ Named "GemLevel" ] characterMods) + supportLevels db setup
                 let maxLevel = data.Levels |> Map.toList |> List.map fst |> List.fold max 1
                 let level = min level maxLevel
-                let quality = setup.Quality + int (Mods.sumBase ctx [ Named "GemQuality" ] characterMods)
+                let quality = setup.Quality + int (Mods.sumBase ctx [ Named "GemQuality" ] characterMods) + supportQuality db setup
                 let supportStats, supportCov =
                     setup.Supports
                     |> List.map (fun (name, lvl) ->
@@ -1050,7 +1062,7 @@ module Gems =
                 let ctx = ctxOf db setup.Gem
                 let maxLevel = data.Levels |> Map.toList |> List.map fst |> List.fold max 1
                 let level = min maxLevel (setup.Level + int (Mods.sumBase ctx [ Named "GemLevel" ] characterMods) + supportLevels db setup)
-                let quality = setup.Quality + int (Mods.sumBase ctx [ Named "GemQuality" ] characterMods)
+                let quality = setup.Quality + int (Mods.sumBase ctx [ Named "GemQuality" ] characterMods) + supportQuality db setup
                 let alt = Mods.flag ctx (Named "AltQuality") characterMods
                 let supports =
                     setup.Supports

@@ -129,8 +129,8 @@ module Setup =
         { build with Groups = build.Groups |> List.mapi (fun gi g -> { g with Gems = g.Gems |> List.filter (fun x -> not (drops gi x.Name)) }) }
 
     /// The game's own character data gives a skill gem's level with what its supports add
-    /// (a Mastery's level, Dialla's Desire): here a gem has its own level, and the supports'
-    /// levels are added where the skill is built (so a support turned off takes its level along).
+    /// (a Mastery's level, Dialla's Desire, and so its quality): here a gem has its own, and the supports'
+    /// levels and quality are added where the skill is built (so a support turned off takes its level along).
     let ownLevels (db: GameDb) (build: PobBuild) =
         if not (Map.containsKey "levelsWithSupports" build.Config) then build
         else
@@ -143,7 +143,9 @@ module Setup =
                             Gems =
                                 g.Gems |> List.map (fun x ->
                                     if x.IsSupport then x
-                                    else { x with Level = max 1 (x.Level - Gems.supportLevels db { Gem = x.Name; Level = x.Level; Quality = x.Quality; StatSet = 1; Supports = supports }) }) }) }
+                                    else
+                                        let setup = { Gem = x.Name; Level = x.Level; Quality = x.Quality; StatSet = 1; Supports = supports }
+                                        { x with Level = max 1 (x.Level - Gems.supportLevels db setup); Quality = max 0 (x.Quality - Gems.supportQuality db setup) }) }) }
 
     /// Build the character. `read` reads a game data file by name ("tree.json").
     let rec load (read: string -> string) (build: PobBuild) (o: Options) : Loaded =
