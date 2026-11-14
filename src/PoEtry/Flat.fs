@@ -613,6 +613,7 @@ module Flat =
     let private qTerrainChain = site MSkill Base (named "TerrainChain")
     let private qForkChance = site MSkill Base (named "ForkChance")
     let private qCannotFork = site MSkill Flag (named "CannotFork")
+    let private qCannotChain = site MSkill Flag (named "CannotChain")
     let private qAdditionalForks = site MSkill Base (named "AdditionalForks")
     let private qForkExtra = site MSkill Base (named "ForkExtraChance")
     let private qForkAngle = site MSkill Inc (named "ForkAngle")
@@ -5985,7 +5986,7 @@ module Flat =
                                   int (c / 100.0) + (if rng.Chance(c - 100.0 * floor (c / 100.0)) then 1 else 0))
                            else 0)
                     let pierce = pr.Pierce + int (sumQ ev qPierce) + (if rng.Chance(sumQ ev qPierceChance) then 1 else 0)
-                    let chains = pr.Chains + int (sumQ ev qChains)
+                    let chains = if flagQ ev qCannotChain then 0 else pr.Chains + int (sumQ ev qChains)
                     let terrainChain = pr.TerrainChain + sumQ ev qTerrainChain
                     // "Projectiles Fork" (a chance of 100%), "Fork an additional time"
                     let forks =

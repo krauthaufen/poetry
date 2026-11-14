@@ -781,6 +781,7 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         equal (box [ Named "ForkChance", 100.0 ]) (box (mods "projectiles_fork" 1.0 |> List.map (fun m -> m.Stat, m.Value)))
         equal (box [ Named "ForkedDamage", More ]) (box (mods "support_fork_forked_projectile_damage_+%_final" -30.0 |> List.map (fun m -> m.Stat, m.Kind)))
         equal (box [ Named "CannotFork" ]) (box (mods "projectiles_cannot_fork" 1.0 |> List.map (fun m -> m.Stat)))
+        equal (box [ Named "CannotChain" ]) (box (mods "base_projectiles_cannot_chain" 1.0 |> List.map (fun m -> m.Stat)))
         let dummy name x y = { EnemyDef.atLevel 83 1e9 with Name = name; Position = Vec.make x y; Size = 4.0; Mods = []; Attack = None }
         // the projectile meets a at (26, 0); 20 further at 60 degrees either way: b and c; d behind a
         let a = { dummy "a" 30.0 0.0 with Life = 2e9 }
@@ -805,6 +806,11 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         // and a skill that cannot fork does not
         let cannot = { fight true with Player = Actor.make "Player" [ Mod.flag (Named "CannotFork") ] [ bolt true ] }
         near 1.0 (total cannot / total (fight false))
+        // a chain takes the bolt from a to the nearest other enemy, unless it cannot chain
+        let chaining no = { fight false with Player = Actor.make "Player" ([ Mod.base' Chains 1.0 ] @ (if no then [ Mod.flag (Named "CannotChain") ] else [])) [ bolt false ] }
+        near 2.0 (total (chaining false) / total (fight false))
+        near 1.0 (total (chaining true) / total (fight false))
+        same (chaining true) seeds
         same (fight true) seeds)
 
     // ---- Scarred Faith ----

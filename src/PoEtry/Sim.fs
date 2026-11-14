@@ -2945,7 +2945,7 @@ module Sim =
                                               int (c / 100.0) + (if rng.Chance(c - 100.0 * floor (c / 100.0)) then 1 else 0))
                                        else 0)
                                 Pierce = p.Pierce + int (Mods.sumBase ctx [ Pierce ] mods) + (if rng.Chance(Mods.sumBase ctx [ Named "PierceChance" ] mods) then 1 else 0)
-                                Chains = p.Chains + int (Mods.sumBase ctx [ Chains ] mods)
+                                Chains = (if Mods.flag ctx (Named "CannotChain") mods then 0 else p.Chains + int (Mods.sumBase ctx [ Chains ] mods))
                                 TerrainChain = p.TerrainChain + Mods.sumBase ctx [ Named "TerrainChain" ] mods
                                 // "Projectiles Fork" (a chance of 100%), "Fork an additional time"
                                 Forks =
