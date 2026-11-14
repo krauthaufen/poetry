@@ -316,7 +316,9 @@ module Gems =
     /// Skill types that only say which supports fit or how the skill is aimed and animated:
     /// nothing to simulate.
     let private descriptiveTypes =
-        set [ "Triggerable"; "Totemable"; "Trappable"; "Mineable"; "Multicastable"; "Unleashable"; "UsableWhileMoving"; "Cascadable"
+        // (Travel, Jumping, Movement: the skill moves the player, who stands in a fight, see
+        // RULES.md "The player stands"; its hit is played where it lands)
+        set [ "Travel"; "Jumping"; "Movement"; "Triggerable"; "Totemable"; "Trappable"; "Mineable"; "Multicastable"; "Unleashable"; "UsableWhileMoving"; "Cascadable"
               "Barrageable"; "MirageArcherCanUse"; "AttackInPlace"; "AttackInPlaceIsDefault"; "Damage"; "UsableWhileShapeshifted"
               "UsableWhileMounted"; "NoAttackOrCastTime"; "ProjectileSpeed"; "ProjectileNumber"; "ProjectilesFromUser"; "RangedAttack"
               "MeleeSingleTarget"; "AreaSpell"; "CanCancelActions"; "UseGlobalStats"; "GamepadDeflectable"; "SingleLevelSkill"
