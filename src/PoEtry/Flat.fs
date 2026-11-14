@@ -97,6 +97,8 @@ module Flat =
     let private EWard = 15
     [<Literal>]
     let private EMana = 16
+    [<Literal>]
+    let private EPlant = 17
 
     let private kindName kind =
         match kind with
@@ -116,6 +118,7 @@ module Flat =
         | ELeaves -> "MinionLeaves"
         | EWard -> "WardArrives"
         | EMana -> "ManaArrives"
+        | EPlant -> "PlantCrystals"
         | _ -> "Expire"
 
     let private ailmentIndex (a: Ailment) =
@@ -672,6 +675,8 @@ module Flat =
         | RSummonPerCorpse of members: int[] * duration: float * deadMinions: bool * summoned: int
         | RSummonPerWard of members: int[] * wardEach: float * duration: float * summoned: int
         | RGrantOneOf of buffs: int[] * duration: float
+        /// A pustule on the enemy hit, if it has none (see `Reaction.AttachPustule`).
+        | RAttachPustule of part: int * seconds: float * poisonPerPercent: float * capPercent: float * count: int
         | RNone
 
     /// What happens on its own every few seconds, with its names as numbers (see `PeriodicAction`).
@@ -872,7 +877,35 @@ module Flat =
           BarrageRepeats: float
           BarragePerFrenzy: float
           BarrageMods: Mod list
-          CBarraged: int }
+          CBarraged: int
+          /// A seed planted in the enemy that the damage the enemy takes sets off: the damage
+          /// needed, percent of the enemy's ailment threshold (NaN: the skill plants none).
+          Seed: float
+          CPlanted: int
+          CFizzled: int
+          /// Ice Crystals a use leaves behind: whether the skill or part makes any, the life of
+          /// one, the length of a wall of them, how many are made and the most there can be;
+          /// the radius of its area (0: it has none), and whether that is around the user.
+          Crystals: bool
+          CrystalLife: float
+          WallLength: float
+          CrystalsCreated: float
+          CrystalLimit: float
+          AreaRadius: float
+          AroundSelf: bool
+          CCrystals: int
+          CShattered: int
+          /// Chained attacks: how many uses the chain has (0: the skill is none); of a part, the
+          /// places in the chain it belongs to (`InChain`: whether it says so), and how many
+          /// times it hits, spread over the use; where the skill's place in its chain is kept.
+          SeqLength: int
+          InChain: bool
+          SeqSteps: int[]
+          SeqHits: int
+          SeqKey: string
+          /// Whether a use asks how long the skill's effects last, and how large its area is.
+          AsksDuration: bool
+          AsksArea: bool }
 
     type private EnemyInfo =
         { Def: EnemyDef
@@ -953,6 +986,9 @@ module Flat =
               Banners: (Banner * int * int)[]
               HasSigil: bool
               CSigil: int
+              /// What a full Infernal Flame burns, percent of maximum life and energy shield.
+              InfernalBurn: float
+              CInfernalBurn: int
               /// Runic Ward and mana remnants (the player's).
               WardRemnants: WardRemnants option
               ManaRemnants: ManaRemnants option
@@ -1127,19 +1163,14 @@ module Flat =
     /// of one of them, wherever the mod is, is not compiled.
     let private unbuiltStats =
         [ "TriskelionArms", "Triskelion Cascade"
-          "DetonatedByDamage", "seeds set off by damage (Living Bomb)"
           "DetonatesCurse", "curse detonation (Hexblast)"
           "NoCooldownWithCharge", "skills that skip their cooldown when empowered"
-          "Crystals", "Ice Crystals"
-          "SeqLength", "chained attacks"
-          "SeqHits", "chained attacks"
           "WindowSeconds", "skills with a window (Requiem)"
           "SpendsRage", "parts that spend Rage"
           "RecordsDamage", "debuffs that record damage (Inevitable Agony)" ]
 
     let private unbuiltPrefixes =
-        [ "SeqSteps:", "chained attacks"
-          "WarpsInto:", "warps into projectiles"
+        [ "WarpsInto:", "warps into projectiles"
           "ToggleBuff:", "forms that are switched on" ]
 
     /// Buffs the reference treats in a way of its own that is not built here.
@@ -1282,7 +1313,6 @@ module Flat =
             if isPlayer && (actor.ActiveWhile.IsSome || actor.Body.IsSome || actor.Pool.IsSome) then reject "a player that is a minion"
             // (the reference lets whoever has these use the player's pools)
             if not isPlayer && (actor.Vitals.IsSome || actor.ManaFlask.IsSome) then reject "a minion with pools"
-            if actor.Vitals |> Option.exists (fun v -> v.CostsInfernalFlame) then reject "Infernal Flame"
 
             // ---- its skills ----
             let all = actor.Skills @ (actor.Skills |> List.collect (fun s -> s.Parts))
@@ -1423,6 +1453,7 @@ module Flat =
                 | SummonPerCorpse (poolName, duration, deadMinions) -> RSummonPerCorpse(pool poolName, duration, deadMinions, summoned poolName)
                 | SummonPerWard (poolName, wardEach, duration) -> RSummonPerWard(pool poolName, wardEach, duration, summoned poolName)
                 | GrantOneOf (names, duration) -> RGrantOneOf(names |> List.map buff |> Array.ofList, duration)
+                | AttachPustule (part, seconds, per, cap) -> RAttachPustule((match skillIds.TryGetValue part with | true, i -> i | _ -> -1), seconds, per, cap, counts.Id "pustule")
                 | other ->
                     reject ("the reaction " + reactionName other)
                     RNone
@@ -1565,6 +1596,7 @@ module Flat =
             for charge in consumed do
                 buff charge |> ignore
                 consumedOf.Add charge
+            let anyKind (s: Skill) (name: string) = s.Mods |> List.sumBy (fun m -> if m.Stat = Named name then m.Value else 0.0)
             // (a number a skill's own mods give: `own` in the reference)
             let ownBase (s: Skill) (name: string) = s.Mods |> List.sumBy (fun m -> if m.Stat = Named name && m.Kind = Base then m.Value else 0.0)
             // the buffs a use of a skill itself brings: a sealed skill's broken seals, the repeats
@@ -1751,7 +1783,26 @@ module Flat =
                       BarrageRepeats = ownBase s "BarrageRepeats"
                       BarragePerFrenzy = ownBase s "BarrageRepeatsPerFrenzy"
                       BarrageMods = (match barrageMods.TryGetValue s.Name with | true, mods -> mods | _ -> [])
-                      CBarraged = counts.Id("barraged:" + s.Name) })
+                      CBarraged = counts.Id("barraged:" + s.Name)
+                      Seed = (match s.Mods |> List.tryPick (fun m -> if m.Stat = Named "DetonatedByDamage" then Some m.Value else None) with Some pct -> pct | None -> nan)
+                      CPlanted = counts.Id("planted:" + s.Name)
+                      CFizzled = counts.Id("fizzled:" + s.Name)
+                      Crystals = flag "Crystals"
+                      CrystalLife = anyKind s "CrystalLife"
+                      WallLength = anyKind s "WallLength"
+                      CrystalsCreated = anyKind s "CrystalsCreated"
+                      CrystalLimit = anyKind s "CrystalLimit"
+                      AreaRadius = (match s.Delivery with AreaAroundSelf r | AreaAtTarget r -> r | _ -> 0.0)
+                      AroundSelf = (match s.Delivery with AreaAroundSelf _ -> true | _ -> false)
+                      CCrystals = counts.Id("crystals:" + s.Name)
+                      CShattered = counts.Id("shattered:" + s.Name)
+                      SeqLength = (match s.Mods |> List.tryPick (fun m -> if m.Stat = Named "SeqLength" then Some(int m.Value) else None) with Some n -> n | None -> 0)
+                      InChain = (named' "SeqSteps:").IsSome
+                      SeqSteps = (match named' "SeqSteps:" with Some steps -> steps.Split ',' |> Array.map int | None -> [||])
+                      SeqHits = (match s.Mods |> List.tryPick (fun m -> if m.Stat = Named "SeqHits" then Some(int m.Value) else None) with Some n -> n | None -> 1)
+                      SeqKey = "Seq:" + s.Name
+                      AsksDuration = ownBase s "BarrageRepeats" > 0.0 || flag "DetonatedByDamage" || (s :: s.Parts) |> List.exists (fun part -> part.Mods |> List.exists (fun m -> m.Stat = Named "Crystals"))
+                      AsksArea = (s :: s.Parts) |> List.exists (fun part -> part.Mods |> List.exists (fun m -> m.Stat = Named "Crystals")) })
                 |> Array.ofList
             let sIso, sClose, sOpen = statuses.Id "Isolated", statuses.Id "Close", statuses.Id "OpenWeakness"
             let sDerived = derivedStatuses |> List.map statuses.Id |> Array.ofList
@@ -1861,6 +1912,8 @@ module Flat =
                       Banners = banners
                       HasSigil = sigils.Count > 0
                       CSigil = count "sigil stage"
+                      InfernalBurn = Mods.sumBase Ctx.empty [ Named "InfernalFlameBurn" ] sheet
+                      CInfernalBurn = count "infernal flame burn"
                       WardRemnants = actor.WardRemnants
                       ManaRemnants = actor.ManaRemnants
                       CWardRemnant = count "ward remnant"
@@ -2383,6 +2436,18 @@ module Flat =
           Kills: ResizeArray<string * Rarity * float>
           /// Corpses already used up by corpse skills (every kill leaves one).
           mutable CorpsesUsed: int
+          /// Seeds planted in enemies: owner, skill, enemy, the enemy's life when planted, the
+          /// damage it takes to set the seed off, when it fizzles. Newest first.
+          mutable Seeds: (int * int * int * float * float * float) list
+          /// Pustules on enemies: owner, part, enemy, the Poison damage dealt when it was
+          /// attached, Poison per 1% more damage, the most (%), when it bursts at the latest.
+          mutable Pustules: (int * int * int * float * float * float * float) list
+          /// Ice Crystals beside an enemy: owner, explosion part, enemy, the enemy's life when
+          /// they appeared, life of one crystal, how many, gone at. Newest first.
+          mutable Crystals: (int * int * int * float * float * int * float) list
+          /// Crystals on their way (what a `EPlant` event names by its place here): how many,
+          /// the life of one, the most at once, the seconds they last.
+          Plants: ResizeArray<int * float * int * float>
           /// Killed minions are revived at this time; how many have died since the last revival.
           mutable Revival: (float * int) option
           /// By actor: whether it is a melee minion that finds no room at the enemy `RoomAt`
@@ -2427,6 +2492,8 @@ module Flat =
           mutable MinLife: float
           mutable LockedUntil: float
           mutable FreezeBuildup: float
+          /// Infernal Flame built by what skills cost (Pyromantic Pact).
+          mutable InfernalFlame: float
           /// When a stun last made a Runic Ward remnant, and a critical hit a mana remnant.
           mutable LastStunRemnant: float
           mutable LastManaRemnant: float
@@ -3552,6 +3619,17 @@ module Flat =
                 place <- place + 1
             enter s was
 
+    /// Chained attacks: which use of the chain comes next (-1: the skill is no chain). Using
+    /// another skill in between starts the chain again (`Sim.seqStep`).
+    let private seqStep (s: State) (sid: int) (info: SkillInfo) : int =
+        if info.SeqLength <= 0 then -1
+        elif s.A.LastUsed <> sid then 0
+        else int (Map.tryFind info.SeqKey s.A.Energy |> Option.defaultValue 0.0) % info.SeqLength
+
+    /// Whether a part belongs to this place of the chain (`Sim.inStep`).
+    let private inStep (step: int) (part: SkillInfo) : bool =
+        step < 0 || not part.InChain || Array.contains step part.SeqSteps
+
     /// The corpses that lie about: every kill leaves one, a corpse skill takes one.
     let inline private corpses (s: State) = s.Kills.Count - s.CorpsesUsed
 
@@ -3617,6 +3695,15 @@ module Flat =
                 setBuff s b 1 (s.Time + duration) mods
             enter s was
             expireAt s (s.Time + duration)
+        | RAttachPustule (part, seconds, per, cap, count) ->
+            if onTarget () && not (s.Pustules |> List.exists (fun (_, _, enemy, _, _, _, _) -> enemy = target)) then
+                // (the Poison damage dealt so far: what is still kept back goes into the results first)
+                for i in 0 .. s.Foes.Length - 1 do
+                    flushDots s (at s.Foes i)
+                let dealt = at s.Damage (at s.P.AilmentSource (ailmentIndex Poison))
+                s.Pustules <- (s.Cur, part, target, dealt, per, cap, s.Time + seconds) :: s.Pustules
+                bump s count
+                expireAt s (s.Time + seconds)
         | RGrantOneOf (names, duration) ->
             if names.Length > 0 then
                 let pick = at names (min (names.Length - 1) (int (rng.Float() * float names.Length)))
@@ -3715,7 +3802,8 @@ module Flat =
             let doubled = skill.Cooldown.IsSome && sumQ ev qDoubleUses > 0.0
             let lose = if p.Vitals.IsSome then sumQ ev qLosePools / 100.0 else 0.0
             let dodge = if p.Metas.Length > 0 && skill.Tags.Contains(Tag "DodgeRoll") then Constants.dodgeRollDistance + sumQ ev qDodgeDistance else 0.0
-            let lasting = if info.BarrageRepeats > 0.0 && skill.Duration > 0.0 then multQ ev qSkillDuration else 1.0
+            let lasting = if info.AsksDuration then multQ ev qSkillDuration else 1.0
+            let areaMult = if info.AsksArea then multQ ev qArea else 1.0
             release s
             match skill.Cooldown with
             | Some cd ->
@@ -3738,6 +3826,8 @@ module Flat =
              | None -> ())
             // (what the use reads of the buffs as they were when it began)
             let charged = info.Consumes >= 0 && stacksOf s info.Consumes > 0
+            // chained attacks: this use's place in the chain, and the next
+            let step = seqStep s sid info
             let barrage = p.BBarrage
             let repeats = if info.SpendsRepeats && (at s.A.BHas barrage) && (at s.A.BStacks barrage) > 0 then (at s.A.BStacks barrage) else 0
             let repeatsUntil = if repeats > 0 then (at s.A.BExpires barrage) else 0.0
@@ -3815,6 +3905,7 @@ module Flat =
                 s.A.Energy <- Map.remove (fst (at info.Requires k)) s.A.Energy
             // (a skill whose rule says what it does with corpses takes them there)
             if info.TakesCorpse && corpses s > 0 then s.CorpsesUsed <- s.CorpsesUsed + 1
+            if step >= 0 then s.A.Energy <- Map.add info.SeqKey (float (step + 1)) s.A.Energy
             if useTime > 0.0 then s.A.LastUsed <- sid
             let hits = patAt.Length
             let mutable first = infinity
@@ -3829,7 +3920,8 @@ module Flat =
                 for part in info.Parts do
                     let pi = p.Skills.[part]
                     let happens =
-                        (at <= first || not pi.OncePerUse)
+                        System.Double.IsNaN pi.Seed
+                        && (at <= first || not pi.OncePerUse)
                         && (part = sid || not pi.OnlyTriggered)
                         && (if pi.NotEnraged then true
                             elif pi.NotWithCharge then not charged
@@ -3837,9 +3929,67 @@ module Flat =
                             elif pi.Waits then false
                             elif pi.OnlyInfused >= 0 then stacksOf s pi.OnlyInfused > 0
                             else not (info.HasChargedPart && charged && pi.Explosion))
+                        && inStep step pi
                     if happens then
-                        if pi.Passing then schedule s at EPassing part target mult (at - s.Time)
-                        else schedule s at EStrike part target mult 0.0
+                        // (a strike of the chain that hits several times, spread over the use)
+                        let n = pi.SeqHits
+                        for i in 1 .. n do
+                            if pi.Passing then schedule s at EPassing part target mult (at - s.Time)
+                            else schedule s (if n = 1 then at else s.Time + (at - s.Time) * float i / float n) EStrike part target mult 0.0
+            // Ice Crystals the use leaves behind: each stands at a random spot of the skill's
+            // area (around the user, or around the target), and those whose explosion reaches
+            // the target count. They appear after the use's own hits, which do not damage them.
+            if info.AsksArea then
+                let targetDef = foe.Def
+                for k in 0 .. info.Parts.Length - 1 do
+                    let part = at info.Parts k
+                    let pi = at p.Skills part
+                    if pi.Crystals then
+                        let radius (q: SkillInfo) = if q.AreaRadius > 0.0 || q.IsAreaAtTarget || q.AroundSelf then Geometry.radius q.AreaRadius areaMult else 0.0
+                        let centre = if info.AroundSelf then Vec.zero else targetDef.Position
+                        let spread, reach = radius info, radius pi
+                        let stands () =
+                            if spread <= 0.0 || reach <= 0.0 then true
+                            else
+                                let r, a = spread * sqrt (rng.Float()), 2.0 * System.Math.PI * rng.Float()
+                                Vec.dist (Vec.add centre (Vec.scale r (Vec.ofAngle a))) targetDef.Position <= reach + targetDef.Size
+                        let life = pi.CrystalLife
+                        // a wall: a row of crystals through the target, across the line to it. Those
+                        // that come up inside the monster are broken by it at once; the others
+                        // stand, and count if their explosion reaches it
+                        let wall = if part = sid then pi.WallLength else 0.0
+                        let row =
+                            if wall <= 0.0 then []
+                            else
+                                let n = max 1 (int (wall / Constants.iceCrystalWidth))
+                                [ for i in 0 .. n - 1 -> abs ((float i - float (n - 1) / 2.0) * Constants.iceCrystalWidth) ]
+                        let broken = row |> List.filter (fun d -> d <= targetDef.Size) |> List.length
+                        if life > 0.0 && broken > 0 then
+                            for _ in 1 .. broken do
+                                schedule s (last + 1e-6) EStrike part target Constants.freshCrystalDamage 0.0
+                        let created = if wall > 0.0 then max 1 row.Length else max 1 (int pi.CrystalsCreated)
+                        let near =
+                            if wall > 0.0 then row |> List.filter (fun d -> d > targetDef.Size && d <= reach + targetDef.Size) |> List.length
+                            else
+                                let mutable standing = 0
+                                for _ in 1 .. created do
+                                    if stands () then standing <- standing + 1
+                                standing
+                        if life > 0.0 && near > 0 then
+                            let lasts = if pi.Skill.Duration > 0.0 then pi.Skill.Duration * lasting else 1e9
+                            // the limit counts every crystal; of those, the share that stands near
+                            let limit = max near (int (System.Math.Round(max (float created) pi.CrystalLimit * float near / float created)))
+                            s.Plants.Add((near, life, limit, lasts))
+                            schedule s (last + 1e-6) EPlant part target (float (s.Plants.Count - 1)) 0.0
+            // a seed planted in the target: it explodes once the enemy has taken enough damage
+            // from then on; a new seed replaces the old one
+            if not (System.Double.IsNaN info.Seed) then
+                defList s foe
+                let needed = info.Seed / 100.0 * max 1.0 (Constants.ailmentThreshold foe.Info.Def.Level * dmult foe thresholdStats)
+                let lasts = if skill.Duration > 0.0 then skill.Duration * lasting else 1e9
+                let owner = s.Cur
+                s.Seeds <- (owner, sid, target, foe.Life, needed, s.Time + useTime + lasts) :: (s.Seeds |> List.filter (fun (a, b, _, _, _, _) -> not (a = owner && b = sid)))
+                bump s info.CPlanted
             // an infusion a part needed is used up; a part that waits is put down
             // (which parts had their infusion is seen before any is used up)
             if info.Parts.Length > 1 then
@@ -3901,16 +4051,38 @@ module Flat =
     /// How long a use of the skill takes now (`Sim.useTime`).
     let private useTime (s: State) (sid: int) : float =
         let info = (at s.P.Skills sid)
+        let t = aimed s
+        // a chained attack takes the time of the strike that is due (its own speed)
+        let step = seqStep s sid info
+        let mutable own = sid
+        if step >= 0 then
+            let mutable found = false
+            for k in 0 .. info.Parts.Length - 1 do
+                let part = at s.P.Skills (at info.Parts k)
+                if not found && part.InChain && inStep step part then
+                    own <- at info.Parts k
+                    found <- true
+        let ownSpeed =
+            if own = sid then nan
+            else
+                let ownInfo = at s.P.Skills own
+                let evO = acquire s own
+                useBuffs s evO ownInfo false
+                if t >= 0 then useStatus s evO (at s.Foes t)
+                keepAnswers s evO own t 1
+                let v = multQ evO qSpeed
+                release s
+                v
         let ev = acquire s sid
         useBuffs s ev info false
-        let t = aimed s
         if t >= 0 then useStatus s ev (at s.Foes t)
         keepAnswers s ev sid t 1
-        let speed = multQ ev qSpeed
+        let speed = if own = sid then multQ ev qSpeed else ownSpeed
+        let info' = at s.P.Skills own
         // "Skills take 5% longer to perform for each time they Repeat"
         let barrage = s.P.BBarrage
         let repeats = if info.SpendsRepeats && (at s.A.BHas barrage) && (at s.A.BStacks barrage) > 0 && s.Time < (at s.A.BExpires barrage) then float (at s.A.BStacks barrage) else 0.0
-        let time = info.Skill.BaseTime / speed * (1.0 + Constants.longerPerRepeat * repeats) + sumQ ev qFixedUse
+        let time = info'.Skill.BaseTime / speed * (1.0 + Constants.longerPerRepeat * repeats) + sumQ ev qFixedUse
         release s
         time
 
@@ -3995,6 +4167,7 @@ module Flat =
         let costOf (sid: int) = costAt sid (fun () -> max Constants.serverTick (useTime s sid))
         let affordable (sid: int) =
             match p.Vitals with
+            | Some pools when pools.CostsInfernalFlame -> true
             | Some pools when pools.CostsLife -> (let c = costOf sid in c <= 0.0 || s.Life - c >= 1.0)
             | Some _ -> s.Mana >= costOf sid
             | None -> true
@@ -4009,6 +4182,8 @@ module Flat =
                 // a skill that works on a corpse needs one, unless it does without
                 && (info.NeedsCorpse = 0 || corpses s > 0 || (info.NeedsCorpse = 2 && held s info.CorpseElse))
                 && (not info.NeedsCharge || info.Consumes < 0 || held s info.Consumes)
+                // a seed still in an enemy is not planted over
+                && (s.Seeds.IsEmpty || not (s.Seeds |> List.exists (fun (a, b, _, _, _, _) -> a = s.Cur && b = sid)))
                 // the Glory or Combo it needs has been built
                 && (info.Requires.Length = 0 || info.Requires |> Array.forall (fun (key, n) -> (Map.tryFind key s.A.Energy |> Option.defaultValue 0.0) >= n - 1e-9))
                 // a skill that spends what has piled up on the enemy waits for the pile to be full
@@ -4076,6 +4251,19 @@ module Flat =
                         let wait = max Constants.serverTick 0.25
                         s.Starved <- s.Starved + wait
                         schedule s (s.Time + wait) EReady 0 0 0.0 0.0
+                elif pools.CostsInfernalFlame then
+                    // Pyromantic Pact: the cost builds Infernal Flame (max: twice max mana); reaching the
+                    // maximum empties it and burns maximum life + energy shield as fire damage
+                    let flame = s.InfernalFlame + cost
+                    if flame >= 2.0 * pools.Mana then
+                        // a fire hit on yourself: fire resistance applies
+                        let fireRes = Map.tryFind Fire pools.Resist |> Option.defaultValue 0.0
+                        let burn = (pools.Life + pools.EnergyShield) * p.InfernalBurn / 100.0 * (1.0 - fireRes / 100.0)
+                        s.InfernalFlame <- 0.0
+                        bump s p.CInfernalBurn
+                        takeDamage s pools (Map.ofList [ Fire, burn ])
+                    else s.InfernalFlame <- flame
+                    go ()
                 elif s.Mana < cost && cost > pools.Mana then
                     // costs more than the whole mana pool: this skill can never be used
                     bump s info.CCannotAfford
@@ -5695,6 +5883,50 @@ module Flat =
             set (11 + 3 * k) (n = 0)
             set (12 + 3 * k) (n = 0)
 
+    /// What is planted in or beside the enemies (`Sim.step`): seeds set off by the damage
+    /// their enemy has taken (or its death: the blast then strikes the enemy aimed at), gone
+    /// when their time is up; pustules that burst when their time is up or they hold all the
+    /// Poison they can use; Ice Crystals destroyed once the enemy beside them has lost as much
+    /// life as one withstands, each of which then explodes.
+    let private planted (s: State) =
+        if not s.Seeds.IsEmpty then
+            let mutable kept = []
+            for ((owner, skill, enemy, mark, needed, until) as seed) in s.Seeds do
+                let e = at s.Foes enemy
+                if e.Life > 0.0 && mark - e.Life >= needed then scheduleFor s owner s.Time EStrike skill enemy 1.0 0.0
+                elif e.Life > 0.0 then
+                    if s.Time >= until then bump s (at (at s.Progs owner).Skills skill).CFizzled else kept <- seed :: kept
+                else
+                    let other = aimed s
+                    if other >= 0 then scheduleFor s owner s.Time EStrike skill other 1.0 0.0
+            s.Seeds <- List.rev kept
+        if not s.Pustules.IsEmpty then
+            // (the Poison damage dealt so far: what is still kept back goes into the results first)
+            for i in 0 .. s.Foes.Length - 1 do
+                flushDots s (at s.Foes i)
+            let poison = at s.Damage (at s.P.AilmentSource (ailmentIndex Poison))
+            let mutable kept = []
+            for ((owner, part, enemy, mark, per, cap, until) as pustule) in s.Pustules do
+                if (at s.Foes enemy).Life > 0.0 then
+                    let stored = poison - mark
+                    let more = if per > 0.0 then min cap (stored / per) else 0.0
+                    if s.Time >= until || (cap > 0.0 && more >= cap) then
+                        // (a part the actor does not have: the reference fails when it is to burst)
+                        if part < 0 then failwith "a pustule bursts with a part its actor does not have"
+                        scheduleFor s owner s.Time EStrike part enemy (1.0 + more / 100.0) 0.0
+                    else kept <- pustule :: kept
+            s.Pustules <- List.rev kept
+        if not s.Crystals.IsEmpty then
+            let mutable kept = []
+            for ((owner, part, enemy, mark, life, count, until) as crystal) in s.Crystals do
+                let e = at s.Foes enemy
+                if e.Life > 0.0 && mark - e.Life >= life then
+                    for _ in 1 .. count do
+                        scheduleFor s owner s.Time EStrike part enemy 1.0 0.0
+                    bump s (at (at s.Progs owner).Skills part).CShattered
+                elif e.Life > 0.0 && s.Time < until then kept <- crystal :: kept
+            s.Crystals <- List.rev kept
+
     /// What has run out of every actor's buffs goes (`Sim.prune`).
     let private pruneAll (s: State) =
         pruneFoes s
@@ -5733,6 +5965,7 @@ module Flat =
                 | ELeaves -> tell t "MinionLeaves" name "" (float q.Seq)
                 | EWard -> tell t "WardArrives" "" "" (float q.Seq)
                 | EMana -> tell t "ManaArrives" "" "" (float q.Seq)
+                | EPlant -> tell t "PlantCrystals" name (at p.Skills a).Skill.Name (float q.Seq)
                 | _ -> tell t "Expire" "" "" (float q.Seq)
              | None -> ())
             // a skill's hits roll from a stream of that skill alone: its first event, its second, ...
@@ -5763,6 +5996,7 @@ module Flat =
             recover s dt
             if s.AliveCount > 0 && alive s then
                 pruneAll s
+                if not (s.Seeds.IsEmpty && s.Pustules.IsEmpty && s.Crystals.IsEmpty) then planted s
                 // rage: regenerated all the time, lost once none has been gained for a while
                 (let have = stacksOf s p.BRage
                  if not (dt <= 0.0 || p.MaxRage <= 0 || (p.RageRegen <= 0.0 && have = 0)) then
@@ -5793,6 +6027,20 @@ module Flat =
                         if not (minion.Gone || minion.Leaves <> x) then
                             leave s who
                             bump s p.CMinionLeft
+                    | EPlant ->
+                        let e = at s.Foes b
+                        if e.Life > 0.0 then
+                            let count, life, limit, lasts = s.Plants.[int x]
+                            // more than the limit: the oldest go (without exploding)
+                            let mutable kept = []
+                            let mutable n = 0
+                            for ((o, part, _, _, _, c, _) as crystal) in (who, a, b, e.Life, life, count, s.Time + lasts) :: s.Crystals do
+                                if o = who && part = a then
+                                    if n + c <= max count limit then kept <- crystal :: kept
+                                    n <- n + c
+                                else kept <- crystal :: kept
+                            s.Crystals <- List.rev kept
+                            bump s (at (at s.Progs who).Skills a).CCrystals
                     | EWard ->
                         (match p.Vitals, p.WardRemnants with
                          | Some v, Some r -> s.Ward <- min (v.Ward * r.Overflow) (s.Ward + x)
@@ -6012,6 +6260,10 @@ module Flat =
               AliveStale = true
               Kills = ResizeArray()
               CorpsesUsed = 0
+              Seeds = []
+              Pustules = []
+              Crystals = []
+              Plants = ResizeArray()
               Revival = None
               NoRoom = Array.create progs.Length false
               RoomAt = -2
@@ -6048,6 +6300,7 @@ module Flat =
               MinLife = 1.0
               LockedUntil = 0.0
               FreezeBuildup = 0.0
+              InfernalFlame = 0.0
               LastStunRemnant = -1e9
               LastManaRemnant = -1e9
               Burning = []

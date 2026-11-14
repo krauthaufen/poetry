@@ -283,6 +283,12 @@ let randomFight (case: uint32) : Fight * string =
                       if chance 0.5 then yield Mod.base' (Named "BarrageRepeatsPerFrenzy") 1.0
                       yield Mod.base' (Named "BarrageRepeatLess") (between 10.0 60.0)
                       if chance 0.6 then yield Mod.base' (Named "BarrageCooldownPct") (between 30.0 200.0)
+                  if chance 0.06 then yield Mod.base' (Named "DetonatedByDamage") (between 20.0 400.0)
+                  if chance 0.05 then
+                      yield Mod.flag (Named "Crystals")
+                      yield Mod.base' (Named "CrystalLife") (between 50.0 3000.0)
+                      yield Mod.base' (Named "WallLength") (between 10.0 90.0)
+                      if chance 0.5 then yield Mod.base' (Named "CrystalLimit") (float (whole 1 12))
                   if chance 0.05 then yield Mod.base' (Named("NeedsEnemyStacks:" + pick [ "Poisoned"; "Marked by pain"; "Shocked" ])) (float (whole 1 3)) ]
             Consumes = (if chance 0.25 then Some(pick [ "PowerCharge"; "FrenzyCharge" ]) else None)
             Cost = (if chance 0.5 then between 3.0 45.0 else 0.0)
@@ -300,7 +306,13 @@ let randomFight (case: uint32) : Fight * string =
                     Name = s.Name + suffix
                     Mods = flags |> List.map (fun f -> Mod.flag (Named f)) }
             let parts =
-                match whole 0 8 with
+                match whole 0 10 with
+                | 10 -> [ part ": First" [ "SeqSteps:0" ]; { part ": Rest" [ "SeqSteps:1,2" ] with Mods = [ Mod.flag (Named "SeqSteps:1,2"); Mod.base' (Named "SeqHits") (float (whole 1 3)) ] } ]
+                | 9 ->
+                    [ { skill 0 true with
+                          Name = s.Name + ": Crystal"
+                          Delivery = pick [ AreaAtTarget(between 8.0 40.0); AreaAroundSelf(between 10.0 40.0); Single ]
+                          Mods = [ Mod.flag (Named "Crystals"); Mod.flag (Named "OnlyTriggered"); Mod.base' (Named "CrystalLife") (between 50.0 3000.0); Mod.base' (Named "CrystalsCreated") (float (whole 1 6)); Mod.base' (Named "CrystalLimit") (float (whole 1 10)) ] } ]
                 | 5 -> [ part ": Shatter" [ "OnlyVs:Frozen|Shocked|Chilled"; "ConsumesVs" ]; part ": Whole" [ "NotVs:Frozen|Shocked|Chilled" ] ]
                 | 6 -> [ part ": Mine" [ "DetonatedBy:Warcry" ]; part ": Trap" [ "DetonatedBy:Type:Barrageable" ] ]
                 | 7 -> [ part ": Drain" [ "Takes:" + pick [ "Shocked"; "Marked by pain"; "ArmourBreak"; "Chilled"; "Curse:Hex" ] ]; part ": Versus" [ "OnlyVs:Ignited|Cursed|Isolated|ArmourBreak"; "ConsumesVs" ] ]
@@ -310,7 +322,8 @@ let randomFight (case: uint32) : Fight * string =
                 | 2 -> [ part ": Echo" [ "OncePerUse" ]; part ": Spark" [ "OnlyWithCharge" ] ]
                 | 3 -> [ part ": Plain" [ "NotWithCharge" ]; part ": Rest" [ "NotEnraged" ] ]
                 | _ -> [ part ": Hidden" [ "OnlyTriggered" ] ]
-            { s with Parts = parts }
+            // (a chain of three uses: the first part at its first, the other at the rest)
+            { s with Parts = parts; Mods = (if parts |> List.exists (fun part -> part.Name.EndsWith ": First") then Mod.base' (Named "SeqLength") 3.0 :: s.Mods else s.Mods) }
     let count = whole 1 4
     let skills = [ for i in 1 .. count -> withParts (skill i (i = count)) ]
     // (with a cooldown: a skill that triggers itself without one never ends)
@@ -320,7 +333,8 @@ let randomFight (case: uint32) : Fight * string =
     let buffMods () = if chance 0.6 then (pick modPool) () else []
     let reaction () : Reaction =
         let simple () =
-            match whole 0 14 with
+            match whole 0 15 with
+            | 15 -> AttachPustule(pick names, between 0.5 4.0, pick [ 0.0; between 5.0 100.0 ], pick [ 0.0; between 10.0 80.0 ])
             | 14 -> GrantBuff("Sigil", between 2.0 8.0, 1, [ Mod.base' (Named "SigilMaxStages") (float (whole 1 4)); Mod.base' (Named "SigilManaPercentPerStage") (between 2.0 30.0); Mod.more (Damage AllDamage) (between 5.0 20.0) ])
             | 0 | 1 -> GrantBuff(pick [ "Buffed"; "Tide"; "Onslaught" ], between 0.5 6.0, whole 1 5, buffMods ())
             | 2 -> ApplyDebuff(pick [ "Marked by pain"; "Weakened"; "Mark:Sniper" ], between 0.5 6.0, whole 1 6, [ Mod.inc (DamageTaken(pick [ AllDamage; Elemental; OfType Fire ])) (between 2.0 15.0) ])
@@ -540,6 +554,11 @@ let randomFight (case: uint32) : Fight * string =
                     [ for i in 1 .. whole 1 2 ->
                         { Name = sprintf "Banner %d" i; Glory = between 5.0 80.0; PerAttackHit = between 100.0 2000.0; Duration = between 1.0 6.0
                           Mods = [ Mod.inc (Damage AllDamage) (between 5.0 40.0); Mod.inc Speed (between 5.0 20.0) ] } ] }
+    // Pyromantic Pact: costs build Infernal Flame, which burns when full
+    let player =
+        match player.Vitals with
+        | Some v when chance 0.1 -> { player with Vitals = Some { v with CostsInfernalFlame = true }; Mods = Mod.base' (Named "InfernalFlameBurn") (between 5.0 40.0) :: player.Mods }
+        | _ -> player
     let player = if player.Archons.IsEmpty then player else { player with Mods = Mod.base' (Named "ArchonOnIgnite") (between 20.0 100.0) :: player.Mods }
     // what it fights
     let enemies =
@@ -683,8 +702,8 @@ let randomFight (case: uint32) : Fight * string =
     let fight =
         match (if chance 0.06 then 1 else -1) with
         | 1 ->
-            note "pustule"
-            { fight with Player = { fight.Player with Rules = { Hook = OnHit; Filter = AnySkill; Chance = 100.0; Reaction = AttachPustule(fight.Player.Skills.Head.Name, 3.0, 0.0, 0.0) } :: fight.Player.Rules } }
+            note "warp"
+            { fight with Player = { fight.Player with Skills = fight.Player.Skills |> List.map (fun s -> { s with Mods = Mod.flag (Named "WarpsInto:Ball") :: s.Mods }) } }
         | _ -> fight
     // a pack that never ends: the dead are replaced (several enemies, most of them weak enough to die)
     let fight =
@@ -1112,10 +1131,9 @@ let run (test: string -> (unit -> unit) -> unit) =
         refused { fine with Minions = [ Actor.make "Player" [] [ strike "Bite" 1.0 2.0 ] ] } "actors of the same name"
         refused { fine with Player = { player with Metas = [ Meta.simple "Cast on Crit" 100.0 "Bolt"; Meta.simple "Cast on Crit" 50.0 "Bolt" ] } } "meta gems of the same name"
         refused { fine with Player = { player with Infusions = Some { Remnants = []; ExtraRemnantChance = 0.0; Delay = 0.5; Consumers = Map.ofList [ "Bolt", ("FireInfusion", "No such skill") ]; Wildcard = None } } } "an infusion of a skill"
-        refused { fine with Player = { player with Skills = [ { spell "Bolt" Fire 1.0 2.0 with Mods = [ Mod.flag (Named "Crystals") ] } ] } } "Ice Crystals"
-        refused { fine with Player = { player with Rules = [ { Hook = OnHit; Filter = AnySkill; Chance = 100.0; Reaction = AttachPustule("Bolt", 3.0, 0.0, 0.0) } ] } } "the reaction AttachPustule"
+        refused { fine with Player = { player with Skills = [ { spell "Bolt" Fire 1.0 2.0 with Mods = [ Mod.flag (Named "WarpsInto:Ball") ] } ] } } "warps into projectiles"
         // both reasons of a fight with two
-        let two = { fine with Enemies = [ { boss 1e9 with Name = "boss+" } ]; Replace = true; Player = { player with Skills = [ { spell "Bolt" Fire 1.0 2.0 with Mods = [ Mod.flag (Named "Crystals") ] } ] } }
+        let two = { fine with Enemies = [ { boss 1e9 with Name = "boss+" } ]; Replace = true; Player = { player with Skills = [ { spell "Bolt" Fire 1.0 2.0 with Mods = [ Mod.flag (Named "WarpsInto:Ball") ] } ] } }
         if (Flat.unsupported two).Length <> 2 then failwithf "expected two reasons, got %A" (Flat.unsupported two))
 
     test "flat: random fights give the reference's outcome, or are refused" (fun () ->
