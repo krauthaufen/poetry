@@ -60,7 +60,7 @@ let report (title: string) (o: Options) =
     let nearMap (a: Map<string, float>) (b: Map<string, float>) = a.Count = b.Count && a |> Map.forall (fun k v -> match Map.tryFind k b with Some w -> near v w | None -> false)
     let same (a: Outcome) (b: Outcome) =
         near a.Duration b.Duration && a.Ttk.IsSome = b.Ttk.IsSome && a.Kills.Length = b.Kills.Length && nearMap a.DamageBy b.DamageBy && nearMap a.DamageByType b.DamageByType && a.Counts = b.Counts
-        && nearMap a.Uptime b.Uptime && a.Died.IsSome = b.Died.IsSome && near a.DamageTaken b.DamageTaken && near a.Evened b.Evened && near a.MinLife b.MinLife
+        && nearMap a.Uptime b.Uptime && a.Died.IsSome = b.Died.IsSome && near a.DamageTaken b.DamageTaken && near a.Evened b.Evened && near a.Overkill b.Overkill && near a.MinLife b.MinLife
         && nearMap a.ManaGained b.ManaGained && near a.ManaStarved b.ManaStarved
     let seeds = [ 1u .. 40u ]
     let timed =

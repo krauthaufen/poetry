@@ -18,6 +18,9 @@ type Summary =
       /// critical hit or not (see `Outcome.Evened`): the same in the long run, far steadier
       /// from few fights.
       DpsEvened: float
+      /// Mean damage per second with what the hits dealt beyond their enemies' life counted
+      /// (see `Outcome.Overkill`): what a fight that is over in a hit or two says of the damage.
+      DpsOverkill: float
       /// Mean share of total damage per source.
       DamageShare: (string * float) list
       /// Share of the damage by damage type.
@@ -64,6 +67,7 @@ module Summary =
           Ttk = if kills.IsEmpty then None else Some(stats kills)
           Dps = outcomes |> List.map (fun o -> total o / max Constants.serverTick o.Duration) |> stats
           DpsEvened = (outcomes |> List.sumBy (fun o -> (total o + o.Evened) / max Constants.serverTick o.Duration)) / float outcomes.Length
+          DpsOverkill = (outcomes |> List.sumBy (fun o -> (total o + o.Overkill) / max Constants.serverTick o.Duration)) / float outcomes.Length
           DamageShare =
             outcomes
             |> meanOf (fun o -> let t = max 1e-9 (total o) in o.DamageBy |> Map.map (fun _ v -> v / t))

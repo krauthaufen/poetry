@@ -260,7 +260,7 @@ module Report =
                     "unknown", strs cov.UnknownText
                     "minions", strs c.MinionNotes ] ]
 
-    /// A fight as asked for: { scenario: "boss" | "pinnacle" | "pack" | "surrounded", level,
+    /// A fight as asked for: { scenario: "boss" | "pinnacle" | "endless" | "pack" | "surrounded", level,
     /// time, runs, seed (the first run's, 1), life (0: the enemies' own), gem ("": the strongest to press) }.
     /// Missing fields take the defaults (a level 83 boss, 30 s, 20 runs).
     /// One run for showing: who is there at the start (the player in the middle), and what
@@ -343,13 +343,15 @@ module Report =
         let least = if n "life" 0.0 > 0.0 then 0.0 else n "least" 0.0
         let o = { o with Replace = (s "scenario" "boss" = "pack" || s "scenario" "boss" = "surrounded") && n "life" 0.0 <= 0.0 && least <= 0.0 }
         let scenario = s "scenario" "boss"
+        // ("endless": the pinnacle boss, asked with "least" so that it lasts)
+        let pinnacle = scenario = "pinnacle" || scenario = "endless"
         let profile r =
             let p = Rarity.defaults r
-            let p = if scenario = "pinnacle" && r = Unique then { p with ElementalResist = 50.0 } else p
+            let p = if pinnacle && r = Unique then { p with ElementalResist = 50.0 } else p
             // (a boss has several times the life of its level and rarity: the game's own number
             // for each monster, MonsterVarieties.LifeMultiplier. A map boss: 250%, the middle of
             // them; the pinnacle: The Arbiter of Ash, 990%)
-            let p = if r = Unique then { p with Life = p.Life * (if scenario = "pinnacle" then 9.9 else 2.5) } else p
+            let p = if r = Unique then { p with Life = p.Life * (if pinnacle then 9.9 else 2.5) } else p
             // (the enemies' resistances as asked for, whoever they are)
             let p = match Json.numField "eres" request with Some v -> { p with ElementalResist = v } | None -> p
             match Json.numField "cres" request with Some v -> { p with ChaosResist = v } | None -> p
@@ -460,6 +462,7 @@ module Report =
               "clear", (match summary.Ttk with Some t -> stats t | None -> JNull)
               "dps", stats summary.Dps
               "dpsEvened", num summary.DpsEvened
+              "dpsOverkill", num summary.DpsOverkill
               "damageShare", pairs summary.DamageShare
               "damageType", pairs summary.TypeShare
               "uptime", pairs summary.Uptime

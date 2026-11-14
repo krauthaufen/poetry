@@ -48,6 +48,7 @@ let differenceWith (same: float -> float -> bool) (reference: Outcome) (flat: Ou
       (fun () -> float' "DamageTaken" reference.DamageTaken flat.DamageTaken)
       (fun () -> float' "ManaStarved" reference.ManaStarved flat.ManaStarved)
       (fun () -> float' "Evened" reference.Evened flat.Evened)
+      (fun () -> float' "Overkill" reference.Overkill flat.Overkill)
       (fun () -> float' "MinLife" reference.MinLife flat.MinLife)
       (fun () -> mapDifference "ManaGained" showFloat same reference.ManaGained flat.ManaGained) ]
     |> List.tryPick (fun check -> check ())

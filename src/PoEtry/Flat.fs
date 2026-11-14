@@ -2562,6 +2562,7 @@ module Flat =
           mutable Aim: int
           // the results
           mutable Evened: float
+          mutable Overkill: float
           Damage: float[]
           DamageSeen: bool[]
           ByType: float[]
@@ -5226,6 +5227,7 @@ module Flat =
                 addDamage s info.Source (min dealt lifeBefore)
                 // (only of a hit the enemy outlives: what a killing hit deals is the life that was left)
                 if not dead then s.Evened <- s.Evened + dealt * (evenly - 1.0)
+                s.Overkill <- s.Overkill + max 0.0 (dealt - lifeBefore)
                 // (a hit that deals more than the enemy has left: each type's share of what was left)
                 (let k = if dealt > lifeBefore && dealt > 0.0 then lifeBefore / dealt else 1.0
                  for t in 0 .. 4 do
@@ -6693,6 +6695,7 @@ module Flat =
               Cause = -1
               Aim = -1
               Evened = 0.0
+              Overkill = 0.0
               Damage = Array.zeroCreate p.SourceNames.Length
               DamageSeen = Array.create p.SourceNames.Length false
               ByType = Array.zeroCreate 5
@@ -6852,6 +6855,7 @@ module Flat =
           DamageTaken = s.Taken
           ManaStarved = s.Starved
           Evened = s.Evened
+          Overkill = s.Overkill
           MinLife = s.MinLife
           ManaGained = (if p.Vitals.IsSome then floats gainedNames s.Gained s.GainedSeen else Map.empty) }
 

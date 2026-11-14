@@ -481,6 +481,9 @@ type Outcome =
       /// average over critical hit or not, in place of what its roll made it: added to the
       /// damage dealt, a fight's damage without the luck of which uses were critical hits.
       Evened: float
+      /// What the hits dealt beyond the life their enemies had left: not part of the damage
+      /// dealt, which ends where the life does.
+      Overkill: float
       /// Lowest life as a fraction of maximum.
       MinLife: float
       /// Mana by source: "regen", "leech", "kill".
@@ -618,6 +621,8 @@ module Sim =
           Seed: uint32
           /// See `Outcome.Evened`.
           Evened: float
+          /// See `Outcome.Overkill`.
+          Overkill: float
           /// How many events each stream of random numbers has served (see `step`).
           Streams: Map<string, int>
           DamageBy: Map<string, float>
@@ -2443,6 +2448,7 @@ module Sim =
                         DamageBy = addf (skill.Name + " (hit)") (min dealt e.Life) w.DamageBy
                         // (only of a hit the enemy outlives: what a killing hit deals is the life that was left)
                         Evened = (if dead then w.Evened else w.Evened + dealt * (evenly - 1.0))
+                        Overkill = w.Overkill + max 0.0 (dealt - e.Life)
                         // (a hit that deals more than the enemy has left: each type's share of what was left)
                         DamageByType = (let k = if dealt > e.Life && dealt > 0.0 then e.Life / dealt else 1.0 in hit.Dealt |> Map.fold (fun m t v -> if v > 0.0 then addf (DamageType.name t) (v * k) m else m) w.DamageByType)
                         // "25% of Hit Damage dealt to them while Debuffed": hits are what is recorded
@@ -3820,6 +3826,7 @@ module Sim =
               Seq = 0
               Seed = seed
               Evened = 0.0
+              Overkill = 0.0
               Streams = Map.empty
               DamageBy = Map.empty
               DamageByType = Map.empty
@@ -3899,6 +3906,7 @@ module Sim =
           DamageTaken = w.Player |> Option.map (fun p -> p.Taken) |> Option.defaultValue 0.0
           ManaStarved = w.Player |> Option.map (fun p -> p.Starved) |> Option.defaultValue 0.0
           Evened = w.Evened
+          Overkill = w.Overkill
           MinLife = w.Player |> Option.map (fun p -> p.MinLife) |> Option.defaultValue 1.0
           ManaGained = w.Player |> Option.map (fun p -> p.ManaGained) |> Option.defaultValue Map.empty }
 
