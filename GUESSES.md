@@ -18,7 +18,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
    whose description or behaviour changed.
 5. Go through the lists below; the wiki's version history of a skill says what changed.
 
-## Rules (115)
+## Rules (119)
 
 ### Hit damage
 
@@ -52,6 +52,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 |---|---|---|
 | Projectiles | — | guess (geometry), data (counts) |
 | Default spread | — | guess |
+| Fork | poe2db keyword text (Fork, Chain); the angle: the first game's wiki ("two new projectile travel ... at a 120º angle", via poedb); the remaining range and straight flight are guesses | data / guess |
 | Spark | game tables (GrantedEffectStatSets, Projectiles), gem text; user: cone widening with the number, gone on hit. The 15 degrees and the zigzag step are guesses | data / guess |
 | Full circle from the player | geometry | guess |
 | Damage per target | — | guess |
@@ -85,6 +86,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | Slowing potency on the player | stat description; that it is a multiplier of its own is a guess | guess |
 | Light stun on the player | game constants; formula a guess | guess |
 | Scarred Faith | keystone text; what "prevented" covers and the start are guesses | data / guess |
+| Conduit | keystone text; that it is lost without allies is our reading of "instead" | data / guess |
 | Which monster | game data (PoB Minions / Spectres export); which variant a name means is not in the API | data; the variant by name is a guess |
 | Skills | game data | data; that the player commands whenever the cooldown allows is a guess |
 | Minions inflict Withered | stat text | data; 4 s is a guess |
@@ -145,6 +147,8 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | Requiem (The Last Lament) | `rapidshot_requiem_active_duration_ms`, `_base_buff_count_requirement`, `_number_of_stacks_per_minute`, `crossbow_ammo_has_no_ammo`, the shot's two radii; wiki Requiem ("fixed duration of 12 seconds that cannot be scaled"); charged at the start and no anguish while it runs are guesses | data / guess |
 | Hailstorm Rounds | `crossbow_ammo_skill_has_passive_reloading`, `base_number_of_crossbow_bolts`, the shot's two radii, description; full at the start and uniform landing are guesses | data / guess |
 | Twister | `twister_base_movement_speed`, `twister_hit_interval_ms`, `minimum_per_projectile_spread_angle_degrees`, description ("Twisters fired at the same time can Hit the same target no more than once every 0.66 seconds"); how far it strays is a guess | data / guess |
+| Whirlwind | gem data, description; one stage per use and the start are guesses (the data says neither) | data / guess |
+| Wind skills boosted by elemental ground | stat descriptions; which one counts without the multiple line is a guess | data / guess |
 | Ball Lightning | `ball_lightning_base_hit_frequency_ms`; game table Projectiles (BallLightningPlayer 400), read as 40 units per second | data / guess |
 | Living Bomb | `living_bomb_damage_threshold_%_of_ailment_threshold`, `living_bomb_base_number_of_bombs_allowed`; that it fizzles when its time is up is a reading of the description | data / guess |
 | Per block chance, per lowest attribute | stat descriptions; PoB for the lucky question | guess |
@@ -180,7 +184,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 |---|---|---|
 | Ward remnants | data; overflow: user | data + user + guess |
 
-## Constants (8)
+## Constants (9)
 
 | Constant | Value | What it stands for |
 |---|---|---|
@@ -191,4 +195,5 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | `twisterWander` | `10.0` | How far (units) a twister strays to either side of its line ("moves forward erratically"): not in the data. A guess: twice its own radius. |
 | `spearfieldCone` | `90.0` | Spearfield: "Spears emerge within a 6.9 metre length cone" in front of the player. The length is the skill's radius; the angle is in neither the data nor the wiki. A guess. |
 | `erraticFanStep` | `15.0` | Degrees between neighbouring erratic projectiles (Spark's spray widens with every spark; the angle is not in the data). A guess. |
+| `forkAngle` | `60.0` | Fork: the two projectiles of a fork fly "away from each other at a 120º angle" (the community wiki for the first game, quoted by poedb's Fork Support page): 60 degrees off the line each. Not in the data of this game. A guess. |
 | `knockbackUnitsPerDistance` | `10.0` | Knockback: a skill's "base_knockback_distance" is read as hundredths of a metre (Rapid Shot 30, Explosive Shot 400, Shield Charge 900): so many of them to a game unit. A guess: the numbers fit nothing else. And how far a hit pushes where the skill names no distance (Ice Nova, a passive's "Knocks Back Enemies"): a metre. A guess. |
