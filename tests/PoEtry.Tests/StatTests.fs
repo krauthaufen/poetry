@@ -669,4 +669,9 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         equal (box [ "Non-Channelling Skills have 3% increased Spell Critical Hit Chance per 100 maximum Mana" ]) (box (parsed (item (life + ", " + wrong) line)).Coverage.UnknownText)
         // without the API's mods: as before, not understood
         let bare = Json.parse (sprintf "{\"rarity\": \"Unique\", \"name\": \"Test Globe\", \"typeLine\": \"Sacred Focus\", \"mutatedMods\": [\"%s\"]}" line)
-        equal (box 1) (box (parsed bare).Coverage.UnknownText.Length))
+        equal (box 1) (box (parsed bare).Coverage.UnknownText.Length)
+        // a radius jewel's line is read where the jewel is socketed (for the passives in its
+        // radius), never as the character's own from the ids
+        let radius = "Notable Passive Skills in Radius also grant 10% increased Critical Damage Bonus"
+        let grant = "{\"id\": \"C\", \"stats\": {\"local_jewel_notables_in_radius_grant_critical_strike_multiplier_+%\": 10}}"
+        equal (box [ radius ]) (box (parsed (item grant radius)).Coverage.UnknownText))

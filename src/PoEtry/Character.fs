@@ -313,8 +313,11 @@ module Items =
         let stats, unknown =
             if statMods.IsEmpty || unknown.IsEmpty then stats, unknown
             else
-                let found, unknown = fromStatLines statMods (stats |> List.map fst |> Set.ofList) unknown
-                stats @ found, unknown
+                // (not what is read where the item is used: a radius jewel's "Passive Skills in
+                // Radius also grant ...", a "Bonded:" line)
+                let later (l: string) = l.StartsWith "Bonded:" || l.Contains " in Radius" || l.Contains "Radius"
+                let found, rest = fromStatLines statMods (stats |> List.map fst |> Set.ofList) (unknown |> List.filter (later >> not))
+                stats @ found, (unknown |> List.filter later) @ rest
         // What only a weapon has of its own (attack speed, critical hits, accuracy) is the
         // character's on an armour piece: "16% increased Attack Speed" on gloves.
         let stats =
