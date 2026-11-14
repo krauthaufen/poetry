@@ -750,6 +750,31 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         if charges < 2 || charges > 4 then failwithf "%d charges in 20 s" charges
         same fight seeds)
 
+    test "Conduit: a charge the character would gain goes to its allies; it holds none, from rules or by itself" (fun () ->
+        equal (box [ Named "Conduit:PowerCharge"; Named "Conduit:FrenzyCharge"; Named "Conduit:EnduranceCharge" ]) (box (mods "keystone_conduit" 1.0 |> List.map (fun m -> m.Stat)))
+        equal (box [ Named "Conduit:FrenzyCharge" ]) (box (mods "frenzy_only_conduit" 1.0 |> List.map (fun m -> m.Stat)))
+        let bolt = { Skill.make "Bolt" [ Spell ] with BaseDamage = Map.ofList [ Cold, { Min = 100.0; Max = 100.0 } ]; BaseTime = 0.25; BaseCrit = 0.0 }
+        let seen = ref 0
+        let fight conduit =
+            let actor =
+                { Actor.make "Player" (if conduit then [ Mod.flag (Named "Conduit:FrenzyCharge") ] else []) [ bolt ] with
+                    Rules = [ { Hook = OnHit; Filter = AnySkill; Chance = 100.0; Reaction = GainResource("FrenzyCharge", 1) } ]
+                    Periodics = [ { Name = "generate charges"; Every = 1.0; Action = GainRandom [ "FrenzyCharge"; "PowerCharge" ] } ]
+                    MaxResources = Map.ofList [ "FrenzyCharge", 3; "PowerCharge", 3 ]
+                    Rotation = [ { Use = "Bolt"; When = fun v -> seen.Value <- max seen.Value (Map.tryFind "FrenzyCharge" v.Buffs |> Option.defaultValue 0); true } ] }
+            Fight.single (EnemyDef.atLevel 83 1e9) actor 10.0
+        seen.Value <- 0
+        let out = Sim.run (fight true) 1u
+        equal (box 0) (box seen.Value)
+        equal (box 0) (box (count out "gained:FrenzyCharge"))
+        if count out "conduit:FrenzyCharge" < 30 then failwithf "%d given away" (count out "conduit:FrenzyCharge")
+        // power charges are still the character's own
+        if count out "gained:PowerCharge" < 1 then failwith "no power charge"
+        seen.Value <- 0
+        Sim.run (fight false) 1u |> ignore
+        equal (box 3) (box seen.Value)
+        same (fight true) seeds)
+
     // ---- Scarred Faith ----
 
     test "Scarred Faith: prevented physical damage recouped as energy shield per enemy power; no regeneration; none above armour" (fun () ->

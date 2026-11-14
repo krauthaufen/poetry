@@ -1207,6 +1207,8 @@ module Flat =
               CKeptOf: int[]
               CLostOf: int[]
               IsCharge: bool[]
+              /// Conduit: the count of a charge given to allies instead, or -1.
+              CConduit: int[]
               CGained: int[]
               CExpired: int[]
               /// Ailments: where their damage goes, their statuses, their counts.
@@ -2236,6 +2238,9 @@ module Flat =
                       CKeptOf = cKeptOf
                       CLostOf = cLostOf
                       IsCharge = buffNames |> Array.map (fun n -> n.EndsWith "Charge")
+                      CConduit =
+                        (let db = ModDb.ofList actor.Mods
+                         buffNames |> Array.map (fun n -> if n.EndsWith "Charge" && Mods.flag Ctx.empty (Named("Conduit:" + n)) db then counts.Id("conduit:" + n) else -1))
                       CGained = cGained
                       CExpired = cExpired
                       AilmentSource = ailmentSource
@@ -6296,18 +6301,21 @@ module Flat =
     /// Stacks of a resource arrive (`Sim.step`, GainStacks).
     let private onGainStacks (s: State) (rng: Rng) (r: int) (n: int) =
         let p = s.P
-        let maxR = if (at p.ResourceMax r) <> System.Int32.MinValue then (at p.ResourceMax r) else n
-        // "N% chance to gain an additional (Power) Charge when you gain a Charge"
-        let n =
-            if not (at p.IsCharge r) || p.FirstSkill < 0 then n
-            else
-                let ev = acquireEmpty s p.FirstSkill
-                let chance = qSum ev (at p.QExtra r)
-                release s
-                if chance > 0.0 && rng.Chance chance then n + 1 else n
-        setStacks s true r (min maxR (stacksOf s r + n))
-        if (at p.IsCharge r) then markStatus s (at p.GainedRecently r)
-        bump s (at p.CGained r)
+        // Conduit: the charge goes to allies, which nothing reads
+        if (at p.CConduit r) >= 0 then bump s (at p.CConduit r)
+        else
+            let maxR = if (at p.ResourceMax r) <> System.Int32.MinValue then (at p.ResourceMax r) else n
+            // "N% chance to gain an additional (Power) Charge when you gain a Charge"
+            let n =
+                if not (at p.IsCharge r) || p.FirstSkill < 0 then n
+                else
+                    let ev = acquireEmpty s p.FirstSkill
+                    let chance = qSum ev (at p.QExtra r)
+                    release s
+                    if chance > 0.0 && rng.Chance chance then n + 1 else n
+            setStacks s true r (min maxR (stacksOf s r + n))
+            if (at p.IsCharge r) then markStatus s (at p.GainedRecently r)
+            bump s (at p.CGained r)
 
     /// A cycle picks its next variant (`Sim.step`, CycleTick).
     let private onCycle (s: State) (rng: Rng) (index: int) =
@@ -6324,9 +6332,11 @@ module Flat =
         let pd = (at p.Periodics index)
         schedule s (s.Time + pd.Every) EPeriodic index 0 0.0 0.0
         let gain (r: int) (n: int) =
-            setStacks s true r n
-            markStatus s (at p.GainedRecently r)
-            bump s (at p.CGained r)
+            if (at p.CConduit r) >= 0 then bump s (at p.CConduit r)
+            else
+                setStacks s true r n
+                markStatus s (at p.GainedRecently r)
+                bump s (at p.CGained r)
         match pd.Action with
         | PGainRandom resources ->
             let open' = resources |> Array.filter (fun (r, most) -> stacksOf s r < most)

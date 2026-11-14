@@ -1158,7 +1158,13 @@ module StatMap =
         | "marauder_hidden_ascendancy_damage_+%_final" ->
             Some(Mods([ "Type:Storm"; "Type:Plant" ] |> List.map (fun t -> Mod.more (Damage AllDamage) v |> Mod.whenever (SkillIs Spell) |> Mod.whenever (SkillIs(Tag t)))))
         | "base_life_leech_does_not_stop_at_full_life" | "can_wield_2h_axe_sword_mace_in_one_hand" -> Some Structural
-        | "keystone_conduit" | "minions_get_amulet_stats_instead_of_you" | "keystone_ancestral_bond" ->
+        // Conduit: "If you would gain a Charge, Allies in your Presence gain that Charge instead"
+        // (and the same for one kind of charge); what the allies hold, nothing a minion does reads
+        | "keystone_conduit" -> Some(Mods([ "PowerCharge"; "FrenzyCharge"; "EnduranceCharge" ] |> List.map (fun c -> Mod.flag (Named("Conduit:" + c)))))
+        | "power_only_conduit" | "generate_power_charges_for_allies_in_your_presence" -> one (Mod.flag (Named "Conduit:PowerCharge"))
+        | "frenzy_only_conduit" | "generate_frenzy_charges_for_allies_in_your_presence" -> one (Mod.flag (Named "Conduit:FrenzyCharge"))
+        | "endurance_only_conduit" | "generate_endurance_charges_for_allies_in_your_presence" -> one (Mod.flag (Named "Conduit:EnduranceCharge"))
+        | "minions_get_amulet_stats_instead_of_you" | "keystone_ancestral_bond" ->
             Some(Unsimulated "minions / allies")
         | "keystone_bulwark" -> Some(Unsimulated "movement")
         // "When you kill a Rare monster, you gain its Modifiers for 60 seconds": the monsters of a

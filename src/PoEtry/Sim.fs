@@ -3432,6 +3432,10 @@ module Sim =
             else schedule (w.Time + atk.Interval) (EnemyAttack name) w
         | _ -> attackPlayer env rng name w
 
+    /// Conduit: "If you would gain a Charge, Allies in your Presence gain that Charge instead".
+    let private conduit (actor: Actor) (r: string) =
+        r.EndsWith "Charge" && Mods.flag Ctx.empty (Named("Conduit:" + r)) (ModDb.ofList actor.Mods)
+
     let private onPeriodic env (rng: Rng) actorName periodicName (w: World) =
         let actor = actorDef env actorName
         match actor.Periodics |> List.tryFind (fun p -> p.Name = periodicName) with
@@ -3439,15 +3443,19 @@ module Sim =
         | Some p ->
             let w = schedule (w.Time + p.Every) (PeriodicTick(actorName, periodicName)) w
             let st = Map.find actorName w.Actors
+            let gain r n w =
+                if conduit actor r then { w with Counts = bump ("conduit:" + r) w.Counts }
+                else
+                    setStacksWith env actorName true r n w
+                    |> markStatus actorName ("Gained" + r + "Recently")
+                    |> fun w -> { w with Counts = bump ("gained:" + r) w.Counts }
             match p.Action with
             | GainRandom resources ->
                 let open' = resources |> List.filter (fun r -> stacksOf st r < (Map.tryFind r actor.MaxResources |> Option.defaultValue 0))
                 if open'.IsEmpty then w
                 else
                     let r = open'.[min (open'.Length - 1) (int (rng.Float() * float open'.Length))]
-                    setStacksWith env actorName true r (stacksOf st r + 1) w
-                    |> markStatus actorName ("Gained" + r + "Recently")
-                    |> fun w -> { w with Counts = bump ("gained:" + r) w.Counts }
+                    gain r (stacksOf st r + 1) w
             | GainWeighted weights ->
                 let total = weights |> List.sumBy snd
                 let roll = rng.Float() * total
@@ -3457,15 +3465,11 @@ module Sim =
                     |> fst
                     |> Option.defaultValue (fst (List.last weights))
                 let maxR = Map.tryFind r actor.MaxResources |> Option.defaultValue 0
-                setStacksWith env actorName true r (min maxR (stacksOf st r + 1)) w
-                |> markStatus actorName ("Gained" + r + "Recently")
-                |> fun w -> { w with Counts = bump ("gained:" + r) w.Counts }
+                gain r (min maxR (stacksOf st r + 1)) w
             | GainAnyRandom resources ->
                 let r = resources.[min (resources.Length - 1) (int (rng.Float() * float resources.Length))]
                 let maxR = Map.tryFind r actor.MaxResources |> Option.defaultValue 0
-                setStacksWith env actorName true r (min maxR (stacksOf st r + 1)) w
-                |> markStatus actorName ("Gained" + r + "Recently")
-                |> fun w -> { w with Counts = bump ("gained:" + r) w.Counts }
+                gain r (min maxR (stacksOf st r + 1)) w
             | SummonMinions (pool, count, duration) -> summon env pool count duration w
             | SummonFromCorpse (pool, count, duration) ->
                 if w.Kills.Length > w.CorpsesUsed then summon env pool count duration { w with CorpsesUsed = w.CorpsesUsed + 1 } else w
@@ -3792,6 +3796,10 @@ module Sim =
                     { w with Crystals = List.rev kept; Counts = bump ("crystals:" + part) w.Counts }
                 | _ -> w
             | Expose (name, target, dt, amount, duration) -> expose (actorDef env name) target dt amount duration w
+            // Conduit: "If you would gain a Charge, Allies in your Presence gain that Charge
+            // instead": the actor gains nothing (what an ally holds, no minion reads)
+            | GainStacks (name, r, _) when conduit (actorDef env name) r ->
+                { w with Counts = bump ("conduit:" + r) w.Counts }
             | GainStacks (name, r, n) ->
                 let actor = actorDef env name
                 let st = Map.find name w.Actors

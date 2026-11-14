@@ -754,6 +754,8 @@ module Setup =
                         match k with
                         | _ when o.Start |> List.exists (fun (x, _) -> x = k) ->
                             k, max 0 (min (Map.tryFind k player.MaxResources |> Option.defaultValue n) (o.Start |> List.find (fun (x, _) -> x = k) |> snd))
+                        // Conduit: the character's charges are its allies'
+                        | "PowerCharge" | "FrenzyCharge" | "EnduranceCharge" when Mods.flag Ctx.empty (Named("Conduit:" + k)) db -> k, 0
                         | "PowerCharge" when o.StartPowerCharges.IsSome -> k, n
                         | "PowerCharge" | "FrenzyCharge" | "EnduranceCharge" ->
                             (match Map.tryFind k sources with
