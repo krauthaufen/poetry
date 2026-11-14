@@ -1034,6 +1034,34 @@ let run (test: string -> (unit -> unit) -> unit) =
         let o = Sim.run fight 1u
         if not (o.Counts.ContainsKey "hits:Warp: Blast") then failwithf "expected the blast whatever the enemy's state: %A" o.Counts)
 
+    test "flat: minions that have pools, a flask and remnants of their own use the player's" (fun () ->
+        let bite = { strike "Bite" 300.0 600.0 with Cost = 25.0; Mods = [ Mod.base' ManaLeech 6.0; Mod.base' (Named "LosePoolsOnUse") 1.0 ] }
+        let flask : ManaFlask = { Amount = 200.0; Duration = 3.0; ChargesPerUse = 20.0; MaxCharges = 60.0; ChargesPerSecond = 2.0; ChargeGainMult = 1.0; Instant = 0.3 }
+        let hound =
+            { Actor.make "Hound" [ Mod.inc CritChance 100.0; Mod.base' (Named "ManaPercentOnConsumePower") 5.0 ]
+                  [ bite; { strike "Pounce" 500.0 900.0 with Cooldown = Some 3.0; Consumes = Some "PowerCharge"; Cost = 40.0 } ] with
+                Rotation = [ Actor.always "Pounce"; Actor.always "Bite" ]
+                Vitals = Some(PlayerStats.basic 800.0 150.0)
+                ManaFlask = Some flask
+                Rules = [ { Hook = OnCrit; Filter = AnySkill; Chance = 50.0; Reaction = GainResource("PowerCharge", 1) } ]
+                MaxResources = Map.ofList [ "PowerCharge", 3 ]
+                WardRemnants = Some { OnKillChance = 100.0; OnStunChance = 60.0; StunCooldown = 0.5; WardPerRemnant = 30.0; ExtraChance = 20.0; Delay = 0.4; Overflow = 1.5 }
+                ManaRemnants = Some { OnKillChance = 100.0; CritCooldown = 0.3; ManaPerRemnant = 20.0; PercentOfMaxMana = 2.0; ExtraChance = 20.0; Delay = 0.5; Overflow = 1.2 } }
+        let player pools =
+            { Actor.make "Player" [ Mod.inc CritChance 60.0; Mod.base' (AilmentChance Ignite) 100.0 ] [ { spell "Bolt" Fire 100.0 300.0 with Cost = 30.0 } ] with
+                Vitals = (if pools then Some(PlayerStats.basic 2000.0 600.0) else None) }
+        let fight pools = { Fight.single { boss 1e12 with Attack = None } (player pools) 40.0 with Minions = [ hound ] }
+        same (fight true) seeds
+        same (fight false) seeds
+        // (the player's own remnants are what an arrival is measured by)
+        let both = fight true
+        let all = { both with Player = { both.Player with WardRemnants = hound.WardRemnants; ManaRemnants = hound.ManaRemnants; ManaFlask = Some flask } }
+        same all seeds
+        let o = Sim.run all 1u
+        for key in [ "flask:mana"; "mana remnant"; "pool loss on use"; "uses:Pounce" ] do
+            if not (o.Counts.ContainsKey key) then failwithf "expected %s: %A" key o.Counts
+        if not ((Map.tryFind "leech" o.ManaGained |> Option.defaultValue 0.0) > 0.0 && o.ManaGained.ContainsKey "consume") then failwithf "expected mana from the hound: %A" o.ManaGained)
+
     // ---- minions and totems ----
     let bite name dmg = { Skill.make name [ Attack; Melee ] with BaseDamage = Map.ofList [ Physical, { Min = dmg * 0.8; Max = dmg * 1.2 } ]; BaseCrit = 6.0 }
     let sure = Mod.base' (Named "Accuracy") 1e12
@@ -1276,7 +1304,6 @@ let run (test: string -> (unit -> unit) -> unit) =
             | Ok _ -> failwithf "compiled, but has %s" reason
             | Error why -> if not (why.Contains reason) then failwithf "refused for '%s', expected '%s'" why reason
         if not (Flat.unsupported fine).IsEmpty then failwithf "a plain fight is refused: %A" (Flat.unsupported fine)
-        refused { fine with Minions = [ { Actor.make "Hound" [] [ strike "Bite" 1.0 2.0 ] with Vitals = Some(PlayerStats.basic 100.0 0.0) } ] } "a minion with pools"
         refused { fine with Minions = [ Actor.make "Player" [] [ strike "Bite" 1.0 2.0 ] ] } "actors of the same name"
         refused { fine with Player = { player with Metas = [ Meta.simple "Cast on Crit" 100.0 "Bolt"; Meta.simple "Cast on Crit" 50.0 "Bolt" ] } } "meta gems of the same name"
         refused { fine with Player = { player with Infusions = Some { Remnants = []; ExtraRemnantChance = 0.0; Delay = 0.5; Consumers = Map.ofList [ "Bolt", ("FireInfusion", "No such skill") ]; Wildcard = None } } } "an infusion of a skill"

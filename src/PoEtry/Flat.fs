@@ -1362,12 +1362,7 @@ module Flat =
         let one (index: int) (actor: Actor) : unit -> Program =
             let isPlayer = index = 0
             if (actor.Metas |> List.map (fun m -> m.Name) |> List.distinct).Length <> actor.Metas.Length then reject "meta gems of the same name"
-            // (the reference pays a minion's remnants into the player's pools by the player's own remnants)
-            if not isPlayer && actor.WardRemnants.IsSome then reject "Runic Ward remnants of a minion"
-            if not isPlayer && actor.ManaRemnants.IsSome then reject "mana remnants of a minion"
             if isPlayer && (actor.ActiveWhile.IsSome || actor.Body.IsSome || actor.Pool.IsSome) then reject "a player that is a minion"
-            // (the reference lets whoever has these use the player's pools)
-            if not isPlayer && (actor.Vitals.IsSome || actor.ManaFlask.IsSome) then reject "a minion with pools"
 
             // ---- its skills ----
             let all = actor.Skills @ (actor.Skills |> List.collect (fun s -> s.Parts))
@@ -3508,7 +3503,8 @@ module Flat =
         | _ -> ()
 
     let private gainMana (s: State) (v: PlayerStats) (slot: int) (amount: float) =
-        if amount > 0.0 then
+        // (the player's mana, by the measures of whoever gains it: none where the player has no pools)
+        if amount > 0.0 && s.Main.Vitals.IsSome then
             let m = min v.Mana (s.Mana + amount)
             addGained s slot (m - s.Mana)
             s.Mana <- m
@@ -4125,14 +4121,16 @@ module Flat =
                 put s.A.Cooldowns sid ((if pending.Length >= uses then pending.Head else -infinity))
             | None -> ()
             // "Lose X% of maximum Life, Mana and Energy Shield when you use"
+            // (the pools are the player's, whoever uses the skill: a minion that has pools of
+            // its own loses the player's by its own measures, where the player has any)
             (match p.Vitals with
-             | Some v ->
+             | Some v when s.Main.Vitals.IsSome ->
                 if lose > 0.0 && useTime > 0.0 then
                     s.Life <- max (min 1.0 s.Life) (s.Life - lose * v.Life)
                     s.Shield <- max 0.0 (s.Shield - lose * v.EnergyShield)
                     s.Mana <- max 0.0 (s.Mana - lose * v.Mana)
                     bump s p.CPoolLoss
-             | None -> ())
+             | _ -> ())
             // (what the use reads of the buffs as they were when it began)
             let charged = info.Consumes >= 0 && stacksOf s info.Consumes > 0
             // a part that spends Rage happens when there is enough, in place of the plain one
@@ -4622,7 +4620,7 @@ module Flat =
                 if firstUsable < 0 then firstUsable <- sid
                 if choice < 0 then
                     let affordable =
-                        match p.Vitals with
+                        match (if s.Main.Vitals.IsSome then p.Vitals else None) with
                         | Some pools when pools.CostsInfernalFlame -> true
                         | Some pools when pools.CostsLife ->
                             costed <- sid
@@ -4640,19 +4638,22 @@ module Flat =
             let info = (at p.Skills sid)
             // nothing is faster than a server tick (instant skills)
             let t = max Constants.serverTick (useTime s sid)
-            match p.Vitals with
+            // (the pools and the flask's charges are the player's; whoever has a flask drinks
+            // from them, whoever has pools pays from them, by its own measures)
+            let main = s.Main.Vitals.IsSome
+            let cost = if not main || (p.Vitals.IsNone && p.Actor.ManaFlask.IsNone) then 0.0 elif costed = sid then costedAt else costOf s sid t
+            // drink the mana flask when mana is getting low and it isn't already running
+            (match p.Actor.ManaFlask with
+             | Some f when main && s.Mana < 2.0 * cost && s.Time >= s.FlaskUntil && s.FlaskCharges >= f.ChargesPerUse ->
+                s.FlaskCharges <- s.FlaskCharges - f.ChargesPerUse
+                s.FlaskUntil <- s.Time + f.Duration
+                s.FlaskRate <- f.Amount * (1.0 - f.Instant) / f.Duration
+                s.Mana <- min (max s.Mana (match p.Vitals with Some pools -> pools.Mana | None -> s.Mana)) (s.Mana + f.Amount * f.Instant)
+                bump s s.Main.CFlaskMana
+             | _ -> ())
+            match (if main then p.Vitals else None) with
             | None -> useNow s rng sid t
             | Some pools ->
-                let cost = if costed = sid then costedAt else costOf s sid t
-                // drink the mana flask when mana is getting low and it isn't already running
-                (match p.Actor.ManaFlask with
-                 | Some f when s.Mana < 2.0 * cost && s.Time >= s.FlaskUntil && s.FlaskCharges >= f.ChargesPerUse ->
-                    s.FlaskCharges <- s.FlaskCharges - f.ChargesPerUse
-                    s.FlaskUntil <- s.Time + f.Duration
-                    s.FlaskRate <- f.Amount * (1.0 - f.Instant) / f.Duration
-                    s.Mana <- min (max s.Mana pools.Mana) (s.Mana + f.Amount * f.Instant)
-                    bump s p.CFlaskMana
-                 | _ -> ())
                 if pools.CostsLife then
                     // Blood Magic: the cost is paid with life; a skill that would kill waits
                     if s.Life - cost >= 1.0 || cost <= 0.0 then
@@ -5413,7 +5414,7 @@ module Flat =
                                 @ (if flagQ ev qBrokenColdLightning then [ OfType Cold; OfType Lightning ] else [])
                         addDebuff s e p.SFullyBroken seconds 1 (scopes |> List.map (fun sc -> Mod.inc (DamageTaken sc) taken |> Mod.from "Fully Broken Armour")))
                 // leech, and what a hit and a kill give back
-                (match p.Vitals with
+                (match (if s.Main.Vitals.IsSome then p.Vitals else None) with
                  | Some v ->
                     let leech = min (at de 0) Constants.effectiveMaxDamageForLeech * sumQ ev qManaLeech / 100.0
                     // leech counts from one enemy per hit event: only the largest instance
