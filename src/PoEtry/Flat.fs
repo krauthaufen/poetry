@@ -6196,7 +6196,7 @@ module Flat =
                             |> fun d -> if atk.Melee then d * (1.0 + Constants.monsterMeleeStunMore / 100.0) else d
                         let stunChance = min 100.0 (stunDamage / max 1.0 v.StunThreshold * 100.0)
                         if stunChance >= Constants.playerLightStunMinimum && rng.Chance stunChance && not (rng.Chance v.AvoidStun) then
-                            unlessCharm "Stunned" (lock Constants.playerLightStunDuration p.CPlayerStunned)
+                            unlessCharm "Stunned" (lock (Constants.playerLightStunDuration / v.StunRecovery) p.CPlayerStunned)
                     bump s p.CEnemyHit
                     if deflected then bump s p.CDeflected
                     if blocked then

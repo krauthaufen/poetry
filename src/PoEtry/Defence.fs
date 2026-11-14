@@ -314,7 +314,8 @@ module Defence =
           // "Reserves 25% of Life"; Setup adds what skills reserve
           LifeReserved = min 1.0 (named "LifeReservedPercent" / 100.0)
           LifeFrozenWithES = flag "LifeFrozenWithES"
-          SurroundedAt = 5 + int (named "SurroundedOffset") }
+          SurroundedAt = 5 + int (named "SurroundedOffset")
+          StunRecovery = max 0.01 (Mods.mult c [ Named "StunRecovery" ] db) }
 
     let compute bases sheet = computeWith Map.empty bases sheet
 

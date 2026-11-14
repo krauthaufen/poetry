@@ -642,6 +642,14 @@ module StatMap =
         | "life_regeneration_rate_per_minute_%" -> one (Mod.base' LifeRegenPercent (v / 60.0))
         | "base_life_regeneration_rate_per_minute" -> one (Mod.base' LifeRegen (v / 60.0))
         | "life_regeneration_rate_+%" -> one (Mod.inc LifeRegen v)
+        // "while stationary": the player stands (RULES.md). (The pools' recovery is worked out
+        // once, for the standing character: one that is taken to move, because it gains from
+        // moving, keeps these all the same.)
+        | "life_regeneration_rate_+%_while_stationary" -> one (Mod.inc LifeRegen v |> Mod.whenever (Not(WhileBuff "Moving")))
+        | "life_regeneration_rate_per_minute_%_while_stationary" -> one (Mod.base' LifeRegenPercent (v / 60.0) |> Mod.whenever (Not(WhileBuff "Moving")))
+        | "mana_regeneration_rate_+%_while_stationary" -> one (Mod.inc ManaRegen v |> Mod.whenever (Not(WhileBuff "Moving")))
+        // "X% increased Stun Recovery": a light stun on the player is over that much sooner
+        | "base_stun_recovery_+%" -> one (Mod.inc (Named "StunRecovery") v)
         | "mana_regeneration_rate_+%" -> one (Mod.inc ManaRegen v)
         | "base_mana_cost_efficiency_+%" -> one (Mod.inc ManaCostEfficiency v)
         | "base_spell_mana_cost_efficiency_+%" -> one (Mod.inc ManaCostEfficiency v |> Mod.whenever (SkillIs Spell))
@@ -760,9 +768,43 @@ module StatMap =
             | [ "base"; "maximum"; t; "damage"; "resistance"; "%" ] when (typeWord t).IsSome -> one (Mod.base' (MaxResist (typeWord t).Value) v)
             | _ -> None
 
+    /// Stats that are no modifiers: the numbers of a mechanic, read by their id where that
+    /// mechanic is built (the function named with each group), whatever gem carries them.
+    let private readWhereBuilt =
+        set [ // Behaviours.ghostDance, periodics (Time of Need, Flames of Chayula)
+              "ghost_dance_max_stacks"; "skill_base_ghost_dance_grants_%_evasion_as_es_regeneration_per_minute_if_have_lost_ghost_dance_shroud_recently"
+              "skill_time_of_need_gain_x_life"; "breach_flame_spawn_rate_ms"; "breach_flame_chaos_addition_%"
+              // Behaviours.tempestBell
+              "bell_hit_limit"; "bell_shockwave_cooldown_ms"
+              // Gems: shield attacks, a support's quality for its skill, how projectiles fly and
+              // land, channels released at the perfect moment, poison for the skill's duration
+              "off_hand_weapon_minimum_physical_damage"; "off_hand_weapon_maximum_physical_damage"; "supported_active_skill_gem_quality_%"
+              "twister_hit_interval_ms"; "twister_base_movement_speed"; "minimum_per_projectile_spread_angle_degrees"; "rain_hit_delay_ms"
+              "spear_wall_cm_per_spear"; "nova_skills_cast_at_target_location"; "projectiles_barrage"; "poison_duration_is_skill_duration"
+              "channel_end_duration_as_%_of_attack_time"; "channel_skill_end_animation_duration_multiplier_permyriad"
+              // Behaviours.minions, summons, totems: how many, how they come and go
+              "skill_wolf_pack_size"; "base_number_of_totems_allowed"; "base_number_of_zombies_allowed"; "max_azmerian_swarms"
+              "skill_grants_%_chance_to_summon_azmerian_swarm_on_kill_affected_by_elemental_ailment"
+              "skill_grants_%_chance_to_summon_azmerian_swarm_on_hitting_unique_or_rare_enemy_affected_by_elemental_ailment"
+              "skill_raging_spirits_max_per_action"; "ravenous_swarm_maximum_swarm_count"; "minion_base_resummon_time_ms"
+              "companion_takes_%_damage_before_you_from_support"; "explode_on_low_life_%_maximum_life_to_deal"; "base_totem_duration"
+              "active_skill_minion_1%_attack_speed_+%_per_X_player_dexterity"; "minion_1%_damage_+%_per_X_player_strength"
+              "wardbound_minions_summon_minion_for_every_X_runic_ward_spent"; "wardbound_minion_maximum_number_of_casts"
+              // Behaviours.warcry, curseDelay, impendingDoom, useRules (a skill's exposure)
+              "seismic_cry_slam_skill_additional_aftershocks"; "warcry_empowers_per_X_monster_power"; "warcry_empowers_per_X_monster_power_mp_cap"
+              "curse_delay_duration_ms"; "trigger_vicious_hex_explosion_when_curse_ends"
+              "active_skill_all_elemental_exposure_magnitude"; "active_skill_all_elemental_exposure_compounding_magnitude"
+              "active_skill_all_elemental_exposure_compounding_magnitude_cap" ]
+
     let private explicit (id: string) (v: float) : Meaning option =
         let one m = Some(Mods [ m ])
         match id with
+        | id when readWhereBuilt.Contains id -> Some Structural
+        // (a support's "more / less life" for the minions of its gem: Behaviours.minions)
+        | id when id.StartsWith "support_" && id.EndsWith "minion_life_+%_final" -> Some Structural
+        // where a Flame of Chayula appears and from how far it is seen: every flame is taken
+        // to be picked up at once (RULES.md, Flames of Chayula)
+        | "breach_flame_spawn_radius" | "breach_walk_base_visibility_range" -> Some Structural
         | "critical_strike_chance_+%" -> one (Mod.inc CritChance v)
         | "spell_critical_strike_chance_+%" -> one (Mod.inc CritChance v |> Mod.whenever (SkillIs Spell))
         | "attack_critical_strike_chance_+%" -> one (Mod.inc CritChance v |> Mod.whenever (SkillIs Attack))
@@ -797,6 +839,16 @@ module StatMap =
         | "weapon_damage_%_granted_to_companions" -> one (Mod.base' (Named "CompanionWeaponDamage") v)
         // "x% of Damage from Hits is taken from your Damageable Companion's Life before you"
         | "companion_takes_%_damage_before_you" -> one (Mod.base' (Named "CompanionTakesDamage") v)
+        // "Allies in your Presence Regenerate X% of their Maximum Life per second", "... X Life per
+        // second", "... X% of your Maximum Life per second": the minions' regeneration
+        // (Behaviours.minionBody; the minions are taken to be in the Presence)
+        | "allies_in_presence_life_regeneration_rate_per_minute_equal_to_their_maximum_life_%" -> one (Mod.base' (ForMinions LifeRegenPercent) (v / 60.0))
+        | "allies_in_presence_life_regeneration_rate_per_minute" -> one (Mod.base' (ForMinions LifeRegen) (v / 60.0))
+        | "allies_in_presence_life_regeneration_rate_per_minute_equal_to_your_maximum_life_%" -> one (Mod.base' (Named "AllyRegenPercentOfOwnerLife") (v / 60.0))
+        // "You and Allies in your Presence have Unholy Might while you are not on Low Mana": the
+        // minions' part (the player's own is "grant_unholy_might_to_self_while_not_on_low_mana";
+        // that the player is not on low mana is not looked at for them)
+        | "allies_in_presence_have_unholy_might_while_you_not_on_low_mana" -> Some(Mods [ for t in DamageType.all -> Mod.base' (ForMinions(GainAs(t, Chaos))) 30.0 ])
         | "minion_resummon_speed_+%" -> one (Mod.inc (ForMinions(Named "MinionReviveSpeed")) v)
         | "minion_maximum_life_%_to_gain_as_maximum_energy_shield" -> one (Mod.base' (ForMinions(Named "LifeAsExtraEnergyShield")) v)
         | "minion_attack_speed_+%" -> one (Mod.inc (ForMinions Speed) v |> Mod.whenever (SkillIs Attack))
@@ -806,6 +858,10 @@ module StatMap =
         // "Supported Spells have X% increased Cooldown Recovery Rate"
         | "base_spell_cooldown_speed_+%" -> one (Mod.inc CooldownRecovery v |> Mod.whenever (SkillIs Spell))
         | "base_cooldown_speed_+%_final" -> one (Mod.more CooldownRecovery v)
+        // "X% more Mana Cost of Skills if you have no Energy Shield"
+        | "lich_mana_cost_+%_final_if_you_have_no_energy_shield" -> one (Mod.more ManaCost v |> Mod.whenever (Not(WhileBuff "HasEnergyShield")))
+        // "Physical Spell Critical Hits build Pin"
+        | "physical_spell_damage_can_pin_on_critical_hit" -> one (Mod.flag (Named "CanPin") |> Mod.whenever (SkillIs Spell) |> Mod.whenever IsCrit)
         | "support_double_number_of_cooldown_uses" -> one (Mod.base' (Named "DoubleCooldownUses") 1.0)
         | "lose_%_of_life_es_and_mana_when_skill_is_used" -> one (Mod.base' (Named "LosePoolsOnUse") v)
         | "support_cooldown_reduction_cooldown_recovery_+%" -> one (Mod.inc CooldownRecovery v)
@@ -1100,6 +1156,9 @@ module StatMap =
             match sources, scopes (List.rev scope) with
             | Some srcs, Some sc -> Some(srcs |> List.map (fun s -> apply sc (Mod.base' (GainAs(s, into)) v)))
             | _ -> None
+        // "Gain X% of Damage as Extra Fire Damage": of all damage
+        | [ t; "as"; "gain"; "to"; "%"; "damage" ] when (typeWord t).IsSome ->
+            Some(DamageType.all |> List.map (fun s -> Mod.base' (GainAs(s, (typeWord t).Value)) v))
         | _ -> None
 
     /// "<type> damage % to convert to <type>"
@@ -1364,10 +1423,31 @@ module StatMap =
         |> List.exists id.StartsWith
         || id.EndsWith "movement_speed_penalty_+%_final_while_performing_action"
 
+    /// What monsters never do in a fight as it is simulated: they hit, with their damage and
+    /// their accuracy, and nothing else (RULES.md, "Monster hits", "Not modelled: monster
+    /// skills"). They put no curse on the player, break none of its armour, leave no Maim and
+    /// no Bleeding on it, and they neither regenerate life nor have skills with cooldowns. A
+    /// stat about one of these changes nothing here; each with what it would be about.
+    let private monstersNeverDo (id: string) =
+        [ // "increased / reduced effect of Curses on you", "increased Damage per Curse on you"
+          "curse_effect_on_self_+%"; "damage_+%_per_active_curse_on_self"
+          // "increased / reduced Armour Break taken"
+          "armour_break_taken_+%"
+          // "Deflected Hits cannot inflict Maim / Bleeding on you"
+          "deflected_hits_cannot_directly_inflict_maim_on_self"; "deflected_hits_cannot_inflict_bleeding_on_self"
+          // "Enemies in your Presence have X% reduced Life Regeneration rate / Cooldown Recovery Rate"
+          "enemies_in_presence_life_regeneration_+%"; "enemies_in_presence_cooldown_recovery_+%" ]
+        |> List.contains id
+
+    /// "X% increased Explicit Resistance Modifier magnitudes" and the like on an item: the
+    /// item's lines already show the changed values (RULES.md, "Item modifier magnitudes").
+    let private shownOnTheItem (id: string) =
+        id.StartsWith "heist_enchantment_" && id.EndsWith "_mod_effect_+%"
+
     let private isNonOffensive (id: string) =
         let words = split id
         // A penetration / enemy debuff line mentions resistance but is offensive.
-        words |> List.exists noCombatWords.Contains || ownMovement id
+        words |> List.exists noCombatWords.Contains || ownMovement id || monstersNeverDo id || shownOnTheItem id
 
     let rec private direct (id: string) value =
         match explicit id value with

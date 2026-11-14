@@ -1446,7 +1446,7 @@ module Behaviours =
           Reach = m.AttackRange
           Revive = revive |> Option.map (fun s -> s / Mods.inc ctx [ Named "MinionReviveSpeed" ] db)
           Power = m.Life
-          LifeRegen = life * Mods.sumBase ctx [ LifeRegenPercent ] db / 100.0
+          LifeRegen = life * Mods.sumBase ctx [ LifeRegenPercent ] db / 100.0 + Mods.sumBase ctx [ LifeRegen ] db
           TakesForOwner = 0.0
           Explodes = None }
 
@@ -1611,8 +1611,10 @@ module Behaviours =
                         supportStat "companion_takes_%_damage_before_you_from_support"
                         + (if companion then Mods.sumBase Ctx.empty [ Named "CompanionTakesDamage" ] charMods else 0.0)
                     let explodePct = supportStat "explode_on_low_life_%_maximum_life_to_deal"
+                    // "Allies in your Presence Regenerate X% of your Maximum Life per second"
+                    let ownerRegen = Mods.sumBase Ctx.empty [ Named "Sheet:Life" ] charMods * Mods.sumBase Ctx.empty [ Named "AllyRegenPercentOfOwnerLife" ] charMods / 100.0
                     let withSupports (b: MinionBody) =
-                        let b = { b with Life = b.Life * lifeMore; TakesForOwner = takes }
+                        let b = { b with Life = b.Life * lifeMore; TakesForOwner = takes; LifeRegen = b.LifeRegen + ownerRegen }
                         if explodePct > 0.0 then { b with Explodes = Some(m.Name + ": Minion Instability") } else b
                     // the explosion: that share of its maximum life as fire damage around it (the
                     // radius is not in the support's stats: 2 m, a guess)

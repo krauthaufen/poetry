@@ -283,3 +283,64 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         equal (box true) (box malice.EnemyAuras.IsEmpty)
         // a whole fight with them is the same in both engines
         same { f with MaxTime = 6.0 } [ 1u; 2u; 3u ])
+
+    // ---- allies, recovery while standing, stun recovery, what monsters never do ----
+
+    test "stats: what allies in the Presence gain and regenerate; costs without energy shield; recovery while stationary" (fun () ->
+        equal (box [ for t in DamageType.all -> ForMinions(GainAs(t, Fire)), 20.0 ]) (box (mods "allies_in_presence_damage_%_to_gain_as_fire" 20.0 |> List.map (fun m -> m.Stat, m.Value)))
+        // 120% a minute is 2% a second; 600 life a minute is 10 a second
+        equal (box [ Mod.base' (ForMinions LifeRegenPercent) 2.0 ]) (box (mods "allies_in_presence_life_regeneration_rate_per_minute_equal_to_their_maximum_life_%" 120.0))
+        equal (box [ Mod.base' (ForMinions LifeRegen) 10.0 ]) (box (mods "allies_in_presence_life_regeneration_rate_per_minute" 600.0))
+        equal (box [ Mod.more ManaCost 25.0 |> Mod.whenever (Not(WhileBuff "HasEnergyShield")) ]) (box (mods "lich_mana_cost_+%_final_if_you_have_no_energy_shield" 25.0))
+        // a minion's body: 2% of its life and 10 a second
+        let wolf = db.Value.Minions |> Map.toList |> List.map snd |> List.head
+        let body ms = Behaviours.minionBody Ctx.empty wolf 40 ms None
+        let plain = body []
+        near 0.0 plain.LifeRegen
+        near (plain.Life * 0.02 + 10.0) (body [ Mod.base' LifeRegenPercent 2.0; Mod.base' LifeRegen 10.0 ]).LifeRegen
+        // the player stands: "while stationary" holds for its sheet (base regeneration from a line of its own)
+        let regen lines = (load { blank with ExtraLines = [ "Regenerate 2% of maximum Life per second" ] @ lines } Options.defaults).Vitals.LifeRegen
+        near (regen [] * 1.3) (regen [ "30% increased Life Regeneration Rate while stationary" ])
+        let life = (load blank Options.defaults).Vitals.Life
+        near (regen [] + life * 0.01) (regen [ "Regenerate 1% of maximum Life per second while stationary" ]))
+
+    test "stun recovery: a light stun on the player is over sooner" (fun () ->
+        near 1.2 (load { blank with ExtraLines = [ "20% increased Stun Recovery" ] } Options.defaults).Vitals.StunRecovery
+        near 1.0 (load blank Options.defaults).Vitals.StunRecovery
+        // a brute whose every hit stuns (0.35 s), once a second, against a spell of 0.2 s. A stun
+        // delays the next cast to its end (the cast under way goes on): 0.15 to 0.35 s lost
+        // each time, and with twice the recovery (0.175 s, less than a cast) at most 0.175 s
+        let brute =
+            { EnemyDef.make Rarity.defaults 70 Magic "brute" (Vec.make 5.0 0.0) with
+                Life = 1e9
+                Attack = Some { Interval = 1.0; Damage = Map.ofList [ Physical, 100.0 ]; Accuracy = 1e9; Range = 20.0; CritChance = 0.0; Melee = true } }
+        let bolt = { Skill.make "Bolt" [ Spell ] with BaseDamage = Map.ofList [ Chaos, { Min = 1.0; Max = 2.0 } ]; BaseTime = 0.2 }
+        let fight recovery =
+            let vitals = { PlayerStats.basic 1e7 0.0 with StunThreshold = 1.0; AilmentThreshold = 1e9; StunRecovery = recovery }
+            Fight.single brute { Actor.make "Player" [] [ bolt ] with Vitals = Some vitals } 30.0
+        let uses recovery = count (Sim.run (fight recovery) 1u) "uses:Bolt"
+        let slow, fast, never = uses 1.0, uses 2.0, uses 1e9
+        if not (slow < fast && fast < never) then failwithf "%d casts, %d with twice the recovery, %d unstunned" slow fast never
+        // 151 casts begun unstunned (the last as the fight ends); 30 stuns cost 4.5 to 10.5 s
+        // (22 to 53 casts), or at most 5.25 s (26 casts)
+        equal (box 151) (box never)
+        if slow < never - 54 || slow > never - 22 || fast < never - 27 then failwithf "%d and %d casts" slow fast
+        same (fight 1.0) seeds
+        same (fight 2.0) seeds)
+
+    test "Pin from the critical hits of physical spells; what monsters never do is understood, without effect" (fun () ->
+        equal (box [ Mod.flag (Named "CanPin") |> Mod.whenever (SkillIs Spell) |> Mod.whenever IsCrit ]) (box (mods "physical_spell_damage_can_pin_on_critical_hit" 1.0))
+        let enemy = { EnemyDef.atLevel 83 1e9 with Mods = [ Mod.more PoiseThreshold -99.999 ] }
+        let fight crit (tags: SkillTag list) =
+            let bolt = { Skill.make "Bolt" tags with BaseDamage = Map.ofList [ Physical, { Min = 100.0; Max = 100.0 } ]; BaseTime = 0.5; BaseCrit = crit }
+            let player = Actor.make "Player" (mods "physical_spell_damage_can_pin_on_critical_hit" 1.0 @ [ Mod.more (Buildup HeavyStun) -100.0 ]) [ bolt ]
+            Fight.single enemy player 6.0
+        let pins f = count (Sim.run f 1u) "inflict:Pin"
+        if pins (fight 100.0 [ Spell ]) = 0 then failwith "a spell that always crits never pins"
+        equal (box 0) (box (pins (fight 0.0 [ Spell ])))
+        equal (box 0) (box (pins (fight 100.0 [ Attack ])))
+        same (fight 100.0 [ Spell ]) seeds
+        same (fight 40.0 [ Spell ]) seeds
+        for id in [ "curse_effect_on_self_+%"; "damage_+%_per_active_curse_on_self"; "armour_break_taken_+%"; "deflected_hits_cannot_inflict_bleeding_on_self"
+                    "enemies_in_presence_life_regeneration_+%"; "enemies_in_presence_cooldown_recovery_+%"; "heist_enchantment_resistance_mod_effect_+%" ] do
+            equal (box NotOffensive) (box (StatMap.meaning id 10.0)))

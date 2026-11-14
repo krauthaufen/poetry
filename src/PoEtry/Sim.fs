@@ -3283,7 +3283,7 @@ module Sim =
                             // players are not heavily stunned by ordinary hits (only while raising a shield,
                             // parrying or mounted: not modelled)
                             if stunChance >= Constants.playerLightStunMinimum && rng.Chance stunChance && not (rng.Chance v.AvoidStun) then
-                                w |> unlessCharm "Stunned" (lock Constants.playerLightStunDuration "Stunned")
+                                w |> unlessCharm "Stunned" (lock (Constants.playerLightStunDuration / v.StunRecovery) "Stunned")
                             else w
                     let w =
                         { w with
