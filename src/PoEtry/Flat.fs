@@ -711,6 +711,28 @@ module Flat =
           Label: int
           Ignited: int }
 
+    /// A skill that can only be used once enough Glory or Combo has been built (`Sim.hitEnemy`).
+    type private BuilderInfo =
+        { /// By skill: whether a hit of it is the skill's own (which builds nothing).
+          Own: bool[]
+          GloryKey: string
+          ComboKey: string
+          Glory: float
+          /// The most Glory it holds (what it needs, with "more Glory required").
+          GloryCap: float
+          Combo: float
+          AttackHit: float
+          ElementalHit: float
+          ChaosHit: float
+          /// Glory by newly inflicted state (heavily stunned, frozen, ignited), per monster power;
+          /// and whatever the monster (ignited, shocked).
+          Stunned: float
+          Frozen: float
+          Ignited: float
+          FlatIgnited: float
+          FlatShocked: float
+          ComboExtraChance: float }
+
     type private CharmInfo =
         { Charm: Charm
           CBuff: int
@@ -826,7 +848,11 @@ module Flat =
           /// skills that a use of this skill sets off, and where that is counted.
           Waits: bool
           SetsOff: int[]
-          CDetonated: int }
+          CDetonated: int
+          /// The Glory and Combo the skill needs to be used (counter, amount), and the stacks
+          /// of statuses the enemy aimed at must have.
+          Requires: (string * float)[]
+          NeedsStacks: (string * int)[] }
 
     type private EnemyInfo =
         { Def: EnemyDef
@@ -895,6 +921,12 @@ module Flat =
               /// Trinity: the resonance of each element (lightning, cold, fire), and their sum.
               BResonance: int[]
               BResonanceSum: int
+              /// The skills that need Glory or Combo; the banners, each with its buff and where
+              /// it is counted; whether a Sigil of Power can stand, and where its stages are counted.
+              Builders: BuilderInfo[]
+              Banners: (Banner * int * int)[]
+              HasSigil: bool
+              CSigil: int
               /// Runic Ward and mana remnants (the player's).
               WardRemnants: WardRemnants option
               ManaRemnants: ManaRemnants option
@@ -1069,7 +1101,6 @@ module Flat =
     /// of one of them, wherever the mod is, is not compiled.
     let private unbuiltStats =
         [ "TriskelionArms", "Triskelion Cascade"
-          "SigilMaxStages", "Sigil of Power"
           "DetonatedByDamage", "seeds set off by damage (Living Bomb)"
           "DetonatesCurse", "curse detonation (Hexblast)"
           "NoCooldownWithCharge", "skills that skip their cooldown when empowered"
@@ -1085,9 +1116,7 @@ module Flat =
     let private unbuiltPrefixes =
         [ "SeqSteps:", "chained attacks"
           "WarpsInto:", "warps into projectiles"
-          "ToggleBuff:", "forms that are switched on"
-          "NeedsEnemyStacks:", "skills that wait for stacks on the enemy"
-          "Requires:", "Glory and Combo" ]
+          "ToggleBuff:", "forms that are switched on" ]
 
     /// Buffs the reference treats in a way of its own that is not built here.
     let private unbuiltBuffs = [ "Demon Form", "Demon Form"; "Barrage", "Barrage" ]
@@ -1226,7 +1255,6 @@ module Flat =
             // (the reference pays a minion's remnants into the player's pools by the player's own remnants)
             if not isPlayer && actor.WardRemnants.IsSome then reject "Runic Ward remnants of a minion"
             if not isPlayer && actor.ManaRemnants.IsSome then reject "mana remnants of a minion"
-            if not actor.Banners.IsEmpty then reject "banners"
             if isPlayer && (actor.ActiveWhile.IsSome || actor.Body.IsSome || actor.Pool.IsSome) then reject "a player that is a minion"
             // (the reference lets whoever has these use the player's pools)
             if not isPlayer && (actor.Vitals.IsSome || actor.ManaFlask.IsSome) then reject "a minion with pools"
@@ -1267,10 +1295,12 @@ module Flat =
             if not isPlayer then buffMods onMinions
 
             // ---- every mod there can be ----
+            let sigils = ResizeArray<string>()
             let checkMods (mods: Mod list) =
                 for m in mods do
                     match m.Stat with
                     | Named n ->
+                        if n = "SigilMaxStages" then sigils.Add n
                         for (stat, what) in unbuiltStats do
                             if n = stat then reject what
                         for (prefix, what) in unbuiltPrefixes do
@@ -1497,6 +1527,14 @@ module Flat =
                        Gained = counts.Id("archon:" + a.Name) }: ArchonInfo))
                 |> Array.ofList
 
+            // (before the skills' answers are made: they have a place for every mod a buff can bring)
+            let banners =
+                actor.Banners
+                |> List.map (fun b ->
+                    checkMods b.Mods
+                    buffMods b.Mods
+                    b, buff ("Banner:" + b.Name), counts.Id("banner:" + b.Name))
+                |> Array.ofList
             let exposureEffect = Mods.inc Ctx.empty [ Named "ExposureEffect" ] sheet
 
             // ---- skills ----
@@ -1504,6 +1542,8 @@ module Flat =
             for charge in consumed do
                 buff charge |> ignore
                 consumedOf.Add charge
+            // (a number a skill's own mods give: `own` in the reference)
+            let ownBase (s: Skill) (name: string) = s.Mods |> List.sumBy (fun m -> if m.Stat = Named name && m.Kind = Base then m.Value else 0.0)
             // a skill's answers: its mods and the character's, newest first, by stat and kind
             let queriesOf (s: Skill) : (int * ModKind * Stat list) -> Query =
                 let byKey = Dictionary<string, ResizeArray<Mod>>()
@@ -1657,7 +1697,12 @@ module Flat =
                                 | Some by when not (s.Parts |> List.exists (fun q -> q.Name = part.Name)) && ((by = "Warcry" && s.Tags.Contains Warcry) || s.Tags.Contains(Tag by)) ->
                                     yield skillIds.[part.Name]
                                 | _ -> () |]
-                      CDetonated = counts.Id("detonated:" + s.Name) })
+                      CDetonated = counts.Id("detonated:" + s.Name)
+                      Requires =
+                        [| "Glory:" + s.Name, ownBase s "Requires:Glory" * (1.0 + ownBase s "GloryRequiredMore" / 100.0)
+                           "Combo:" + s.Name, ownBase s "Requires:Combo" |]
+                        |> Array.filter (fun (_, n) -> n > 0.0)
+                      NeedsStacks = [| for m in s.Mods do match m.Stat with Named n when n.StartsWith "NeedsEnemyStacks:" -> yield n.Substring 17, int m.Value | _ -> () |] })
                 |> Array.ofList
             let sIso, sClose, sOpen = statuses.Id "Isolated", statuses.Id "Close", statuses.Id "OpenWeakness"
             let sDerived = derivedStatuses |> List.map statuses.Id |> Array.ofList
@@ -1667,6 +1712,27 @@ module Flat =
                 match actor.Body |> Option.bind (fun b -> b.Explodes) with
                 | Some name -> skillId "a minion's explosion" name
                 | None -> -1
+            let builders =
+                actor.Skills
+                |> List.filter (fun s -> s.Mods |> List.exists (fun m -> match m.Stat with Named n -> n.StartsWith "Requires:" | _ -> false))
+                |> List.map (fun s ->
+                    let own = ownBase s
+                    ({ Own = all |> List.map (fun hit -> hit.Name = s.Name || s.Parts |> List.exists (fun part -> part.Name = hit.Name)) |> Array.ofList
+                       GloryKey = "Glory:" + s.Name
+                       ComboKey = "Combo:" + s.Name
+                       Glory = own "Requires:Glory"
+                       GloryCap = own "Requires:Glory" * (1.0 + own "GloryRequiredMore" / 100.0)
+                       Combo = own "Requires:Combo"
+                       AttackHit = own "Builds:Glory:AttackHit"
+                       ElementalHit = own "Builds:Glory:ElementalHit"
+                       ChaosHit = own "Builds:Glory:ChaosHit"
+                       Stunned = own "Builds:Glory:HeavilyStunned"
+                       Frozen = own "Builds:Glory:Frozen"
+                       Ignited = own "Builds:Glory:Ignited"
+                       FlatIgnited = own "Builds:GloryFlat:Ignited"
+                       FlatShocked = own "Builds:GloryFlat:Shocked"
+                       ComboExtraChance = own "ComboExtraChance" }: BuilderInfo))
+                |> Array.ofList
             let remnants =
                 match actor.Infusions with
                 | Some inf -> inf.Remnants |> List.map (fun (a, r, chance) -> a, buff r, chance, counts.Id("remnant:" + r)) |> Array.ofList
@@ -1734,6 +1800,10 @@ module Flat =
                       BConsumedInfusion = buffs.Id "ConsumedInfusionRecently"
                       BResonance = DamageType.elemental |> List.map (fun t -> buffs.Id("Resonance:" + DamageType.name t)) |> Array.ofList
                       BResonanceSum = buffs.Id "Resonance"
+                      Builders = builders
+                      Banners = banners
+                      HasSigil = sigils.Count > 0
+                      CSigil = count "sigil stage"
                       WardRemnants = actor.WardRemnants
                       ManaRemnants = actor.ManaRemnants
                       CWardRemnant = count "ward remnant"
@@ -3603,6 +3673,9 @@ module Flat =
                     bump s p.CPoolLoss
              | None -> ())
             bump s info.CUses
+            // the Glory or Combo the skill needed is spent
+            for k in 0 .. info.Requires.Length - 1 do
+                s.A.Energy <- Map.remove (fst (at info.Requires k)) s.A.Energy
             // (a skill whose rule says what it does with corpses takes them there)
             if info.TakesCorpse && corpses s > 0 then s.CorpsesUsed <- s.CorpsesUsed + 1
             if useTime > 0.0 then s.A.LastUsed <- sid
@@ -3703,6 +3776,26 @@ module Flat =
         release s
         time
 
+    /// Mana spent while a Sigil of Power stands: a Stage for every share of maximum mana, at
+    /// most one a second, up to its maximum (`Sim.sigilSpend`).
+    let private sigilSpend (s: State) (spent: float) (maxMana: float) =
+        let p = s.P
+        // the first of the buffs, in the order of their names, that is a sigil
+        let mutable sigil = -1
+        for k in 0 .. p.BuffOrder.Length - 1 do
+            let id = at p.BuffOrder k
+            if sigil < 0 && (at s.A.BHas id) && (at s.A.BMods id) |> List.exists (fun m -> m.Stat = Named "SigilMaxStages") then sigil <- id
+        if sigil >= 0 && (at s.A.BExpires sigil) > s.Time && spent > 0.0 && maxMana > 0.0 then
+            let value (stat: string) = (at s.A.BMods sigil) |> List.sumBy (fun m -> if m.Stat = Named stat then m.Value else 0.0)
+            let need = value "SigilManaPercentPerStage" / 100.0 * maxMana
+            let total = (Map.tryFind "SigilSpent" s.A.Energy |> Option.defaultValue 0.0) + spent
+            let last = Map.tryFind "SigilStageAt" s.A.Energy |> Option.defaultValue -1.0
+            if need > 0.0 && total >= need && (at s.A.BStacks sigil) < int (value "SigilMaxStages") && s.Time - last >= 1.0 then
+                bump s p.CSigil
+                setBuff s sigil ((at s.A.BStacks sigil) + 1) (at s.A.BExpires sigil) (at s.A.BMods sigil)
+                s.A.Energy <- s.A.Energy |> Map.add "SigilSpent" (total - need) |> Map.add "SigilStageAt" s.Time
+            else s.A.Energy <- Map.add "SigilSpent" total s.A.Energy
+
     /// What the player sees when choosing a skill (`Sim.view`).
     let private view (s: State) : View =
         let t = aimed s
@@ -3740,6 +3833,7 @@ module Flat =
     let private act (s: State) (rng: Rng) =
         let p = s.P
         let v = view s
+        let t = aimed s
         // what a use of the skill costs now: base x increased cost / (1 + cost efficiency)
         let costAt (sid: int) (seconds: unit -> float) =
             let info = (at p.Skills sid)
@@ -3776,6 +3870,10 @@ module Flat =
                 // a skill that works on a corpse needs one, unless it does without
                 && (info.NeedsCorpse = 0 || corpses s > 0 || (info.NeedsCorpse = 2 && held s info.CorpseElse))
                 && (not info.NeedsCharge || info.Consumes < 0 || held s info.Consumes)
+                // the Glory or Combo it needs has been built
+                && (info.Requires.Length = 0 || info.Requires |> Array.forall (fun (key, n) -> (Map.tryFind key s.A.Energy |> Option.defaultValue 0.0) >= n - 1e-9))
+                // a skill that spends what has piled up on the enemy waits for the pile to be full
+                && (info.NeedsStacks.Length = 0 || info.NeedsStacks |> Array.forall (fun (status, n) -> t >= 0 && (Map.tryFind status v.EnemyStatus |> Option.defaultValue 0) >= n))
             if usable then
                 if firstUsable < 0 then firstUsable <- sid
                 if choice < 0 && affordable sid then choice <- sid
@@ -3825,6 +3923,7 @@ module Flat =
                     schedule s (s.Time + wait) EReady 0 0 0.0 0.0
                 else
                     s.Mana <- s.Mana - cost
+                    if p.HasSigil then sigilSpend s cost pools.Mana
                     go ()
         else
             // Nothing usable: wait for the next cooldown, or a server tick.
@@ -4576,6 +4675,59 @@ module Flat =
                     ev.Tags <- skill.Tags
                     ev.AsAttack <- info.IsAttack
                     ev.Dyn <- asSkill
+                // Glory and Combo: skills that can only be used once enough has been built count up here
+                if p.Builders.Length > 0 then
+                    let power = MonsterPower.ofRarity def0.Rarity
+                    if not dead then refreshStatus s e
+                    let afterHas = e.SHas
+                    let newly (a: Ailment) = (let id = at p.AilmentStatus (ailmentIndex a) in not dead && not (at beforeHas id) && (at afterHas id))
+                    // (what the gain is limited by: once every so often per monster, or per strike;
+                    // and what is lost when nothing was gained for a while)
+                    let add (key: string) (amount: float) (cap: float) (per: string) (every: float) (fade: float -> float -> float) =
+                        if amount > 0.0 then
+                            let stamp, lastKey = key + "@" + per, key + "@last"
+                            let since (k: string) = s.Time - (Map.tryFind k s.A.Energy |> Option.defaultValue -1e9)
+                            if not (since stamp < every) then
+                                let have = fade (Map.tryFind key s.A.Energy |> Option.defaultValue 0.0) (since lastKey)
+                                s.A.Energy <- s.A.Energy |> Map.add key (min cap (have + amount)) |> Map.add stamp s.Time |> Map.add lastKey s.Time
+                    for k in 0 .. p.Builders.Length - 1 do
+                        let b = at p.Builders k
+                        let ownHit = at b.Own sid
+                        let glory =
+                            if b.Glory <= 0.0 || ownHit then 0.0
+                            else
+                                power / 100.0
+                                * ((if info.IsAttack then b.AttackHit else 0.0)
+                                   + (if 0.0 + (at de 1) + (at de 2) + (at de 3) > 0.0 then b.ElementalHit else 0.0)
+                                   + (if (at de 4) > 0.0 then b.ChaosHit else 0.0)
+                                   + (0.0 + (if newly HeavyStun then b.Stunned else 0.0) + (if newly Freeze then b.Frozen else 0.0) + (if newly Ignite then b.Ignited else 0.0)))
+                                + (0.0 + (if newly Ignite then b.FlatIgnited else 0.0) + (if newly Shock then b.FlatShocked else 0.0))
+                        // Combo: from melee attack hits with other skills
+                        let combo =
+                            if b.Combo <= 0.0 || ownHit || not info.IsAttack || not (skill.Tags.Contains(Tag "Type:Melee")) then 0.0
+                            else 1.0 + (if rng.Chance b.ComboExtraChance then 1.0 else 0.0)
+                        // "Skills lose 2 Glory per second if they haven't gained Glory in the past 15 seconds"
+                        add b.GloryKey glory b.GloryCap def0.Name 0.5 (fun have idle -> if idle > 15.0 && idle < 1e8 then max 0.0 (have - 2.0 * (idle - 15.0)) else have)
+                        // Combo counts the strikes "in the last 8 seconds"
+                        add b.ComboKey combo b.Combo "strike" 1e-9 (fun have idle -> if idle > 8.0 && idle < 1e8 then 0.0 else have)
+                // Banners: attack hits build Glory; a full banner is placed at once
+                if p.Banners.Length > 0 && info.IsAttack then
+                    let power = MonsterPower.ofRarity def0.Rarity
+                    for k in 0 .. p.Banners.Length - 1 do
+                        let b, banner, placed = at p.Banners k
+                        let key = "Glory:" + b.Name
+                        // once every 0.5 seconds per monster
+                        let stamp = key + "@" + def0.Name
+                        let fresh = s.Time - (Map.tryFind stamp s.A.Energy |> Option.defaultValue -1e9) >= 0.5
+                        if fresh then s.A.Energy <- Map.add stamp s.Time s.A.Energy
+                        let have = (Map.tryFind key s.A.Energy |> Option.defaultValue 0.0) + (if fresh then power * b.PerAttackHit / 100.0 else 0.0)
+                        if (at s.A.BHas banner) && (at s.A.BExpires banner) > s.Time then s.A.Energy <- Map.add key (min b.Glory have) s.A.Energy
+                        elif have >= b.Glory then
+                            s.A.Energy <- Map.add key 0.0 s.A.Energy
+                            setBuff s banner 1 (s.Time + b.Duration) b.Mods
+                            expireAt s (s.Time + b.Duration)
+                            bump s placed
+                        else s.A.Energy <- Map.add key have s.A.Energy
                 // meta gem energy: crits and newly inflicted ailments, scaled by monster power and by
                 // the share of the ailment threshold the hit deals; none from triggered skills
                 if p.Metas.Length > 0 && not (skill.Tags.Contains Triggered) then

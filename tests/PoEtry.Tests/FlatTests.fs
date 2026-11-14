@@ -259,7 +259,19 @@ let randomFight (case: uint32) : Fight * string =
                   if chance 0.15 then yield Mod.base' (Named "ConsumeChargeEveryMs") (between 300.0 3000.0)
                   if chance 0.1 then yield Mod.flag (Named "NeedsCharge")
                   if chance 0.1 then yield Mod.flag (Named "CannotInflict:Marked by pain")
-                  if chance 0.1 then yield Mod.base' (Named "DoubleCooldownUses") 1.0 ]
+                  if chance 0.1 then yield Mod.base' (Named "DoubleCooldownUses") 1.0
+                  if chance 0.08 then
+                      yield Mod.base' (Named "Requires:Glory") (between 5.0 60.0)
+                      yield Mod.base' (Named "Builds:Glory:AttackHit") (between 50.0 400.0)
+                      yield Mod.base' (Named "Builds:Glory:ElementalHit") (between 50.0 400.0)
+                      if chance 0.5 then yield Mod.base' (Named "Builds:Glory:ChaosHit") (between 50.0 400.0)
+                      if chance 0.5 then yield Mod.base' (Named "Builds:Glory:Ignited") (between 50.0 400.0)
+                      if chance 0.5 then yield Mod.base' (Named "Builds:GloryFlat:Shocked") (between 1.0 20.0)
+                      if chance 0.3 then yield Mod.base' (Named "GloryRequiredMore") (between -50.0 50.0)
+                  if chance 0.06 then
+                      yield Mod.base' (Named "Requires:Combo") (float (whole 1 5))
+                      if chance 0.5 then yield Mod.base' (Named "ComboExtraChance") (between 10.0 90.0)
+                  if chance 0.05 then yield Mod.base' (Named("NeedsEnemyStacks:" + pick [ "Poisoned"; "Marked by pain"; "Shocked" ])) (float (whole 1 3)) ]
             Consumes = (if chance 0.25 then Some(pick [ "PowerCharge"; "FrenzyCharge" ]) else None)
             Cost = (if chance 0.5 then between 3.0 45.0 else 0.0)
             CostPerSecond = (if chance 0.1 then between 3.0 30.0 else 0.0)
@@ -294,7 +306,8 @@ let randomFight (case: uint32) : Fight * string =
     let buffMods () = if chance 0.6 then (pick modPool) () else []
     let reaction () : Reaction =
         let simple () =
-            match whole 0 13 with
+            match whole 0 14 with
+            | 14 -> GrantBuff("Sigil", between 2.0 8.0, 1, [ Mod.base' (Named "SigilMaxStages") (float (whole 1 4)); Mod.base' (Named "SigilManaPercentPerStage") (between 2.0 30.0); Mod.more (Damage AllDamage) (between 5.0 20.0) ])
             | 0 | 1 -> GrantBuff(pick [ "Buffed"; "Tide"; "Onslaught" ], between 0.5 6.0, whole 1 5, buffMods ())
             | 2 -> ApplyDebuff(pick [ "Marked by pain"; "Weakened"; "Mark:Sniper" ], between 0.5 6.0, whole 1 6, [ Mod.inc (DamageTaken(pick [ AllDamage; Elemental; OfType Fire ])) (between 2.0 15.0) ])
             | 3 -> ApplyCurse(pick [ "Hex"; "Despair"; "Mark:Sniper"; "Curse:Frailty" ], between 1.0 8.0, [ Mod.base' (Resist(pick types)) (between -40.0 -5.0); Mod.inc (DamageTaken AllDamage) (between 1.0 20.0) ])
@@ -505,6 +518,14 @@ let randomFight (case: uint32) : Fight * string =
             { player with
                 WardRemnants = (if chance 0.6 then Some { OnKillChance = between 0.0 100.0; OnStunChance = between 20.0 100.0; StunCooldown = between 0.0 3.0; WardPerRemnant = between 5.0 80.0; ExtraChance = between 0.0 50.0; Delay = between 0.1 1.5; Overflow = pick [ 1.0; 2.0 ] } else None)
                 ManaRemnants = (if chance 0.6 then Some { OnKillChance = between 0.0 100.0; CritCooldown = between 0.0 3.0; ManaPerRemnant = between 5.0 60.0; PercentOfMaxMana = pick [ 0.0; 5.0 ]; ExtraChance = between 0.0 50.0; Delay = between 0.1 1.5; Overflow = pick [ 1.0; 2.0 ] } else None) }
+    let player =
+        if chance 0.85 then player
+        else
+            { player with
+                Banners =
+                    [ for i in 1 .. whole 1 2 ->
+                        { Name = sprintf "Banner %d" i; Glory = between 5.0 80.0; PerAttackHit = between 100.0 2000.0; Duration = between 1.0 6.0
+                          Mods = [ Mod.inc (Damage AllDamage) (between 5.0 40.0); Mod.inc Speed (between 5.0 20.0) ] } ] }
     let player = if player.Archons.IsEmpty then player else { player with Mods = Mod.base' (Named "ArchonOnIgnite") (between 20.0 100.0) :: player.Mods }
     // what it fights
     let enemies =
@@ -1045,6 +1066,29 @@ let run (test: string -> (unit -> unit) -> unit) =
         for key in [ "consumed:Frozen"; "consumed:Shocked"; "detonated:Lay: Mine"; "hits:Blow: Plain"; "hits:Blow: Shatter" ] do
             if not (o.Counts.ContainsKey key) then failwithf "expected %s: %A" key o.Counts)
 
+    test "flat: Glory and Combo built by hits and spent by the skills that need them; a banner; a Sigil's stages" (fun () ->
+        let jab = { strike "Jab" 40.0 80.0 with Tags = Set.ofList [ Attack; Melee; Tag "Type:Melee" ]; BaseTime = 0.35 }
+        let finisher = { strike "Finisher" 600.0 900.0 with Tags = Set.ofList [ Attack; Melee; Tag "Type:Melee" ]; Mods = [ Mod.base' (Named "Requires:Combo") 4.0; Mod.base' (Named "ComboExtraChance") 30.0 ] }
+        let hammer =
+            { strike "Hammer" 900.0 1400.0 with
+                Mods = [ Mod.base' (Named "Requires:Glory") 30.0; Mod.base' (Named "Builds:Glory:AttackHit") 60.0; Mod.base' (Named "Builds:GloryFlat:Shocked") 5.0; Mod.base' (Named "GloryRequiredMore") -20.0 ] }
+        let venom = { spell "Venom" Chaos 10.0 20.0 with Cooldown = Some 0.8; BaseTime = 0.3 }
+        let burst = { spell "Burst" Chaos 500.0 700.0 with Mods = [ Mod.base' (Named "NeedsEnemyStacks:Poisoned") 3.0 ]; BaseTime = 0.4; Cooldown = Some 2.5 }
+        let sigil = { Skill.make "Sigil" [ Spell ] with Hits = []; Cooldown = Some 9.0; Cost = 20.0; BaseTime = 0.4 }
+        let player =
+            { Actor.make "Player" [ noIgnite; Mod.base' (Named "Accuracy") 1e9; Mod.base' (AilmentChance Shock) 30.0; Mod.base' (AilmentChance Poison) 100.0; Mod.base' (AilmentStacks Poison) 5.0 ]
+                  [ sigil; hammer; finisher; burst; venom; { jab with Cost = 9.0 } ] with
+                Rotation = [ for sk in [ sigil; hammer; finisher; burst; venom; jab ] -> Actor.always sk.Name ]
+                Vitals = Some { PlayerStats.basic 3000.0 250.0 with ManaRegen = 25.0 }
+                Banners = [ { Name = "War"; Glory = 40.0; PerAttackHit = 300.0; Duration = 3.0; Mods = [ Mod.inc (Damage AllDamage) 30.0; Mod.inc Speed 10.0 ] } ]
+                Rules = [ { Hook = OnUse; Filter = Called "Sigil"; Chance = 100.0
+                            Reaction = GrantBuff("Sigil of Power", 7.0, 1, [ Mod.base' (Named "SigilMaxStages") 3.0; Mod.base' (Named "SigilManaPercentPerStage") 8.0; Mod.more (Damage AllDamage) 10.0 ]) } ] }
+        let fight = { Fight.single (boss 1e12) player 25.0 with Enemies = [ { boss 1e12 with Rarity = Rare } ] }
+        same fight seeds
+        let o = Sim.run fight 1u
+        for key in [ "uses:Hammer"; "uses:Finisher"; "uses:Burst"; "banner:War"; "sigil stage" ] do
+            if not (o.Counts.ContainsKey key) then failwithf "expected %s: %A" key o.Counts)
+
     test "flat: what is not built is refused, with every reason" (fun () ->
         let player = Actor.make "Player" [] [ spell "Bolt" Fire 1.0 2.0 ]
         let fine = Fight.single (boss 1e9) player 5.0
@@ -1060,7 +1104,7 @@ let run (test: string -> (unit -> unit) -> unit) =
         refused { fine with Player = { player with Skills = [ { spell "Bolt" Fire 1.0 2.0 with Mods = [ Mod.base' (Named "MaxSeals") 2.0 ] } ] } } "sealed skills"
         refused { fine with Player = { player with Rules = [ { Hook = OnHit; Filter = AnySkill; Chance = 100.0; Reaction = AttachPustule("Bolt", 3.0, 0.0, 0.0) } ] } } "the reaction AttachPustule"
         // both reasons of a fight with two
-        let two = { fine with Enemies = [ { boss 1e9 with Name = "boss+" } ]; Replace = true; Player = { player with Banners = [ { Name = "War Banner"; Glory = 100.0; PerAttackHit = 5.0; Duration = 10.0; Mods = [] } ] } }
+        let two = { fine with Enemies = [ { boss 1e9 with Name = "boss+" } ]; Replace = true; Player = { player with Skills = [ { spell "Bolt" Fire 1.0 2.0 with Clip = 3 } ] } }
         if (Flat.unsupported two).Length <> 2 then failwithf "expected two reasons, got %A" (Flat.unsupported two))
 
     test "flat: random fights give the reference's outcome, or are refused" (fun () ->
