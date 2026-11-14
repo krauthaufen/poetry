@@ -6434,6 +6434,7 @@ module Flat =
             let v = vitalsNow s pools
             let stopped = stopped s e false
             let blinded = at e.SHas (at p.AilmentStatus 11)
+            let marked = at e.SHas (at p.SDerived 4)
             let chill = if (at e.Has p.SChilled) then (at e.DMods p.SChilled) |> List.sumBy (fun m -> m.Value) else 0.0
             // curses on the monster: action speed (Temporal Chains), damage dealt (Enfeeble)
             defList s e
@@ -6445,7 +6446,7 @@ module Flat =
             let inRange = Vec.length e.Def.Position - e.Def.Size <= atk.Range + 1e-6
             if stopped then bump s p.CStopped
             elif inRange then
-                let accuracy = atk.Accuracy * (if blinded then 1.0 - Constants.blindAccuracyLess / 100.0 else 1.0)
+                let accuracy = atk.Accuracy * (if blinded then 1.0 - Constants.blindAccuracyLess / 100.0 else 1.0) * (if marked then v.MarkedEnemyAccuracyMult else 1.0)
                 let hitChance =
                     let h = Vitals.monsterHitChance v.Evasion accuracy
                     // Glancing Blows: the evade roll is unlucky (both of two rolls must evade)
@@ -6469,7 +6470,7 @@ module Flat =
                                   |> Map.add into ((Map.tryFind into m |> Option.defaultValue 0.0) + moved))
                             atk.Damage
                     // a critical hit is tested against evasion once more: evaded, it is an ordinary hit
-                    let crit = rng.Chance(atk.CritChance * v.EnemyCritChanceMult) && not (hitChance < 100.0 && rng.Chance(100.0 - hitChance))
+                    let crit = rng.Chance(atk.CritChance * v.EnemyCritChanceMult * (if blinded then v.BlindedEnemyCritMult else 1.0)) && not (hitChance < 100.0 && rng.Chance(100.0 - hitChance))
                     // "Defend with X% of Armour against Projectile Attacks / Critical Hits"
                     let armourShare = (if atk.Melee then 1.0 else v.ArmourVsProjectiles) * (if crit then v.ArmourVsCrits else 1.0)
                     let critMult = if crit then 1.0 + Constants.monsterBaseCritBonus / 100.0 * (1.0 - v.LessCritDamageTaken / 100.0) else 1.0

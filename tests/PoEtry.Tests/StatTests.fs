@@ -880,6 +880,27 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         | Ok (_, cov) -> equal (box false) (box (cov.Unsimulated |> List.exists (fun (k, _) -> k = "base_secondary_skill_effect_duration")))
         | Error e -> failwith e)
 
+    // ---- what blinded and marked monsters do ----
+
+    test "enemies one blinds have less critical hit chance, enemies one marks less accuracy" (fun () ->
+        let v = (load { blank with ExtraLines = [ "Enemies Blinded by you have 50% reduced Critical Hit Chance"; "Enemies you Mark have 30% reduced Accuracy Rating" ] } Options.defaults).Vitals
+        near 0.5 v.BlindedEnemyCritMult
+        near 0.7 v.MarkedEnemyAccuracyMult
+        // a monster that always crits, blinded by every hit: no critical hit once it is blinded
+        let brute =
+            { EnemyDef.make Rarity.defaults 70 Unique "brute" (Vec.make 5.0 0.0) with
+                Life = 1e9; Mods = []
+                Attack = Some { Interval = 1.0; Damage = Map.ofList [ Physical, 10.0 ]; Accuracy = 1e9; Range = 20.0; CritChance = 100.0; Melee = true } }
+        let bolt = { Skill.make "Bolt" [ Spell ] with BaseDamage = Map.ofList [ Chaos, { Min = 1.0; Max = 1.0 } ]; BaseTime = 0.25; BaseCrit = 0.0; Mods = [ Mod.base' (AilmentChance Blind) 100.0 ] }
+        let fight mult =
+            let vitals = { PlayerStats.basic 1e6 0.0 with StunThreshold = 1e9; AilmentThreshold = 1e9; BlindedEnemyCritMult = mult }
+            Fight.single brute { Actor.make "Player" [] [ bolt ] with Vitals = Some vitals } 10.0
+        let crits m = count (Sim.run (fight m) 1u) "enemy:crit"
+        if crits 1.0 < 5 then failwithf "%d crits without the line" (crits 1.0)
+        // (the first hit may come before the first blind)
+        if crits 0.0 > 1 then failwithf "%d crits of a blinded monster" (crits 0.0)
+        same (fight 0.5) seeds)
+
     // ---- Scarred Faith ----
 
     test "Scarred Faith: prevented physical damage recouped as energy shield per enemy power; no regeneration; none above armour" (fun () ->

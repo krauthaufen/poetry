@@ -646,6 +646,9 @@ module StatMap =
         | "passive_overwhelming_strike_hit_damage_stun_multiplier_+%_final_with_crits" -> one (Mod.more (Buildup HeavyStun) v |> Mod.whenever IsCrit)
         | "non_damaging_ailment_effect_+%_on_self" -> Some(Mods [ Mod.inc (Named "SelfEffect:Chill") v; Mod.inc (Named "SelfEffect:Shock") v ])
         | "base_enemy_critical_strike_chance_+%_against_self" -> one (Mod.inc (Named "EnemyCritChanceAgainstSelf") v)
+        // what the monsters one blinds or marks do to the character with their hits
+        | "enemies_you_blind_have_critical_strike_chance_+%" -> one (Mod.inc (Named "BlindedEnemyCritChance") v)
+        | "marked_enemy_accuracy_rating_+%" -> one (Mod.inc (Named "MarkedEnemyAccuracy") v)
         | "defend_with_%_armour_against_ranged_attacks" -> one (Mod.base' (Named "DefendWithArmourVsProjectiles") v)
         | "defend_with_%_armour_against_critical_strikes" -> one (Mod.base' (Named "DefendWithArmourVsCrits") v)
         | "mark_use_speed_+%" -> one (Mod.inc Speed v |> Mod.whenever (SkillIs(Tag "Type:Mark")))

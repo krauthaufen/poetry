@@ -3204,7 +3204,7 @@ module Sim =
             elif not inRange then
                 w
             else
-                let accuracy = atk.Accuracy * (if st.ContainsKey "Blinded" then 1.0 - Constants.blindAccuracyLess / 100.0 else 1.0)
+                let accuracy = atk.Accuracy * (if st.ContainsKey "Blinded" then 1.0 - Constants.blindAccuracyLess / 100.0 else 1.0) * (if st.ContainsKey "Marked" then v.MarkedEnemyAccuracyMult else 1.0)
                 let hitChance =
                     let h = Vitals.monsterHitChance v.Evasion accuracy
                     // Glancing Blows: the evade roll is unlucky (both of two rolls must evade)
@@ -3229,7 +3229,7 @@ module Sim =
                                   |> Map.add into ((Map.tryFind into m |> Option.defaultValue 0.0) + moved))
                             atk.Damage
                     // a critical hit is tested against evasion once more: evaded, it is an ordinary hit
-                    let crit = rng.Chance(atk.CritChance * v.EnemyCritChanceMult) && not (hitChance < 100.0 && rng.Chance(100.0 - hitChance))
+                    let crit = rng.Chance(atk.CritChance * v.EnemyCritChanceMult * (if st.ContainsKey "Blinded" then v.BlindedEnemyCritMult else 1.0)) && not (hitChance < 100.0 && rng.Chance(100.0 - hitChance))
                     // "Defend with X% of Armour against Projectile Attacks / Critical Hits"
                     let armourShare = (if atk.Melee then 1.0 else v.ArmourVsProjectiles) * (if crit then v.ArmourVsCrits else 1.0)
                     let critMult = if crit then 1.0 + Constants.monsterBaseCritBonus / 100.0 * (1.0 - v.LessCritDamageTaken / 100.0) else 1.0
