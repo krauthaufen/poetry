@@ -535,12 +535,14 @@ module Geometry =
         let step = p.Speed * tick
         let from = pathsWith true 1000 rng walls p reach primary [] |> List.map (fun path -> path.Points) |> Array.ofList
         let gone : float[] = Array.zeroCreate from.Length
-        // per flight, the leg it was last asked of and whether an enemy is so near that leg
-        // that a place on it can reach one (no place on a leg is further from the leg's
+        // per flight, the leg it is on, how long that is, and whether an enemy is so near the
+        // leg that a place on it can reach one (no place on a leg is further from the leg's
         // start than the leg is long); where none is, the places are not worked out
         let asked : Vec list[] = Array.create from.Length []
+        let legLen : float[] = Array.zeroCreate from.Length
         let near : bool[] = Array.create from.Length false
-        let last = System.Collections.Generic.Dictionary<string, float>()
+        // when each enemy was last hit, by its place in the list (NaN: not yet)
+        let last : float[] = Array.create (List.length alive) nan
         let hits = ResizeArray<float * string>()
         let mutable flying = from.Length
         let mutable k = 0
@@ -558,7 +560,20 @@ module Geometry =
                         points <- []
                         looking <- false
                     else
-                        len <- Vec.dist points.Head points.Tail.Head
+                        if not (obj.ReferenceEquals(asked.[flight], points)) then
+                            asked.[flight] <- points
+                            let a = points.Head
+                            let long = Vec.dist a points.Tail.Head
+                            legLen.[flight] <- long
+                            let mutable any = false
+                            let mutable rest = alive
+                            while not any && not rest.IsEmpty do
+                                let e = rest.Head
+                                let away = Vec.dist a e.Position
+                                if not (away - long > r + e.Size + 1e-3 + 1e-6 * away) then any <- true
+                                rest <- rest.Tail
+                            near.[flight] <- any
+                        len <- legLen.[flight]
                         if d <= len then looking <- false
                         else
                             d <- d - len
@@ -566,31 +581,22 @@ module Geometry =
                 from.[flight] <- points
                 if not points.IsEmpty then
                     flying <- flying + 1
-                    let a, b = points.Head, points.Tail.Head
                     gone.[flight] <- d + step
-                    if not (obj.ReferenceEquals(asked.[flight], points)) then
-                        asked.[flight] <- points
-                        let mutable any = false
+                    if near.[flight] then
+                        let a, b = points.Head, points.Tail.Head
+                        let at = Vec.add a (Vec.scale (d / max 1e-9 len) (Vec.sub b a))
                         let mutable rest = alive
-                        while not any && not rest.IsEmpty do
+                        let mutable place = 0
+                        while not rest.IsEmpty do
                             let e = rest.Head
-                            let away = Vec.dist a e.Position
-                            if not (away - len > r + e.Size + 1e-3 + 1e-6 * away) then any <- true
+                            if within at r e then
+                                let t0 = last.[place]
+                                // (never hit before, or long enough ago)
+                                if not (t - t0 < p.HitInterval - 1e-9) then
+                                    hits.Add((t, e.Name))
+                                    last.[place] <- t
                             rest <- rest.Tail
-                        near.[flight] <- any
-                    let at = Vec.add a (Vec.scale (d / max 1e-9 len) (Vec.sub b a))
-                    let mutable rest = if near.[flight] then alive else []
-                    while not rest.IsEmpty do
-                        let e = rest.Head
-                        if within at r e then
-                            let tooSoon =
-                                match last.TryGetValue e.Name with
-                                | true, t0 -> t - t0 < p.HitInterval - 1e-9
-                                | _ -> false
-                            if not tooSoon then
-                                hits.Add((t, e.Name))
-                                last.[e.Name] <- t
-                        rest <- rest.Tail
+                            place <- place + 1
             k <- k + 1
         List.ofSeq hits
 
