@@ -220,6 +220,8 @@ module Flat =
         member val OMin : float[] = Array.zeroCreate 5 with get
         member val OMax : float[] = Array.zeroCreate 5 with get
         member val OHas : bool[] = Array.zeroCreate 5 with get
+        /// (what of one damage type goes to each of the others, while `ranges` converts)
+        member val Share : float[] = Array.zeroCreate 5 with get
         member val Has : bool[] = Array.zeroCreate 5 with get
         member val Un : float[] = Array.zeroCreate 5 with get
         member val De : float[] = Array.zeroCreate 5 with get
@@ -1779,7 +1781,12 @@ module Flat =
           mutable RatesVersion: int
           Buildup: float[]
           mutable StunBuildupAt: float
-          mutable Flammability: (float * float) list
+          /// Flammability left by fire hits, oldest first from `FlamFrom` up to `FlamTo`: how
+          /// much, and when it is gone (each lasts the same, so the oldest goes first).
+          mutable FlamValue: float[]
+          mutable FlamUntil: float[]
+          mutable FlamFrom: int
+          mutable FlamTo: int
           mutable Entropy: float
           mutable EntropyAt: float
           mutable HasEntropy: bool
@@ -2403,6 +2410,9 @@ module Flat =
             more <- dmore e stat more
         max 0.0 ((1.0 + inc / 100.0) * more)
 
+    let private actionSpeedStat = Named "ActionSpeed"
+    let private damageDealtStat = Named "DamageDealt"
+
     let private kill (s: State) (e: Foe) (at: float) =
         e.Life <- 0.0
         s.Kills.Add((e.Def.Name, e.Def.Rarity, at))
@@ -2756,13 +2766,31 @@ module Flat =
                 if (at e.Has id) && (at e.Expires id) > s.Time then (at e.DMods id) |> List.sumBy (fun m -> -m.Value) else 0.0
             if amount * k >= current then addDebuff s e id duration 1 [ Mod.base' (Resist dt) (-amount * k) ]
 
+    /// Damage over time comes onto an enemy. Where only one of a label counts (an Ignite),
+    /// those that can never count are not kept: an older one that is weaker and gone no
+    /// later than the new one, and a new one that an older one outlasts and is no weaker
+    /// than. (The reference keeps them all and finds the strongest each time; what counts
+    /// at any time is the same.)
+    let private addDot (e: Foe) (d: FDot) =
+        let mutable alone = d.Most = 1
+        let mutable beaten = false
+        let mutable beats = false
+        for x in List.toArray e.Dots do
+            if x.Label = d.Label then
+                if x.Most <> 1 then alone <- false
+                elif x.Dps >= d.Dps && x.Until >= d.Until then beaten <- true
+                elif x.Dps < d.Dps && x.Until <= d.Until then beats <- true
+        if not alone then e.Dots <- d :: e.Dots
+        elif not beaten then
+            e.Dots <- d :: (if beats then e.Dots |> List.filter (fun x -> x.Label <> d.Label || not (x.Dps < d.Dps && x.Until <= d.Until)) else e.Dots)
+
     /// What a hit inflicts comes onto the enemy (`Sim.inflict`).
     let private inflict (s: State) (e: Foe) (i: Inflict) =
         let p = s.P
         match i with
         | Dot (a, t, dps, duration, maxStacks) ->
             let d = { Ailing = Some a; Label = (at p.AilmentSource (ailmentIndex a)); Of = t; Dps = dps; Until = s.Time + duration; Most = maxStacks }
-            e.Dots <- d :: e.Dots
+            addDot e d
             if not (d.Until >= e.Soonest) then e.Soonest <- d.Until
             expireAt s d.Until
         | Status (Shock, magnitude, duration) ->
@@ -3452,16 +3480,18 @@ module Flat =
                     put rHas t (false)
                 for from in 0 .. 4 do
                     if (at oHas from) then
+                        let shares = ev.Share
                         let mutable total = 0.0
                         for into in 0 .. 4 do
-                            if into <> from then total <- total + max 0.0 (sumQ ev (at q (from * 5 + into))) / 100.0
-                        let share (into: int) =
-                            let v = max 0.0 (sumQ ev (at q (from * 5 + into))) / 100.0
-                            if total > 1.0 then v / total else v
+                            if into <> from then
+                                let v = max 0.0 (sumQ ev (at q (from * 5 + into))) / 100.0
+                                put shares into v
+                                total <- total + v
                         let mutable gone = 0.0
                         for into in 0 .. 4 do
                             if into <> from then
-                                let k = share into
+                                let k = if total > 1.0 then (at shares into) / total else (at shares into)
+                                put shares into k
                                 if k > 0.0 then gone <- gone + k
                         let put (into: int) (k: float) =
                             if k > 0.0 then
@@ -3470,7 +3500,7 @@ module Flat =
                                 put rHas into (true)
                         put from (1.0 - gone)
                         for into in 0 .. 4 do
-                            if into <> from then put into (share into)
+                            if into <> from then put into (at shares into)
             for t in 0 .. 4 do
                 if rHas.[t] && not (rMax.[t] > 0.0) then rHas.[t] <- false
         // Avatar of Fire: "Deal no Non-Fire Damage"
@@ -3726,14 +3756,37 @@ module Flat =
                         put un t ((at un t) * mult)
                         put de t ((at de t) * mult)
                 // ailments are rolled before the damage lands
-                let flammable = e.Flammability |> List.filter (fun (_, until) -> until > s.Time)
-                let inflicted = fromHit p ev info rng nums (flammable |> List.sumBy fst) crit un
+                while e.FlamFrom < e.FlamTo && not ((at e.FlamUntil e.FlamFrom) > s.Time) do
+                    e.FlamFrom <- e.FlamFrom + 1
+                let mutable flammable = 0.0
+                for i in e.FlamTo - 1 .. -1 .. e.FlamFrom do
+                    flammable <- flammable + (at e.FlamValue i)
+                let inflicted = fromHit p ev info rng nums flammable crit un
                 // the Flammability this hit leaves (`Ailments.flammability`)
                 (ev.Crit <- crit
                  let fire = source ev Ignite un
                  if fire > 0.0 then
                     let f = min 100.0 (max 0.0 ((fire / nThreshold nums * Constants.igniteChanceMultiplier + sumQ ev (at qAilChance 0)) * multQ ev (at qAilChanceMult 0)))
-                    if f > 0.0 then e.Flammability <- (f, s.Time + Constants.flammabilityDuration) :: flammable)
+                    if f > 0.0 then
+                        if e.FlamTo = e.FlamValue.Length then
+                            // (what is gone makes room, or the arrays grow)
+                            let live = e.FlamTo - e.FlamFrom
+                            if live * 2 > e.FlamValue.Length then
+                                let values, untils = Array.zeroCreate (live * 2), Array.zeroCreate (live * 2)
+                                for i in 0 .. live - 1 do
+                                    put values i (at e.FlamValue (e.FlamFrom + i))
+                                    put untils i (at e.FlamUntil (e.FlamFrom + i))
+                                e.FlamValue <- values
+                                e.FlamUntil <- untils
+                            else
+                                for i in 0 .. live - 1 do
+                                    put e.FlamValue i (at e.FlamValue (e.FlamFrom + i))
+                                    put e.FlamUntil i (at e.FlamUntil (e.FlamFrom + i))
+                            e.FlamFrom <- 0
+                            e.FlamTo <- live
+                        put e.FlamValue e.FlamTo f
+                        put e.FlamUntil e.FlamTo (s.Time + Constants.flammabilityDuration)
+                        e.FlamTo <- e.FlamTo + 1)
                 ev.Crit <- false
                 if flagQ ev qNoHitDamage then
                     for t in 0 .. 4 do
@@ -4221,9 +4274,9 @@ module Flat =
             let stopped = [ "Frozen"; "HeavilyStunned"; "Electrocuted" ] |> List.exists st.ContainsKey
             let chill = if (at e.Has p.SChilled) then (at e.DMods p.SChilled) |> List.sumBy (fun m -> m.Value) else 0.0
             // curses on the monster: action speed (Temporal Chains), damage dealt (Enfeeble)
-            let debuffs = (defender s e).Mods
-            let actionSpeed = max 0.1 (Mods.more Ctx.empty [ Named "ActionSpeed" ] debuffs)
-            let dealt = max 0.0 (Mods.more Ctx.empty [ Named "DamageDealt" ] debuffs)
+            defList s e
+            let actionSpeed = max 0.1 (dmore e actionSpeedStat 1.0)
+            let dealt = max 0.0 (dmore e damageDealtStat 1.0)
             let atk = { atk with Damage = atk.Damage |> Map.map (fun _ d -> d * dealt) }
             let next = atk.Interval / max 0.1 (1.0 - chill / 100.0) / actionSpeed
             schedule s (s.Time + next) EEnemyAttack index 0 0.0 0.0
@@ -4529,7 +4582,10 @@ module Flat =
                       RatesVersion = -1
                       Buildup = Array.zeroCreate 13
                       StunBuildupAt = 0.0
-                      Flammability = []
+                      FlamValue = Array.zeroCreate 16
+                      FlamUntil = Array.zeroCreate 16
+                      FlamFrom = 0
+                      FlamTo = 0
                       Entropy = 0.0
                       EntropyAt = 0.0
                       HasEntropy = false
