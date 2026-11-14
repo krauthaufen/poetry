@@ -767,6 +767,10 @@ module Flat =
           Db: ModDb
           /// The skill and its parts.
           Parts: int[]
+          /// The skill and its parts as themselves (see `build`): what a use reads of a part
+          /// is read of the part the skill has, whatever else goes by that name (-1: a
+          /// part of a part of a part, which is never used).
+          Selves: int[]
           /// The buff the skill consumes (-1: none).
           Consumes: int
           /// The charge whose stacks the skill counts more of ("N additional consumed"), and
@@ -1365,22 +1369,34 @@ module Flat =
             if isPlayer && (actor.ActiveWhile.IsSome || actor.Body.IsSome || actor.Pool.IsSome) then reject "a player that is a minion"
 
             // ---- its skills ----
-            let all = actor.Skills @ (actor.Skills |> List.collect (fun s -> s.Parts))
-            // (the reference finds a skill by its name, the first of that name: two of one name
-            // that are the same skill are that skill; of two that differ it mixes the two)
-            if all |> List.groupBy (fun s -> s.Name) |> List.exists (fun (_, same) -> same |> List.exists (fun s -> s <> same.Head)) then
-                reject "skills or parts of the same name that differ"
-            if actor.Skills |> List.exists (fun s -> s.Parts |> List.exists (fun p -> not p.Parts.IsEmpty)) then reject "parts that have parts"
+            // The reference finds a skill by its name, the first of that name among the
+            // skills and their parts, but where a skill is used it goes through the parts it
+            // has itself. So every skill, part and part of a part is built here, in that
+            // order; a name stands for the first of that name among the skills and the parts,
+            // and a skill's parts are known both ways: as what their names stand for (what
+            // strikes, and what is kept by the name) and as themselves (what a use reads of
+            // them). A part of a part has no name anyone can find it by.
+            let firstParts = actor.Skills |> List.collect (fun s -> s.Parts)
+            let named = actor.Skills @ firstParts
+            let all = named @ (firstParts |> List.collect (fun part -> part.Parts))
+            // (where the parts of each of these stand among them)
+            let partsAt =
+                let at = Array.create all.Length -1
+                let mutable next = actor.Skills.Length
+                named |> List.iteri (fun i o ->
+                    at.[i] <- next
+                    next <- next + o.Parts.Length)
+                at
             // (the reference keeps these beside the skills' cooldowns, under these names)
             if all |> List.exists (fun s -> s.Name = "ArchonRecovery" || s.Name.StartsWith "invocation:" || s.Name.StartsWith "SealBreak:") then reject "a skill named like a cooldown of the engine's own"
             let skillIds = Dictionary<string, int>()
-            all |> List.iteri (fun i s -> if not (skillIds.ContainsKey s.Name) then skillIds.[s.Name] <- i)
-            let skillId (what: string) (name: string) =
+            named |> List.iteri (fun i s -> if not (skillIds.ContainsKey s.Name) then skillIds.[s.Name] <- i)
+            // (a name no skill of the actor has: -1; the reference fails where it is to be
+            // used, and so does a run here)
+            let skillId (name: string) =
                 match skillIds.TryGetValue name with
                 | true, i -> i
-                | _ ->
-                    reject (what + " of a skill its actor does not have")
-                    0
+                | _ -> -1
 
             // ---- where the mods of buffs go ----
             let dynKeys = Dictionary<string, int>()
@@ -1474,7 +1490,7 @@ module Flat =
                     RApplyCurse(id, duration, enemies |> Array.map (fun e -> let k = curseK e in mods |> List.map (Mod.scaled k)), [||], (if prefix = "Mark:" then 1 else maxCurses), counts.Id("apply:" + full))
                 | ApplyExposure (dt, amount, duration) -> RApplyExposure(dt, amount, duration)
                 | GrowExposure (dt, start, perPulse, cap, every, pulses, duration) -> RGrowExposure(dt, start, perPulse, cap, every, pulses, duration)
-                | TriggerSkill name -> RTrigger(skillId "a trigger" name)
+                | TriggerSkill name -> RTrigger(skillId name)
                 | RemoveBuff name -> RRemoveBuff(buffs.Id name)
                 | RemoveDebuff name -> RRemoveDebuff(statuses.Id name)
                 | GainResource (r, n) -> RGainResource(buff r, n)
@@ -1543,7 +1559,7 @@ module Flat =
                     ({ Meta = m
                        Sources = Array.ofList m.Sources
                        FromHits = m.Sources |> List.exists (fun src -> match src with CritHits _ | MeleeHits _ | MeleeKills _ | InflictsAilment _ -> true | _ -> false)
-                       Triggers = m.Triggers |> List.map (skillId "a meta gem's trigger") |> Array.ofList
+                       Triggers = m.Triggers |> List.map skillId |> Array.ofList
                        EnergyMods =
                         (let found = ResizeArray<Item>()
                          ModDb.forStat (Named "EnergyGenerated") Inc m.EnergyMods (fun md ->
@@ -1610,7 +1626,7 @@ module Flat =
                             buffMods mods
                             PGainTimedBuff(buff b, chance, duration, maxStacks, mods)
                         | HealLife amount -> PHealLife(amount, counts.Id "healed")
-                        | TriggerNamed name -> PTrigger(skillId "a periodic trigger" name)
+                        | TriggerNamed name -> PTrigger(skillId name)
                         | SummonMinions (poolName, count, duration) -> PSummon(pool poolName, count, duration, false, summoned poolName)
                         | SummonFromCorpse (poolName, count, duration) -> PSummon(pool poolName, count, duration, true, summoned poolName)
                     ({ Every = pd.Every; Action = action; Key = Sim.streamHash ("P|" + actor.Name + "|" + pd.Name) }: PeriodicInfo))
@@ -1673,10 +1689,17 @@ module Flat =
                     let mods = [ Mod.base' (Named "BarrageRepeatLess") (ownBase s "BarrageRepeatLess"); Mod.base' (Named "BarrageCooldownPct") (ownBase s "BarrageCooldownPct") |> Mod.from s.Name ]
                     buffMods mods
                     barrageMods.[s.Name] <- mods
+            // (the reference keeps the mods that are asked of a skill by the skill's name: of
+            // several of one name, those of the last. What it reads off a skill itself, its
+            // flags and tags and numbers, are the skill's own.)
+            let askedOf (s: Skill) : Mod list =
+                match named |> List.tryFindBack (fun o -> o.Name = s.Name) with
+                | Some last -> last.Mods
+                | None -> s.Mods
             // a skill's answers: its mods and the character's, newest first, by stat and kind
             let queriesOf (s: Skill) : (int * ModKind * Stat list) -> Query =
                 let byKey = Dictionary<string, ResizeArray<Mod>>()
-                for m in List.rev (actor.Mods @ s.Mods) do
+                for m in List.rev (actor.Mods @ askedOf s) do
                     let key = statKey m.Stat m.Kind
                     if not (byKey.ContainsKey key) then byKey.[key] <- ResizeArray<Mod>()
                     byKey.[key].Add m
@@ -1708,7 +1731,7 @@ module Flat =
                     makeQuery kind (items.ToArray())
             let skills =
                 all
-                |> List.map (fun s ->
+                |> List.mapi (fun index s ->
                     let flag (name: string) = s.Mods |> List.exists (fun m -> m.Stat = Named name)
                     // (what the skill does with corpses, if a rule of the actor says so: `Sim.corpseRule`)
                     let onCorpse = s.Tags.Contains(Tag "Type:TargetsDestructibleCorpses")
@@ -1725,7 +1748,7 @@ module Flat =
                     let query = queriesOf s
                     let answers = sites.ToArray() |> Array.map query
                     let rangeQueries = rangeSites |> Array.map (fun i -> at answers i)
-                    let own = actor.Mods @ s.Mods
+                    let own = actor.Mods @ askedOf s
                     let pattern = Map.tryFind s.Name actor.HitPattern |> Option.defaultValue (s.Hits |> List.map (fun (f, m) -> DuringUse f, m)) |> Array.ofList
                     // (as `Sim.skillStacks`: a part counts like the skill it belongs to)
                     let stackCharge =
@@ -1738,8 +1761,9 @@ module Flat =
                             int (Mods.sumBase ctx [ Named("Extra" + charge + "sConsumed") ] (ModDb.ofList (actor.Mods @ s.Mods)))
                         | None -> 0
                     { Skill = s
-                      Db = ModDb.ofList (actor.Mods @ s.Mods)
-                      Parts = (s :: s.Parts) |> List.map (fun p -> skillIds.[p.Name]) |> Array.ofList
+                      Db = ModDb.ofList own
+                      Parts = (s :: s.Parts) |> List.map (fun part -> skillId part.Name) |> Array.ofList
+                      Selves = Array.init (1 + s.Parts.Length) (fun k -> if k = 0 then index elif partsAt.[index] < 0 then -1 else partsAt.[index] + k - 1)
                       Consumes = (match s.Consumes with Some c -> buffs.Id c | None -> -1)
                       StackCharge = stackCharge |> Option.defaultValue ""
                       StackBuff = (match stackCharge with Some c -> buffs.Id c | None -> -1)
@@ -1814,7 +1838,7 @@ module Flat =
                          | None -> -1)
                       Infusion = (match consumer with Some (_, (element, _)) -> buff element | None -> -1)
                       Wildcard = (match consumer with Some (inf, _) -> (match inf.Wildcard with Some w -> buff w | None -> -1) | None -> -1)
-                      Infused = (match consumer with Some (_, (_, copy)) -> skillId "an infusion" copy | None -> -1)
+                      Infused = (match consumer with Some (_, (_, copy)) -> skillId copy | None -> -1)
                       CInfused = counts.Id("infused:" + s.Name)
                       CUninfused = counts.Id("uninfused:" + s.Name)
                       OnlyVs = onlyVs |> List.map statuses.Id |> Array.ofList
@@ -1870,7 +1894,7 @@ module Flat =
                       Form = (match named' "ToggleBuff:" with Some form -> buffs.Id form | None -> -1)
                       WarpsInto =
                         (match named' "WarpsInto:" with
-                         | Some gem -> [| for (i, o) in List.indexed all do if skillIds.[o.Name] = i && (o.Name = gem || o.Name.StartsWith(gem + " ")) then yield i |]
+                         | Some gem -> [| for (i, o) in List.indexed named do if skillIds.[o.Name] = i && (o.Name = gem || o.Name.StartsWith(gem + " ")) then yield i |]
                          | None -> [||])
                       Warps = (named' "WarpsInto:").IsSome
                       WarpBuff = (match named' "WarpsInto:" with Some gem -> buffs.Id(gem + " buff") | None -> -1)
@@ -1895,11 +1919,11 @@ module Flat =
                 |> Array.ofList
             let sIso, sClose, sOpen = statuses.Id "Isolated", statuses.Id "Close", statuses.Id "OpenWeakness"
             let sDerived = derivedStatuses |> List.map statuses.Id |> Array.ofList
-            let rotation = actor.Rotation |> List.map (fun step -> skillId "a step" step.Use, step.When) |> Array.ofList
+            let rotation = actor.Rotation |> List.map (fun step -> skillId step.Use, step.When) |> Array.ofList
 
             let explodes =
                 match actor.Body |> Option.bind (fun b -> b.Explodes) with
-                | Some name -> skillId "a minion's explosion" name
+                | Some name -> (match skillId name with -1 -> -2 | i -> i)
                 | None -> -1
             let builders =
                 actor.Skills
@@ -2616,6 +2640,7 @@ module Flat =
           StatusStacks: int[]
           AilmentSeen: bool[]
           NoHas: bool[]
+          NoInts: int[]
           mutable EvDepth: int
           /// The enemy that is the cause of what happens now (the one just hit, the one whose
           /// hit was blocked; -1: none), and the enemy a triggered skill is aimed at while it starts.
@@ -4094,8 +4119,9 @@ module Flat =
             put s.A.Rolled sid ((at s.A.Rolled sid) + 1)
             for place in 0 .. info.Parts.Length - 1 do
                 let part = at info.Parts place
-                put s.A.CritRoll part (r)
-                put s.A.HasCritRoll part (true)
+                if part >= 0 then
+                    put s.A.CritRoll part (r)
+                    put s.A.HasCritRoll part (true)
             // (what the use asks of the mods, with the buffs and the enemy as they are now)
             let ev = acquire s sid
             useBuffs s ev info true
@@ -4139,7 +4165,7 @@ module Flat =
             let mutable enraged = false
             if info.RageNeed > 0.0 then
                 for k in 1 .. info.Parts.Length - 1 do
-                    let needs = (at p.Skills (at info.Parts k)).RageFor
+                    let needs = (at p.Skills (at info.Selves k)).RageFor
                     if needs > 0.0 && float rage >= needs then enraged <- true
             // chained attacks: this use's place in the chain, and the next
             let step = seqStep s sid info
@@ -4242,8 +4268,11 @@ module Flat =
             for i in 0 .. hits - 1 do
                 let at = (if (at patShare i) then s.Time + (at patAt i) * useTime + skill.HitDelay else s.Time + (at patAt i) + skill.HitDelay)
                 let mult = patMult.[i]
-                for part in info.Parts do
-                    let pi = p.Skills.[part]
+                for k in 0 .. info.Parts.Length - 1 do
+                    // (what the use reads of a part it reads of its own part; what strikes
+                    // is what the part's name stands for)
+                    let part = info.Parts.[k]
+                    let pi = p.Skills.[info.Selves.[k]]
                     let happens =
                         System.Double.IsNaN pi.Seed
                         && (at <= first || not pi.OncePerUse)
@@ -4269,7 +4298,7 @@ module Flat =
                 let targetDef = foe.Def
                 for k in 0 .. info.Parts.Length - 1 do
                     let part = at info.Parts k
-                    let pi = at p.Skills part
+                    let pi = at p.Skills (at info.Selves k)
                     if pi.Crystals then
                         let radius (q: SkillInfo) = if q.AreaRadius > 0.0 || q.IsAreaAtTarget || q.AroundSelf then Geometry.radius q.AreaRadius areaMult else 0.0
                         let centre = if info.AroundSelf then Vec.zero else targetDef.Position
@@ -4330,19 +4359,22 @@ module Flat =
             // an infusion a part needed is used up; a part that waits is put down
             // (which parts had their infusion is seen before any is used up)
             if info.Parts.Length > 1 then
-                let had = info.Parts |> Array.map (fun part -> let infusion = (at p.Skills part).OnlyInfused in infusion >= 0 && stacksOf s infusion > 0)
+                let had = info.Selves |> Array.map (fun part -> let infusion = (at p.Skills part).OnlyInfused in infusion >= 0 && stacksOf s infusion > 0)
                 for k in 1 .. info.Parts.Length - 1 do
                     let part = at info.Parts k
-                    let pi = at p.Skills part
+                    let pi = at p.Skills (at info.Selves k)
                     if at had k then
                         let infusion = pi.OnlyInfused
                         if (at s.A.BHas infusion) && (at s.A.BStacks infusion) > 1 then setBuff s infusion ((at s.A.BStacks infusion) - 1) (at s.A.BExpires infusion) (at s.A.BMods infusion)
                         else removeBuff s infusion
-                    elif pi.Waits then put s.A.Waiting part (min 20 ((at s.A.Waiting part) + 1))
+                    elif pi.Waits && part >= 0 then put s.A.Waiting part (min 20 ((at s.A.Waiting part) + 1))
             // a detonator (or a warcry) sets off everything of that kind that waits
+            // (how many wait is seen before any is set off: two parts of one name are each set
+            // off for all that wait by that name)
+            let waiting = if info.SetsOff.Length = 0 then s.NoInts else info.SetsOff |> Array.map (fun part -> at s.A.Waiting part)
             for k in 0 .. info.SetsOff.Length - 1 do
                 let part = at info.SetsOff k
-                let n = at s.A.Waiting part
+                let n = at waiting k
                 if n > 0 then
                     put s.A.Waiting part 0
                     for _ in 1 .. n do
@@ -4387,6 +4419,7 @@ module Flat =
             react s rng p.OnUse "" sid target
 
     and private trigger (s: State) (rng: Rng) (sid: int) =
+        if sid < 0 then failwith "a trigger of a skill its actor does not have"
         if ready s sid then
             bump s (at s.P.Skills sid).CTrigger
             setBuff s s.P.BTriggered 1 (s.Time + 4.0) []
@@ -4402,13 +4435,17 @@ module Flat =
         let t = aimed s
         // a chained attack takes the time of the strike that is due (its own speed)
         let step = seqStep s sid info
+        // (the part itself gives the time; its speed is asked of it unless it goes by the
+        // skill's own name)
         let mutable own = sid
+        let mutable timed = sid
         if step >= 0 then
             let mutable found = false
             for k in 0 .. info.Parts.Length - 1 do
-                let part = at s.P.Skills (at info.Parts k)
+                let part = at s.P.Skills (at info.Selves k)
                 if not found && part.InChain && inStep step part then
-                    own <- at info.Parts k
+                    timed <- at info.Selves k
+                    own <- (if (at info.Parts k) = sid then sid else timed)
                     found <- true
         let ownSpeed =
             if own = sid then nan
@@ -4426,7 +4463,7 @@ module Flat =
         if t >= 0 then useStatus s ev (at s.Foes t)
         keepAnswers s ev sid t 1
         let speed = if own = sid then multQ ev qSpeed else ownSpeed
-        let info' = at s.P.Skills own
+        let info' = at s.P.Skills timed
         // "Skills take 5% longer to perform for each time they Repeat"
         let barrage = s.P.BBarrage
         let repeats = if info.SpendsRepeats && (at s.A.BHas barrage) && (at s.A.BStacks barrage) > 0 && s.Time < (at s.A.BExpires barrage) then float (at s.A.BStacks barrage) else 0.0
@@ -4592,6 +4629,7 @@ module Flat =
         // (every step's condition is asked, as the reference asks them all)
         for step in 0 .. p.Rotation.Length - 1 do
             let (sid, cond) = at p.Rotation step
+            if sid < 0 then failwith "a step of a skill its actor does not have"
             let info = (at p.Skills sid)
             let usable =
                 cond v && ready s sid
@@ -5765,6 +5803,7 @@ module Flat =
                         bump s plain.CUninfused
                         sid
                     else
+                        if plain.Infused < 0 then failwith "an infusion of a skill its actor does not have"
                         let evE = acquireEmpty s plain.Infused
                         let keep = sumQ evE qInfusionKeep
                         let charges = int (sumQ evE qInfusionPower)
@@ -5937,6 +5976,7 @@ module Flat =
         a.HitAt <- s.Time
         let target = aimed s
         // "explode when reduced to Low Life" (35%): its explosion strikes, and it is dead
+        if p.Explodes = -2 && target >= 0 && life <= 0.35 * body.Life then failwith "a minion's explosion its actor does not have"
         if p.Explodes >= 0 && target >= 0 && life <= 0.35 * body.Life then
             bump s p.CMinionExploded
             let was = s.Cur
@@ -6492,7 +6532,7 @@ module Flat =
                 let name = p.Actor.Name
                 match kind with
                 | EReady -> tell t "Ready" name "" (float q.Seq)
-                | EStrike | EPassing | EDirect -> tell t (kindName kind) name (at p.Skills a).Skill.Name (float q.Seq)
+                | EStrike | EPassing | EDirect -> tell t (kindName kind) name (if a < 0 then "" else (at p.Skills a).Skill.Name) (float q.Seq)
                 | EConsume | EGainStacks | ESpendBuff -> tell t (kindName kind) name (at p.BuffNames a) (float q.Seq)
                 | ECycle -> tell t "CycleTick" name (at p.BuffNames ((at p.Cycles a).Buff)) (float q.Seq)
                 | EPeriodic -> tell t "PeriodicTick" name p.Actor.Periodics.[a].Name (float q.Seq)
@@ -6503,13 +6543,13 @@ module Flat =
                 | ELeaves -> tell t "MinionLeaves" name "" (float q.Seq)
                 | EWard -> tell t "WardArrives" "" "" (float q.Seq)
                 | EMana -> tell t "ManaArrives" "" "" (float q.Seq)
-                | EPlant -> tell t "PlantCrystals" name (at p.Skills a).Skill.Name (float q.Seq)
+                | EPlant -> tell t "PlantCrystals" name (if a < 0 then "" else (at p.Skills a).Skill.Name) (float q.Seq)
                 | _ -> tell t "Expire" "" "" (float q.Seq)
              | None -> ())
             // a skill's hits roll from a stream of that skill alone: its first event, its second, ...
             let rng =
                 match kind with
-                | EStrike | EPassing | EDirect ->
+                | EStrike | EPassing | EDirect when a >= 0 ->
                     let n = (at s.A.StrikeStream a)
                     put s.A.StrikeStream a (n + 1)
                     Rng(Sim.streamSeedOf s.Seed (at p.Skills a).StrikeKey n)
@@ -6595,6 +6635,7 @@ module Flat =
                             leave s who
                             bump s p.CMinionLeft
                     | EPlant ->
+                        if a < 0 then failwith "crystals of a part its actor cannot find"
                         let e = at s.Foes b
                         if e.Life > 0.0 then
                             let count, life, limit, lasts = s.Plants.[int x]
@@ -6620,6 +6661,9 @@ module Flat =
                     | _ ->
                         // (what an actor does, it does in its own place)
                         enter s who
+                        // (a part of a part has no name the reference can find it by: it fails
+                        // when such a strike is due)
+                        if a < 0 && (kind = EStrike || kind = EPassing) then failwith "a strike of a part its actor cannot find"
                         (match kind with
                          | EReady -> onReady s rng
                          | EStrike -> onStrike s rng a x b 0.0 false false
@@ -6870,6 +6914,7 @@ module Flat =
               StatusStacks = Array.zeroCreate ns
               AilmentSeen = Array.zeroCreate 13
               NoHas = [||]
+              NoInts = [||]
               EvDepth = 0
               Cause = -1
               Aim = -1

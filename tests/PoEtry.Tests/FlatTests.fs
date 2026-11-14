@@ -1306,15 +1306,83 @@ let run (test: string -> (unit -> unit) -> unit) =
         if not (Flat.unsupported fine).IsEmpty then failwithf "a plain fight is refused: %A" (Flat.unsupported fine)
         refused { fine with Minions = [ Actor.make "Player" [] [ strike "Bite" 1.0 2.0 ] ] } "actors of the same name"
         refused { fine with Player = { player with Metas = [ Meta.simple "Cast on Crit" 100.0 "Bolt"; Meta.simple "Cast on Crit" 50.0 "Bolt" ] } } "meta gems of the same name"
-        refused { fine with Player = { player with Infusions = Some { Remnants = []; ExtraRemnantChance = 0.0; Delay = 0.5; Consumers = Map.ofList [ "Bolt", ("FireInfusion", "No such skill") ]; Wildcard = None } } } "an infusion of a skill"
-        // (two of one name that are the same skill are that skill; two that differ are refused)
-        let twice = { player with Skills = [ spell "Bolt" Fire 1.0 2.0; spell "Bolt" Fire 1.0 2.0 ] }
-        if not (Flat.unsupported { fine with Player = twice }).IsEmpty then failwith "the same skill twice is refused"
-        same { fine with Player = twice } [ 1u; 2u; 3u ]
-        refused { fine with Player = { player with Skills = [ spell "Bolt" Fire 1.0 2.0; spell "Bolt" Cold 5.0 6.0 ] } } "skills or parts of the same name that differ"
         // both reasons of a fight with two
-        let two = { fine with Enemies = [ { boss 1e9 with Name = "boss+" } ]; Replace = true; Player = { player with Skills = [ spell "Bolt" Fire 1.0 2.0; spell "Bolt" Cold 5.0 6.0 ] } }
-        if (Flat.unsupported two).Length <> 2 then failwithf "expected two reasons, got %A" (Flat.unsupported two))
+        let two = { fine with Enemies = [ { boss 1e9 with Name = "boss+" } ]; Replace = true; Minions = [ Actor.make "Player" [] [ strike "Bite" 1.0 2.0 ] ] }
+        if (Flat.unsupported two).Length < 2 then failwithf "expected two reasons, got %A" (Flat.unsupported two))
+
+    test "flat: skills and parts of one name, the same or not: a name is the first of it, a use reads its own parts" (fun () ->
+        let player = Actor.make "Player" [] [ spell "Bolt" Fire 1.0 2.0 ]
+        let fine = Fight.single (boss 1e9) player 5.0
+        same { fine with Player = { player with Skills = [ spell "Bolt" Fire 1.0 2.0; spell "Bolt" Fire 1.0 2.0 ] } } [ 1u; 2u; 3u ]
+        same { fine with Player = { player with Skills = [ spell "Bolt" Fire 1.0 2.0; { spell "Bolt" Cold 5.0 6.0 with Cooldown = Some 1.0 } ] } } [ 1u; 2u; 3u ]
+        // a part that has a part: the part's part never strikes, unless the part is what is used
+        let inner = spell "Bolt: B" Cold 30.0 40.0
+        let nested = { spell "Bolt" Fire 10.0 20.0 with Parts = [ { spell "Bolt: A" Fire 10.0 20.0 with Parts = [ inner ] } ] }
+        same { fine with Player = Actor.make "Player" [] [ nested ] } [ 1u; 2u; 3u ]
+        // (used through a part of that name that can be found: the part's part goes by it)
+        same { fine with Player = { Actor.make "Player" [] [ nested; inner ] with Rotation = [ Actor.always "Bolt: A" ] } } [ 1u; 2u; 3u ]
+        // random fights with names made to clash
+        let mutable compared = 0
+        for case in 1u .. 90u do
+            let fight, described = randomFight case
+            let first = fight.Player.Skills.Head.Name
+            let clash (kind: int) (skills: Skill list) =
+                skills |> List.mapi (fun i sk ->
+                    match kind with
+                    // every part goes by the name of the first skill
+                    | 0 -> { sk with Parts = sk.Parts |> List.map (fun part -> { part with Name = first }) }
+                    // the last skill goes by the name of the first
+                    | 1 -> if i > 0 && i = skills.Length - 1 then { sk with Name = first } else sk
+                    // every part goes by its own skill's name
+                    | 2 -> { sk with Parts = sk.Parts |> List.map (fun part -> { part with Name = sk.Name }) }
+                    // the parts of a skill all go by the name of its first part, and a skill by that of another's part
+                    | _ ->
+                        let named = match skills |> List.tryPick (fun o -> if o.Name <> sk.Name then o.Parts |> List.tryHead else None) with Some part when i = 0 -> part.Name | _ -> sk.Name
+                        { sk with Name = named; Parts = (match sk.Parts with head :: rest -> head :: (rest |> List.map (fun part -> { part with Name = head.Name })) | [] -> []) })
+            for kind in 0 .. 3 do
+                let clashing = { fight with Player = { fight.Player with Skills = clash kind fight.Player.Skills } }
+                // (a rotation that names what is no longer there fails in the reference: left out)
+                if clashing.Player.Rotation |> List.forall (fun step -> clashing.Player.Skills |> List.exists (fun sk -> sk.Name = step.Use || sk.Parts |> List.exists (fun part -> part.Name = step.Use))) then
+                    match Flat.compile clashing with
+                    | Error why -> failwithf "%s, clash %d: does not compile: %s" described kind why
+                    | Ok _ ->
+                        for seed in [ 1u; 2u ] do
+                            let reference = try Some(Sim.run clashing seed) with _ -> None
+                            match reference with
+                            | None -> ()
+                            | Some _ ->
+                                compared <- compared + 1
+                                match check clashing seed with
+                                | Some (Error d) -> failwithf "%s, clash %d: %s" described kind d
+                                | _ -> ()
+        if compared < 300 then failwithf "only %d runs compared" compared)
+
+    test "flat: what the reference fails at when it comes to it, this fails at when it comes to it" (fun () ->
+        let player = Actor.make "Player" [] [ spell "Bolt" Fire 1.0 2.0 ]
+        let fine = Fight.single (boss 1e9) player 5.0
+        let fails (fight: Fight) =
+            (try Sim.run fight 1u |> ignore; false with _ -> true),
+            (match Flat.compile fight with
+             | Error why -> failwithf "refused: %s" why
+             | Ok program -> (try Flat.run program 1u |> ignore; false with _ -> true))
+        let both (what: string) (fight: Fight) = if fails fight <> (true, true) then failwithf "%s: expected both to fail, got %A" what (fails fight)
+        let neither (what: string) (fight: Fight) =
+            if fails fight <> (false, false) then failwithf "%s: expected both to run, got %A" what (fails fight)
+            same fight [ 1u; 2u; 3u ]
+        both "a step" { fine with Player = { player with Rotation = [ Actor.always "Bolt"; Actor.always "Nothing" ] } }
+        both "a trigger" { fine with Player = { player with Rules = [ { Hook = OnHit; Filter = AnySkill; Chance = 100.0; Reaction = TriggerSkill "Nothing" } ] } }
+        neither "a trigger that never comes" { fine with Player = { player with Rules = [ { Hook = OnKill; Filter = AnySkill; Chance = 100.0; Reaction = TriggerSkill "Nothing" } ] } }
+        both "a periodic trigger" { fine with Player = { player with Periodics = [ { Name = "p"; Every = 1.0; Action = TriggerNamed "Nothing" } ] } }
+        neither "a periodic trigger that never comes" { fine with Player = { player with Periodics = [ { Name = "p"; Every = 1e6; Action = TriggerNamed "Nothing" } ] } }
+        let infused held =
+            { player with
+                Infusions = Some { Remnants = []; ExtraRemnantChance = 0.0; Delay = 0.5; Consumers = Map.ofList [ "Bolt", ("FireInfusion", "No such skill") ]; Wildcard = None }
+                Resources = (if held then [ "FireInfusion", 2 ] else []) }
+        both "an infusion" { fine with Player = infused true }
+        neither "an infusion there is none of" { fine with Player = infused false }
+        // a part of a part that is used: its strike cannot be found
+        let nested = { spell "Bolt" Fire 10.0 20.0 with Parts = [ { spell "Bolt: A" Fire 10.0 20.0 with Parts = [ spell "Bolt: B" Cold 30.0 40.0 ] } ] }
+        both "a part of a part" { fine with Player = { Actor.make "Player" [] [ nested ] with Rotation = [ Actor.always "Bolt: A" ] } })
 
     test "flat: random fights give the reference's outcome, or are refused" (fun () ->
         let mutable exact = 0
