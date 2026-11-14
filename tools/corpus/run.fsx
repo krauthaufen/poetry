@@ -211,8 +211,8 @@ let ranked title (pick: Result -> string list) top =
 ranked "gems not in the data" (fun r -> r.MissingGems) 100
 ranked "skills that could not be built" (fun r -> r.Notes) 100
 ranked "text lines not understood" (fun r -> r.Unknown) 150
-ranked "unmapped stats" (fun r -> r.Unmapped) 200
-ranked "unsimulated stats" (fun r -> r.Unsimulated) 200
+ranked "unmapped stats" (fun r -> r.Unmapped) 100000
+ranked "unsimulated stats" (fun r -> r.Unsimulated) 100000
 // character sheet against poe.ninja's: a value is off when it differs by more than 2% and 2 points
 let off (_, ours: float, theirs: float) = abs (ours - theirs) > 2.0 && abs (ours - theirs) > 0.02 * max (abs ours) (abs theirs)
 say "\n== character sheet differs from poe.ninja's (builds affected, of those that ran)"

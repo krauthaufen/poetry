@@ -1308,10 +1308,21 @@ module StatMap =
           "presence", "presence / allies"
           "allies", "presence / allies" ]
 
+    /// The player's own movement speed (what is changed is the id's beginning; when, its end):
+    /// the player of a fight stands where the fight begins (RULES.md, "The player stands"),
+    /// so how fast it could walk, sprint or move while using a skill changes nothing.
+    let private ownMovement (id: string) =
+        [ "base_movement_velocity_+%"; "movement_speed_+%"; "movement_velocity_+%"; "sprint_movement_speed_+%"
+          "movement_speed_penalty_+%_while_performing"; "movement_speed_acceleration_+%_per_second_while_performing_action"
+          "movement_speed_while_performing_action_locked_duration_%"; "ignore_armour_movement_penalties"
+          "dodge_roll_speed_+%"; "dodge_roll_travel_distance_+" ]
+        |> List.exists id.StartsWith
+        || id.EndsWith "movement_speed_penalty_+%_final_while_performing_action"
+
     let private isNonOffensive (id: string) =
         let words = split id
         // A penetration / enemy debuff line mentions resistance but is offensive.
-        words |> List.exists noCombatWords.Contains
+        words |> List.exists noCombatWords.Contains || ownMovement id
 
     let rec private direct (id: string) value =
         match explicit id value with

@@ -173,6 +173,7 @@ Confidence levels:
 | Mana on kill | flat and % of max mana per kill, also for damage-over-time kills? no: hit kills only | game text | guess (DoT kills) |
 | Monster hits | 1.5 × level damage × (1/4.4 normal/magic/rare, 4/4.4 unique) × rarity damage modifier, every 1.5 s, 40% physical / 20% each element | PoB enemy presets; rarity mod from Mods.dat | pob heuristic + guess |
 | Monster movement | walk towards the player at 3.5 m/s until within 0.8 m; frozen / stunned / electrocuted / pinned don't move; maimed and hindered 30% slower; chilled slower by its magnitude | maim −30% from BuffTemplates; hinder 30%: wiki Hinder; speed and range: guesses | guess |
+| The player stands | the player fights where the fight begins and does not walk, sprint or dodge roll: its own movement speed (also while using a skill, and the penalties of armour) changes nothing in a fight and is counted as understood, without effect | this simulator's choice | choice |
 | Monster hit chance | 1 − 0.95 E / (E + 4 Acc); blinded monsters have 20% less accuracy | PoB monsterHitChance; wiki Blind | pob + data |
 | Deflection | P(not deflected) = Acc / (Acc + 0.12 D) × 1.5 − 0.5, capped 95%; deflected hits deal 40% less | PoB deflectChance; GameConstants | pob + data |
 | Mitigation | armour A / (A + 10 D) capped 90% for physical, resistances for the rest; "damage removed from mana first", then energy shield, then life | PoB; game text | pob |
