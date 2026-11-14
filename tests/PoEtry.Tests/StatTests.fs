@@ -406,6 +406,87 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         same (melee scaled) seeds
         same (fight Normal [ knocks ]) seeds)
 
+    test "a monster's movement speed: slower by what its debuffs say; an Aftershock's hits can be told apart" (fun () ->
+        // the walker of the Presence test (10 m away, 2 m a second), slowed to half by the first
+        // hit (0.5 s, at 9 m): it is inside a Presence of 4.1 m (its edge at 4.6 m) after 4.9 s
+        // in place of 2.7 s
+        let bolt = { Skill.make "Bolt" [ Spell ] with BaseDamage = Map.ofList [ Chaos, { Min = 100.0; Max = 100.0 } ]; BaseTime = 0.5; BaseCrit = 0.0 }
+        let walker =
+            { EnemyDef.make Rarity.defaults 70 Normal "walker" (Vec.make 100.0 0.0) with
+                Life = 1e9; Mods = []; Size = 5.0; Speed = 20.0
+                Attack = Some { Interval = 1.0; Damage = Map.ofList [ Physical, 1.0 ]; Accuracy = 100.0; Range = 6.0; CritChance = 0.0; Melee = true } }
+        let fight (rules: Rule list) =
+            let player = { Actor.make "Player" [] [ bolt ] with Vitals = Some(PlayerStats.basic 1e6 0.0); Rules = rules }
+            { Fight.single walker player 7.2 with Presence = 41.0; PresenceAuras = [ "Weakened", 1, [ Mod.inc (DamageTaken AllDamage) 100.0 ] ] }
+        let dealt f = (Sim.run f 1u).DamageBy |> Map.toList |> List.sumBy snd
+        let slows = { Hook = OnHit; Filter = AnySkill; Chance = 100.0; Reaction = ApplyDebuff("Jagged Ground", 100.0, 1, [ Mod.more (Named "MovementSpeed") -50.0 ]) }
+        // 14 hits: unslowed, those from 3.0 s on (nine) are in the Presence; slowed, those from 5.0 s on (five)
+        near (5.0 * 100.0 + 9.0 * 200.0) (dealt (fight []))
+        near (9.0 * 100.0 + 5.0 * 200.0) (dealt (fight [ slows ]))
+        same (fight [ slows ]) seeds
+        // a slam whose Aftershock always comes: what is only for an Aftershock's hits happens with
+        // the second strike of a use, not the first. Here: the enemy takes double from then on
+        let slam = { Skill.make "Slam" [ Attack; Melee; Slam ] with BaseDamage = Map.ofList [ Chaos, { Min = 100.0; Max = 100.0 } ]; BaseTime = 1.0; BaseCrit = 0.0 }
+        let shaken = { Hook = OnHit; Filter = AnySkill; Chance = 100.0; Reaction = IfBuff("Aftershock", ApplyDebuff("Shaken", 100.0, 1, [ Mod.inc (DamageTaken AllDamage) 100.0 ])) }
+        let slamming chance =
+            let player = { Actor.make "Player" [ Mod.base' (Named "AftershockChance") chance ] [ slam ] with Rules = [ shaken ] }
+            Fight.single { EnemyDef.atLevel 83 1e9 with Mods = [] } player 3.2
+        // three uses: 100 + 100, then 200 + 200 twice
+        near 1000.0 (dealt (slamming 100.0))
+        near 300.0 (dealt (slamming 0.0))
+        same (slamming 100.0) seeds
+        same (slamming 40.0) seeds)
+
+    test "Jagged Ground: what makes it, how long it lies, how much it slows, what enemies in it take; curses that hinder" (fun () ->
+        let mace = "Weapon 1", "Rarity: Normal\nPlated Mace\n--------\n"
+        let rulesOf gems lines name =
+            let c = load { blank with Items = [ mace ]; Groups = [ group gems ]; ExtraLines = lines } Options.defaults
+            match Setup.pressed c Options.defaults name with
+            | Some p -> p.Rules
+            | None -> failwithf "%s not built" name
+        let ground (rules: Rule list) =
+            rules |> List.choose (fun r ->
+                let rec find reaction gate =
+                    match reaction with
+                    | ApplyDebuff ("Jagged Ground", d, _, ms) -> Some(r.Hook, gate, d, ms |> List.map (fun m -> m.Stat, m.Kind, m.Value))
+                    | IfBuff (b, next) -> find next b
+                    | _ -> None
+                find r.Reaction "")
+        // Earthquake's own: every hit leaves the enemy in it for 4 s, at twice the 20% slow
+        match ground (rulesOf [ gem "Earthquake" ] [] "Earthquake") with
+        | (OnHit, "", d, ms) :: _ ->
+            near 4.0 d
+            equal (box [ Named "MovementSpeed", More, -40.0 ]) (box ms)
+        | other -> failwithf "Earthquake: %A" other
+        // with "40% increased Jagged Ground Duration" and "Enemies in Jagged Ground you create take 10% increased Damage"
+        match ground (rulesOf [ gem "Earthquake" ] [ "40% increased Jagged Ground Duration"; "Enemies in Jagged Ground you create take 10% increased Damage" ] "Earthquake") with
+        | (OnHit, "", d, ms) :: _ ->
+            near 5.6 d
+            equal (box [ Named "MovementSpeed", More, -40.0; DamageTaken AllDamage, Inc, 10.0 ]) (box ms)
+        | other -> failwithf "Earthquake with passives: %A" other
+        // Jagged Ground II: only an Aftershock's hits, 4 s, 20%
+        match ground (rulesOf [ gem "Rolling Slam"; support "Jagged Ground II" ] [] "Rolling Slam") with
+        | (OnHit, "Aftershock", d, ms) :: _ ->
+            near 4.0 d
+            equal (box [ Named "MovementSpeed", More, -20.0 ]) (box ms)
+        | other -> failwithf "Jagged Ground II: %A" other
+        // Jagged Ground I: a use that takes an Endurance Charge
+        let one = rulesOf [ gem "Rolling Slam"; support "Jagged Ground I" ] [] "Rolling Slam"
+        equal (box true) (box (one |> List.exists (fun r -> match r.Hook, r.Reaction with OnUse, SpendStack ("EnduranceCharge", SetStacks ("Jagged Ground: Rolling Slam", 1)) -> true | _ -> false)))
+        match ground one with
+        | (OnHit, "Jagged Ground: Rolling Slam", d, _) :: _ -> near 4.0 d
+        | other -> failwithf "Jagged Ground I: %A" other
+        // without any of it: no ground, whatever the passive says
+        equal (box 0) (box (ground (rulesOf [ gem "Rolling Slam" ] [ "Enemies in Jagged Ground you create take 10% increased Damage" ] "Rolling Slam")).Length)
+        // "Enemies you Curse are Hindered, with 15% reduced Movement Speed": with the curse
+        let curse lines =
+            let c = load { blank with Groups = [ group [ gem "Enfeeble" ] ]; ExtraLines = lines } Options.defaults
+            match Setup.pressed c Options.defaults "Enfeeble" with
+            | Some p -> p.Rules |> List.pick (fun r -> match r.Reaction with ApplyCurse (_, _, ms) -> Some(ms |> List.filter (fun m -> m.Stat = Named "MovementSpeed") |> List.map (fun m -> m.Kind, m.Value)) | _ -> None)
+            | None -> failwith "Enfeeble not built"
+        equal (box ([]: (ModKind * float) list)) (box (curse []))
+        equal (box [ More, -15.0 ]) (box (curse [ "Enemies you Curse are Hindered, with 15% reduced Movement Speed" ])))
+
     // ---- allies, recovery while standing, stun recovery, what monsters never do ----
 
     test "stats: what allies in the Presence gain and regenerate; costs without energy shield; recovery while stationary" (fun () ->

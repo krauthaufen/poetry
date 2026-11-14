@@ -304,6 +304,16 @@ module StatMap =
         | "support_deadly_poison_poison_effect_+%_final" -> one (Mod.more (AilmentMagnitude(Some Poison)) v)
         | "support_unseen_critical_damage_multiplier_+%_final_vs_blinded_enemies" -> one (Mod.more CritBonus v |> Mod.whenever (EnemyHas "Blinded"))
         | "support_ignition_chance_to_ignite_+%_final" -> one (Mod.more (AilmentChance Ignite) v)
+        // Jagged Ground (Behaviours.jaggedGround): what enemies in it take, how long it lies and
+        // how much it slows; what makes one is read there by its id
+        | "jagged_ground_enemy_damage_taken_+%" -> one (Mod.base' (Named "JaggedGroundDamageTaken") v)
+        | "jagged_ground_duration_+%" -> one (Mod.inc (Named "JaggedGroundDuration") v)
+        | "jagged_ground_effect_+%" -> one (Mod.inc (Named "JaggedGroundEffect") v)
+        | "support_jagged_ground_base_duration_ms" | "skill_jagged_ground_base_duration_ms" | "jagged_ground_duration_ms" | "can_create_jagged_ground"
+        | "cannot_create_jagged_ground" | "aftershocks_create_jagged_ground" | "support_create_jagged_ground_if_consumed_endurance_charge"
+        | "support_consume_X_endurance_charges_on_use" -> Some Structural
+        // "Enemies you Curse are Hindered, with 15% reduced Movement Speed" (Behaviours.curseOf)
+        | "enemies_you_curse_have_15%_hinder" -> one (Mod.flag (Named "CursesHinder"))
         // Ice Bite's buff on freezing an enemy: read by Behaviours.iceBite
         | "support_ice_bite_buff_grant_%_added_cold_attack_damage" | "support_ice_bite_base_buff_duration" -> Some Structural
         // sealed skills (Salvo, Unleash, Zarokh's Revolt, Freezing Salvo): read by the engine at use

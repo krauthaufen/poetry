@@ -565,7 +565,10 @@ module Behaviours =
                     ([], [])
             // your curse / mark effect scales what it does
             let effect = Mods.mult ctx [ Named(if isCurse then "CurseEffect" else "MarkEffect") ] all
-            Some(name, duration, monster |> List.map (Mod.scaled effect), player |> List.map (Mod.scaled effect >> Mod.from skill.Name))
+            // "Enemies you Curse are Hindered, with 15% reduced Movement Speed" (it comes and goes
+            // with the curse, and like it is weaker on an enemy that curses are weaker on)
+            let hinder = if isCurse && Mods.flag Ctx.empty (Named "CursesHinder") all then [ Mod.more (Named "MovementSpeed") -15.0 ] else []
+            Some(name, duration, (monster |> List.map (Mod.scaled effect)) @ hinder, player |> List.map (Mod.scaled effect >> Mod.from skill.Name))
 
     /// "Curse zones erupt after a delay" (`curse_delay_duration_ms`), slower or faster with
     /// "Curse Activation"; none with "Curses have no Activation Delay". Marks have none.
@@ -1006,7 +1009,12 @@ module Behaviours =
                 | [| _; hook; effect; seconds |] ->
                     let hook = match hook with "OnCrit" -> Some OnCrit | "OnHit" -> Some OnHit | "OnKill" -> Some OnKill | "OnUse" -> Some OnUse | "WhenHit" -> Some WhenHit | _ -> None
                     let secs = float seconds
-                    let filter = m.Conds |> List.tryPick (function SkillIs t -> Some(WithTag t) | _ -> None) |> Option.defaultValue filter
+                    // (every kind of skill the stat names: "with this Weapon" in weapon set two is an attack of that set)
+                    let filter =
+                        match m.Conds |> List.choose (function SkillIs t -> Some t | _ -> None) with
+                        | [] -> filter
+                        | [ t ] -> WithTag t
+                        | ts -> WithTags(ts, [])
                     hook |> Option.map (fun h ->
                         let reaction =
                             if effect.StartsWith "-" then RemoveBuff(effect.Substring 1)
@@ -1247,6 +1255,40 @@ module Behaviours =
                 | _ -> []
             | _ -> []
         exposure @ remnant
+
+    /// Jagged Ground: "Slows the movement speed of enemies in its area by 20%" (x its effect);
+    /// "Enemies in Jagged Ground you create take X% increased Damage". A patch lies where the
+    /// skill struck: the enemies its hits reach are in it, and are taken to stay in it for its
+    /// time (the debuff "Jagged Ground" on each). What makes one:
+    /// - a skill of its own ("can_create_jagged_ground" with a duration: Earthquake): every use;
+    /// - Jagged Ground I: "Supported Skills will consume Endurance Charges on use to create
+    ///   Jagged Ground": a use that has a charge to take;
+    /// - Jagged Ground II: "Aftershocks caused by Supported Slam Skills always create patches":
+    ///   the hits of an Aftershock.
+    /// `names`: the skill, its parts and its infused form.
+    let jaggedGround (db: GameDb) (charMods: ModDb) (setup: GemSetup) (skill: Skill) (names: string list) : Rule list =
+        let raw = Gems.rawStats db charMods setup
+        let sum id = raw |> List.filter (fun (k, _) -> k = id) |> List.sumBy snd
+        let has id = raw |> List.exists (fun (k, v) -> k = id && v <> 0.0)
+        let ms = sum "support_jagged_ground_base_duration_ms" + sum "skill_jagged_ground_base_duration_ms" + sum "jagged_ground_duration_ms"
+        if ms <= 0.0 || has "cannot_create_jagged_ground" then []
+        else
+            let ctx = { Ctx.empty with SkillTags = skill.Tags; SkillName = skill.Name }
+            let all = ModDb.ofList (ModDb.toList charMods @ skill.Mods)
+            let seconds = ms / 1000.0 * Mods.inc ctx [ Named "JaggedGroundDuration" ] all
+            let slow = max -100.0 (Map.find "JaggedGroundMagnitude" Tables.gameConstants * Mods.inc ctx [ Named "JaggedGroundEffect" ] all)
+            let taken = Mods.sumBase ctx [ Named "JaggedGroundDamageTaken" ] all
+            let debuff =
+                ApplyDebuff("Jagged Ground", seconds, 1, [ yield Mod.more (Named "MovementSpeed") slow; if taken <> 0.0 then yield Mod.inc (DamageTaken AllDamage) taken ])
+            let onHit (reaction: Reaction) = names |> List.distinct |> List.map (fun n -> { Hook = OnHit; Filter = Called n; Chance = 100.0; Reaction = reaction })
+            if has "aftershocks_create_jagged_ground" then onHit (IfBuff("Aftershock", debuff))
+            elif has "support_create_jagged_ground_if_consumed_endurance_charge" then
+                let ready = "Jagged Ground: " + skill.Name
+                [ { Hook = OnUse; Filter = Called skill.Name; Chance = 100.0; Reaction = RemoveBuff ready }
+                  { Hook = OnUse; Filter = Called skill.Name; Chance = 100.0; Reaction = SpendStack("EnduranceCharge", SetStacks(ready, 1)) } ]
+                @ onHit (IfBuff(ready, debuff))
+            elif has "can_create_jagged_ground" && sum "skill_jagged_ground_base_duration_ms" > 0.0 then onHit debuff
+            else []
 
     /// Ice Bite: "Gain X% of Damage as Cold Damage for N seconds on Freezing an enemy with
     /// Supported Skills": a buff on the character (for all it does: "infuses your damage with

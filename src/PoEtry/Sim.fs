@@ -999,6 +999,8 @@ module Sim =
                         (if st.ContainsKey "Maimed" then 1.0 - Constants.maimSlow / 100.0 else 1.0)
                         * (if st.ContainsKey "Hindered" then 1.0 - Constants.hinderSlow / 100.0 else 1.0)
                         * (1.0 - (e.Debuffs |> Map.tryFind "Chilled" |> Option.map (fun x -> x.Mods |> List.sumBy (fun m -> m.Value)) |> Option.defaultValue 0.0) / 100.0)
+                    // what its debuffs make of its movement speed (Jagged Ground, "Hindered, with 15% reduced Movement Speed")
+                    let slow = if e.Debuffs.IsEmpty then slow else slow * max 0.0 (Mods.more Ctx.empty [ Named "MovementSpeed" ] (defender e).Mods)
                     let d = Vec.length e.Def.Position
                     let gap = d - e.Def.Size - atk.Range
                     if stopped || gap <= 0.0 then w
@@ -3053,7 +3055,11 @@ module Sim =
                 let w = strike w
                 // Aftershock: a slam has a chance to hit its area once more
                 if sk.Tags.Contains Slam && rng.Chance(Mods.sumBase ctx [ Named "AftershockChance" ] mods) then
-                    let again = strike w
+                    // (while it strikes the actor has "Aftershock": for what only an Aftershock's hits do)
+                    let again =
+                        updateActor actor.Name (fun st -> { st with Buffs = Map.add "Aftershock" { Name = "Aftershock"; Mods = []; Stacks = 1; Expires = infinity } st.Buffs }) w
+                        |> strike
+                        |> updateActor actor.Name (fun st -> { st with Buffs = Map.remove "Aftershock" st.Buffs })
                     { again with Counts = bump ("aftershock:" + sk.Name) again.Counts }
                 else w
 

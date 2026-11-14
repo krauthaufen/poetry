@@ -1163,6 +1163,7 @@ module Flat =
               BShocked: int
               BChilled: int
               BBeenHit: int
+              BAftershock: int
               CStopped: int
               CKnockback: int
               CEvaded: int
@@ -1433,6 +1434,7 @@ module Flat =
             let bShocked = buffs.Id "Shocked"
             let bChilled = buffs.Id "Chilled"
             let bBeenHit = buffs.Id "BeenHitRecently"
+            let bAftershock = buffs.Id "Aftershock"
             let bStates = stateNames |> List.map buffs.Id |> Array.ofList
             let bCharges = [ "PowerCharge"; "FrenzyCharge"; "EnduranceCharge" ] |> List.map buffs.Id |> Array.ofList
             let bConstantMana = buffs.Id "ConstantManaFlask"
@@ -2113,6 +2115,7 @@ module Flat =
                       BShocked = bShocked
                       BChilled = bChilled
                       BBeenHit = bBeenHit
+                      BAftershock = bAftershock
                       CStopped = cStopped
                       CKnockback = counts.Id "knockback"
                       CEvaded = cEvaded
@@ -3205,6 +3208,7 @@ module Flat =
 
     let private actionSpeedStat = Named "ActionSpeed"
     let private damageDealtStat = Named "DamageDealt"
+    let private movementSpeedStat = Named "MovementSpeed"
 
     let private kill (s: State) (e: Foe) (at: float) =
         e.Life <- 0.0
@@ -3335,6 +3339,10 @@ module Flat =
                                 (if (at e.SHas (at ailments 10)) then 1.0 - Constants.maimSlow / 100.0 else 1.0)
                                 * (if (at e.SHas (at ailments 12)) then 1.0 - Constants.hinderSlow / 100.0 else 1.0)
                                 * (1.0 - (if (at e.Has s.P.SChilled) then (at e.DMods s.P.SChilled) |> List.sumBy (fun m -> m.Value) else 0.0) / 100.0)
+                            // what its debuffs make of its movement speed
+                            let slow =
+                                defList s e
+                                slow * max 0.0 (dmore e movementSpeedStat 1.0)
                             let step = min gap (e.Def.Speed * slow * dt)
                             e.Def <- { e.Def with Position = Vec.scale ((d - step) / d) e.Def.Position }
                             s.AliveStale <- true
@@ -5825,7 +5833,10 @@ module Flat =
                 strike ()
                 // Aftershock: a slam has a chance to hit its area once more
                 if info.IsSlam && rng.Chance(sumQ ev qAftershock) then
+                    // (while it strikes the actor has "Aftershock": for what only an Aftershock's hits do)
+                    setBuff s p.BAftershock 1 infinity []
                     strike ()
+                    removeBuff s p.BAftershock
                     bump s info.CAftershock
                 release s
             release s

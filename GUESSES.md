@@ -18,7 +18,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
    whose description or behaviour changed.
 5. Go through the lists below; the wiki's version history of a skill says what changed.
 
-## Rules (108)
+## Rules (110)
 
 ### Hit damage
 
@@ -98,6 +98,8 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | Totems | gem data | data; the simplifications are guesses |
 | Trinity | gem data | guess |
 | Aftershock | stat text | guess (same damage and area) |
+| Jagged Ground | poe2db keyword text, GameConstants `JaggedGroundMagnitude`, support gem data and descriptions. That an enemy stays in the patch is a guess | data / guess |
+| Curses that hinder | stat description; scaling with the enemy's curse effect is a guess | data / guess |
 | Shapeshift skills | using one means "while Shapeshifted" conditions hold for the whole fight | | guess |
 | Onslaught on kill | stat descriptions; 4 s as the stat that names it | data; 4 s guess |
 | Knockback | gem data (`global_knockback`, `base_knockback_distance`, `generic_knockback_*`), stat descriptions. The unit of the distance, the metre where none is named, and that bosses are immune (a guide says so; the wiki could not be read) are guesses | guess |
