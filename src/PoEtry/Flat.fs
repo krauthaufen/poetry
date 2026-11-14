@@ -664,6 +664,8 @@ module Flat =
         | RIfEnemyHas of status: int * next: Re
         | RIfBuff of buff: int * next: Re
         | RRegenES of perSecond: float * duration: float * count: int
+        /// The player becomes Ignited (see `Reaction.IgniteSelf`).
+        | RIgniteSelf of percentPerSecond: float
         /// `meta`: -1 if the actor has no meta gem of the name (nothing happens then).
         | RGainEnergy of meta: int * amount: float
         /// `counts`: by the number of attacks empowered, where the count of it goes.
@@ -1097,6 +1099,9 @@ module Flat =
               RageWhenHit: float
               RageOnKill: float
               BerserkLoss: float
+              /// Chance (%) for a charm that is used to keep its charges, and where the count of that goes.
+              CharmKeep: float
+              CCharmKept: int
               MaxRage: int
               /// The enemies that attack, in the order the fight names them.
               Attackers: int[]
@@ -1255,6 +1260,7 @@ module Flat =
         | IfEnemyHas _ -> "IfEnemyHas"
         | IfBuff _ -> "IfBuff"
         | RegenES _ -> "RegenES"
+        | IgniteSelf _ -> "IgniteSelf"
         | Empower _ -> "Empower"
 
     /// The program of a fight, or everything about the fight that is not built here (each
@@ -1468,6 +1474,7 @@ module Flat =
                 | IfEnemyHas (st, next) -> RIfEnemyHas(statuses.Id st, reaction next)
                 | IfBuff (b, next) -> RIfBuff(buffs.Id b, reaction next)
                 | RegenES (rate, duration) -> RRegenES(rate, duration, counts.Id "regen:ES")
+                | IgniteSelf percent -> RIgniteSelf percent
                 | GainEnergy (meta, amount) -> RGainEnergy((match actor.Metas |> List.tryFindIndex (fun m -> m.Name = meta) with Some i -> i | None -> -1), amount)
                 | Empower (b, perPower, cap) ->
                     // (the most there can be: with every enemy alive)
@@ -2047,6 +2054,8 @@ module Flat =
                       RageWhenHit = Mods.sumBase Ctx.empty [ Named "RageWhenHit" ] sheet
                       RageOnKill = Mods.sumBase Ctx.empty [ Named "RageOnKill" ] sheet
                       BerserkLoss = Mods.sumBase Ctx.empty [ Named "LifeLossPercentPerMinutePerRage" ] sheet
+                      CharmKeep = Mods.sumBase Ctx.empty [ Named "CharmKeepCharges" ] sheet
+                      CCharmKept = counts.Id "charm:kept charges"
                       MaxRage = Map.tryFind "Rage" actor.MaxResources |> Option.defaultValue 0
                       Attackers =
                         (if actor.Vitals.IsNone && not anyBody then [||]
@@ -3515,7 +3524,7 @@ module Flat =
 
     /// Something that uses charms happened to the player. A charm for it that is running, or
     /// has the charges to be used now, answers; whether the occurrence is prevented (`Sim.charm`).
-    let private charm (s: State) (key: string) : bool =
+    let private charm (s: State) (rng: Rng) (key: string) : bool =
         let p = s.Main
         match p.Vitals with
         | Some pools when p.Charms.Length > 0 ->
@@ -3533,15 +3542,44 @@ module Flat =
                     elif charges >= c.Charm.ChargesPerUse && c.Charm.ChargesPerUse > 0.0 then
                         setBuff s c.CBuff 1 (s.Time + c.Charm.Duration) []
                         expireAt s (s.Time + c.Charm.Duration)
-                        put s.CharmCharges c.CBuff (charges - c.Charm.ChargesPerUse)
+                        // "X% chance for Charms you use to not consume Charges"
+                        let kept = rng.Chance p.CharmKeep
+                        if not kept then put s.CharmCharges c.CBuff (charges - c.Charm.ChargesPerUse)
                         s.Life <- min (max s.Life pools.Life) (s.Life + (if pools.Life > 1.0 then c.Charm.LifeOnUse * pools.LifeRecoveryRate else 0.0))
                         s.Mana <- min (max s.Mana pools.Mana) (s.Mana + c.Charm.ManaOnUse * pools.ManaRecoveryRate)
                         if c.Charm.StartsRecharge then s.LastHit <- -1e9
                         bump s c.Used
+                        if kept then bump s p.CCharmKept
                         prevented <- prevented || c.Charm.Prevents
             enter s was
             prevented
         | _ -> false
+
+    /// The player's defences with the buffs and charges of the moment (`Actor.VitalsAt`; the
+    /// player is the actor entered). They are a function of the buffs: the same buffs, the
+    /// same defences, and working them out is most of what a monster's hit costs.
+    let private vitalsNow (s: State) (pools: PlayerStats) : PlayerStats =
+        let p = s.P
+        match p.Fight.Player.VitalsAt with
+        | Some at ->
+            match s.VitalsLast with
+            | Some v when s.VitalsOf = s.A.VitalsVersion -> v
+            | _ ->
+                // the buffs written out: which there are, and their stacks
+                let mutable key = ""
+                for id in p.VitalsOn do
+                    if s.A.BHas.[id] then key <- key + string id + "=" + string s.A.BStacks.[id] + ";"
+                let v =
+                    match s.VitalsSeen.TryGetValue key with
+                    | true, v -> v
+                    | _ ->
+                        let v = at (buffMap s)
+                        s.VitalsSeen.[key] <- v
+                        v
+                s.VitalsOf <- s.A.VitalsVersion
+                s.VitalsLast <- Some v
+                v
+        | None -> pools
 
     /// Exposure on an enemy: the strongest applies (`Sim.expose`).
     let private expose (s: State) (target: int) (dt: DamageType) (amount: float) (duration: float) =
@@ -3877,6 +3915,22 @@ module Flat =
             if s.Main.Vitals.IsSome && alive s then
                 s.Recoups <- (s.Time + duration, rate, PShroudES) :: (s.Recoups |> List.filter (fun (_, _, pool) -> pool <> PShroudES))
                 bump s count
+        | RIgniteSelf percent ->
+            // (the player's own rule; resistance and what there is against Ignite with the buffs of the moment)
+            match s.Main.Vitals with
+            | Some pools when alive s && s.Cur = 0 ->
+                let v = vitalsNow s pools
+                if not (rng.Chance(Map.tryFind "Ignite" v.Avoid |> Option.defaultValue 0.0)) then
+                    if charm s rng "Ignited" then bump s s.Main.CPrevented.["Ignited"]
+                    else
+                        let dps =
+                            percent / 100.0 * (pools.Life + pools.EnergyShield) * (Map.tryFind "Ignite" v.SelfEffect |> Option.defaultValue 1.0)
+                            * (1.0 - (Map.tryFind Fire v.Resist |> Option.defaultValue 0.0) / 100.0) * (Map.tryFind Fire v.TakenMult |> Option.defaultValue 1.0)
+                        let until = s.Time + Constants.igniteDuration * (Map.tryFind "Ignite" v.SelfDuration |> Option.defaultValue 1.0)
+                        let stronger = s.Burning |> List.exists (fun (u, d, t) -> t = Fire && u > s.Time && d > dps)
+                        if not stronger then s.Burning <- (until, dps, Fire) :: (s.Burning |> List.filter (fun (_, _, t) -> t <> Fire))
+                        bump s s.Main.CPlayerIgnited
+            | _ -> ()
         | RGainEnergy (meta, amount) -> if meta >= 0 then gainEnergy s rng meta amount
         | REmpower (b, perPower, cap, counts) ->
             // a warcry: one attack per so much monster power among the living, at least one
@@ -5539,7 +5593,7 @@ module Flat =
                             // "granting charges equal to half of the monster's Power"
                             let gain = (MonsterPower.ofRarity def0.Rarity / 2.0 + (if rng.Chance c.Charm.ChargeOnKillChance then 1.0 else 0.0)) * c.Charm.ChargeGainMult
                             put s.CharmCharges c.CBuff (min c.Charm.MaxCharges ((at s.CharmCharges c.CBuff) + gain))
-                    if def0.Rarity = Rare || def0.Rarity = Unique then charm s "KillRare" |> ignore
+                    if def0.Rarity = Rare || def0.Rarity = Unique then charm s rng "KillRare" |> ignore
                 // "Only one Hit every 0.5 seconds can cause you to gain Rage": when one last could
                 // is kept, even where there is no Rage to gain
                 // (Rage is the player's alone)
@@ -5973,27 +6027,7 @@ module Flat =
             // mitigation from the player's current buffs and charges
             // (the defences are a function of the buffs: the same buffs, the same defences, and
             // working them out is most of what a monster's hit costs)
-            let v =
-                match p.Fight.Player.VitalsAt with
-                | Some at ->
-                    match s.VitalsLast with
-                    | Some v when s.VitalsOf = s.A.VitalsVersion -> v
-                    | _ ->
-                        // the buffs written out: which there are, and their stacks
-                        let mutable key = ""
-                        for id in p.VitalsOn do
-                            if s.A.BHas.[id] then key <- key + string id + "=" + string s.A.BStacks.[id] + ";"
-                        let v =
-                            match s.VitalsSeen.TryGetValue key with
-                            | true, v -> v
-                            | _ ->
-                                let v = at (buffMap s)
-                                s.VitalsSeen.[key] <- v
-                                v
-                        s.VitalsOf <- s.A.VitalsVersion
-                        s.VitalsLast <- Some v
-                        v
-                | None -> pools
+            let v = vitalsNow s pools
             let stopped = stopped s e false
             let blinded = at e.SHas (at p.AilmentStatus 11)
             let chill = if (at e.Has p.SChilled) then (at e.DMods p.SChilled) |> List.sumBy (fun m -> m.Value) else 0.0
@@ -6089,7 +6123,7 @@ module Flat =
                     // "Rage loss is paused for 4 seconds upon gaining Rage, or after taking damage"
                     s.A.RageAt <- s.Time
                     // charms used when a hit of their damage type is taken (they help from the next hit on)
-                    if p.Charms.Length > 0 then taken |> Map.iter (fun t d -> if d > 0.0 then charm s ("Hit:" + DamageType.name t) |> ignore)
+                    if p.Charms.Length > 0 then taken |> Map.iter (fun t d -> if d > 0.0 then charm s rng ("Hit:" + DamageType.name t) |> ignore)
                     if crit then bump s p.CEnemyCrit
                     setBuff s p.BBeenHit 1 (s.Time + 4.0) []
                     expireAt s (s.Time + 4.0)
@@ -6109,7 +6143,7 @@ module Flat =
                             bump s count
                         // a charm for this may stop it (and is used up doing so)
                         let unlessCharm (key: string) (apply: unit -> unit) =
-                            if charm s key then bump s p.CPrevented.[key] else apply ()
+                            if charm s rng key then bump s p.CPrevented.[key] else apply ()
                         // ignite: strongest only
                         (let fire = get Fire
                          if fire > 0.0 && rng.Chance(min 100.0 (fire / thr * Constants.igniteChanceMultiplier)) && not (avoided "Ignite") then

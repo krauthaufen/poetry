@@ -127,3 +127,90 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
             for id in [ "zero_projectiles_if_no_power_charges"; "active_skill_projectile_speed_+%_variation_final"; "lightning_strike_maximum_action_distance_+_when_empowered" ] do
                 if cov.Unmapped |> List.exists (fun (k, _) -> k = id) || cov.Unsimulated |> List.exists (fun (k, _) -> k = id) then failwithf "%s is not understood" id
         | Error e -> failwith e)
+
+    // ---- charms, an Ignite of one's own, how fast buffs and debuffs run out ----
+
+    test "charms: a chance to not consume charges is rolled at every use" (fun () ->
+        // a brute that hits with fire once a second; a charm for fire hits that lasts 0.3 s and
+        // has the charges for two uses, with nothing to fill it again
+        let brute =
+            { EnemyDef.make Rarity.defaults 70 Magic "brute" (Vec.make 5.0 0.0) with
+                Life = 1e9
+                Attack = Some { Interval = 1.0; Damage = Map.ofList [ Fire, 10.0 ]; Accuracy = 1e9; Range = 20.0; CritChance = 0.0; Melee = true } }
+        let charm = { Name = "ruby"; Trigger = "Hit:Fire"; Buff = "Charm1"; Prevents = false; Duration = 0.3; ChargesPerUse = 40.0; MaxCharges = 80.0; ChargesPerSecond = 0.0; ChargeOnKillChance = 0.0; ChargeGainMult = 1.0; LifeOnUse = 0.0; ManaOnUse = 0.0; StartsRecharge = false }
+        let bolt = { Skill.make "Bolt" [ Spell ] with BaseDamage = Map.ofList [ Fire, { Min = 1.0; Max = 2.0 } ] }
+        let fight keep =
+            let player =
+                { Actor.make "Player" [ Mod.base' (Named "CharmKeepCharges") keep ] [ bolt ] with
+                    Vitals = Some { PlayerStats.basic 1e6 0.0 with AilmentThreshold = 1e9; StunThreshold = 1e9 }
+                    Charms = [ charm ] }
+            Fight.single brute player 10.5
+        let hits = count (Sim.run (fight 0.0) 1u) "enemy:hit"
+        if hits < 9 then failwithf "%d hits" hits
+        // without: two uses, then it is empty
+        let plain = Sim.run (fight 0.0) 1u
+        equal (box 2) (box (count plain "charm:ruby"))
+        equal (box 0) (box (count plain "charm:kept charges"))
+        // 100%: it is used at every hit and never loses a charge
+        let always = Sim.run (fight 100.0) 1u
+        equal (box hits) (box (count always "charm:ruby"))
+        equal (box hits) (box (count always "charm:kept charges"))
+        // 50%: each use that keeps its charges allows one more; two are lost in the end
+        for seed in seeds do
+            let half = Sim.run (fight 50.0) seed
+            let used, kept = count half "charm:ruby", count half "charm:kept charges"
+            if used - kept > 2 || (used < hits && used - kept <> 2) then failwithf "seed %d: %d uses, %d kept, %d hits" seed used kept hits
+        same (fight 0.0) seeds
+        same (fight 50.0) seeds
+        same (fight 100.0) seeds
+        // from the character: the line, and "reduced Charm Charges used"
+        let c = load { blank with ExtraLines = [ "12% chance for Charms you use to not consume Charges" ] } Options.defaults
+        near 12.0 (Mods.sumBase Ctx.empty [ Named "CharmKeepCharges" ] (ModDb.ofList c.Sheet.Mods)))
+
+    test "an Ignite of one's own on a critical hit: a share of life and energy shield a second, as fire damage" (fun () ->
+        // 1000 life and 500 energy shield, 10% a second: 150 a second for an Ignite's 4 s. A
+        // spell that always crits lands every 0.5 s from 0.5 s on: burning from then to the end
+        let bolt = { Skill.make "Bolt" [ Spell ] with BaseDamage = Map.ofList [ Cold, { Min = 1.0; Max = 1.0 } ]; BaseTime = 0.5; BaseCrit = 100.0 }
+        let enemy = { EnemyDef.atLevel 83 1e9 with Mods = [] }
+        let fight (vitals: PlayerStats) =
+            let player =
+                { Actor.make "Player" [] [ bolt ] with
+                    Vitals = Some vitals
+                    Rules = [ { Hook = OnCrit; Filter = AnySkill; Chance = 100.0; Reaction = IgniteSelf 10.0 } ] }
+            Fight.single enemy player 4.5
+        let basic = { PlayerStats.basic 1000.0 0.0 with EnergyShield = 500.0 }
+        let out = Sim.run (fight basic) 1u
+        near (150.0 * 4.0) out.DamageTaken
+        // half of it with 50% fire resistance; "40% reduced Effect of Ignite on you"; avoided for sure
+        near (75.0 * 4.0) (Sim.run (fight { basic with Resist = Map.add Fire 50.0 basic.Resist }) 1u).DamageTaken
+        near (90.0 * 4.0) (Sim.run (fight { basic with SelfEffect = Map.ofList [ "Ignite", 0.6 ] }) 1u).DamageTaken
+        near 0.0 (Sim.run (fight { basic with Avoid = Map.ofList [ "Ignite", 100.0 ] }) 1u).DamageTaken
+        // it stops when the crits do: one crit, 4 s of burning, and then none
+        let once = { fight basic with Player = { (fight basic).Player with Rotation = [ { Use = "Bolt"; When = fun v -> v.Time < 0.25 } ] }; MaxTime = 8.0 }
+        near (150.0 * 4.0) (Sim.run once 1u).DamageTaken
+        // "Debuffs on you expire 100% faster": 2 s
+        near (150.0 * 2.0) (Sim.run { once with Player = { once.Player with Vitals = Some { basic with SelfDuration = Map.ofList [ "Ignite", 0.5 ] } } } 1u).DamageTaken
+        same (fight basic) seeds
+        same (fight { basic with Avoid = Map.ofList [ "Ignite", 40.0 ]; Resist = Map.add Fire 30.0 basic.Resist }) seeds
+        same once seeds
+        // the character's line becomes that rule
+        let c = load { blank with ExtraLines = [ "Become Ignited when you deal a Critical Hit, taking 15% of your maximum Life and Energy Shield as Fire Damage per second" ] } Options.defaults
+        let player = Setup.player c Options.defaults [] None
+        equal (box [ OnCrit, 15.0 ]) (box (player.Rules |> List.choose (fun r -> match r.Reaction with IgniteSelf p -> Some(r.Hook, p) | _ -> None))))
+
+    test "buffs on you expire faster: their time is shorter; debuffs on you likewise" (fun () ->
+        let staff = "Weapon 1", "Rarity: Rare\nTest Staff\nWrapped Quarterstaff\n--------\n100% chance to gain Onslaught on Killing Hits with this Weapon\n"
+        let onslaught lines =
+            let c = load { blank with Items = [ staff ]; ExtraLines = lines } Options.defaults
+            (Setup.player c Options.defaults [] None).Rules |> List.pick (fun r -> match r.Reaction with GrantBuff ("Onslaught", d, _, _) -> Some d | _ -> None)
+        near 4.0 (onslaught [])
+        // 25% faster: 4 / 1.25
+        near 3.2 (onslaught [ "Buffs on you expire 25% faster" ])
+        // Ice Bite's 6 s: 4.8
+        let c = load { blank with Groups = [ group [ gem "Ice Nova"; support "Ice Bite II" ] ]; ExtraLines = [ "Buffs on you expire 25% faster" ] } Options.defaults
+        let player = Setup.player c Options.defaults [ Spam "Ice Nova" ] None
+        near 4.8 (player.Rules |> List.pick (fun r -> match r.Reaction with GrantBuff ("Ice Bite", d, _, _) -> Some d | _ -> None))
+        // debuffs: the ailments a monster leaves on the player last half as long at 100% faster
+        let v = (load { blank with ExtraLines = [ "Debuffs on you expire 100% faster" ] } Options.defaults).Vitals
+        near 0.5 v.SelfDuration.["Ignite"]
+        near 0.5 v.SelfDuration.["Chill"])

@@ -268,7 +268,11 @@ module Defence =
             ailments
             |> List.map (fun a -> a, max 0.0 (Mods.mult c [ Named("SelfEffect:" + a) ] db) * (if a = "Chill" then max 0.0 (Mods.mult c [ Named "SlowPotencyOnSelf" ] db) else 1.0))
             |> Map.ofList
-          SelfDuration = ailments |> List.map (fun a -> a, max 0.0 (Mods.mult c [ Named("SelfDuration:" + a) ] db)) |> Map.ofList
+          // ("Debuffs on you expire X% faster": time passes that much faster for them)
+          SelfDuration =
+            ailments
+            |> List.map (fun a -> a, max 0.0 (Mods.mult c [ Named("SelfDuration:" + a) ] db) / max 0.01 (Mods.mult c [ Named "DebuffExpiry" ] db))
+            |> Map.ofList
           LifeOnKill = if ci || onlyLeech then 0.0 else (named "LifeOnKill" + life * named "LifePercentOnKill" / 100.0) * lifeRecovery
           ESOnKill = es * named "ESPercentOnKill" / 100.0 * esRecovery
           LifeOnBlock = if ci || onlyLeech then 0.0 else named "LifeOnBlock" * lifeRecovery

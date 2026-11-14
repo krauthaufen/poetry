@@ -629,7 +629,9 @@ module Setup =
             OverkillBurns = overkillBurns
             HitPattern = used |> List.choose (fun (_, p) -> p.Pattern |> Option.map (fun pat -> p.Skill.Name, pat)) |> Map.ofList
             Rules =
-                grantRules @ (used |> List.collect (fun (_, p) -> p.Rules)) @ heraldRules @ Behaviours.keywordRules sheet pressedSkills
+                // ("Buffs on you expire X% faster": the buffs these give the character)
+                Behaviours.buffsExpire sheet (grantRules @ (used |> List.collect (fun (_, p) -> p.Rules)) @ heraldRules @ Behaviours.keywordRules sheet pressedSkills)
+                @ Behaviours.selfIgnite sheet
                 @ fst (Behaviours.summons db sheet c.Build pressedSkills)
                 @ snd (Behaviours.ancestralSpirits db sheet c.Build c.Vitals.Str c.Vitals.Dex (c.Minions |> List.filter (fun m -> m.ActiveWhile |> Option.exists (fun b -> b.EndsWith " buff"))))
                 @ (match Behaviours.ghostDance db sheet c.Build with
@@ -673,7 +675,7 @@ module Setup =
             WardRemnants = Behaviours.wardRemnants db sheet c.Build o.Pickup
             ManaRemnants = Behaviours.manaRemnants db sheet c.Build o.Pickup
             Banners = Behaviours.banners db sheet c.Build
-            Archons = [ Behaviours.elementalArchon sheet ]
+            Archons = [ (let a = Behaviours.elementalArchon sheet in { a with Duration = a.Duration / Behaviours.buffExpiry sheet }) ]
             Charms = (if o.Immortal || o.NoFlask then [] else c.Charms)
             ManaFlask =
                 if o.Immortal || o.NoFlask then None

@@ -388,6 +388,17 @@ module StatMap =
         | "crossbow_attack_%_chance_to_not_consume_ammo_if_reloaded_recently" -> one (Mod.base' (Named "KeepAmmoChance") v |> Mod.whenever (WhileBuff "ReloadedRecently"))
         | "dodge_roll_base_travel_distance" -> one (Mod.base' (Named "DodgeRollDistance") v)
         | "charm_charges_gained_+%" -> one (Mod.inc (Named "CharmChargesGained") v)
+        | "primalist_charm_charges_gained_+%_final" -> one (Mod.more (Named "CharmChargesGained") v)
+        | "charm_charges_used_+%" -> one (Mod.inc (Named "CharmChargesUsed") v)
+        // "X% chance for Charms you use to not consume Charges": rolled by the engine at each use
+        | "charms_%_chance_to_not_consume_charges" -> one (Mod.base' (Named "CharmKeepCharges") v)
+        // "Become Ignited when you deal a Critical Hit, taking X% of your maximum Life and Energy
+        // Shield as Fire Damage per second" (Behaviours.selfIgnite)
+        | "infernalist_burn_life_and_es_%_per_second_if_crit_recently" -> one (Mod.base' (Named "IgniteSelfOnCrit") v)
+        // "Buffs on you expire X% faster" (Behaviours.buffsExpire), "Debuffs on you expire X%
+        // faster" (the ailments a monster's hit leaves on the player: Defence)
+        | "buff_time_passed_+%_only_buff_category" -> one (Mod.inc (Named "BuffExpiry") v)
+        | "debuff_time_passed_+%" -> one (Mod.inc (Named "DebuffExpiry") v)
         | "charm_duration_+%" -> one (Mod.inc (Named "CharmDuration") v)
         | "active_skill_chill_effect_+%_final" -> one (Mod.more (AilmentMagnitude(Some Chill)) v)
         | "active_skill_shock_chance_+%_final" -> one (Mod.more (AilmentChance Shock) v)

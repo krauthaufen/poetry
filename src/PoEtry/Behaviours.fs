@@ -1021,6 +1021,37 @@ module Behaviours =
         (sheet.Mods |> List.choose (ruleOf AnySkill))
         @ (skills |> List.collect (fun s -> s.Mods |> List.choose (ruleOf (Called s.Name))))
 
+    /// "Become Ignited when you deal a Critical Hit, taking X% of your maximum Life and Energy
+    /// Shield as Fire Damage per second": every critical hit of the character (a triggered
+    /// skill's too) ignites it anew.
+    let selfIgnite (sheet: CharacterSheet) : Rule list =
+        let percent = Mods.sumBase Ctx.empty [ Named "IgniteSelfOnCrit" ] (ModDb.ofList sheet.Mods)
+        if percent > 0.0 then [ { Hook = OnCrit; Filter = AnySkill; Chance = 100.0; Reaction = IgniteSelf percent } ] else []
+
+    /// "Buffs on you expire X% faster": time passes that much faster for the buffs the
+    /// character's rules give it (Onslaught, Arcane Surge, a skill's buff, Ice Bite): they last
+    /// 1 / (1 + X / 100) of their time. Not charges (they are no buffs: the stat is
+    /// "only buff category"), not what never runs out by itself.
+    let buffsExpire (sheet: CharacterSheet) (rules: Rule list) : Rule list =
+        let k = Mods.mult Ctx.empty [ Named "BuffExpiry" ] (ModDb.ofList sheet.Mods)
+        if k = 1.0 || k <= 0.0 then rules
+        else
+            let rec scale (r: Reaction) =
+                match r with
+                | GrantBuff (name, duration, stacks, mods) when duration < 3600.0 -> GrantBuff(name, duration / k, stacks, mods)
+                | ChargeBuff (name, charge, perStack, seconds, double) -> ChargeBuff(name, charge, perStack, seconds / k, double)
+                | SpendStack (b, next) -> SpendStack(b, scale next)
+                | IfBuff (b, next) -> IfBuff(b, scale next)
+                | IfEnemyHas (st, next) -> IfEnemyHas(st, scale next)
+                | WithCorpse (next, otherwise) -> WithCorpse(scale next, scale otherwise)
+                | other -> other
+            rules |> List.map (fun r -> { r with Reaction = scale r.Reaction })
+
+    /// How much faster buffs on the character expire (1: as they are).
+    let buffExpiry (sheet: CharacterSheet) : float =
+        let k = Mods.mult Ctx.empty [ Named "BuffExpiry" ] (ModDb.ofList sheet.Mods)
+        if k <= 0.0 then 1.0 else k
+
     /// Critical Weakness inflicted on enemies in your presence every second for N seconds: a
     /// steady N stacks (at most 20) on every enemy.
     let criticalWeaknessAura (sheet: CharacterSheet) : (string * int * Mod list) list =
@@ -1051,6 +1082,9 @@ module Behaviours =
         let sheetDb = ModDb.ofList sheet.Mods
         let durationInc = Mods.inc Ctx.empty [ Named "CharmDuration" ] sheetDb
         let gainInc = Mods.sumInc Ctx.empty [ Named "CharmChargesGained" ] sheetDb
+        let gainMore = Mods.more Ctx.empty [ Named "CharmChargesGained" ] sheetDb
+        // "X% increased / reduced Charm Charges used"
+        let usedMult = max 0.0 (Mods.mult Ctx.empty [ Named "CharmChargesUsed" ] sheetDb)
         let numbers (l: string) =
             l.Split(' ') |> Array.choose (fun w -> match System.Double.TryParse(w.Trim(',').TrimEnd('%')) with | true, v -> Some v | _ -> None) |> List.ofArray
         build.Items
@@ -1085,11 +1119,11 @@ module Behaviours =
               Buff = buff
               Prevents = prevents
               Duration = (first "Flask: Lasts" |> Option.defaultValue 0.0) * durationInc
-              ChargesPerUse = perUse
+              ChargesPerUse = perUse * usedMult
               MaxCharges = maxC
               ChargesPerSecond = ownLine "Charges per Second" |> Option.defaultValue 0.0
               ChargeOnKillChance = ownLine "Chance to gain a Charge when you kill an enemy" |> Option.defaultValue 0.0
-              ChargeGainMult = 1.0 + ((ownLine "increased Charges gained" |> Option.defaultValue 0.0) + gainInc) / 100.0
+              ChargeGainMult = (1.0 + ((ownLine "increased Charges gained" |> Option.defaultValue 0.0) + gainInc) / 100.0) * gainMore
               LifeOnUse = ownLine "Life when Used" |> Option.defaultValue 0.0
               ManaOnUse = ownLine "Mana when Used" |> Option.defaultValue 0.0
               StartsRecharge = lines |> List.exists (fun l -> l.Contains "Energy Shield Recharge starts on use") },

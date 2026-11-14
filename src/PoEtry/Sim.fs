@@ -105,6 +105,10 @@ type Reaction =
     /// A warcry: empowers one attack per `perPower` monster power among the living enemies,
     /// counting up to `cap` power, at least one. The buff's stacks are the attacks left.
     | Empower of buff: string * perPower: float * cap: float
+    /// The player becomes Ignited: this percent of its maximum life and energy shield per
+    /// second as fire damage, for an Ignite's time ("Become Ignited when you deal a Critical
+    /// Hit"). The player's fire resistance and what it has against being Ignited apply.
+    | IgniteSelf of percentPerSecond: float
 
 /// "Enemies you sufficiently Overkill ... cause an explosion that Ignites nearby enemies
 /// based on the Overkill damage dealt" (Herald of Ash). `Skill` is the explosion among the
@@ -666,6 +670,8 @@ module Sim =
           WithBuffs: System.Collections.Generic.Dictionary<string, System.Collections.Generic.Dictionary<string, Map<string, Effect> * ModDb>>
           /// Percent of maximum life lost per minute per Rage (Berserk).
           BerserkLoss: float
+          /// Chance (%) for a charm that is used to keep its charges.
+          CharmKeep: float
           /// Told what happens, if anyone listens (`traced`): time, kind, who, what, a number
           /// (an event: its place in the queue's order; a hit: what it dealt). Nothing in the
           /// fight depends on it.
@@ -1403,6 +1409,41 @@ module Sim =
 
     let private summon env pool count duration w = summonWith env pool count duration [] w
 
+    /// Something that uses charms happened to the player ("Frozen", "Hit:Fire", "KillRare"...).
+    /// A charm for it that is running, or has the charges to be used now, answers; returns
+    /// whether the occurrence is prevented (immunity charms). "X% chance for Charms you use to
+    /// not consume Charges": rolled for each use.
+    let private charm (env: Env) (rng: Rng) (key: string) (w: World) : World * bool =
+        let player = env.Fight.Player
+        match player.Vitals, w.Player with
+        | Some pools, Some p when not player.Charms.IsEmpty ->
+            let st = Map.find player.Name w.Actors
+            player.Charms
+            |> List.filter (fun c -> c.Trigger = key)
+            |> List.fold
+                (fun (w: World, prevented) c ->
+                    let running = Map.tryFind c.Buff st.Buffs |> Option.exists (fun e -> e.Expires > w.Time)
+                    let charges = match w.Player with Some p -> Map.tryFind c.Buff p.CharmCharges |> Option.defaultValue 0.0 | None -> 0.0
+                    if running then w, prevented || c.Prevents
+                    elif charges >= c.ChargesPerUse && c.ChargesPerUse > 0.0 then
+                        let kept = rng.Chance env.CharmKeep
+                        let w =
+                            updateActor player.Name (fun st -> { st with Buffs = Map.add c.Buff { Name = c.Buff; Mods = []; Stacks = 1; Expires = w.Time + c.Duration } st.Buffs }) w
+                            |> schedule (w.Time + c.Duration) Expire
+                        { w with
+                            Player =
+                                w.Player |> Option.map (fun p ->
+                                    { p with
+                                        CharmCharges = (if kept then p.CharmCharges else Map.add c.Buff (charges - c.ChargesPerUse) p.CharmCharges)
+                                        Life = min (max p.Life pools.Life) (p.Life + (if pools.Life > 1.0 then c.LifeOnUse * pools.LifeRecoveryRate else 0.0))
+                                        Mana = min (max p.Mana pools.Mana) (p.Mana + c.ManaOnUse * pools.ManaRecoveryRate)
+                                        LastHit = (if c.StartsRecharge then -1e9 else p.LastHit) })
+                            Counts = bump ("charm:" + c.Name) w.Counts |> (if kept then bump "charm:kept charges" else id) },
+                        prevented || c.Prevents
+                    else w, prevented)
+                (w, false)
+        | _ -> w, false
+
     /// What a skill does with corpses, if a rule of the actor says so.
     let private corpseRule (actor: Actor) (skill: Skill) =
         actor.Rules
@@ -1452,6 +1493,33 @@ module Sim =
                           match target with
                           | Some t when w.Enemies.[t].Life > 0.0 && (status w.Enemies.[t]).ContainsKey st -> perform next w
                           | _ -> w
+                      | IgniteSelf percent ->
+                          let player = env.Fight.Player
+                          match player.Vitals, w.Player with
+                          | Some pools, Some p when p.Died.IsNone && actor.Name = player.Name ->
+                              // (resistance and what there is against Ignite: with the buffs of the moment)
+                              let v =
+                                  match player.VitalsAt with
+                                  | Some at -> at (buffStacks (Map.find player.Name w.Actors))
+                                  | None -> pools
+                              if rng.Chance(Map.tryFind "Ignite" v.Avoid |> Option.defaultValue 0.0) then w
+                              else
+                                  // a charm against Ignite answers (and is used up doing so)
+                                  let w, prevented = charm env rng "Ignited" w
+                                  if prevented then { w with Counts = bump "charm prevented:Ignited" w.Counts }
+                                  else
+                                      let dps =
+                                          percent / 100.0 * (pools.Life + pools.EnergyShield) * (Map.tryFind "Ignite" v.SelfEffect |> Option.defaultValue 1.0)
+                                          * (1.0 - (Map.tryFind Fire v.Resist |> Option.defaultValue 0.0) / 100.0) * (Map.tryFind Fire v.TakenMult |> Option.defaultValue 1.0)
+                                      let until = w.Time + Constants.igniteDuration * (Map.tryFind "Ignite" v.SelfDuration |> Option.defaultValue 1.0)
+                                      { w with
+                                          Player =
+                                              w.Player |> Option.map (fun p ->
+                                                  // the strongest Ignite burns; one as strong starts its time again
+                                                  let stronger = p.Dots |> List.exists (fun (u, d, t) -> t = Fire && u > w.Time && d > dps)
+                                                  if stronger then p else { p with Dots = (until, dps, Fire) :: (p.Dots |> List.filter (fun (_, _, t) -> t <> Fire)) })
+                                          Counts = bump "player:Ignited" w.Counts }
+                          | _ -> w
                       | Empower (buff, perPower, cap) ->
                           let power = alive w |> List.sumBy (fun e -> MonsterPower.ofRarity e.Def.Rarity)
                           let n = max 1 (int (floor (min cap power / max 1.0 perPower)))
@@ -1464,7 +1532,7 @@ module Sim =
                         | Some t when w.Enemies.[t].Life > 0.0 -> f t
                         | _ -> w
                      match reaction with
-                     | SpendStack _ | SetStacks _ | Empower _ | IfEnemyHas _ | IfBuff _ | WithCorpse _ | NoReaction -> w
+                     | SpendStack _ | SetStacks _ | Empower _ | IfEnemyHas _ | IfBuff _ | WithCorpse _ | IgniteSelf _ | RegenES _ | NoReaction -> w
                      | SummonEmpowered (pool, count, duration, first) -> summonWith env pool count duration first w
                      | SummonPerCorpse (pool, duration, deadMinions) ->
                          let size = env.Fight.Minions |> List.filter (fun m -> m.Pool = Some pool) |> List.length
@@ -2246,39 +2314,6 @@ module Sim =
             setStacksWith env name false "Rage" (min maxRage (stacksOf st "Rage" + int amount)) w
             |> updateActor name (fun st -> { st with RageAt = w.Time })
 
-    /// Something that uses charms happened to the player ("Frozen", "Hit:Fire", "KillRare"...).
-    /// A charm for it that is running, or has the charges to be used now, answers; returns
-    /// whether the occurrence is prevented (immunity charms).
-    let private charm (env: Env) (key: string) (w: World) : World * bool =
-        let player = env.Fight.Player
-        match player.Vitals, w.Player with
-        | Some pools, Some p when not player.Charms.IsEmpty ->
-            let st = Map.find player.Name w.Actors
-            player.Charms
-            |> List.filter (fun c -> c.Trigger = key)
-            |> List.fold
-                (fun (w: World, prevented) c ->
-                    let running = Map.tryFind c.Buff st.Buffs |> Option.exists (fun e -> e.Expires > w.Time)
-                    let charges = match w.Player with Some p -> Map.tryFind c.Buff p.CharmCharges |> Option.defaultValue 0.0 | None -> 0.0
-                    if running then w, prevented || c.Prevents
-                    elif charges >= c.ChargesPerUse && c.ChargesPerUse > 0.0 then
-                        let w =
-                            updateActor player.Name (fun st -> { st with Buffs = Map.add c.Buff { Name = c.Buff; Mods = []; Stacks = 1; Expires = w.Time + c.Duration } st.Buffs }) w
-                            |> schedule (w.Time + c.Duration) Expire
-                        { w with
-                            Player =
-                                w.Player |> Option.map (fun p ->
-                                    { p with
-                                        CharmCharges = Map.add c.Buff (charges - c.ChargesPerUse) p.CharmCharges
-                                        Life = min (max p.Life pools.Life) (p.Life + (if pools.Life > 1.0 then c.LifeOnUse * pools.LifeRecoveryRate else 0.0))
-                                        Mana = min (max p.Mana pools.Mana) (p.Mana + c.ManaOnUse * pools.ManaRecoveryRate)
-                                        LastHit = (if c.StartsRecharge then -1e9 else p.LastHit) })
-                            Counts = bump ("charm:" + c.Name) w.Counts },
-                        prevented || c.Prevents
-                    else w, prevented)
-                (w, false)
-        | _ -> w, false
-
     /// One hit on one enemy.
     let private hitEnemy env (rng: Rng) (actor: Actor) (skill: Skill) mult (target: string) (w: World) =
         let e = w.Enemies.[target]
@@ -2800,7 +2835,7 @@ module Sim =
                                                     // "granting charges equal to half of the monster's Power"
                                                     let gain = (MonsterPower.ofRarity e.Def.Rarity / 2.0 + (if rng.Chance c.ChargeOnKillChance then 1.0 else 0.0)) * c.ChargeGainMult
                                                     Map.add c.Buff (min c.MaxCharges ((Map.tryFind c.Buff m |> Option.defaultValue 0.0) + gain)) m) p.CharmCharges }) }
-                        if e.Def.Rarity = Rare || e.Def.Rarity = Unique then fst (charm env "KillRare" w) else w
+                        if e.Def.Rarity = Rare || e.Def.Rarity = Unique then fst (charm env rng "KillRare" w) else w
                 // rage from hitting and from kills
                 let w =
                     if actor.Name <> env.Fight.Player.Name then w
@@ -3142,7 +3177,7 @@ module Sim =
                     // "Rage loss is paused for 4 seconds upon gaining Rage, or after taking damage"
                     let w = updateActor env.Fight.Player.Name (fun st -> { st with RageAt = w.Time }) w
                     // charms used when a hit of their damage type is taken (they help from the next hit on)
-                    let w = taken |> Map.fold (fun w t d -> if d > 0.0 then fst (charm env ("Hit:" + DamageType.name t) w) else w) w
+                    let w = taken |> Map.fold (fun w t d -> if d > 0.0 then fst (charm env rng ("Hit:" + DamageType.name t) w) else w) w
                     let w = if crit then { w with Counts = bump "enemy:crit" w.Counts } else w
                     let w =
                         updateActor env.Fight.Player.Name (fun st ->
@@ -3168,7 +3203,7 @@ module Sim =
                                     Counts = bump ("player:" + what) w.Counts }
                             // a charm for this may stop it (and is used up doing so)
                             let unlessCharm key (apply: World -> World) (w: World) =
-                                let w, prevented = charm env key w
+                                let w, prevented = charm env rng key w
                                 if prevented then { w with Counts = bump ("charm prevented:" + key) w.Counts } else apply w
                             // ignite: strongest only
                             let w =
@@ -3695,6 +3730,7 @@ module Sim =
              Mods.sumBase c [ Named "RageWhenHit" ] db,
              Mods.sumBase c [ Named "RageOnKill" ] db)
           BerserkLoss = Mods.sumBase Ctx.empty [ Named "LifeLossPercentPerMinutePerRage" ] (ModDb.ofList fight.Player.Mods)
+          CharmKeep = Mods.sumBase Ctx.empty [ Named "CharmKeepCharges" ] (ModDb.ofList fight.Player.Mods)
           WithBuffs = System.Collections.Generic.Dictionary()
           SkillDbs =
             Map.ofList
