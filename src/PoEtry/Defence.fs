@@ -263,8 +263,16 @@ module Defence =
           FreezeThreshold = (ailmentThreshold + es * named "FreezeThresholdFromES" / 100.0) * Mods.mult c [ Named "FreezeThreshold" ] db
           AvoidStun = named "AvoidStun"
           Avoid = ailments |> List.map (fun a -> a, named ("Avoid:" + a)) |> Map.ofList
-          SelfEffect = ailments |> List.map (fun a -> a, max 0.0 (Mods.mult c [ Named("SelfEffect:" + a) ] db)) |> Map.ofList
-          SelfDuration = ailments |> List.map (fun a -> a, max 0.0 (Mods.mult c [ Named("SelfDuration:" + a) ] db)) |> Map.ofList
+          // (Chill is a slow: "Slowing Potency of Debuffs on You" multiplies it once more)
+          SelfEffect =
+            ailments
+            |> List.map (fun a -> a, max 0.0 (Mods.mult c [ Named("SelfEffect:" + a) ] db) * (if a = "Chill" then max 0.0 (Mods.mult c [ Named "SlowPotencyOnSelf" ] db) else 1.0))
+            |> Map.ofList
+          // ("Debuffs on you expire X% faster": time passes that much faster for them)
+          SelfDuration =
+            ailments
+            |> List.map (fun a -> a, max 0.0 (Mods.mult c [ Named("SelfDuration:" + a) ] db) / max 0.01 (Mods.mult c [ Named "DebuffExpiry" ] db))
+            |> Map.ofList
           LifeOnKill = if ci || onlyLeech then 0.0 else (named "LifeOnKill" + life * named "LifePercentOnKill" / 100.0) * lifeRecovery
           ESOnKill = es * named "ESPercentOnKill" / 100.0 * esRecovery
           LifeOnBlock = if ci || onlyLeech then 0.0 else named "LifeOnBlock" * lifeRecovery
@@ -306,7 +314,8 @@ module Defence =
           // "Reserves 25% of Life"; Setup adds what skills reserve
           LifeReserved = min 1.0 (named "LifeReservedPercent" / 100.0)
           LifeFrozenWithES = flag "LifeFrozenWithES"
-          SurroundedAt = 5 + int (named "SurroundedOffset") }
+          SurroundedAt = 5 + int (named "SurroundedOffset")
+          StunRecovery = max 0.01 (Mods.mult c [ Named "StunRecovery" ] db) }
 
     let compute bases sheet = computeWith Map.empty bases sheet
 

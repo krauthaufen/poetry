@@ -612,6 +612,13 @@ module Flat =
     let private qChains = site MSkill Base [ Chains ]
     let private qTerrainChain = site MSkill Base (named "TerrainChain")
     let private qAftershock = site MSkill Base (named "AftershockChance")
+    let private qKnockChance = site MSkill Base (named "KnockbackChance")
+    let private qKnockNever = site MSkill Flag (named "CannotKnockback")
+    let private qKnockLimit = site MSkill Base (named "KnockbackLimit")
+    let private qKnockAtMin = site MSkill Base (named "KnockbackAtMin")
+    let private qKnockAtMax = site MSkill Base (named "KnockbackAtMax")
+    let private qKnockBase = site MSkill Base (named "KnockbackBase")
+    let private qKnockDistance = siteMult MSkill (named "KnockbackDistance")
     let private qCooldownRecovery = siteMult MSkill [ CooldownRecovery ]
     let private qDoubleUses = site MSkill Base (named "DoubleCooldownUses")
     let private qLosePools = site MSkill Base (named "LosePoolsOnUse")
@@ -667,6 +674,8 @@ module Flat =
         | RIfEnemyHas of status: int * next: Re
         | RIfBuff of buff: int * next: Re
         | RRegenES of perSecond: float * duration: float * count: int
+        /// The player becomes Ignited (see `Reaction.IgniteSelf`).
+        | RIgniteSelf of percentPerSecond: float
         /// `meta`: -1 if the actor has no meta gem of the name (nothing happens then).
         | RGainEnergy of meta: int * amount: float
         /// `counts`: by the number of attacks empowered, where the count of it goes.
@@ -987,7 +996,10 @@ module Flat =
           /// Its own mods as a defender has them: newest first, with their values.
           Own: (Stat * ModKind * float * bool)[]
           /// The debuffs it has for the whole fight: status, stacks, mods.
-          Auras: (int * int * Mod list) list }
+          Auras: (int * int * Mod list) list
+          /// Whether anything in the fight can make it resist elemental damage by its lowest
+          /// resistance (only then is it asked at a hit).
+          MayResistByLowest: bool }
 
     type private CycleInfo =
         { Buff: int
@@ -1148,6 +1160,12 @@ module Flat =
               RageWhenHit: float
               RageOnKill: float
               BerserkLoss: float
+              /// The debuffs an enemy has while it is in the player's Presence (`Fight.PresenceAuras`).
+              /// (with whether it is an exposure: as strong as the enemy lets exposure be)
+              PresenceAuras: (int * int * Mod list * bool)[]
+              /// Chance (%) for a charm that is used to keep its charges, and where the count of that goes.
+              CharmKeep: float
+              CCharmKept: int
               MaxRage: int
               /// The enemies that attack, in the order the fight names them.
               /// The enemies that attack: each with the interval its first attack comes in
@@ -1203,7 +1221,9 @@ module Flat =
               BShocked: int
               BChilled: int
               BBeenHit: int
+              BAftershock: int
               CStopped: int
+              CKnockback: int
               CEvaded: int
               CEnemyHit: int
               CDeflected: int
@@ -1308,6 +1328,7 @@ module Flat =
         | IfEnemyHas _ -> "IfEnemyHas"
         | IfBuff _ -> "IfBuff"
         | RegenES _ -> "RegenES"
+        | IgniteSelf _ -> "IgniteSelf"
         | Empower _ -> "Empower"
 
     /// The program of a fight, or everything about the fight that is not built here (each
@@ -1343,7 +1364,7 @@ module Flat =
         // replacement is of the kind of the first)
         let enemies = fight.Enemies |> List.rev |> List.distinctBy (fun e -> e.Name) |> List.sortBy (fun e -> e.Name) |> Array.ofList
         let curseK (e: EnemyDef) = Mods.more Ctx.empty [ Named "CurseEffectOnSelf" ] (ModDb.ofList e.Mods)
-        for (name, _, _) in fight.EnemyAuras do
+        for (name, _, _) in fight.EnemyAuras @ fight.PresenceAuras do
             statuses.Id name |> ignore
         let enemyInfo (d: EnemyDef) : EnemyInfo =
                 let db = ModDb.ofList d.Mods
@@ -1363,7 +1384,11 @@ module Flat =
                     fight.EnemyAuras
                     |> List.map (fun (name, stacks, mods) ->
                         let k = if name.StartsWith "Curse:" then Mods.more Ctx.empty [ Named "CurseEffectOnSelf" ] db else 1.0
-                        statuses.Id name, stacks, mods |> List.map (Mod.scaled k)) }
+                        statuses.Id name, stacks, mods |> List.map (Mod.scaled k))
+                  MayResistByLowest =
+                    (let lowest (ms: Mod list) = ms |> List.exists (fun m -> m.Stat = Named "ResistByLowest")
+                     lowest d.Mods || (fight.EnemyAuras @ fight.PresenceAuras) |> List.exists (fun (_, _, ms) -> lowest ms)
+                     || (fight.Player :: fight.Minions) |> List.exists (fun a -> a.Rules |> List.exists (fun r -> match r.Reaction with ApplyDebuff (_, _, _, ms) | ApplyCurse (_, _, ms) -> lowest ms | _ -> false))) }
         let enemyInfos = enemies |> Array.map enemyInfo
         let roots = Dictionary<string, EnemyInfo>()
         for d in fight.Enemies do
@@ -1482,6 +1507,7 @@ module Flat =
             let bShocked = buffs.Id "Shocked"
             let bChilled = buffs.Id "Chilled"
             let bBeenHit = buffs.Id "BeenHitRecently"
+            let bAftershock = buffs.Id "Aftershock"
             let bStates = stateNames |> List.map buffs.Id |> Array.ofList
             let bCharges = [ "PowerCharge"; "FrenzyCharge"; "EnduranceCharge" ] |> List.map buffs.Id |> Array.ofList
             let bConstantMana = buffs.Id "ConstantManaFlask"
@@ -1541,6 +1567,7 @@ module Flat =
                 | IfEnemyHas (st, next) -> RIfEnemyHas(statuses.Id st, reaction next)
                 | IfBuff (b, next) -> RIfBuff(buffs.Id b, reaction next)
                 | RegenES (rate, duration) -> RRegenES(rate, duration, counts.Id "regen:ES")
+                | IgniteSelf percent -> RIgniteSelf percent
                 | GainEnergy (meta, amount) -> RGainEnergy((match actor.Metas |> List.tryFindIndex (fun m -> m.Name = meta) with Some i -> i | None -> -1), amount)
                 | Empower (b, perPower, cap) ->
                     // (the most there can be: with every enemy alive)
@@ -2177,6 +2204,9 @@ module Flat =
                       RageWhenHit = Mods.sumBase Ctx.empty [ Named "RageWhenHit" ] sheet
                       RageOnKill = Mods.sumBase Ctx.empty [ Named "RageOnKill" ] sheet
                       BerserkLoss = Mods.sumBase Ctx.empty [ Named "LifeLossPercentPerMinutePerRage" ] sheet
+                      CharmKeep = Mods.sumBase Ctx.empty [ Named "CharmKeepCharges" ] sheet
+                      PresenceAuras = fight.PresenceAuras |> List.map (fun (name, stacks, mods) -> statuses.Id name, stacks, mods, name.StartsWith "Exposure:") |> Array.ofList
+                      CCharmKept = counts.Id "charm:kept charges"
                       MaxRage = Map.tryFind "Rage" actor.MaxResources |> Option.defaultValue 0
                       Attackers =
                         (if actor.Vitals.IsNone && not anyBody then [||]
@@ -2217,7 +2247,9 @@ module Flat =
                       BShocked = bShocked
                       BChilled = bChilled
                       BBeenHit = bBeenHit
+                      BAftershock = bAftershock
                       CStopped = cStopped
+                      CKnockback = counts.Id "knockback"
                       CEvaded = cEvaded
                       CEnemyHit = cEnemyHit
                       CDeflected = cDeflected
@@ -3318,6 +3350,7 @@ module Flat =
 
     let private actionSpeedStat = Named "ActionSpeed"
     let private damageDealtStat = Named "DamageDealt"
+    let private movementSpeedStat = Named "MovementSpeed"
 
     let private kill (s: State) (e: Foe) (at: float) =
         e.Life <- 0.0
@@ -3402,12 +3435,15 @@ module Flat =
                                 let t = typeIndex d.Of
                                 if System.Double.IsNaN (at e.DotTaken t) then
                                     // (`Ailments.dotTakenMult`: bleeding ignores armour)
+                                    let own (t: int) =
+                                        dsum e Base (at resistOf t) 0.0
+                                        |> min (min Constants.resistCeiling (Constants.enemyBaseMaxResist + dsum e Base (at maxResistOf t) 0.0))
+                                        |> max Constants.resistFloor
                                     let resist =
                                         if t = 0 then 0.0
-                                        else
-                                            dsum e Base (at resistOf t) 0.0
-                                            |> min (min Constants.resistCeiling (Constants.enemyBaseMaxResist + dsum e Base (at maxResistOf t) 0.0))
-                                            |> max Constants.resistFloor
+                                        // "Resist Elemental Damage based on their Lowest Resistance"
+                                        elif t <= 3 && e.Info.MayResistByLowest && dsum e Base (Named "ResistByLowest") 0.0 > 0.0 then min (own 1) (min (own 2) (own 3))
+                                        else own t
                                     put e.DotTaken t ((1.0 - resist / 100.0) * dmult e (at takenStats t) * dmult e dotTakenStats)
                                 put rates i (d.Dps * k * (at e.DotTaken t))
                                 put labels i (d.Label)
@@ -3445,11 +3481,31 @@ module Flat =
                                 (if (at e.SHas (at ailments 10)) then 1.0 - Constants.maimSlow / 100.0 else 1.0)
                                 * (if (at e.SHas (at ailments 12)) then 1.0 - Constants.hinderSlow / 100.0 else 1.0)
                                 * (1.0 - (if (at e.Has s.P.SChilled) then (at e.DMods s.P.SChilled) |> List.sumBy (fun m -> m.Value) else 0.0) / 100.0)
+                            // what its debuffs make of its movement speed
+                            let slow =
+                                defList s e
+                                slow * max 0.0 (dmore e movementSpeedStat 1.0)
                             let step = min gap (e.Def.Speed * slow * dt)
                             e.Def <- { e.Def with Position = Vec.scale ((d - step) / d) e.Def.Position }
                             s.AliveStale <- true
                     | _ -> ()
             s.Time <- t
+
+    /// Auras on enemies in the player's Presence come and go with where the enemies are
+    /// (`Sim.syncPresence`).
+    let private syncPresence (s: State) =
+        let auras = s.Main.PresenceAuras
+        if auras.Length > 0 then
+            let reach = s.Main.Fight.Presence
+            for live in 0 .. s.Live.Length - 1 do
+                let e = at s.Foes (at s.Live live)
+                if e.Life > 0.0 then
+                    let inside = Vec.length e.Def.Position - e.Def.Size <= reach
+                    for place in 0 .. auras.Length - 1 do
+                        let id, stacks, mods, exposure = at auras place
+                        let has = (at e.Has id) && (at e.Expires id) > s.Time
+                        if inside && not has then setDebuff e id stacks infinity (if exposure then mods |> List.map (Mod.scaled e.Info.ExposureK) else mods)
+                        elif not inside && has && System.Double.IsPositiveInfinity(at e.Expires id) then removeDebuff e id
 
     let inline private alive (s: State) = System.Double.IsNaN s.Died
 
@@ -3658,7 +3714,7 @@ module Flat =
 
     /// Something that uses charms happened to the player. A charm for it that is running, or
     /// has the charges to be used now, answers; whether the occurrence is prevented (`Sim.charm`).
-    let private charm (s: State) (key: string) : bool =
+    let private charm (s: State) (rng: Rng) (key: string) : bool =
         let p = s.Main
         match p.Vitals with
         | Some pools when p.Charms.Length > 0 ->
@@ -3676,15 +3732,44 @@ module Flat =
                     elif charges >= c.Charm.ChargesPerUse && c.Charm.ChargesPerUse > 0.0 then
                         setBuff s c.CBuff 1 (s.Time + c.Charm.Duration) []
                         expireAt s (s.Time + c.Charm.Duration)
-                        put s.CharmCharges c.CBuff (charges - c.Charm.ChargesPerUse)
+                        // "X% chance for Charms you use to not consume Charges"
+                        let kept = rng.Chance p.CharmKeep
+                        if not kept then put s.CharmCharges c.CBuff (charges - c.Charm.ChargesPerUse)
                         s.Life <- min (max s.Life pools.Life) (s.Life + (if pools.Life > 1.0 then c.Charm.LifeOnUse * pools.LifeRecoveryRate else 0.0))
                         s.Mana <- min (max s.Mana pools.Mana) (s.Mana + c.Charm.ManaOnUse * pools.ManaRecoveryRate)
                         if c.Charm.StartsRecharge then s.LastHit <- -1e9
                         bump s c.Used
+                        if kept then bump s p.CCharmKept
                         prevented <- prevented || c.Charm.Prevents
             enter s was
             prevented
         | _ -> false
+
+    /// The player's defences with the buffs and charges of the moment (`Actor.VitalsAt`; the
+    /// player is the actor entered). They are a function of the buffs: the same buffs, the
+    /// same defences, and working them out is most of what a monster's hit costs.
+    let private vitalsNow (s: State) (pools: PlayerStats) : PlayerStats =
+        let p = s.P
+        match p.Fight.Player.VitalsAt with
+        | Some at ->
+            match s.VitalsLast with
+            | Some v when s.VitalsOf = s.A.VitalsVersion -> v
+            | _ ->
+                // the buffs written out: which there are, and their stacks
+                let mutable key = ""
+                for id in p.VitalsOn do
+                    if s.A.BHas.[id] then key <- key + string id + "=" + string s.A.BStacks.[id] + ";"
+                let v =
+                    match s.VitalsSeen.TryGetValue key with
+                    | true, v -> v
+                    | _ ->
+                        let v = at (buffMap s)
+                        s.VitalsSeen.[key] <- v
+                        v
+                s.VitalsOf <- s.A.VitalsVersion
+                s.VitalsLast <- Some v
+                v
+        | None -> pools
 
     /// Exposure on an enemy: the strongest applies (`Sim.expose`).
     let private expose (s: State) (target: int) (dt: DamageType) (amount: float) (duration: float) =
@@ -4033,6 +4118,22 @@ module Flat =
             if s.Main.Vitals.IsSome && alive s then
                 s.Recoups <- (s.Time + duration, rate, PShroudES) :: (s.Recoups |> List.filter (fun (_, _, pool) -> pool <> PShroudES))
                 bump s count
+        | RIgniteSelf percent ->
+            // (the player's own rule; resistance and what there is against Ignite with the buffs of the moment)
+            match s.Main.Vitals with
+            | Some pools when alive s && s.Cur = 0 ->
+                let v = vitalsNow s pools
+                if not (rng.Chance(Map.tryFind "Ignite" v.Avoid |> Option.defaultValue 0.0)) then
+                    if charm s rng "Ignited" then bump s s.Main.CPrevented.["Ignited"]
+                    else
+                        let dps =
+                            percent / 100.0 * (pools.Life + pools.EnergyShield) * (Map.tryFind "Ignite" v.SelfEffect |> Option.defaultValue 1.0)
+                            * (1.0 - (Map.tryFind Fire v.Resist |> Option.defaultValue 0.0) / 100.0) * (Map.tryFind Fire v.TakenMult |> Option.defaultValue 1.0)
+                        let until = s.Time + Constants.igniteDuration * (Map.tryFind "Ignite" v.SelfDuration |> Option.defaultValue 1.0)
+                        let stronger = s.Burning |> List.exists (fun (u, d, t) -> t = Fire && u > s.Time && d > dps)
+                        if not stronger then s.Burning <- (until, dps, Fire) :: (s.Burning |> List.filter (fun (_, _, t) -> t <> Fire))
+                        bump s s.Main.CPlayerIgnited
+            | _ -> ()
         | RGainEnergy (meta, amount) -> if meta >= 0 then gainEnergy s rng meta amount
         | REmpower (b, perPower, cap, counts) ->
             // a warcry: one attack per so much monster power among the living, at least one
@@ -4925,9 +5026,18 @@ module Flat =
         min Constants.enemyMaxPhysReduction (fromArmour + n.PhysFlat)
 
     /// `Hit.effectiveResist`.
+    let private resistByLowest = Named "ResistByLowest"
+
     let private effectiveResist (ev: Ev) (n: Foe) (t: int) =
-        let maxRes = nMaxRes n t
-        let res = nRes n t + sumQ ev (at qEnemyResist t) |> min maxRes |> max Constants.resistFloor
+        let res =
+            // "Resist Elemental Damage based on their Lowest Resistance": the lowest of the three
+            if t >= 1 && t <= 3 && n.Info.MayResistByLowest && dsum n Base resistByLowest 0.0 > 0.0 then
+                let mutable low = infinity
+                for other in 1 .. 3 do
+                    let r = nRes n other + sumQ ev (at qEnemyResist other) |> min (nMaxRes n other) |> max Constants.resistFloor
+                    if r < low then low <- r
+                low
+            else nRes n t + sumQ ev (at qEnemyResist t) |> min (nMaxRes n t) |> max Constants.resistFloor
         let pen = sumQ ev (at qPen t)
         let floor' =
             if t >= 1 && t <= 3 then
@@ -5582,12 +5692,15 @@ module Flat =
                 else
                     for k in 0 .. inflicted.Count - 1 do
                         let i = inflicted.[k]
+                        // (a bar that this hit fills: the status is there after it and was not before)
+                        let had = match i with AddBuildup (a, _) -> at e.Has (at p.AilmentStatus (ailmentIndex a)) | _ -> true
                         inflict s e i
                         match i with
                         | Dot (a, _, _, _, _) | Status (a, _, _) ->
                             bump s (at p.CInflict (ailmentIndex a))
                             react s rng (at p.OnInflict (ailmentIndex a)) "" sid target
-                        | AddBuildup _ -> ()
+                        | AddBuildup (a, _) ->
+                            if not had && (at e.Has (at p.AilmentStatus (ailmentIndex a))) then react s rng (at p.OnInflict (ailmentIndex a)) "" sid target
                 // the skill's own damage over time: one instance per skill and type, the strongest stays
                 if not (dead || info.Dots.Length = 0) then
                     let duration = (if skill.Duration > 0.0 then skill.Duration else 1.0) * multQ ev qSkillDuration
@@ -5782,7 +5895,7 @@ module Flat =
                             // "granting charges equal to half of the monster's Power"
                             let gain = (MonsterPower.ofRarity def0.Rarity / 2.0 + (if rng.Chance c.Charm.ChargeOnKillChance then 1.0 else 0.0)) * c.Charm.ChargeGainMult
                             put s.CharmCharges c.CBuff (min c.Charm.MaxCharges ((at s.CharmCharges c.CBuff) + gain))
-                    if def0.Rarity = Rare || def0.Rarity = Unique then charm s "KillRare" |> ignore
+                    if def0.Rarity = Rare || def0.Rarity = Unique then charm s rng "KillRare" |> ignore
                 // "Only one Hit every 0.5 seconds can cause you to gain Rage": when one last could
                 // is kept, even where there is no Rage to gain
                 // (Rage is the player's alone)
@@ -5791,6 +5904,26 @@ module Flat =
                     let onHit = if fresh then sumQ ev qRageOnHit else 0.0
                     if onHit > 0.0 then s.A.Energy <- Map.add "RageHitAt" s.Time s.A.Energy
                     gainRage s (onHit + (if dead then p.RageOnKill else 0.0))
+                // Knockback: the monster is pushed straight away from the player (see the reference)
+                if not dead && def0.Rarity <> Unique then
+                    ev.Crit <- crit
+                    let chance = sumQ ev qKnockChance
+                    if chance > 0.0 && not (flagQ ev qKnockNever) && rng.Chance chance then
+                        let pos = def0.Position
+                        let d = Vec.length pos
+                        let limit = sumQ ev qKnockLimit
+                        let byDistance =
+                            if limit <= 0.0 then 1.0
+                            else
+                                let k = min 1.0 (max 0.0 (d - def0.Size) / limit)
+                                1.0 + (sumQ ev qKnockAtMin * (1.0 - k) + sumQ ev qKnockAtMax * k) / 100.0
+                        let own = sumQ ev qKnockBase
+                        let far = (if own > 0.0 then own / Constants.knockbackUnitsPerDistance else Constants.knockbackDefault) * multQ ev qKnockDistance * byDistance
+                        if far > 0.0 then
+                            e.Def <- { e.Def with Position = (if d > 1e-9 then Vec.scale ((d + far) / d) pos else Vec.make far 0.0) }
+                            s.AliveStale <- true
+                            bump s p.CKnockback
+                    ev.Crit <- false
                 // what the game tracks for "recently" conditions
                 mark s p.BHit 4.0
                 if not crit then mark s p.BNonCrit 4.0
@@ -5976,7 +6109,10 @@ module Flat =
                 strike ()
                 // Aftershock: a slam has a chance to hit its area once more
                 if info.IsSlam && rng.Chance(sumQ ev qAftershock) then
+                    // (while it strikes the actor has "Aftershock": for what only an Aftershock's hits do)
+                    setBuff s p.BAftershock 1 infinity []
                     strike ()
+                    removeBuff s p.BAftershock
                     bump s info.CAftershock
                 release s
             release s
@@ -6239,27 +6375,7 @@ module Flat =
             // mitigation from the player's current buffs and charges
             // (the defences are a function of the buffs: the same buffs, the same defences, and
             // working them out is most of what a monster's hit costs)
-            let v =
-                match p.Fight.Player.VitalsAt with
-                | Some at ->
-                    match s.VitalsLast with
-                    | Some v when s.VitalsOf = s.A.VitalsVersion -> v
-                    | _ ->
-                        // the buffs written out: which there are, and their stacks
-                        let mutable key = ""
-                        for id in p.VitalsOn do
-                            if s.A.BHas.[id] then key <- key + string id + "=" + string s.A.BStacks.[id] + ";"
-                        let v =
-                            match s.VitalsSeen.TryGetValue key with
-                            | true, v -> v
-                            | _ ->
-                                let v = at (buffMap s)
-                                s.VitalsSeen.[key] <- v
-                                v
-                        s.VitalsOf <- s.A.VitalsVersion
-                        s.VitalsLast <- Some v
-                        v
-                | None -> pools
+            let v = vitalsNow s pools
             let stopped = stopped s e false
             let blinded = at e.SHas (at p.AilmentStatus 11)
             let chill = if (at e.Has p.SChilled) then (at e.DMods p.SChilled) |> List.sumBy (fun m -> m.Value) else 0.0
@@ -6344,7 +6460,7 @@ module Flat =
                     // "Rage loss is paused for 4 seconds upon gaining Rage, or after taking damage"
                     s.A.RageAt <- s.Time
                     // charms used when a hit of their damage type is taken (they help from the next hit on)
-                    if p.Charms.Length > 0 then taken |> Map.iter (fun t d -> if d > 0.0 then charm s ("Hit:" + DamageType.name t) |> ignore)
+                    if p.Charms.Length > 0 then taken |> Map.iter (fun t d -> if d > 0.0 then charm s rng ("Hit:" + DamageType.name t) |> ignore)
                     if crit then bump s p.CEnemyCrit
                     setBuff s p.BBeenHit 1 (s.Time + 4.0) []
                     expireAt s (s.Time + 4.0)
@@ -6364,7 +6480,7 @@ module Flat =
                             bump s count
                         // a charm for this may stop it (and is used up doing so)
                         let unlessCharm (key: string) (apply: unit -> unit) =
-                            if charm s key then bump s p.CPrevented.[key] else apply ()
+                            if charm s rng key then bump s p.CPrevented.[key] else apply ()
                         // ignite: strongest only
                         (let fire = get Fire
                          if fire > 0.0 && rng.Chance(min 100.0 (fire / thr * Constants.igniteChanceMultiplier)) && not (avoided "Ignite") then
@@ -6397,7 +6513,7 @@ module Flat =
                             |> fun d -> if atk.Melee then d * (1.0 + Constants.monsterMeleeStunMore / 100.0) else d
                         let stunChance = min 100.0 (stunDamage / max 1.0 v.StunThreshold * 100.0)
                         if stunChance >= Constants.playerLightStunMinimum && rng.Chance stunChance && not (rng.Chance v.AvoidStun) then
-                            unlessCharm "Stunned" (lock Constants.playerLightStunDuration p.CPlayerStunned)
+                            unlessCharm "Stunned" (lock (Constants.playerLightStunDuration / v.StunRecovery) p.CPlayerStunned)
                     bump s p.CEnemyHit
                     if deflected then bump s p.CDeflected
                     if blocked then
@@ -6629,6 +6745,7 @@ module Flat =
             enter s 0
             let p = s.P
             advance s t
+            syncPresence s
             recover s dt
             if s.AliveCount > 0 && alive s then
                 pruneAll s

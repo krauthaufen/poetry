@@ -313,13 +313,16 @@ module Hit =
     /// penetration. Penetration cannot take resistance below zero.
     let effectiveResist (attackerCtx: Ctx) attackerMods (defender: Defender) t =
         let dctx = Ctx.empty
-        let maxRes =
-            min Constants.resistCeiling (Constants.enemyBaseMaxResist + Mods.sumBase dctx [ MaxResist t ] defender.Mods)
-        let res =
+        let own (t: DamageType) =
             // "Enemies Frozen by this Skill have -X% to Cold Resistance": lowered by the attacker, for its hits
             Mods.sumBase dctx [ Resist t ] defender.Mods + Mods.sumBase attackerCtx [ Named("EnemyResist:" + DamageType.name t) ] attackerMods
-            |> min maxRes
+            |> min (min Constants.resistCeiling (Constants.enemyBaseMaxResist + Mods.sumBase dctx [ MaxResist t ] defender.Mods))
             |> max Constants.resistFloor
+        let res =
+            // "Resist Elemental Damage based on their Lowest Resistance": the lowest of the three
+            if DamageType.isElemental t && Mods.sumBase dctx [ Named "ResistByLowest" ] defender.Mods > 0.0 then
+                DamageType.elemental |> List.map own |> List.min
+            else own t
         let pen = Mods.sumBase attackerCtx [ Penetration t ] attackerMods
         // penetration stops at 0, or lower with "can penetrate down to a minimum of X"
         let floor =

@@ -838,6 +838,23 @@ module Gems =
     /// Build a simulator Skill from a socketed gem. `characterMods` are needed for
     /// "+N to level of ... gems". Attacks need a weapon. Stat sets that belong to the
     /// same use become Parts of the skill.
+    /// "Increases and reductions to Projectile speed also apply to Projectile Damage" (a
+    /// support's, or a character's for its bows): what the character and the skill have of
+    /// increased projectile speed, and for a spell that share of its increased cast speed
+    /// which "also applies to Projectile Speed", is increased damage of the skill's
+    /// projectiles. Worked out when the skill is built: what holds only for a while in a
+    /// fight (a buff's cast speed) is not counted.
+    let private speedAsDamage (characterMods: ModDb) (sk: Skill) : Skill =
+        if not (sk.Tags.Contains Projectile) then sk
+        else
+            let ctx = { Ctx.empty with SkillName = sk.Name; SkillTags = sk.Tags }
+            let db = ModDb.addList sk.Mods characterMods
+            if not (Mods.flag ctx (Named "ProjectileSpeedAsDamage") db) then sk
+            else
+                let fromCast = if sk.Tags.Contains Spell then Mods.sumInc ctx [ Speed ] db * Mods.sumBase ctx [ Named "CastSpeedAsProjectileSpeed" ] db / 100.0 else 0.0
+                let speed = Mods.sumInc ctx [ Named "ProjectileSpeed" ] db + fromCast
+                if speed = 0.0 then sk else { sk with Mods = sk.Mods @ [ Mod.inc (Damage AllDamage) speed |> Mod.from "projectile speed" ] }
+
     let rec skill (db: GameDb) (characterMods: ModDb) (weapon: Weapon option) (setup: GemSetup) : Result<Skill * Coverage, string> =
         match skillOfGemFor db setup.Gem weapon with
         | None -> Error(sprintf "unknown gem %s" setup.Gem)
@@ -1018,6 +1035,7 @@ module Gems =
                     setup.Supports
                     |> List.choose (fun (name, lvl) -> supportOfGem db name |> Option.bind (fun s -> Map.tryFind (max 1 lvl) s.Levels |> Option.orElse (Map.tryFind 1 s.Levels)))
                     |> List.fold (fun k l -> k * (1.0 + (l.ManaMultiplier |> Option.defaultValue 0.0) / 100.0)) 1.0
+                let main, parts = speedAsDamage characterMods main, parts |> List.map (speedAsDamage characterMods)
                 Ok({ main with Parts = parts; Cost = main.Cost * costMult; CostPerSecond = main.CostPerSecond * costMult }, cov)
 
     /// The game stats of a socketed gem (own stat set, quality, alt quality, supports),

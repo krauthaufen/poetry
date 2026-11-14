@@ -334,7 +334,7 @@ module Behaviours =
                               OnStunChance = sum "ward_remnants_chance_to_spawn_remnant_on_stun_%"
                               StunCooldown = sum "ward_remnants_spawn_remnant_on_stun_cooldown_ms" / 1000.0
                               WardPerRemnant = sum "ward_remnants_gain_per_globe" * (1.0 + sum "remnant_effect_+%" / 100.0)
-                              ExtraChance = sum "chance_%_to_create_additional_remnant"
+                              ExtraChance = (sum "chance_%_to_create_additional_remnant" + Mods.sumBase Ctx.empty [ Named "ExtraRemnantChance" ] charMods)
                               Delay = pickupSeconds + sum "remnant_delay_X_ms" / 1000.0
                               Overflow = 1.5 }))
 
@@ -361,7 +361,7 @@ module Behaviours =
                               CritCooldown = sum "mana_remnants_spawn_remnant_on_crit_vs_elemental_ailment_enemy_every_X_ms" / 1000.0
                               ManaPerRemnant = sum "mana_remnants_mana_gain_per_globe" * (1.0 + (sum "remnant_effect_+%" + Mods.sumInc Ctx.empty [ Named "RemnantEffect" ] charMods) / 100.0)
                               PercentOfMaxMana = Mods.sumBase Ctx.empty [ Named "RemnantRecoverManaPercent" ] charMods
-                              ExtraChance = sum "chance_%_to_create_additional_remnant"
+                              ExtraChance = (sum "chance_%_to_create_additional_remnant" + Mods.sumBase Ctx.empty [ Named "ExtraRemnantChance" ] charMods)
                               Delay = pickupSeconds + sum "remnant_delay_X_ms" / 1000.0
                               Overflow = 2.0 }))
 
@@ -453,7 +453,7 @@ module Behaviours =
                               Shock, "LightningInfusion", sum "infusion_remnants_%_chance_to_spawn_lightning_infusion_on_shocking_an_enemy" ]
                             |> List.filter (fun (_, _, c) -> c > 0.0)
                         if r.IsEmpty then None
-                        else Some(r, sum "chance_%_to_create_additional_remnant", pickupSeconds + sum "remnant_delay_X_ms" / 1000.0)))
+                        else Some(r, (sum "chance_%_to_create_additional_remnant" + Mods.sumBase Ctx.empty [ Named "ExtraRemnantChance" ] charMods), pickupSeconds + sum "remnant_delay_X_ms" / 1000.0)))
             |> Option.defaultValue ([], 0.0, pickupSeconds)
         if remnants.IsEmpty && consumers.IsEmpty then None
         else
@@ -565,7 +565,10 @@ module Behaviours =
                     ([], [])
             // your curse / mark effect scales what it does
             let effect = Mods.mult ctx [ Named(if isCurse then "CurseEffect" else "MarkEffect") ] all
-            Some(name, duration, monster |> List.map (Mod.scaled effect), player |> List.map (Mod.scaled effect >> Mod.from skill.Name))
+            // "Enemies you Curse are Hindered, with 15% reduced Movement Speed" (it comes and goes
+            // with the curse, and like it is weaker on an enemy that curses are weaker on)
+            let hinder = if isCurse && Mods.flag Ctx.empty (Named "CursesHinder") all then [ Mod.more (Named "MovementSpeed") -15.0 ] else []
+            Some(name, duration, (monster |> List.map (Mod.scaled effect)) @ hinder, player |> List.map (Mod.scaled effect >> Mod.from skill.Name))
 
     /// "Curse zones erupt after a delay" (`curse_delay_duration_ms`), slower or faster with
     /// "Curse Activation"; none with "Curses have no Activation Delay". Marks have none.
@@ -1006,7 +1009,12 @@ module Behaviours =
                 | [| _; hook; effect; seconds |] ->
                     let hook = match hook with "OnCrit" -> Some OnCrit | "OnHit" -> Some OnHit | "OnKill" -> Some OnKill | "OnUse" -> Some OnUse | "WhenHit" -> Some WhenHit | _ -> None
                     let secs = float seconds
-                    let filter = m.Conds |> List.tryPick (function SkillIs t -> Some(WithTag t) | _ -> None) |> Option.defaultValue filter
+                    // (every kind of skill the stat names: "with this Weapon" in weapon set two is an attack of that set)
+                    let filter =
+                        match m.Conds |> List.choose (function SkillIs t -> Some t | _ -> None) with
+                        | [] -> filter
+                        | [ t ] -> WithTag t
+                        | ts -> WithTags(ts, [])
                     hook |> Option.map (fun h ->
                         let reaction =
                             if effect.StartsWith "-" then RemoveBuff(effect.Substring 1)
@@ -1020,6 +1028,37 @@ module Behaviours =
             | _ -> None
         (sheet.Mods |> List.choose (ruleOf AnySkill))
         @ (skills |> List.collect (fun s -> s.Mods |> List.choose (ruleOf (Called s.Name))))
+
+    /// "Become Ignited when you deal a Critical Hit, taking X% of your maximum Life and Energy
+    /// Shield as Fire Damage per second": every critical hit of the character (a triggered
+    /// skill's too) ignites it anew.
+    let selfIgnite (sheet: CharacterSheet) : Rule list =
+        let percent = Mods.sumBase Ctx.empty [ Named "IgniteSelfOnCrit" ] (ModDb.ofList sheet.Mods)
+        if percent > 0.0 then [ { Hook = OnCrit; Filter = AnySkill; Chance = 100.0; Reaction = IgniteSelf percent } ] else []
+
+    /// "Buffs on you expire X% faster": time passes that much faster for the buffs the
+    /// character's rules give it (Onslaught, Arcane Surge, a skill's buff, Ice Bite): they last
+    /// 1 / (1 + X / 100) of their time. Not charges (they are no buffs: the stat is
+    /// "only buff category"), not what never runs out by itself.
+    let buffsExpire (sheet: CharacterSheet) (rules: Rule list) : Rule list =
+        let k = Mods.mult Ctx.empty [ Named "BuffExpiry" ] (ModDb.ofList sheet.Mods)
+        if k = 1.0 || k <= 0.0 then rules
+        else
+            let rec scale (r: Reaction) =
+                match r with
+                | GrantBuff (name, duration, stacks, mods) when duration < 3600.0 -> GrantBuff(name, duration / k, stacks, mods)
+                | ChargeBuff (name, charge, perStack, seconds, double) -> ChargeBuff(name, charge, perStack, seconds / k, double)
+                | SpendStack (b, next) -> SpendStack(b, scale next)
+                | IfBuff (b, next) -> IfBuff(b, scale next)
+                | IfEnemyHas (st, next) -> IfEnemyHas(st, scale next)
+                | WithCorpse (next, otherwise) -> WithCorpse(scale next, scale otherwise)
+                | other -> other
+            rules |> List.map (fun r -> { r with Reaction = scale r.Reaction })
+
+    /// How much faster buffs on the character expire (1: as they are).
+    let buffExpiry (sheet: CharacterSheet) : float =
+        let k = Mods.mult Ctx.empty [ Named "BuffExpiry" ] (ModDb.ofList sheet.Mods)
+        if k <= 0.0 then 1.0 else k
 
     /// Critical Weakness inflicted on enemies in your presence every second for N seconds: a
     /// steady N stacks (at most 20) on every enemy.
@@ -1044,6 +1083,45 @@ module Behaviours =
             else None)
         |> Option.defaultValue []
 
+    /// Malice: "emits an Aura that continuously inflicts Critical Weakness on enemies in your
+    /// Presence": a stack every `critical_chance_against_aura_apply_brittle_every_x_ms`, each for
+    /// the gem's duration: a steady duration / interval stacks (at most 20) on every enemy in it.
+    let malice (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) : (string * int * Mod list) list =
+        let charMods = ModDb.ofList sheet.Mods
+        build.Groups
+        |> List.filter (fun g -> g.Enabled)
+        |> List.collect (fun g -> g.Gems |> List.filter (fun x -> x.Enabled && not x.IsSupport))
+        |> List.tryPick (fun gem ->
+            let raw = Gems.rawStats db charMods { Gem = gem.Name; Level = gem.Level; Quality = gem.Quality; StatSet = 1; Supports = [] }
+            let sum id = raw |> List.filter (fun (k, _) -> k = id) |> List.sumBy snd
+            let every, lasts = sum "critical_chance_against_aura_apply_brittle_every_x_ms", sum "base_skill_effect_duration"
+            if every > 0.0 && lasts > 0.0 then Some [ "CriticalWeakness", min 20 (int (ceil (lasts / every))), [] ] else None)
+        |> Option.defaultValue []
+
+    /// The radius of the character's Presence, game units: 4 m, as an area scaled by "increased
+    /// Presence Area of Effect" (the radius by its square root, as for skills); "Presence
+    /// Radius is doubled" doubles the radius.
+    let presenceRadius (sheet: CharacterSheet) : float =
+        let db = ModDb.ofList sheet.Mods
+        Geometry.radius Constants.presenceRadius (Mods.mult Ctx.empty [ Named "PresenceArea" ] db)
+        * (if Mods.flag Ctx.empty (Named "PresenceRadiusDoubled") db then 2.0 else 1.0)
+
+    /// What enemies in the character's Presence have, beside the auras of its gems: "are
+    /// Hindered", "are Blinded", "have Exposure" (20% to each element, x exposure effect and
+    /// the enemy's own; the strongest exposure applies), "have -X% to Fire Resistance".
+    let presenceAuras (sheet: CharacterSheet) : (string * int * Mod list) list =
+        let db = ModDb.ofList sheet.Mods
+        let has name = Mods.flag Ctx.empty (Named("PresenceAura:" + name)) db
+        let fire = Mods.sumBase Ctx.empty [ Named "PresenceResist:Fire" ] db
+        [ if has "Hindered" then yield "Hindered", 1, []
+          if has "Blinded" then yield "Blinded", 1, []
+          if has "Exposure" then
+              let k = Mods.inc Ctx.empty [ Named "ExposureEffect" ] db
+              for t in DamageType.elemental -> "Exposure:" + DamageType.name t, 1, [ Mod.base' (Resist t) (-Constants.exposureMagnitude * k) |> Mod.from "Presence" ]
+          if fire <> 0.0 then yield "Presence: Fire Resistance", 1, [ Mod.base' (Resist Fire) fire |> Mod.from "Presence" ]
+          // "Enemies in your Presence Resist Elemental Damage based on their Lowest Resistance" (Hit.effectiveResist)
+          if has "LowestResist" then yield "Presence: Lowest Resistance", 1, [ Mod.base' (Named "ResistByLowest") 1.0 |> Mod.from "Presence" ] ]
+
     /// Charms from the equipped items (API layout: "Flask: Lasts N Seconds", "Flask: Consumes N
     /// of M Charges on use", "Utility: <effect>", "Used when you ..."). Returns the charms and
     /// the sheet mods their effects are (conditional on the charm's buff).
@@ -1051,6 +1129,9 @@ module Behaviours =
         let sheetDb = ModDb.ofList sheet.Mods
         let durationInc = Mods.inc Ctx.empty [ Named "CharmDuration" ] sheetDb
         let gainInc = Mods.sumInc Ctx.empty [ Named "CharmChargesGained" ] sheetDb
+        let gainMore = Mods.more Ctx.empty [ Named "CharmChargesGained" ] sheetDb
+        // "X% increased / reduced Charm Charges used"
+        let usedMult = max 0.0 (Mods.mult Ctx.empty [ Named "CharmChargesUsed" ] sheetDb)
         let numbers (l: string) =
             l.Split(' ') |> Array.choose (fun w -> match System.Double.TryParse(w.Trim(',').TrimEnd('%')) with | true, v -> Some v | _ -> None) |> List.ofArray
         build.Items
@@ -1085,11 +1166,11 @@ module Behaviours =
               Buff = buff
               Prevents = prevents
               Duration = (first "Flask: Lasts" |> Option.defaultValue 0.0) * durationInc
-              ChargesPerUse = perUse
+              ChargesPerUse = perUse * usedMult
               MaxCharges = maxC
               ChargesPerSecond = ownLine "Charges per Second" |> Option.defaultValue 0.0
               ChargeOnKillChance = ownLine "Chance to gain a Charge when you kill an enemy" |> Option.defaultValue 0.0
-              ChargeGainMult = 1.0 + ((ownLine "increased Charges gained" |> Option.defaultValue 0.0) + gainInc) / 100.0
+              ChargeGainMult = (1.0 + ((ownLine "increased Charges gained" |> Option.defaultValue 0.0) + gainInc) / 100.0) * gainMore
               LifeOnUse = ownLine "Life when Used" |> Option.defaultValue 0.0
               ManaOnUse = ownLine "Mana when Used" |> Option.defaultValue 0.0
               StartsRecharge = lines |> List.exists (fun l -> l.Contains "Energy Shield Recharge starts on use") },
@@ -1170,10 +1251,61 @@ module Behaviours =
                     // "Creates a Lightning Infusion on successful use") when it does
                     let seed = sum "living_bomb_damage_threshold_%_of_ailment_threshold" > 0.0 || raw |> List.exists (fun (k, _) -> k = "active_skill_show_cull_range")
                     [ { Hook = (if seed then OnHit else OnUse); Filter = Called skillName; Chance = 100.0
-                        Reaction = DropRemnant(el + "Infusion", detonation + pickupSeconds, sum "chance_%_to_create_additional_remnant") } ]
+                        Reaction = DropRemnant(el + "Infusion", detonation + pickupSeconds, (sum "chance_%_to_create_additional_remnant" + Mods.sumBase Ctx.empty [ Named "ExtraRemnantChance" ] charMods)) } ]
                 | _ -> []
             | _ -> []
         exposure @ remnant
+
+    /// Jagged Ground: "Slows the movement speed of enemies in its area by 20%" (x its effect);
+    /// "Enemies in Jagged Ground you create take X% increased Damage". A patch lies where the
+    /// skill struck: the enemies its hits reach are in it, and are taken to stay in it for its
+    /// time (the debuff "Jagged Ground" on each). What makes one:
+    /// - a skill of its own ("can_create_jagged_ground" with a duration: Earthquake): every use;
+    /// - Jagged Ground I: "Supported Skills will consume Endurance Charges on use to create
+    ///   Jagged Ground": a use that has a charge to take;
+    /// - Jagged Ground II: "Aftershocks caused by Supported Slam Skills always create patches":
+    ///   the hits of an Aftershock.
+    /// `names`: the skill, its parts and its infused form.
+    let jaggedGround (db: GameDb) (charMods: ModDb) (setup: GemSetup) (skill: Skill) (names: string list) : Rule list =
+        let raw = Gems.rawStats db charMods setup
+        let sum id = raw |> List.filter (fun (k, _) -> k = id) |> List.sumBy snd
+        let has id = raw |> List.exists (fun (k, v) -> k = id && v <> 0.0)
+        let ms = sum "support_jagged_ground_base_duration_ms" + sum "skill_jagged_ground_base_duration_ms" + sum "jagged_ground_duration_ms"
+        if ms <= 0.0 || has "cannot_create_jagged_ground" then []
+        else
+            let ctx = { Ctx.empty with SkillTags = skill.Tags; SkillName = skill.Name }
+            let all = ModDb.ofList (ModDb.toList charMods @ skill.Mods)
+            let seconds = ms / 1000.0 * Mods.inc ctx [ Named "JaggedGroundDuration" ] all
+            let slow = max -100.0 (Map.find "JaggedGroundMagnitude" Tables.gameConstants * Mods.inc ctx [ Named "JaggedGroundEffect" ] all)
+            let taken = Mods.sumBase ctx [ Named "JaggedGroundDamageTaken" ] all
+            let debuff =
+                ApplyDebuff("Jagged Ground", seconds, 1, [ yield Mod.more (Named "MovementSpeed") slow; if taken <> 0.0 then yield Mod.inc (DamageTaken AllDamage) taken ])
+            let onHit (reaction: Reaction) = names |> List.distinct |> List.map (fun n -> { Hook = OnHit; Filter = Called n; Chance = 100.0; Reaction = reaction })
+            if has "aftershocks_create_jagged_ground" then onHit (IfBuff("Aftershock", debuff))
+            elif has "support_create_jagged_ground_if_consumed_endurance_charge" then
+                let ready = "Jagged Ground: " + skill.Name
+                [ { Hook = OnUse; Filter = Called skill.Name; Chance = 100.0; Reaction = RemoveBuff ready }
+                  { Hook = OnUse; Filter = Called skill.Name; Chance = 100.0; Reaction = SpendStack("EnduranceCharge", SetStacks(ready, 1)) } ]
+                @ onHit (IfBuff(ready, debuff))
+            elif has "can_create_jagged_ground" && sum "skill_jagged_ground_base_duration_ms" > 0.0 then onHit debuff
+            else []
+
+    /// Ice Bite: "Gain X% of Damage as Cold Damage for N seconds on Freezing an enemy with
+    /// Supported Skills": a buff on the character (for all it does: "infuses your damage with
+    /// Cold damage") whenever the supported skill, one of its parts or its infused form
+    /// (`names`) freezes an enemy; a new freeze starts its time again. The time is a skill
+    /// duration (the support makes the skill one with a duration).
+    let iceBite (db: GameDb) (charMods: ModDb) (setup: GemSetup) (skill: Skill) (names: string list) : Rule list =
+        let raw = Gems.rawStats db charMods setup
+        let sum id = raw |> List.filter (fun (k, _) -> k = id) |> List.sumBy snd
+        let gain, ms = sum "support_ice_bite_buff_grant_%_added_cold_attack_damage", sum "support_ice_bite_base_buff_duration"
+        if gain <= 0.0 || ms <= 0.0 then []
+        else
+            let ctx = { Ctx.empty with SkillTags = skill.Tags; SkillName = skill.Name }
+            let seconds = ms / 1000.0 * Mods.mult ctx [ SkillDuration ] (ModDb.ofList (ModDb.toList charMods @ skill.Mods))
+            let mods = [ for t in DamageType.all -> Mod.base' (GainAs(t, Cold)) gain |> Mod.from "Ice Bite" ]
+            names |> List.distinct |> List.map (fun n ->
+                { Hook = OnInflict Freeze; Filter = Called n; Chance = 100.0; Reaction = GrantBuff("Ice Bite", seconds, 1, mods) })
 
     /// The character's Spirit and what its persistent skills reserve.
     /// Spirit: flat amounts (quests, mods, sceptres' own value) and "per X on body armour",
@@ -1358,7 +1490,7 @@ module Behaviours =
           Reach = m.AttackRange
           Revive = revive |> Option.map (fun s -> s / Mods.inc ctx [ Named "MinionReviveSpeed" ] db)
           Power = m.Life
-          LifeRegen = life * Mods.sumBase ctx [ LifeRegenPercent ] db / 100.0
+          LifeRegen = life * Mods.sumBase ctx [ LifeRegenPercent ] db / 100.0 + Mods.sumBase ctx [ LifeRegen ] db
           TakesForOwner = 0.0
           Explodes = None }
 
@@ -1523,8 +1655,10 @@ module Behaviours =
                         supportStat "companion_takes_%_damage_before_you_from_support"
                         + (if companion then Mods.sumBase Ctx.empty [ Named "CompanionTakesDamage" ] charMods else 0.0)
                     let explodePct = supportStat "explode_on_low_life_%_maximum_life_to_deal"
+                    // "Allies in your Presence Regenerate X% of your Maximum Life per second"
+                    let ownerRegen = Mods.sumBase Ctx.empty [ Named "Sheet:Life" ] charMods * Mods.sumBase Ctx.empty [ Named "AllyRegenPercentOfOwnerLife" ] charMods / 100.0
                     let withSupports (b: MinionBody) =
-                        let b = { b with Life = b.Life * lifeMore; TakesForOwner = takes }
+                        let b = { b with Life = b.Life * lifeMore; TakesForOwner = takes; LifeRegen = b.LifeRegen + ownerRegen }
                         if explodePct > 0.0 then { b with Explodes = Some(m.Name + ": Minion Instability") } else b
                     // the explosion: that share of its maximum life as fire damage around it (the
                     // radius is not in the support's stats: 2 m, a guess)

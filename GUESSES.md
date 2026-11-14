@@ -18,7 +18,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
    whose description or behaviour changed.
 5. Go through the lists below; the wiki's version history of a skill says what changed.
 
-## Rules (98)
+## Rules (110)
 
 ### Hit damage
 
@@ -69,6 +69,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | Mana on kill | game text | guess (DoT kills) |
 | Monster hits | PoB enemy presets; rarity mod from Mods.dat | pob heuristic + guess |
 | Monster movement | maim −30% from BuffTemplates; hinder 30%: wiki Hinder; speed and range: guesses | guess |
+| Stun recovery | stat description; the stun's own length is a guess (see "Light stun on the player") | guess |
 | Mana flask | item / data; base charges per kill and drink policy: guesses | data + guess |
 | Body armour scoped | game text | guess (order) |
 | Runic Ward | game item text | guess |
@@ -78,6 +79,9 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | Damage taken | stat text | guess (order) |
 | Life flask | player behaviour | guess |
 | Ailments on the player | GameConstants "...Player" | data; using unmitigated damage is a guess |
+| Ignited by one's own critical hits | stat description; the stat's id ("if crit recently") for the 4 s; that it is mitigated like an Ignite is a guess | data / guess |
+| Buffs and debuffs that expire faster | stat descriptions; which effects count as buffs (the stat's id: "only buff category") is a guess | guess |
+| Slowing potency on the player | stat description; that it is a multiplier of its own is a guess | guess |
 | Light stun on the player | game constants; formula a guess | guess |
 | Which monster | game data (PoB Minions / Spectres export); which variant a name means is not in the API | data; the variant by name is a guess |
 | Skills | game data | data; that the player commands whenever the cooldown allows is a guess |
@@ -94,7 +98,14 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | Totems | gem data | data; the simplifications are guesses |
 | Trinity | gem data | guess |
 | Aftershock | stat text | guess (same damage and area) |
+| Jagged Ground | poe2db keyword text, GameConstants `JaggedGroundMagnitude`, support gem data and descriptions. That an enemy stays in the patch is a guess | data / guess |
+| Curses that hinder | stat description; scaling with the enemy's curse effect is a guess | data / guess |
 | Shapeshift skills | using one means "while Shapeshifted" conditions hold for the whole fight | | guess |
+| Onslaught on kill | stat descriptions; 4 s as the stat that names it | data; 4 s guess |
+| Knockback | gem data (`global_knockback`, `base_knockback_distance`, `generic_knockback_*`), stat descriptions. The unit of the distance, the metre where none is named, and that bosses are immune (a guide says so; the wiki could not be read) are guesses | guess |
+| Resisting by the lowest resistance | stat description; that penetration applies after is a guess | data / guess |
+| A random element | stat description; the average in place of the choice | guess |
+| Additional Remnants | stat descriptions; adding the two up is a guess | guess |
 | Using them up | game rule | guess |
 | Chains | game rule (recollection) | guess |
 | Herald of Ash | gem description + data | data; the ignite takes no further modifiers (guess); in the damage shares it is the herald's, not "Ignite" |
@@ -139,6 +150,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | Flames of Chayula | skill data; 8 s and the colours from poe2db patch notes; cap of ten from PoB; pick-up is a guess | guess |
 | Low life | user: low life must be justified by the build | guess |
 | Skills an item triggers | item text, skill types | data; "with this weapon" is taken as any attack (guess) |
+| Ice Bite | stat description, support description ("infuses your damage with Cold damage"). The stat's id says "added cold attack damage": that it is for attacks only is not what the text says, so it is for all damage | data; all damage is a guess |
 
 ### Resources over time
 
@@ -163,7 +175,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 |---|---|---|
 | Ward remnants | data; overflow: user | data + user + guess |
 
-## Constants (7)
+## Constants (8)
 
 | Constant | Value | What it stands for |
 |---|---|---|
@@ -174,3 +186,4 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | `twisterWander` | `10.0` | How far (units) a twister strays to either side of its line ("moves forward erratically"): not in the data. A guess: twice its own radius. |
 | `spearfieldCone` | `90.0` | Spearfield: "Spears emerge within a 6.9 metre length cone" in front of the player. The length is the skill's radius; the angle is in neither the data nor the wiki. A guess. |
 | `erraticFanStep` | `15.0` | Degrees between neighbouring erratic projectiles (Spark's spray widens with every spark; the angle is not in the data). A guess. |
+| `knockbackUnitsPerDistance` | `10.0` | Knockback: a skill's "base_knockback_distance" is read as hundredths of a metre (Rapid Shot 30, Explosive Shot 400, Shield Charge 900): so many of them to a game unit. A guess: the numbers fit nothing else. And how far a hit pushes where the skill names no distance (Ice Nova, a passive's "Knocks Back Enemies"): a metre. A guess. |

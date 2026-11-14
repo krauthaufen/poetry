@@ -407,7 +407,13 @@ module Setup =
                     let cryGrants = cryGrants @ (match tipped with Some (_, _, ms) -> ms | None -> [])
                     let wave = Behaviours.chargedShockwave db charMods (Gems.chooseWeapon db setup.Gem sheet.Weapons) setup s
                     let cryRules = cryRules @ (match wave with Some (_, rs) -> rs | None -> [])
-                    let rules = cryRules @ (match lasting with Some (_, rs) -> rs | None -> []) @ Behaviours.useRules db charMods setup s.Name o.Pickup @ Behaviours.buffRules db charMods setup s @ Behaviours.totemPlacement db charMods setup s @ curseRules
+                    let biteRules =
+                        let withParts (x: Skill) = x.Name :: (x.Parts |> List.map (fun p -> p.Name))
+                        Behaviours.iceBite db charMods setup s (withParts s @ (match copy with Some (_, _, cp) -> withParts cp | None -> []))
+                    let biteRules =
+                        let withParts (x: Skill) = x.Name :: (x.Parts |> List.map (fun p -> p.Name))
+                        biteRules @ Behaviours.jaggedGround db charMods setup s (withParts s @ (match copy with Some (_, _, cp) -> withParts cp | None -> []))
+                    let rules = cryRules @ biteRules @ (match lasting with Some (_, rs) -> rs | None -> []) @ Behaviours.useRules db charMods setup s.Name o.Pickup @ Behaviours.buffRules db charMods setup s @ Behaviours.totemPlacement db charMods setup s @ curseRules
                     let grants = Behaviours.verisiumGrant db charMods setup
                     let s = Behaviours.applyObserved s
                     // skills that deal no damage (buffs, infusion grants) don't hit
@@ -459,7 +465,8 @@ module Setup =
                     let offering = d.Types.Contains "Offering" && not p.Rules.IsEmpty
                     let skip = isDefaultAttack || (not offering && ([ "Travel"; "Minion"; "ModifiesNextSkill"; "Persistent" ] |> List.exists d.Types.Contains))
                     let empowers = p.Rules |> List.exists (fun r -> match r.Reaction with Empower _ -> true | _ -> false)
-                    let grantsBuff = p.Rules |> List.exists (fun r -> match r.Reaction with ChargeBuff _ | GrantBuff _ -> true | _ -> false)
+                    // (a buff the skill's use gives: not one that comes of what its hits inflict, like Ice Bite's)
+                    let grantsBuff = p.Rules |> List.exists (fun r -> match r.Hook, r.Reaction with OnInflict _, _ -> false | _, (ChargeBuff _ | GrantBuff _) -> true | _ -> false)
                     let cooldown = p.Skill.Cooldown |> Option.defaultValue 0.0
                     let needsBuilding = p.Skill.Mods |> List.exists (fun m -> match m.Stat with Named n -> (n.StartsWith "Requires:" || n.StartsWith "NeedsEnemyStacks:") && m.Value > 0.0 | _ -> false)
                     // Barrage is readied whenever it can be, for a main skill it can repeat
@@ -513,7 +520,7 @@ module Setup =
         // a main "skill" that only places a totem or grants a buff is kept up, not spammed
         let main =
             match pressed c o mainGem with
-            | Some p when (p.Skill.Hits.IsEmpty || p.Pattern.IsSome) && p.Rules |> List.exists (fun r -> match r.Reaction with ChargeBuff _ | GrantBuff _ -> true | _ -> false) -> KeepBuff mainGem
+            | Some p when (p.Skill.Hits.IsEmpty || p.Pattern.IsSome) && p.Rules |> List.exists (fun r -> match r.Hook, r.Reaction with OnInflict _, _ -> false | _, (ChargeBuff _ | GrantBuff _) -> true | _ -> false) -> KeepBuff mainGem
             | _ -> Spam mainGem
         // a main skill with a cooldown of its own goes first whenever it is ready: otherwise the
         // other cooldown skills would fill every gap and it would never be used
@@ -626,7 +633,9 @@ module Setup =
             OverkillBurns = overkillBurns
             HitPattern = used |> List.choose (fun (_, p) -> p.Pattern |> Option.map (fun pat -> p.Skill.Name, pat)) |> Map.ofList
             Rules =
-                grantRules @ (used |> List.collect (fun (_, p) -> p.Rules)) @ heraldRules @ Behaviours.keywordRules sheet pressedSkills
+                // ("Buffs on you expire X% faster": the buffs these give the character)
+                Behaviours.buffsExpire sheet (grantRules @ (used |> List.collect (fun (_, p) -> p.Rules)) @ heraldRules @ Behaviours.keywordRules sheet pressedSkills)
+                @ Behaviours.selfIgnite sheet
                 @ fst (Behaviours.summons db sheet c.Build pressedSkills)
                 @ snd (Behaviours.ancestralSpirits db sheet c.Build c.Vitals.Str c.Vitals.Dex (c.Minions |> List.filter (fun m -> m.ActiveWhile |> Option.exists (fun b -> b.EndsWith " buff"))))
                 @ (match Behaviours.ghostDance db sheet c.Build with
@@ -670,7 +679,7 @@ module Setup =
             WardRemnants = Behaviours.wardRemnants db sheet c.Build o.Pickup
             ManaRemnants = Behaviours.manaRemnants db sheet c.Build o.Pickup
             Banners = Behaviours.banners db sheet c.Build
-            Archons = [ Behaviours.elementalArchon sheet ]
+            Archons = [ (let a = Behaviours.elementalArchon sheet in { a with Duration = a.Duration / Behaviours.buffExpiry sheet }) ]
             Charms = (if o.Immortal || o.NoFlask then [] else c.Charms)
             ManaFlask =
                 if o.Immortal || o.NoFlask then None
@@ -679,13 +688,17 @@ module Setup =
 
     /// A fight against these enemies.
     and fight (c: Loaded) (o: Options) (player: Actor) (enemies: EnemyDef list) : Fight =
-        // auras that weaken monsters near you (Overwhelming Presence); presence range is ignored
+        // auras that weaken monsters in your Presence (Overwhelming Presence)
         let db = ModDb.ofList c.Sheet.Mods
         let aura stat name =
             let k = Mods.more Ctx.empty [ Named name ] db
             if k <> 1.0 then [ Mod.more stat ((k - 1.0) * 100.0) |> Mod.from "aura" ] else []
         let auraMods = aura AilmentThreshold "EnemyAura:AilmentThreshold" @ aura PoiseThreshold "EnemyAura:PoiseThreshold"
-        let enemies = if auraMods.IsEmpty then enemies else enemies |> List.map (fun e -> { e with Mods = e.Mods @ auraMods })
+        // a condition on the enemy being in the Presence ("against targets in your Presence")
+        // is the status "InPresence": there only for a character that asks
+        let asksPresence =
+            let asks (ms: Mod list) = ms |> List.exists (fun m -> m.Conds |> List.exists (function EnemyHas "InPresence" | Not(EnemyHas "InPresence") -> true | _ -> false))
+            asks player.Mods || player.Skills |> List.exists (fun s -> asks s.Mods)
         let curses, curseGrants = Behaviours.curseAuras c.Db c.Sheet c.Build
         let player = if curseGrants.IsEmpty then player else { player with Mods = player.Mods @ curseGrants }
         // What the character brings into the fight. Charges: only those the build can generate,
@@ -723,7 +736,16 @@ module Setup =
             { a with Resources = a.Resources @ minionCounts; MaxResources = minionCounts |> List.fold (fun acc (k, n) -> Map.add k n acc) a.MaxResources }
         let player = counted player
         { Enemies = enemies
-          EnemyAuras = curses @ Behaviours.criticalWeaknessAura c.Sheet @ Behaviours.witheringPresence c.Db c.Sheet c.Build
+          // (Blasphemy's curses are an aura of their own size, which is not looked at)
+          EnemyAuras = curses
+          Presence = Behaviours.presenceRadius c.Sheet
+          PresenceAuras =
+            // (of two sources of Critical Weakness the one with more stacks)
+            ((Behaviours.criticalWeaknessAura c.Sheet @ Behaviours.malice c.Db c.Sheet c.Build) |> List.sortByDescending (fun (_, n, _) -> n) |> List.truncate 1)
+            @ Behaviours.witheringPresence c.Db c.Sheet c.Build
+            @ (if auraMods.IsEmpty then [] else [ "Overwhelming Presence", 1, auraMods ])
+            @ Behaviours.presenceAuras c.Sheet
+            @ (if asksPresence then [ "InPresence", 1, [] ] else [])
           Player = player
           // a totem uses its skill with the character's modifiers, so it also counts with the
           // character's numbers ("per 100 maximum Mana", "per 15 Strength", socketed gem colours)
