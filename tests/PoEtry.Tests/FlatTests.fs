@@ -1381,13 +1381,29 @@ let run (test: string -> (unit -> unit) -> unit) =
         if not (Flat.unsupported fine).IsEmpty then failwithf "a plain fight is refused: %A" (Flat.unsupported fine)
         refused { fine with Minions = [ Actor.make "Player" [] [ strike "Bite" 1.0 2.0 ] ] } "actors of the same name"
         // both reasons of a fight with two
-        // (a skill that goes by a name the reference keeps a cooldown of its own under)
-        let sealed = { spell "Bolt" Fire 1.0 2.0 with Mods = [ Mod.base' (Named "MaxSeals") 3.0; Mod.base' (Named "SealIntervalMs") 500.0 ] }
-        refused { fine with Player = Actor.make "Player" [] [ sealed; spell "SealBreak:Bolt" Cold 1.0 2.0 ] } "a skill named like a cooldown of the engine's own"
-        same { fine with Player = Actor.make "Player" [] [ spell "Bolt" Fire 1.0 2.0; { spell "SealBreak:Bolt" Cold 1.0 2.0 with Cooldown = Some 1.0 }; { spell "ArchonRecovery" Cold 1.0 2.0 with Cooldown = Some 0.7 } ] } [ 1u; 2u; 3u ]
-        // both reasons of a fight with two
-        let two = { fine with Player = Actor.make "Player" [] [ sealed; spell "SealBreak:Bolt" Cold 1.0 2.0 ]; Minions = [ Actor.make "Player" [] [ strike "Bite" 1.0 2.0 ] ] }
-        if (Flat.unsupported two).Length <> 2 then failwithf "expected two reasons, got %A" (Flat.unsupported two))
+        if (Flat.unsupported { fine with Minions = [ Actor.make "Hound" [] [ strike "Bite" 1.0 2.0 ]; Actor.make "Hound" [] [ strike "Bite" 1.0 2.0 ] ] }) <> [ "actors of the same name" ] then
+            failwith "expected one reason")
+
+    test "flat: a skill that goes by a name the reference keeps a cooldown of its own under shares it" (fun () ->
+        // the seals of a skill, under "SealBreak:<skill>"
+        let sealed = { spell "Bolt" Fire 100.0 200.0 with Mods = [ Mod.base' (Named "MaxSeals") 3.0; Mod.base' (Named "SealIntervalMs") 700.0; Mod.base' (Named "SealRepeats") 1.0; Mod.base' (Named "SealRepeatDamage") -30.0 ]; Cooldown = Some 2.5 }
+        let breaker cd = { spell "SealBreak:Bolt" Cold 50.0 90.0 with Cooldown = cd; StoredUses = 2 }
+        let filler = spell "Spark" Lightning 10.0 30.0
+        let play skills = { Actor.make "Player" [ Mod.inc CritChance 100.0; Mod.base' (AilmentChance Ignite) 100.0 ] skills with Rotation = skills |> List.map (fun (sk: Skill) -> Actor.always sk.Name) }
+        same (Fight.single (boss 1e12) (play [ sealed; breaker (Some 1.3); filler ]) 20.0) seeds
+        same (Fight.single (boss 1e12) (play [ breaker (Some 4.0); sealed; filler ]) 20.0) seeds
+        same (Fight.single (boss 1e12) (play [ sealed; breaker None; filler ]) 20.0) seeds
+        // when no Archon can be gained, under "ArchonRecovery"
+        let archon : Archon = { Name = "Archon"; OnIgniteStat = "ArchonOnIgnite"; Duration = 2.0; Recovery = 3.0; Mods = [ Mod.more (Damage Elemental) 30.0 ] }
+        let flame = { spell "Flame" Fire 200.0 400.0 with Mods = [ Mod.base' (Named "ArchonOnIgnite") 60.0 ] }
+        let recovery = { spell "ArchonRecovery" Cold 50.0 90.0 with Cooldown = Some 1.7 }
+        same (Fight.single (boss 1e12) { play [ recovery; flame ] with Archons = [ archon ] }  25.0) seeds
+        same (Fight.single (boss 1e12) { play [ flame; recovery ] with Archons = [ archon ] }  25.0) seeds
+        // when an invocation can be used again, under "invocation:<gem>"
+        let echo = { spell "Echo" Cold 80.0 160.0 with Tags = Set.ofList [ Spell; Triggered ] }
+        let invocation = { Meta.simple "Invocation" 300.0 "Echo" with Release = Invocation 2.0; Cost = 100.0; Sources = [ CastsSpells 0.9 ] }
+        let named = { spell "invocation:Invocation" Fire 30.0 60.0 with Cooldown = Some 1.1 }
+        same { Fight.single (boss 1e12) { play [ named; filler; echo ] with Metas = [ invocation ]; Rotation = [ Actor.always named.Name; Actor.always "Spark" ] } 25.0 with BankedInvocations = 0.5 } seeds)
 
     test "flat: skills and parts of one name, the same or not: a name is the first of it, a use reads its own parts" (fun () ->
         let player = Actor.make "Player" [] [ spell "Bolt" Fire 1.0 2.0 ]

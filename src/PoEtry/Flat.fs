@@ -711,6 +711,9 @@ module Flat =
           /// energy that is full at the start of a fight (NaN: none is banked).
           First: int
           Banked: float
+          /// The skill that goes by the name the reference keeps the invocation's cooldown
+          /// under (-1: none; see `build`).
+          ReadyCell: int
           /// Where its energy comes from, in the order the gem lists them, and whether any of
           /// that is a hit's doing.
           Sources: EnergySource[]
@@ -944,6 +947,8 @@ module Flat =
           /// Hexblast: a hit of this does nothing without a curse on the enemy that is ripe,
           /// and takes the ripe ones off (see `Program.CurseRipe`).
           DetonatesCurse: bool
+          /// The skill that goes by the name the reference keeps this one's seals under (-1: none).
+          SealCell: int
           /// "Does not use up its Cooldown when empowered" (by what it consumes); `MustHold`:
           /// it waits for that where the character can have it at all.
           NoCooldown: bool
@@ -1110,6 +1115,8 @@ module Flat =
               /// no rule of the actor makes it: any time); NaN for what is no curse.
               CurseRipe: float[]
               CCurseDetonated: int
+              /// The skill that goes by the name "ArchonRecovery" (-1: none).
+              ArchonCell: int
               /// The skill the mods of a gained charge are asked of (the actor's first).
               FirstSkill: int
               Rotation: (int * (View -> bool))[]
@@ -1408,13 +1415,11 @@ module Flat =
                     at.[i] <- next
                     next <- next + o.Parts.Length)
                 at
-            // (the reference keeps these beside the skills' cooldowns, under these names: a skill
-            // that goes by one of them where it is in use shares its cooldown with it. Not built.)
-            if named |> List.exists (fun s ->
-                (s.Name = "ArchonRecovery" && not actor.Archons.IsEmpty)
-                || (s.Name.StartsWith "invocation:" && actor.Metas |> List.exists (fun m -> "invocation:" + m.Name = s.Name && (match m.Release with Invocation _ -> true | AtMaximum -> false)))
-                || (s.Name.StartsWith "SealBreak:" && named |> List.exists (fun o -> "SealBreak:" + o.Name = s.Name && o.Mods |> List.exists (fun m -> m.Stat = Named "MaxSeals")))) then
-                reject "a skill named like a cooldown of the engine's own"
+            // (The reference keeps three things beside the skills' cooldowns, under names of
+            // their own: when no Archon can be gained ("ArchonRecovery"), when an invocation
+            // can be used again ("invocation:<gem>"), when a skill's seals were last broken
+            // ("SealBreak:<skill>"). A skill that goes by such a name shares its cooldown
+            // with it: `cellOf` is that skill, where there is one.)
             let skillIds = Dictionary<string, int>()
             named |> List.iteri (fun i s -> if not (skillIds.ContainsKey s.Name) then skillIds.[s.Name] <- i)
             // (a name no skill of the actor has: -1; the reference fails where it is to be
@@ -1423,6 +1428,7 @@ module Flat =
                 match skillIds.TryGetValue name with
                 | true, i -> i
                 | _ -> -1
+            let cellOf (name: string) = skillId name
 
             // ---- where the mods of buffs go ----
             let dynKeys = Dictionary<string, int>()
@@ -1586,6 +1592,7 @@ module Flat =
                        // (energy is kept by the gem's name: of several of one name it is the
                        // first's, and what is banked at the start is the last invocation's)
                        First = actor.Metas |> List.findIndex (fun o -> o.Name = m.Name)
+                       ReadyCell = cellOf ("invocation:" + m.Name)
                        Banked =
                         (if not (obj.ReferenceEquals(actor.Metas |> List.find (fun o -> o.Name = m.Name), m)) then nan
                          else
@@ -1938,6 +1945,7 @@ module Flat =
                       Warped = (match named' "WarpsInto:" with Some _ -> buffs.Id("Warped:" + s.Name) | None -> -1)
                       CWarped = (match named' "WarpsInto:" with Some gem -> counts.Id("warped into:" + gem) | None -> -1)
                       DetonatesCurse = flag "DetonatesCurse"
+                      SealCell = cellOf ("SealBreak:" + s.Name)
                       NoCooldown = flag "NoCooldownWithCharge"
                       MustHold = flag "NoCooldownWithCharge" && (match s.Consumes with Some charge -> (Map.tryFind charge actor.MaxResources |> Option.defaultValue 0) <> 0 | None -> false)
                       WindowSecs = ownBase s "WindowSeconds"
@@ -2141,6 +2149,7 @@ module Flat =
                                 | Some d -> d / 2.0
                                 | None -> infinity)
                       CCurseDetonated = count "curse detonated"
+                      ArchonCell = cellOf "ArchonRecovery"
                       FirstSkill = (if actor.Skills.IsEmpty then -1 else 0)
                       Rotation = rotation
                       OnUse = onUse |> Array.map fixCurses
@@ -4147,13 +4156,15 @@ module Flat =
         let triggers =
             match meta.Release with
             | AtMaximum -> if energy >= meta.MaxEnergy && meta.Cost > 0.0 then 1 else 0
-            | Invocation _ -> if (at s.A.InvocationReady index) <= s.Time && meta.Cost > 0.0 then int (energy / meta.Cost) else 0
+            | Invocation _ ->
+                let ready = if info.ReadyCell >= 0 then (at s.A.Cooldowns info.ReadyCell) else (at s.A.InvocationReady index)
+                if ready <= s.Time && meta.Cost > 0.0 then int (energy / meta.Cost) else 0
         if triggers <> 0 then
             let spent = float triggers * meta.Cost
             let refund = if rng.Chance meta.RefundChance then spent / 2.0 else 0.0
             put s.A.Held index (energy - spent + refund)
             (match meta.Release with
-             | Invocation cd -> s.A.InvocationReady.[index] <- s.Time + cd
+             | Invocation cd -> if info.ReadyCell >= 0 then put s.A.Cooldowns info.ReadyCell (s.Time + cd) else put s.A.InvocationReady index (s.Time + cd)
              | AtMaximum -> ())
             bump s info.Released
             for _ in 1 .. triggers do
@@ -4237,18 +4248,21 @@ module Flat =
             // a maximum; the use breaks them all. A fight starts with the seals full.
             if info.MaxSeals > 0.0 then
                 let interval = info.SealMs / 1000.0 + info.SealPercent / 100.0 * useTime
-                let broken = at s.A.SealBreak sid
+                // (kept under the skill's own number, or as the cooldown of the skill that goes
+                // by the name the reference keeps it under: no cooldown there, no break yet)
+                let cell = info.SealCell
+                let broken = if cell < 0 then at s.A.SealBreak sid elif (at s.A.Cooldowns cell) = -infinity then nan else at s.A.Cooldowns cell
                 let seals =
                     if interval <= 0.0 || useTime <= 0.0 then 0
                     elif System.Double.IsNaN broken then int info.MaxSeals
                     else int (min info.MaxSeals (floor ((s.Time - broken) / interval)))
                 if seals > 0 then
-                    put s.A.SealBreak sid s.Time
+                    (if cell < 0 then put s.A.SealBreak sid s.Time else put s.A.Cooldowns cell s.Time)
                     // "additional Projectiles are fired": for this use
                     if info.SealProjectiles > 0.0 then setBuff s p.BSealsBroken seals (s.Time + useTime + skill.HitDelay + 1e-6) info.SealMods
                     bump s info.CSeals
                 // (a use without seals still restarts the count)
-                elif System.Double.IsNaN broken then put s.A.SealBreak sid s.Time
+                elif System.Double.IsNaN broken then (if cell < 0 then put s.A.SealBreak sid s.Time else put s.A.Cooldowns cell s.Time)
                 // "each causing the Spell to Repeat": the hits again per seal, with the repeats' own damage
                 let again = seals * int info.SealRepeats
                 if again > 0 then
@@ -5697,7 +5711,7 @@ module Flat =
                 // or during the recovery period after one ends
                 (if p.Archons.Length > 0 && ignitedBy inflicted then
                     let active = p.Archons |> Array.exists (fun a -> (at s.A.BHas a.Buff))
-                    let recovering = s.A.ArchonRecovery > s.Time
+                    let recovering = (if p.ArchonCell >= 0 then (at s.A.Cooldowns p.ArchonCell) else s.A.ArchonRecovery) > s.Time
                     if not (active || recovering) then
                         let mutable found = -1
                         for i in 0 .. p.Archons.Length - 1 do
@@ -5705,7 +5719,7 @@ module Flat =
                         if found >= 0 then
                             let a = (at p.Archons found)
                             setBuff s a.Buff 1 (s.Time + a.Duration) a.AMods
-                            s.A.ArchonRecovery <- s.Time + a.Duration + a.Recovery
+                            (if p.ArchonCell >= 0 then put s.A.Cooldowns p.ArchonCell (s.Time + a.Duration + a.Recovery) else s.A.ArchonRecovery <- s.Time + a.Duration + a.Recovery)
                             expireAt s (s.Time + a.Duration)
                             bump s a.Gained)
                 // charms: charges from kills, and the ones used by killing a rare or unique monster
