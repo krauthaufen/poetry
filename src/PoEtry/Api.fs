@@ -146,7 +146,21 @@ module Api =
                 Json.field "support" s <> Some(JBool true) && not (props |> List.exists (fun n -> n = "Level" || n = "Cost" || n.Contains "Support")))
             |> List.length
         let sockets = (if filled > 0 then [ sprintf "Sockets filled: %d" filled ] else []) @ (if Json.field "corrupted" item = Some(JBool true) then [ "Corrupted" ] else [])
-        [ "Rarity: " + get "rarity"; get "name"; get "typeLine"; "--------" ] @ quality @ defences @ templated @ radius @ sockets @ [ "--------" ] @ utility @ modLines item
+        // the item's mods with their stat ids, as the game sends them ("mods": {"explicit":
+        // [{"id", "stats": {id: value}}]}): for lines whose text the stat descriptions here
+        // don't have (Items.parse, `Items.statsLinePrefix`)
+        let statLines =
+            match Json.field "mods" item with
+            | Some (JObj kinds) ->
+                kinds |> Map.toList |> List.collect (fun (_, ms) ->
+                    Json.list (Some ms) |> List.choose (fun m ->
+                        match Json.field "stats" m with
+                        | Some (JObj stats) when not stats.IsEmpty ->
+                            let pairs = stats |> Map.toList |> List.choose (fun (k, v) -> Json.num v |> Option.map (fun x -> k + "=" + x.ToString(System.Globalization.CultureInfo.InvariantCulture)))
+                            if pairs.IsEmpty then None else Some(Items.statsLinePrefix + String.concat ";" pairs)
+                        | _ -> None))
+            | _ -> []
+        [ "Rarity: " + get "rarity"; get "name"; get "typeLine"; "--------" ] @ quality @ defences @ templated @ radius @ sockets @ [ "--------" ] @ utility @ modLines item @ statLines
         |> String.concat "\n"
 
     let private gemLevel (gem: Json) =

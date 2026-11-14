@@ -244,8 +244,43 @@ module Items =
         else Some(match range with Some r -> applyRange r line | None -> line)
 
     /// Parse an item in the game's Ctrl+C text format, or PoB's raw item format.
+    /// A line of an item's text that holds one of its mods as stat ids (the game's API sends
+    /// them beside the text): "{stats} id=value;id=value".
+    let statsLinePrefix = "{stats} "
+
+    /// Lines the stat descriptions could not read, matched with the item's mods as the game
+    /// sent them: a mod none of whose stat ids is already read from the item's text, whose
+    /// values are all numbers of the line (or 1, a flag), explains the line. Each mod once, in
+    /// order. Returns the stats found and the lines still not understood.
+    let private fromStatLines (mods: (string * float) list list) (known: Set<string>) (unknown: string list) =
+        let numbers (l: string) =
+            System.Text.RegularExpressions.Regex.Matches(l, @"\d+(\.\d+)?") |> Seq.map (fun m -> float m.Value) |> List.ofSeq
+        let fits (line: string) (m: (string * float) list) =
+            let ns = numbers line
+            not (m |> List.exists (fun (id, _) -> known.Contains id))
+            && m |> List.forall (fun (_, v) -> abs v = 1.0 || abs v = 0.0 || ns |> List.exists (fun n -> abs (n - abs v) < 1e-6))
+            && (ns.IsEmpty || m |> List.exists (fun (_, v) -> ns |> List.exists (fun n -> abs (n - abs v) < 1e-6)))
+        unknown
+        |> List.fold
+            (fun (found, left, rest) line ->
+                match left |> List.tryFindIndex (fits line) with
+                | Some i -> found @ left.[i], List.removeAt i left, rest
+                | None -> found, left, rest @ [ line ])
+            ([], mods, [])
+        |> fun (found, _, rest) -> found, rest
+
     let parse (db: GameDb) (text: string) : ParsedItem =
         let raw = text.Replace("\r", "").Split('\n') |> List.ofArray |> List.map (fun l -> l.Trim())
+        // the mods as stat ids, apart from the text
+        let statMods =
+            raw |> List.filter (fun l -> l.StartsWith statsLinePrefix)
+            |> List.map (fun l ->
+                l.Substring(statsLinePrefix.Length).Split(';') |> List.ofArray
+                |> List.choose (fun kv ->
+                    match kv.Split('=') with
+                    | [| k; v |] -> (match System.Double.TryParse(v, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture) with | true, x -> Some(k, x) | _ -> None)
+                    | _ -> None))
+        let raw = raw |> List.filter (fun l -> not (l.StartsWith statsLinePrefix))
         let selectedVariant =
             raw |> List.tryPick (fun l -> if l.StartsWith "Selected Variant:" then Some(l.Substring(17).Trim()) else None)
         let lines =
@@ -273,6 +308,13 @@ module Items =
         let showsWard = lines |> List.exists (fun l -> l.StartsWith "Runic Ward:")
         let context = if baseName.IsSome || hasLocalDefences then StatText.ItemLocal else StatText.Global
         let stats, unknown = StatText.parseLinesIn context db.Text candidates
+        // a line the descriptions here don't have (a new league's wording, a Foulborn unique's
+        // line): the game's own stat ids for it, where it sent them
+        let stats, unknown =
+            if statMods.IsEmpty || unknown.IsEmpty then stats, unknown
+            else
+                let found, unknown = fromStatLines statMods (stats |> List.map fst |> Set.ofList) unknown
+                stats @ found, unknown
         // What only a weapon has of its own (attack speed, critical hits, accuracy) is the
         // character's on an armour piece: "16% increased Attack Speed" on gloves.
         let stats =

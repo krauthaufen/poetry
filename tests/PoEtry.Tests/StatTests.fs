@@ -647,3 +647,26 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         // without Frostbolt in the play style: an ordinary nova
         let alone = Setup.player c o [ Spam "Ice Nova" ] None
         near 0.0 (value (alone.Skills |> List.find (fun s -> s.Name = "Ice Nova")) "NovaOnBoltSpeed"))
+
+    // ---- what the game's API says an item's lines are ----
+
+    test "item lines the descriptions here don't have are read from the stat ids the API sends with the item" (fun () ->
+        // a Foulborn line in a wording the descriptions don't have; the API's mods give its ids
+        let item (mods: string) (mutated: string) =
+            Json.parse (sprintf "{\"rarity\": \"Unique\", \"name\": \"Test Globe\", \"typeLine\": \"Sacred Focus\", \"explicitMods\": [\"+10 to maximum Life\"], \"mutatedMods\": [\"%s\"], \"mods\": {\"explicit\": [%s]}}" mutated mods)
+        let life = "{\"id\": \"A\", \"stats\": {\"base_maximum_life\": 10}}"
+        let crit = "{\"id\": \"B\", \"stats\": {\"spell_critical_strike_chance_+%_per_100_max_mana_with_non_channelling_skills\": 3}}"
+        let line = "Non-[Channelling] Skills have 3% increased [Spell] [Critical|Critical Hit Chance] per 100 maximum Mana"
+        let parsed (j: Json) = Items.parse db.Value (Api.itemText j)
+        let p = parsed (item (life + ", " + crit) line)
+        equal (box ([]: string list)) (box p.Coverage.UnknownText)
+        let ofCrit = p.Mods |> List.filter (fun m -> m.Stat = CritChance)
+        equal (box [ Inc, 3.0 ]) (box (ofCrit |> List.map (fun m -> m.Kind, m.Value)))
+        // the life line, read from its text, is not taken again from its ids
+        near 10.0 (p.Mods |> List.sumBy (fun m -> if m.Stat = MaxLife then m.Value else 0.0))
+        // a mod whose values are not the line's numbers does not explain it
+        let wrong = "{\"id\": \"B\", \"stats\": {\"spell_critical_strike_chance_+%_per_100_max_mana_with_non_channelling_skills\": 4}}"
+        equal (box [ "Non-Channelling Skills have 3% increased Spell Critical Hit Chance per 100 maximum Mana" ]) (box (parsed (item (life + ", " + wrong) line)).Coverage.UnknownText)
+        // without the API's mods: as before, not understood
+        let bare = Json.parse (sprintf "{\"rarity\": \"Unique\", \"name\": \"Test Globe\", \"typeLine\": \"Sacred Focus\", \"mutatedMods\": [\"%s\"]}" line)
+        equal (box 1) (box (parsed bare).Coverage.UnknownText.Length))
