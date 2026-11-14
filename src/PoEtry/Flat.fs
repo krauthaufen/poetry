@@ -2402,6 +2402,9 @@ module Flat =
           mutable BuffMap: Map<string, int>
           mutable BuffMapStale: bool
           BChanged: ResizeArray<int>
+          /// By buff: what the map `BuffMap` says of it.
+          MapHas: bool[]
+          MapStacks: int[]
           /// Counts the changes to what the buffs' mods are: a skill's mods with the buffs
           /// (`Sim.skillDb`) are good while this is what it was when they were made.
           mutable ModsVersion: int
@@ -2727,11 +2730,19 @@ module Flat =
 
     let private buffMap (s: State) : Map<string, int> =
         if s.A.BuffMapStale then
-            // (only the buffs that changed since it was last asked for)
+            // (only the buffs that are not what they were when it was last asked for: one
+            // that went and came back the same in between changes nothing)
             let mutable m = s.A.BuffMap
-            for id in s.A.BChanged do
-                m <- (if (at s.A.BHas id) then Map.add (at s.P.BuffNames id) (at s.A.BStacks id) m else Map.remove (at s.P.BuffNames id) m)
-            s.A.BChanged.Clear()
+            let changed = s.A.BChanged
+            for k in 0 .. changed.Count - 1 do
+                let id = changed.[k]
+                let has = at s.A.BHas id
+                let stacks = if has then (at s.A.BStacks id) else 0
+                if has <> (at s.A.MapHas id) || stacks <> (at s.A.MapStacks id) then
+                    m <- (if has then Map.add (at s.P.BuffNames id) stacks m else Map.remove (at s.P.BuffNames id) m)
+                    put s.A.MapHas id has
+                    put s.A.MapStacks id stacks
+            changed.Clear()
             s.A.BuffMap <- m
             s.A.BuffMapStale <- false
         s.A.BuffMap
@@ -5535,8 +5546,9 @@ module Flat =
             let plain = (at p.Skills sid)
             let primaryDef = (at s.Foes primary).Def
             // how the skill is delivered by this strike: what its mods and the buffs add to its
-            // projectiles (the skill's own delivery where they add nothing)
-            let shape (ev: Ev) (info: SkillInfo) : Delivery =
+            // projectiles (the skill's own delivery where they add nothing; `wanted`: whether
+            // the delivery is asked for, or only what is rolled for it is to be rolled)
+            let shape (ev: Ev) (info: SkillInfo) (wanted: bool) : Delivery =
                 let skill = info.Skill
                 match skill.Delivery with
                 | Projectiles pr ->
@@ -5555,7 +5567,7 @@ module Flat =
                     let pierce = pr.Pierce + int (sumQ ev qPierce) + (if rng.Chance(sumQ ev qPierceChance) then 1 else 0)
                     let chains = pr.Chains + int (sumQ ev qChains)
                     let terrainChain = pr.TerrainChain + sumQ ev qTerrainChain
-                    if count = pr.Count && pierce = pr.Pierce && chains = pr.Chains && terrainChain = pr.TerrainChain then skill.Delivery
+                    if not wanted || (count = pr.Count && pierce = pr.Pierce && chains = pr.Chains && terrainChain = pr.TerrainChain) then skill.Delivery
                     else Projectiles { pr with Count = count; Pierce = pierce; Chains = chains; TerrainChain = terrainChain }
                 | d -> d
             s.StrikeLeech <- 0.0
@@ -5582,7 +5594,7 @@ module Flat =
                 ev
             // (the reference works the shape out twice, and each time rolls what it rolls)
             (match plain.Skill.Delivery with
-             | Projectiles _ -> shape began plain |> ignore
+             | Projectiles _ -> shape began plain false |> ignore
              | _ -> ())
             // Infusions: each impact consumes one of the skill's element (or the one that does
             // in its place) and is the infused copy; without one, the plain skill
@@ -5622,7 +5634,7 @@ module Flat =
                     let info = at p.Skills impact
                     let ev = ask impact
                     let areaMult = multQ ev qArea
-                    let delivery = shape ev info
+                    let delivery = shape ev info true
                     let r = match delivery with AreaAtTarget r -> r | _ -> 0.0
                     let centreR = Geometry.radius r areaMult
                     if k = 0 then step <- centreR * p.Fight.CascadeSpacing
@@ -5639,7 +5651,7 @@ module Flat =
                 let info = at p.Skills impact
                 let ev = ask impact
                 let areaMult = multQ ev qArea
-                let delivery = shape ev info
+                let delivery = shape ev info true
                 let hitAll (names: string list) =
                     let mutable rest = names
                     while not rest.IsEmpty do
@@ -6540,6 +6552,8 @@ module Flat =
                   BuffMap = Map.empty
                   BuffMapStale = true
                   BChanged = ResizeArray()
+                  MapHas = Array.zeroCreate nb
+                  MapStacks = Array.zeroCreate nb
                   ModsVersion = 0
                   BuffsVersion = 0
                   VitalsVersion = 0

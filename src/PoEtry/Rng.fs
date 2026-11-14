@@ -14,16 +14,25 @@ type Rng(seed: uint32) =
 
     do
         // Expand the seed with xorshift32 so nearby seeds give unrelated streams.
-        let mutable x = if seed = 0u then 0x9E3779B9u else seed
-        let step () =
-            x <- x ^^^ (x <<< 13)
-            x <- x ^^^ (x >>> 17)
-            x <- x ^^^ (x <<< 5)
-            x
-        s0 <- step ()
-        s1 <- step ()
-        s2 <- step ()
-        s3 <- step ()
+        // (written out step by step: a function that changed a variable here would be made
+        // anew, with the variable in a cell of its own, for every generator)
+        let x = if seed = 0u then 0x9E3779B9u else seed
+        let x = x ^^^ (x <<< 13)
+        let x = x ^^^ (x >>> 17)
+        let x = x ^^^ (x <<< 5)
+        s0 <- x
+        let x = x ^^^ (x <<< 13)
+        let x = x ^^^ (x >>> 17)
+        let x = x ^^^ (x <<< 5)
+        s1 <- x
+        let x = x ^^^ (x <<< 13)
+        let x = x ^^^ (x >>> 17)
+        let x = x ^^^ (x <<< 5)
+        s2 <- x
+        let x = x ^^^ (x <<< 13)
+        let x = x ^^^ (x >>> 17)
+        let x = x ^^^ (x <<< 5)
+        s3 <- x
 
     member _.NextUInt() : uint32 =
         // The products are masked to 32 bits by hand: JavaScript multiplies as floating point and
