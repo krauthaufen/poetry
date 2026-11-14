@@ -435,7 +435,13 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         near 1000.0 (dealt (slamming 100.0))
         near 300.0 (dealt (slamming 0.0))
         same (slamming 100.0) seeds
-        same (slamming 40.0) seeds)
+        same (slamming 40.0) seeds
+        // a slam's area lies on the enemy aimed at, and so does its Aftershock's: where the one
+        // lands beside the other (Falling Thunder's half metre) is nothing the geometry knows
+        equal (box Structural) (box (StatMap.meaning "cascade_aftershock_additional_offset_distance" -5.0))
+        let onTarget = { slam with Delivery = AreaAtTarget 11.0 }
+        let far = { Fight.single { EnemyDef.atLevel 83 1e9 with Mods = []; Position = Vec.make 35.0 0.0; Size = 5.0 } (Actor.make "Player" [ Mod.base' (Named "AftershockChance") 100.0 ] [ onTarget ]) 3.2 with Reach = 20.0 }
+        near 600.0 (dealt far))
 
     test "Jagged Ground: what makes it, how long it lies, how much it slows, what enemies in it take; curses that hinder" (fun () ->
         let mace = "Weapon 1", "Rarity: Normal\nPlated Mace\n--------\n"

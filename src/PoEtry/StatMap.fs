@@ -1073,6 +1073,11 @@ module StatMap =
         | "spell_skills_fire_2_additional_projectiles_final_chance_%" -> one (Mod.base' (Named "ExtraProjectileChance2") v |> Mod.whenever (SkillIs Spell))
         | "attacks_roll_crits_twice" -> one (Mod.flag (Named "LuckyCrit") |> Mod.whenever (SkillIs Attack))
         | id when id.StartsWith "maximum_critical_strike_chance_is_%" -> one (Mod.base' (Named "MaxCritChance") v)
+        // Where an Aftershock (or a cascaded copy) lands beside where the slam did: Falling
+        // Thunder's is half a metre off. The stat has no text; read off its name. Here a slam's
+        // area lies on the enemy it is aimed at, and its Aftershock on the same enemy (RULES.md,
+        // "Aftershock"): the geometry has no place for the half metre between the two.
+        | "cascade_aftershock_additional_offset_distance" -> Some Structural
         | "your_slam_aftershock_chance_%" | "slam_aftershock_chance_%" -> one (Mod.base' (Named "AftershockChance") v |> Mod.whenever (SkillIs Slam))
         | "hit_damage_immobilisation_multiplier_+%" ->
             Some(Mods([ Freeze; HeavyStun; Electrocute; Pin ] |> List.map (fun a -> Mod.inc (Buildup a) v)))
