@@ -242,6 +242,9 @@ module Gems =
             if name.StartsWith "Companion: " then Map.tryFind "TameBeastPlayer" db.Skills
             elif name.StartsWith "Spectre: " then Map.tryFind "SummonSpectrePlayer" db.Skills
             else None)
+        // a player's skill that has no gem of its own, by its name (Punch, the unarmed attack)
+        |> Option.orElse (
+            db.Skills |> Map.tryPick (fun id d -> if d.Name = name && id.EndsWith "Player" && not d.Support then Some d else None))
 
     /// A support gem's data. A name can belong to a support and to a skill ("Unleash"): in a
     /// support socket it is the support.

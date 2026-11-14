@@ -818,6 +818,10 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         near dog.CompanionReservation (perMinion { blank with Groups = [ group "" "Companion: Rabid Dog" 0 ] } "Companion: Rabid Dog")
         near dog.SpectreReservation (perMinion { blank with Groups = [ group "" "Spectre: Rabid Dog" 0 ] } "Spectre: Rabid Dog")
         equal (box true) (box (Gems.data db.Value "Companion: Rabid Dog").IsSome)
+        // a skill with no gem of its own, by its name: Punch (the unarmed attack) is an attack
+        match Gems.data db.Value "Punch" with
+        | Some d -> equal (box true) (box (d.Types.Contains "Attack" && d.Types.Contains "Melee"))
+        | None -> failwith "Punch not found"
         near (100.0 / 1.1) (cost { blank with Groups = [ group "" "Cast on Critical" 20 ] } "Cast on Critical")
         // a skill an item grants reserves nothing
         near 0.0 (cost { blank with Groups = [ group "granted" "Cast on Critical" 0 ] } "Cast on Critical")
