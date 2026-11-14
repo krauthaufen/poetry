@@ -697,9 +697,13 @@ module Flat =
 
     type private PeriodicInfo =
         { Every: float
+          /// Within how long its first tick comes.
+          First: float
           Action: PAction
-          /// The name of its stream of random numbers.
-          Key: uint32 }
+          /// The name of its stream of random numbers, and whose count of ticks it goes by
+          /// (the first periodic of its name).
+          Key: uint32
+          Stream: int }
 
     type private MetaInfo =
         { Meta: Meta
@@ -1133,7 +1137,11 @@ module Flat =
               BerserkLoss: float
               MaxRage: int
               /// The enemies that attack, in the order the fight names them.
-              Attackers: int[]
+              /// The enemies that attack: each with the interval its first attack comes in
+              /// (an enemy is here once for every one of its name the fight was given).
+              Attackers: (int * float)[]
+              /// What a replacement is a fresh one of, by the name without its + (see `build`).
+              Roots: Dictionary<string, EnemyInfo>
               /// The character's own chance to keep a charge, and the mana (a share of the most)
               /// that consuming a Power Charge gives.
               SheetSkip: float
@@ -1297,10 +1305,12 @@ module Flat =
         let sources = Names()
 
         // ---- the fight ----
-        // (a replacement is named after the enemy it replaces, with a + more)
-        if fight.Replace && fight.Enemies |> List.exists (fun e -> e.Name.EndsWith "+") then reject "an enemy named like a replacement"
-        if fight.Enemies.IsEmpty then reject "a fight without enemies"
-        if (fight.Enemies |> List.map (fun e -> e.Name) |> List.distinct).Length <> fight.Enemies.Length then reject "enemies of the same name"
+        // (a replacement is named after the enemy it replaces, with a + more, and is of the kind
+        // of the enemy that goes by the name without the +. Where that name with a + is an
+        // enemy's own, the reference puts the replacement in that enemy's place, alive or not:
+        // not built here.)
+        if fight.Replace && fight.Enemies |> List.exists (fun e -> e.Name.EndsWith "+" && fight.Enemies |> List.exists (fun o -> o.Name = e.Name.TrimEnd('+'))) then
+            reject "an enemy named like the replacement of another"
         // (the player's evasion entropy goes by this name in the reference, whatever the player is called)
         if fight.Enemies |> List.exists (fun e -> e.Name = "Player") then reject "an enemy called Player"
         let actors = fight.Player :: fight.Minions
@@ -1309,13 +1319,14 @@ module Flat =
         if fight.Minions |> List.exists (fun m -> m.Name = "Player" || fight.Enemies |> List.exists (fun e -> e.Name = m.Name)) then reject "a minion named like an enemy"
 
         // ---- the enemies ----
-        let enemies = fight.Enemies |> List.sortBy (fun e -> e.Name) |> Array.ofList
+        // (the reference keeps the enemies by their names: of several of one name the last is
+        // the one in the fight; each of them starts attacks of its own, though, and a
+        // replacement is of the kind of the first)
+        let enemies = fight.Enemies |> List.rev |> List.distinctBy (fun e -> e.Name) |> List.sortBy (fun e -> e.Name) |> Array.ofList
         let curseK (e: EnemyDef) = Mods.more Ctx.empty [ Named "CurseEffectOnSelf" ] (ModDb.ofList e.Mods)
         for (name, _, _) in fight.EnemyAuras do
             statuses.Id name |> ignore
-        let enemyInfos =
-            enemies
-            |> Array.map (fun d ->
+        let enemyInfo (d: EnemyDef) : EnemyInfo =
                 let db = ModDb.ofList d.Mods
                 { Def = d
                   Db = db
@@ -1333,7 +1344,12 @@ module Flat =
                     fight.EnemyAuras
                     |> List.map (fun (name, stacks, mods) ->
                         let k = if name.StartsWith "Curse:" then Mods.more Ctx.empty [ Named "CurseEffectOnSelf" ] db else 1.0
-                        statuses.Id name, stacks, mods |> List.map (Mod.scaled k)) })
+                        statuses.Id name, stacks, mods |> List.map (Mod.scaled k)) }
+        let enemyInfos = enemies |> Array.map enemyInfo
+        let roots = Dictionary<string, EnemyInfo>()
+        for d in fight.Enemies do
+            if not (roots.ContainsKey d.Name) then
+                roots.[d.Name] <- (match enemyInfos |> Array.tryFind (fun info -> obj.ReferenceEquals(info.Def, d)) with Some info -> info | None -> enemyInfo d)
         let enemyIds = Dictionary<string, int>()
         enemies |> Array.iteri (fun i e -> enemyIds.[e.Name] <- i)
 
@@ -1366,7 +1382,6 @@ module Flat =
         let one (index: int) (actor: Actor) : unit -> Program =
             let isPlayer = index = 0
             if (actor.Metas |> List.map (fun m -> m.Name) |> List.distinct).Length <> actor.Metas.Length then reject "meta gems of the same name"
-            if isPlayer && (actor.ActiveWhile.IsSome || actor.Body.IsSome || actor.Pool.IsSome) then reject "a player that is a minion"
 
             // ---- its skills ----
             // The reference finds a skill by its name, the first of that name among the
@@ -1597,25 +1612,22 @@ module Flat =
                 cPrevented.[key] <- counts.Id("charm prevented:" + key)
 
             // ---- what happens on its own ----
-            // (the ticks of two periodics of one name would share a stream of random numbers)
-            if (actor.Periodics |> List.map (fun pd -> pd.Name) |> List.distinct).Length <> actor.Periodics.Length then reject "periodic actions of the same name"
             let maxOf (r: string) = Map.tryFind r actor.MaxResources |> Option.defaultValue 0
             let periodics =
                 actor.Periodics
-                |> List.map (fun pd ->
-                    // (a tick names its periodic: of two of one name the first answers both)
-                    let pd = actor.Periodics |> List.find (fun o -> o.Name = pd.Name)
+                |> List.map (fun given ->
+                    // (a tick names its periodic: of two of one name the first answers both, and
+                    // their ticks roll from one stream; only when the first tick comes is each one's own)
+                    let pd = actor.Periodics |> List.find (fun o -> o.Name = given.Name)
                     let action =
                         match pd.Action with
                         | GainRandom rs ->
                             gainedOf.AddRange rs
                             PGainRandom(rs |> List.map (fun r -> buff r, maxOf r) |> Array.ofList)
                         | GainAnyRandom rs ->
-                            if rs.IsEmpty then reject "a periodic gain of nothing"
                             gainedOf.AddRange rs
                             PGainAnyRandom(rs |> List.map (fun r -> buff r, maxOf r) |> Array.ofList)
                         | GainWeighted ws ->
-                            if ws.IsEmpty then reject "a periodic gain of nothing"
                             gainedOf.AddRange(ws |> List.map fst)
                             PGainWeighted(ws |> List.map (fun (r, w) -> buff r, maxOf r, w) |> Array.ofList)
                         | ConsumeEach rs ->
@@ -1629,14 +1641,19 @@ module Flat =
                         | TriggerNamed name -> PTrigger(skillId name)
                         | SummonMinions (poolName, count, duration) -> PSummon(pool poolName, count, duration, false, summoned poolName)
                         | SummonFromCorpse (poolName, count, duration) -> PSummon(pool poolName, count, duration, true, summoned poolName)
-                    ({ Every = pd.Every; Action = action; Key = Sim.streamHash ("P|" + actor.Name + "|" + pd.Name) }: PeriodicInfo))
+                    ({ Every = pd.Every
+                       First = given.Every
+                       Stream = actor.Periodics |> List.findIndex (fun o -> o.Name = given.Name)
+                       Action = action
+                       Key = Sim.streamHash ("P|" + actor.Name + "|" + pd.Name) }: PeriodicInfo))
                 |> Array.ofList
 
             // ---- cycles, archons ----
             let cycles =
                 actor.Cycles
-                |> List.map (fun c ->
-                    if c.Variants.IsEmpty then reject "a cycle without variants"
+                |> List.map (fun given ->
+                    // (a tick names its cycle: of two of one name the first answers both)
+                    let c = actor.Cycles |> List.find (fun o -> o.Name = given.Name)
                     for v in c.Variants do
                         checkMods v
                         buffMods v
@@ -2129,7 +2146,8 @@ module Flat =
                       MaxRage = Map.tryFind "Rage" actor.MaxResources |> Option.defaultValue 0
                       Attackers =
                         (if actor.Vitals.IsNone && not anyBody then [||]
-                         else fight.Enemies |> List.filter (fun e -> e.Attack.IsSome) |> List.map (fun e -> enemyIds.[e.Name]) |> Array.ofList)
+                         else fight.Enemies |> List.choose (fun e -> e.Attack |> Option.map (fun attack -> enemyIds.[e.Name], attack.Interval)) |> Array.ofList)
+                      Roots = roots
                       SheetSkip = Mods.sumBase Ctx.empty [ Named "ChargeSkipConsume" ] sheet
                       ConsumePowerMana = Mods.sumBase Ctx.empty [ Named "ManaPercentOnConsumePower" ] sheet
                       Enemies = enemyInfos
@@ -6088,6 +6106,7 @@ module Flat =
     /// A cycle picks its next variant (`Sim.step`, CycleTick).
     let private onCycle (s: State) (rng: Rng) (index: int) =
         let c = (at s.P.Cycles index)
+        if c.Variants.Length = 0 then failwith "a cycle without variants"
         let pick = min (c.Variants.Length - 1) (int (rng.Float() * float c.Variants.Length))
         setBuff s c.Buff 1 (s.Time + c.Period) (at c.Variants pick)
         bump s (at c.Picked pick)
@@ -6109,6 +6128,7 @@ module Flat =
                 let r, _ = (at open' (min (open'.Length - 1) (int (rng.Float() * float open'.Length))))
                 gain r (stacksOf s r + 1)
         | PGainWeighted weights ->
+            if weights.Length = 0 then failwith "a periodic gain of nothing"
             let mutable total = 0.0
             for place in 0 .. weights.Length - 1 do
                 let (_, _, w) = at weights place
@@ -6124,6 +6144,7 @@ module Flat =
             let r, most, _ = (at weights (if picked < 0 then weights.Length - 1 else picked))
             gain r (min most (stacksOf s r + 1))
         | PGainAnyRandom resources ->
+            if resources.Length = 0 then failwith "a periodic gain of nothing"
             let r, most = (at resources (min (resources.Length - 1) (int (rng.Float() * float resources.Length))))
             gain r (min most (stacksOf s r + 1))
         | PTrigger skill -> trigger s rng skill
@@ -6563,8 +6584,9 @@ module Flat =
                     e.AttackN <- n + 1
                     Rng(Sim.streamSeedOf s.Seed e.AttackKey n)
                 | EPeriodic ->
-                    let n = (at s.A.PeriodicStream a)
-                    put s.A.PeriodicStream a (n + 1)
+                    let stream = (at p.Periodics a).Stream
+                    let n = (at s.A.PeriodicStream stream)
+                    put s.A.PeriodicStream stream (n + 1)
                     Rng(Sim.streamSeedOf s.Seed (at p.Periodics a).Key n)
                 | _ -> s.Rng
             // (time passes for the player, whoever the event is of)
@@ -6995,12 +7017,12 @@ module Flat =
         // periodic actions start at a random point of their first period
         for who in 0 .. progs.Length - 1 do
             enter s who
-            s.P.Periodics |> Array.iteri (fun i pd -> schedule s (s.Rng.Float() * pd.Every) EPeriodic i 0 0.0 0.0)
+            s.P.Periodics |> Array.iteri (fun i pd -> schedule s (s.Rng.Float() * pd.First) EPeriodic i 0 0.0 0.0)
         enter s 0
         // monsters start attacking at random points in their first interval
         for place in 0 .. p.Attackers.Length - 1 do
-            let i = at p.Attackers place
-            schedule s (s.Rng.Float() * (at p.Enemies i).Def.Attack.Value.Interval) EEnemyAttack i 0 0.0 0.0
+            let (i, interval) = at p.Attackers place
+            schedule s (s.Rng.Float() * interval) EEnemyAttack i 0 0.0 0.0
         expireAt s fight.MaxTime
         s
 
@@ -7012,18 +7034,21 @@ module Flat =
         let ns = p.StatusNames.Length
         for k in from .. s.Kills.Count - 1 do
             let name, _, _ = s.Kills.[k]
-            let root = (at s.Foes s.FoeIds.[name]).Root
-            let d = (at p.Enemies root).Def
-            let position = Vec.scale (Vec.length d.Position * 1.25 + 10.0) (Vec.ofAngle (Vec.angle d.Position + (s.Rng.Float() - 0.5) * 1.2))
-            let def = { d with Name = name + "+"; Position = position }
-            let index = s.Foes.Length
-            s.Foes <- Array.append s.Foes [| makeFoe ns (at p.Enemies root) index root def |]
-            s.FoeIds.[def.Name] <- index
-            s.AliveCount <- s.AliveCount + 1
-            if p.Attacked then
-                match d.Attack with
-                | Some attack -> schedule s (s.Time + s.Rng.Float() * attack.Interval) EEnemyAttack index 0 0.0 0.0
-                | None -> ()
+            // (of the kind of the enemy that goes by the name without its +; none: no one comes)
+            match p.Roots.TryGetValue(name.TrimEnd('+')) with
+            | true, info ->
+                let d = info.Def
+                let position = Vec.scale (Vec.length d.Position * 1.25 + 10.0) (Vec.ofAngle (Vec.angle d.Position + (s.Rng.Float() - 0.5) * 1.2))
+                let def = { d with Name = name + "+"; Position = position }
+                let index = s.Foes.Length
+                s.Foes <- Array.append s.Foes [| makeFoe ns info index (at s.Foes s.FoeIds.[name]).Root def |]
+                s.FoeIds.[def.Name] <- index
+                s.AliveCount <- s.AliveCount + 1
+                if p.Attacked then
+                    match d.Attack with
+                    | Some attack -> schedule s (s.Time + s.Rng.Float() * attack.Interval) EEnemyAttack index 0 0.0 0.0
+                    | None -> ()
+            | _ -> ()
         // those in the fight now, in the order of their names: the dead are out of it for good
         s.Live <-
             [| for e in s.Foes do if e.Life > 0.0 then yield e |]

@@ -1062,6 +1062,36 @@ let run (test: string -> (unit -> unit) -> unit) =
             if not (o.Counts.ContainsKey key) then failwithf "expected %s: %A" key o.Counts
         if not ((Map.tryFind "leech" o.ManaGained |> Option.defaultValue 0.0) > 0.0 && o.ManaGained.ContainsKey "consume") then failwithf "expected mana from the hound: %A" o.ManaGained)
 
+    test "flat: fights the reference plays in ways of its own: no enemies, enemies of one name, names with a +, a player that is a minion" (fun () ->
+        let player = { Actor.make "Player" [ Mod.inc CritChance 100.0 ] [ spell "Bolt" Fire 100.0 200.0 ] with Vitals = Some(PlayerStats.basic 5000.0 500.0) }
+        let fine = Fight.single (boss 1e9) player 10.0
+        let few = [ 1u; 2u; 3u; 4u; 5u ]
+        same { fine with Enemies = [] } few
+        // of two of one name the last is in the fight; both attack, and a replacement is of the kind of the first
+        let weak = { boss 250.0 with Position = Vec.make 10.0 5.0; Rarity = Magic }
+        let strong = { boss 900.0 with Attack = (boss 1.0).Attack |> Option.map (fun a -> { a with Interval = 0.7 }) }
+        same { fine with Enemies = [ strong; weak ] } few
+        same { fine with Enemies = [ weak; strong ] } few
+        same { fine with Enemies = [ weak; strong; { weak with Name = "other" } ]; Replace = true } few
+        same { fine with Enemies = [ strong; weak; { weak with Name = "other" } ]; Replace = true } few
+        // a name with a + that is no replacement's: no one comes for it; one comes for the others
+        same { fine with Enemies = [ { weak with Name = "boss+" } ]; Replace = true } few
+        same { fine with Enemies = [ { weak with Name = "a+" }; { weak with Name = "b" }; { weak with Name = "c++" } ]; Replace = true } few
+        // a player that is out until summoned, or stands only while a buff is up, or has a body
+        same { fine with Player = { player with Pool = Some "Pack" } } few
+        same { fine with Player = { player with ActiveWhile = Some "Totem" } } few
+        same { fine with Player = { player with ActiveWhile = Some "Totem"; Resources = [ "Totem", 1 ] } } few
+        let body : MinionBody = { Life = 500.0; EnergyShield = 100.0; Armour = 0.0; Evasion = 0.0; Resist = Map.empty; Melee = false; Size = 3.0; Reach = 10.0; Revive = Some 3.0; Power = 1.0; LifeRegen = 5.0; TakesForOwner = 0.0; Explodes = None }
+        same { fine with Player = { player with Body = Some body } } few
+        same { fine with Player = { player with Body = Some body; Vitals = None } } few
+        // periodics and cycles of one name: the first answers for both
+        let twice =
+            { player with
+                Periodics = [ { Name = "p"; Every = 1.0; Action = GainAnyRandom [ "PowerCharge"; "FrenzyCharge" ] }; { Name = "p"; Every = 0.7; Action = HealLife 5.0 }; { Name = "q"; Every = 0.9; Action = GainRandom [ "PowerCharge" ] } ]
+                Cycles = [ { Name = "c"; Period = 1.5; Variants = [ [ Mod.inc (Damage AllDamage) 20.0 ]; [ Mod.inc CritChance 50.0 ] ] }; { Name = "c"; Period = 0.8; Variants = [ [ Mod.more (Damage AllDamage) 100.0 ] ] } ]
+                MaxResources = Map.ofList [ "PowerCharge", 3; "FrenzyCharge", 3 ] }
+        same { fine with Player = twice } few)
+
     // ---- minions and totems ----
     let bite name dmg = { Skill.make name [ Attack; Melee ] with BaseDamage = Map.ofList [ Physical, { Min = dmg * 0.8; Max = dmg * 1.2 } ]; BaseCrit = 6.0 }
     let sure = Mod.base' (Named "Accuracy") 1e12
@@ -1380,6 +1410,10 @@ let run (test: string -> (unit -> unit) -> unit) =
                 Resources = (if held then [ "FireInfusion", 2 ] else []) }
         both "an infusion" { fine with Player = infused true }
         neither "an infusion there is none of" { fine with Player = infused false }
+        both "a periodic gain of nothing" { fine with Player = { player with Periodics = [ { Name = "p"; Every = 1.0; Action = GainAnyRandom [] } ] } }
+        both "a periodic gain of nothing, by weights" { fine with Player = { player with Periodics = [ { Name = "p"; Every = 1.0; Action = GainWeighted [] } ] } }
+        neither "a periodic gain of nothing that never comes" { fine with Player = { player with Periodics = [ { Name = "p"; Every = 1e6; Action = GainAnyRandom [] } ] } }
+        both "a cycle without variants" { fine with Player = { player with Cycles = [ { Name = "c"; Period = 1.0; Variants = [] } ] } }
         // a part of a part that is used: its strike cannot be found
         let nested = { spell "Bolt" Fire 10.0 20.0 with Parts = [ { spell "Bolt: A" Fire 10.0 20.0 with Parts = [ spell "Bolt: B" Cold 30.0 40.0 ] } ] }
         both "a part of a part" { fine with Player = { Actor.make "Player" [] [ nested ] with Rotation = [ Actor.always "Bolt: A" ] } })
