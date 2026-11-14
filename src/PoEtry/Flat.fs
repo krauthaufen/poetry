@@ -6443,9 +6443,12 @@ module Flat =
           /// the counts they are stamped with. The counts only ever go up, so an answer of an
           /// earlier run is good in a later one exactly where it can change with nothing (it
           /// is the program's own), and is worked out anew everywhere else.
-          Answers: ResizeArray<float[][] * int[][] * int[][] * int[] * int[]> }
+          Answers: ResizeArray<float[][] * int[][] * int[][] * int[] * int[]>
+          /// By actor and buff: the mods last compiled for it and what they compiled to (a
+          /// function of the mods alone, so good in every run).
+          Comps: ResizeArray<(int * Item)[][] * Mod list[]> }
 
-    let private newKept () : Kept = { Queue = Queue(); Evs = ResizeArray(); Vitals = Dictionary(); Answers = ResizeArray() }
+    let private newKept () : Kept = { Queue = Queue(); Evs = ResizeArray(); Vitals = Dictionary(); Answers = ResizeArray(); Comps = ResizeArray() }
 
     /// An enemy as it comes into the fight (`fresh` in `Sim.runWith`): `root` is the enemy
     /// the fight names that it is, or that it replaces.
@@ -6542,6 +6545,8 @@ module Flat =
                 if kept.Answers.Count <= who then
                     kept.Answers.Add((Array.create (nk * 3) [||], Array.create (nk * 3) [||], Array.create (nk * 3) [||], Array.zeroCreate (nk * 3), Array.zeroCreate (nk * 3)))
                 let kVal, kBuffs, kStatus, kgBuffs, kgStatus = kept.Answers.[who]
+                if kept.Comps.Count <= who then kept.Comps.Add((Array.create nb [||], Array.create nb []))
+                let comp, compOf = kept.Comps.[who]
                 { BKept = false
                   BHas = Array.create nb false
                   BStacks = Array.zeroCreate nb
@@ -6563,8 +6568,8 @@ module Flat =
                   DynOnStatus = false
                   DynFor = Array.create (nk * 3) pr.NoDyn
                   DynForVer = Array.create (nk * 3) -1
-                  BComp = Array.create nb [||]
-                  BCompOf = Array.create nb []
+                  BComp = comp
+                  BCompOf = compOf
                   RageMore = Array.create nk nan
                   RageVer = Array.create nk -1
                   KVal = kVal

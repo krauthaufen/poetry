@@ -387,6 +387,24 @@ module Geometry =
                 else { Points = List.rev (at :: points); Hit = hit; Dist = dists }
             | _ -> { Points = List.rev (Vec.add pos (Vec.scale remaining dir) :: points); Hit = hit; Dist = dists }
 
+    /// How far along its line an erratic projectile can still meet an enemy it has not hit:
+    /// it never leaves the band of half that width about the line, so it meets only enemies
+    /// that reach into the band, and none once it is past them all (with room to spare for
+    /// rounding). Minus infinity: none at all.
+    let private lastInBand (start: Vec) (dir: Vec) (halfWidth: float) (hit: string list) (alive: EnemyDef list) : float =
+        let mutable last = -infinity
+        let mutable rest = alive
+        while not rest.IsEmpty do
+            let e = rest.Head
+            if hit.IsEmpty || not (List.contains e.Name hit) then
+                let toE = Vec.sub e.Position start
+                let along = dot toE dir
+                let aside = abs (dir.X * toE.Y - dir.Y * toE.X)
+                let spare = 1e-3 + 1e-6 * (abs along + aside)
+                if aside <= halfWidth + e.Size + spare && along + e.Size + spare > last then last <- along + e.Size + spare
+            rest <- rest.Tail
+        last
+
     /// An erratic projectile (see `trace`): it strays sideways within its band, a new offset every band
     /// width travelled; each leg is flown and tested like a straight one. A wall ends
     /// it, unless it bounces: then it flies on in a random direction (wiki, Bounce).
@@ -404,8 +422,16 @@ module Geometry =
         let mutable hit : string list = []
         let mutable dists : float list = []
         let mutable flying = true
+        // where nothing is shown and no wall stands, the legs past the last enemy it can meet
+        // are not flown: only their random numbers are drawn
+        let skips = not keep && walls.IsEmpty
+        let mutable until = if skips then lastInBand origin dir0 (0.5 * abs p.Wander) hit alive else infinity
         while flying && not (remaining <= 1e-9) do
-            let advance = min remaining step
+          let advance = min remaining step
+          if along > until then
+            rng.Float() |> ignore
+            remaining <- remaining - advance
+          else
             let perp = Vec.make -dir.Y dir.X
             let next = Vec.add (Vec.add start (Vec.scale (along + advance) dir)) (Vec.scale ((rng.Float() - 0.5) * p.Wander) perp)
             let leg = Vec.sub next pos
@@ -437,6 +463,7 @@ module Geometry =
                         along <- along + advance
                         remaining <- remaining - advance
                         if keep then points.Add next
+                        if skips then until <- lastInBand start dir (0.5 * abs p.Wander) hit alive
                 else
                     match wall with
                     | Some (t, _) when not p.Bounces ->
@@ -501,35 +528,42 @@ module Geometry =
     let dwellHits (rng: Rng) (walls: Wall list) (p: ProjectileShape) (reach: float) (areaMult: float) (primary: EnemyDef) (alive: EnemyDef list) : (float * string) list =
         let r = radius p.Passing areaMult
         let tick = Constants.serverTick
-        // where the flight is after every tick
-        let along (points: Vec list) : Vec[] =
-            let places = ResizeArray<Vec>()
-            let step = p.Speed * tick
-            let mutable carry = 0.0
-            let mutable from = points
-            while not from.IsEmpty && not from.Tail.IsEmpty do
-                let a, b = from.Head, from.Tail.Head
-                let len = Vec.dist a b
-                let mutable d = carry
-                while d <= len do
-                    places.Add(Vec.add a (Vec.scale (d / max 1e-9 len) (Vec.sub b a)))
-                    d <- d + step
-                carry <- d - len
-                from <- from.Tail
-            places.ToArray()
         // every flight tick by tick, all the flights' places of one tick before those of the
-        // next, the flights in their order (what sorting all their places by the time gives)
-        let flights = pathsWith true 1000 rng walls p reach primary [] |> List.map (fun path -> along path.Points) |> Array.ofList
-        let mutable ticks = 0
-        for flight in flights do
-            if flight.Length > ticks then ticks <- flight.Length
+        // next, the flights in their order (what sorting all their places by the time gives).
+        // A flight is followed along its legs: `from` is what is left of its points, `gone`
+        // how far along the leg it is, a tick's step further every tick.
+        let step = p.Speed * tick
+        let from = pathsWith true 1000 rng walls p reach primary [] |> List.map (fun path -> path.Points) |> Array.ofList
+        let gone : float[] = Array.zeroCreate from.Length
         let last = System.Collections.Generic.Dictionary<string, float>()
         let hits = ResizeArray<float * string>()
-        for k in 0 .. ticks - 1 do
+        let mutable flying = from.Length
+        let mutable k = 0
+        while flying > 0 do
             let t = float k * tick
-            for flight in flights do
-                if k < flight.Length then
-                    let at = flight.[k]
+            flying <- 0
+            for flight in 0 .. from.Length - 1 do
+                // (on to the leg this tick's place lies on; none: the flight is over)
+                let mutable points = from.[flight]
+                let mutable d = gone.[flight]
+                let mutable len = nan
+                let mutable looking = true
+                while looking do
+                    if points.IsEmpty || points.Tail.IsEmpty then
+                        points <- []
+                        looking <- false
+                    else
+                        len <- Vec.dist points.Head points.Tail.Head
+                        if d <= len then looking <- false
+                        else
+                            d <- d - len
+                            points <- points.Tail
+                from.[flight] <- points
+                if not points.IsEmpty then
+                    flying <- flying + 1
+                    let a, b = points.Head, points.Tail.Head
+                    let at = Vec.add a (Vec.scale (d / max 1e-9 len) (Vec.sub b a))
+                    gone.[flight] <- d + step
                     let mutable rest = alive
                     while not rest.IsEmpty do
                         let e = rest.Head
@@ -542,6 +576,7 @@ module Geometry =
                                 hits.Add((t, e.Name))
                                 last.[e.Name] <- t
                         rest <- rest.Tail
+            k <- k + 1
         List.ofSeq hits
 
     /// The places of the numbers in rising order, equal ones in the order they stand in (a
