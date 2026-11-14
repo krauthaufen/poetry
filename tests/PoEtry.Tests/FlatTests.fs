@@ -677,6 +677,127 @@ let run (test: string -> (unit -> unit) -> unit) =
         let unprepared = Sim.run { fight with BankedInvocations = 0.0; Enemies = pack |> List.map (fun e -> { e with Life = 1e9 }) } 1u
         if not (unprepared.Counts.ContainsKey "buff:Charged") then failwith "expected the charge buff")
 
+    // ---- minions and totems ----
+    let bite name dmg = { Skill.make name [ Attack; Melee ] with BaseDamage = Map.ofList [ Physical, { Min = dmg * 0.8; Max = dmg * 1.2 } ]; BaseCrit = 6.0 }
+    let sure = Mod.base' (Named "Accuracy") 1e12
+    let idle = { Skill.make "Wait" [ Spell ] with Hits = [] }
+    let body life revive =
+        { Life = life; EnergyShield = 0.0; Armour = 0.0; Evasion = 0.0; Resist = Map.empty; Melee = true; Size = 1.0; Reach = 12.0; Revive = revive; Power = 0.55; LifeRegen = 0.0; TakesForOwner = 0.0; Explodes = None }
+    let brute t dmg interval =
+        { EnemyDef.atLevel 83 1e9 with
+            Name = "brute"; Position = Vec.make 8.0 0.0; Size = 4.0; Mods = []
+            Attack = Some { Interval = interval; Damage = Map.ofList [ t, dmg ]; Accuracy = 1500.0; Range = 5.0; CritChance = 10.0; Melee = true } }
+    let minionSeeds = [ 1u .. 12u ]
+
+    test "flat: a minion that cannot be hurt fights beside the player; an offering buffs the minions" (fun () ->
+        let offering = { Skill.make "Offering" [ Spell ] with Hits = []; Cooldown = Some 4.0 }
+        let player =
+            { Actor.make "Player" [ noIgnite; Mod.inc CritChance 100.0 ] [ offering; spell "Bolt" Fire 40.0 90.0 ] with
+                Rules = [ { Hook = OnUse; Filter = Called "Offering"; Chance = 100.0; Reaction = GrantMinionBuff("Offering", 3.0, [ Mod.inc (Damage AllDamage) 50.0; Mod.more Speed 20.0 ]) } ] }
+        let hound =
+            { Actor.make "Hound" [ sure; Mod.base' (AilmentChance Bleed) 40.0; Mod.inc (Damage AllDamage) 20.0 |> Mod.whenever (WhileBuff "HitRecently") ] [ bite "Bite" 100.0; { bite "Howl" 30.0 with Cooldown = Some 2.5 } ] with
+                Rotation = [ Actor.always "Howl"; Actor.always "Bite" ]
+                Rules = [ { Hook = OnHit; Filter = Called "Howl"; Chance = 100.0; Reaction = ApplyDebuff("Marked", 3.0, 2, [ Mod.inc (DamageTaken AllDamage) 10.0 ]) } ] }
+        let crow = Actor.make "Crow" [ sure ] [ { spell "Peck" Cold 20.0 60.0 with BaseTime = 0.45 } ]
+        let fight = { Fight.single (boss 1e12) player 12.0 with Minions = [ hound; crow ] }
+        same fight minionSeeds
+        let o = Sim.run fight 1u
+        if not (o.DamageBy.ContainsKey "Bite (hit)" && o.DamageBy.ContainsKey "Peck (hit)" && o.DamageBy.ContainsKey "Bolt (hit)") then failwith "expected every actor to hit"
+        // and a fight that ends when the enemies die
+        same { fight with Enemies = [ boss 3000.0; { boss 5000.0 with Name = "other"; Position = Vec.make 25.0 10.0 } ] } minionSeeds)
+
+    test "flat: monsters kill minions, which are revived together; one that does not revive is gone" (fun () ->
+        let skeleton i = { Actor.make (sprintf "Skeleton %d" i) [ sure ] [ bite "Bite" 100.0 ] with Body = Some { body 150.0 (Some 5.0) with Evasion = 800.0; Armour = 300.0; LifeRegen = 5.0 } }
+        let spirit = { Actor.make "Spirit" [ sure ] [ spell "Wail" Chaos 10.0 30.0 ] with Body = Some { body 90.0 None with Melee = false; EnergyShield = 60.0; Resist = Map.ofList [ Fire, 50.0 ] } }
+        let player = Actor.make "Player" [ noIgnite ] [ idle ]
+        let brutes = [ brute Physical 60.0 0.7; { brute Fire 45.0 1.1 with Name = "burner"; Position = Vec.make -6.0 3.0 }; { brute Chaos 30.0 0.9 with Name = "rot"; Position = Vec.make 3.0 -7.0 } ]
+        let fight = { Fight.single brutes.Head player 30.0 with Enemies = brutes; Minions = [ skeleton 1; skeleton 2; skeleton 3; spirit ] }
+        same fight minionSeeds
+        let o = Sim.run fight 1u
+        if not (o.Counts.ContainsKey "minion:died" && o.Counts.ContainsKey "minion:revived") then failwithf "expected deaths and revivals: %A" o.Counts
+        // with a player that can be hurt the attacks go at it too; a companion takes its share
+        let wolf = { Actor.make "Wolf" [ sure ] [ bite "Maul" 80.0 ] with Body = Some { body 2000.0 (Some 4.0) with TakesForOwner = 40.0 } }
+        let hurt = { player with Vitals = Some { PlayerStats.basic 4000.0 100.0 with Evasion = 500.0; LifeRegen = 30.0; Block = 20.0 } }
+        let fight = { fight with Player = hurt; Minions = wolf :: fight.Minions }
+        same fight minionSeeds
+        if not ((Sim.run fight 1u).Counts.ContainsKey "minion:took for owner") then failwith "expected the companion to take hits")
+
+    test "flat: energy from minions' deaths, a minion that explodes at low life, melee minions that find no room" (fun () ->
+        let nova = { spell "Nova" Fire 80.0 120.0 with Tags = Set.ofList [ Spell; Triggered ] }
+        let meta = { Meta.simple "On Death" 55.0 "Nova" with Sources = [ MinionDeaths 50.0 ] }
+        let player = { Actor.make "Player" [ noIgnite ] [ idle; nova ] with Rotation = [ Actor.always idle.Name ]; Metas = [ meta ] }
+        let blast = { Skill.make "Instability" [ Area; Tag "Fire" ] with BaseDamage = Map.ofList [ Fire, { Min = 100.0; Max = 200.0 } ]; BaseCrit = 5.0; Delivery = AreaAroundSelf 30.0 }
+        let skeleton i explodes =
+            { Actor.make (sprintf "Skeleton %d" i) [ sure ] [ bite "Bite" 60.0; blast ] with
+                Rotation = [ Actor.always "Bite" ]
+                Body = Some { body 400.0 (Some 3.0) with Explodes = (if explodes then Some blast.Name else None) } }
+        let fight = { Fight.single (brute Physical 110.0 0.5) player 25.0 with Minions = [ skeleton 1 true; skeleton 2 false; skeleton 3 true ] }
+        same fight minionSeeds
+        let o = Sim.run fight 1u
+        if not (o.Counts.ContainsKey "minion:exploded" && o.Counts.ContainsKey "trigger:Nova") then failwithf "expected explosions and triggers: %A" o.Counts
+        // big beasts around a small monster: four find room, the others wait
+        let beast i = { Actor.make (sprintf "Beast %d" i) [ sure ] [ bite "Gore" 100.0 ] with Body = Some { body 1e9 None with Size = 6.0; Reach = 16.0 } }
+        let small = { boss 1e12 with Size = 4.0 }
+        let crowded = { Fight.single small (Actor.make "Player" [ noIgnite ] [ idle ]) 6.0 with Minions = [ for i in 1 .. 6 -> beast i ] }
+        same crowded minionSeeds
+        if not ((Sim.run crowded 1u).Counts.ContainsKey "minion:no room") then failwith "expected minions without room")
+
+    test "flat: totems act while their buff is up; one spirit of several is called at random" (fun () ->
+        let place = { Skill.make "Totem" [ Spell ] with Hits = []; Cooldown = Some 6.0 }
+        let spirit n = { Actor.make n [ sure ] [ bite ("Bite " + n) 100.0 ] with ActiveWhile = Some n }
+        let turret = { Actor.make "Turret" [ sure ] [ { spell "Shot" Lightning 30.0 70.0 with BaseTime = 0.3; Delivery = Projectiles(ProjectileShape.make 2) } ] with ActiveWhile = Some "Turret buff" }
+        let player =
+            { Actor.make "Player" [ noIgnite ] [ place; spell "Bolt" Fire 10.0 20.0 ] with
+                Rules =
+                    [ { Hook = OnUse; Filter = Called "Totem"; Chance = 100.0; Reaction = GrantOneOf([ "A"; "B"; "C" ], 3.5) }
+                      { Hook = OnUse; Filter = Called "Totem"; Chance = 100.0; Reaction = GrantBuff("Turret buff", 4.0, 1, []) } ] }
+        let fight = { Fight.single (boss 1e12) player 20.0 with Minions = [ spirit "A"; spirit "B"; spirit "C"; turret ] }
+        same fight minionSeeds
+        if not ((Sim.run fight 1u).DamageBy.ContainsKey "Shot (hit)") then failwith "expected the turret to shoot")
+
+    test "flat: temporary minions are summoned, last their time and leave; corpses, bones and Runic Ward raise them" (fun () ->
+        let call = { Skill.make "Call" [ Spell ] with Hits = []; Cooldown = Some 2.0 }
+        let spirits = [ for i in 1 .. 3 -> { Actor.make (sprintf "Spirit %d" i) [ sure ] [ bite "Bite" 100.0 ] with Pool = Some "Spirits" } ]
+        let player =
+            { Actor.make "Player" [ noIgnite ] [ call; spell "Bolt" Fire 10.0 20.0 ] with
+                Rotation = [ { Use = "Call"; When = fun v -> (Map.tryFind "Out:Spirits" v.Buffs |> Option.defaultValue 0) < 3 }; Actor.always "Bolt" ]
+                Rules = [ { Hook = OnUse; Filter = Called "Call"; Chance = 100.0; Reaction = Summon("Spirits", 2, 3.0) } ] }
+        let fight = { Fight.single (boss 1e12) player 15.0 with Minions = spirits }
+        same fight minionSeeds
+        let o = Sim.run fight 1u
+        if not (o.Counts.ContainsKey "summoned:Spirits" && o.Counts.ContainsKey "minion:left") then failwithf "expected summons that leave: %A" o.Counts
+        // a zombie from a corpse, or three for a power charge, the first of them empowered
+        let raise = { Skill.make "Raise" [ Spell; Tag "Type:TargetsDestructibleCorpses" ] with Hits = [] }
+        let zombies = [ for i in 1 .. 10 -> { Actor.make (sprintf "Zombie %d" i) [ sure ] [ bite "Chew" 100.0 ] with Pool = Some "Zombies"; Body = Some(body 300.0 None) } ]
+        let rule = WithCorpse(Summon("Zombies", 1, 6.0), SpendStack("PowerCharge", SummonEmpowered("Zombies", 3, 8.0, [ Mod.more (Damage AllDamage) 100.0 ])))
+        let raiser =
+            { Actor.make "Player" [ noIgnite ] [ raise; { spell "Nova" Fire 200.0 300.0 with Delivery = AreaAroundSelf 80.0 } ] with
+                Resources = [ "PowerCharge", 2 ]
+                Rules = [ { Hook = OnUse; Filter = Called "Raise"; Chance = 100.0; Reaction = rule } ] }
+        let weak i = { EnemyDef.atLevel 70 600.0 with Name = sprintf "weak %d" i; Position = Vec.make (10.0 + float i) (float i); Mods = [] }
+        let fight = { Fight.single (brute Physical 90.0 0.8) raiser 20.0 with Enemies = brute Physical 90.0 0.8 :: [ for i in 1 .. 4 -> weak i ]; Minions = zombies }
+        same fight minionSeeds
+        // Unearth raises a construct from a dead reviving minion, once per death; beetles from corpses now and then
+        let dig = { Skill.make "Dig" [ Spell; Tag "Type:TargetsDestructibleCorpses" ] with Hits = [] }
+        let skeleton = { Actor.make "Skeleton" [ sure ] [ bite "Bite" 100.0 ] with Body = Some(body 100.0 (Some 5.0)) }
+        let constructs = [ for i in 1 .. 4 -> { Actor.make (sprintf "Construct %d" i) [ sure ] [ bite "Claw" 10.0 ] with Pool = Some "Constructs" } ]
+        let beetles = [ for i in 1 .. 4 -> { Actor.make (sprintf "Beetle %d" i) [ sure ] [ bite "Burst" 100.0 ] with Pool = Some "Beetles" } ]
+        let digger =
+            { Actor.make "Player" [ noIgnite ] [ dig; { spell "Nova" Fire 200.0 300.0 with Delivery = AreaAroundSelf 80.0 } ] with
+                Periodics = [ { Name = "beetles"; Every = 1.0; Action = SummonFromCorpse("Beetles", 2, 1.5) }; { Name = "more"; Every = 2.3; Action = SummonMinions("Beetles", 1, 0.9) } ]
+                Rules = [ { Hook = OnUse; Filter = Called "Dig"; Chance = 100.0; Reaction = SummonPerCorpse("Constructs", 2.5, true) } ] }
+        let fight = { fight with Player = digger; Minions = skeleton :: constructs @ beetles }
+        same fight minionSeeds
+        if not ((Sim.run fight 1u).Counts.ContainsKey "summoned:Constructs") then failwith "expected constructs"
+        // Wardbound casters, one per so much Runic Ward, all of it spent
+        let bind = { Skill.make "Bind" [ Spell ] with Hits = []; Cooldown = Some 3.0 }
+        let casters = [ for i in 1 .. 5 -> { Actor.make (sprintf "Caster %d" i) [ sure ] [ spell "Blast" Cold 50.0 100.0 ] with Pool = Some "Casters" } ]
+        let binder =
+            { Actor.make "Player" [ noIgnite ] [ bind; spell "Bolt" Fire 10.0 20.0 ] with
+                Vitals = Some { PlayerStats.basic 100.0 100.0 with Ward = 100.0; WardRegen = 20.0 }
+                Rules = [ { Hook = OnUse; Filter = Called "Bind"; Chance = 100.0; Reaction = SummonPerWard("Casters", 30.0, 2.5) } ] }
+        same { Fight.single (boss 1e12) binder 12.0 with Minions = casters } minionSeeds)
+
     test "flat: what is not built is refused, with every reason" (fun () ->
         let player = Actor.make "Player" [] [ spell "Bolt" Fire 1.0 2.0 ]
         let fine = Fight.single (boss 1e9) player 5.0
@@ -685,11 +806,12 @@ let run (test: string -> (unit -> unit) -> unit) =
             | Ok _ -> failwithf "compiled, but has %s" reason
             | Error why -> if not (why.Contains reason) then failwithf "refused for '%s', expected '%s'" why reason
         if not (Flat.unsupported fine).IsEmpty then failwithf "a plain fight is refused: %A" (Flat.unsupported fine)
-        refused { fine with Minions = [ Actor.make "Hound" [] [ strike "Bite" 1.0 2.0 ] ] } "minions"
+        refused { fine with Minions = [ { Actor.make "Hound" [] [ strike "Bite" 1.0 2.0 ] with Vitals = Some(PlayerStats.basic 100.0 0.0) } ] } "a minion with pools"
+        refused { fine with Minions = [ Actor.make "Player" [] [ strike "Bite" 1.0 2.0 ] ] } "actors of the same name"
         refused { fine with Player = { player with Metas = [ Meta.simple "Cast on Crit" 100.0 "Bolt"; Meta.simple "Cast on Crit" 50.0 "Bolt" ] } } "meta gems of the same name"
         refused { fine with Player = { player with Infusions = Some { Remnants = [ Ignite, "FireInfusion", 50.0 ]; ExtraRemnantChance = 0.0; Delay = 0.5; Consumers = Map.empty; Wildcard = None } } } "infusions"
         refused { fine with Player = { player with Skills = [ { spell "Bolt" Fire 1.0 2.0 with Mods = [ Mod.base' (Named "MaxSeals") 2.0 ] } ] } } "sealed skills"
-        refused { fine with Player = { player with Rules = [ { Hook = OnHit; Filter = AnySkill; Chance = 100.0; Reaction = Summon("Wolves", 1, 5.0) } ] } } "the reaction Summon"
+        refused { fine with Player = { player with Rules = [ { Hook = OnHit; Filter = AnySkill; Chance = 100.0; Reaction = AttachPustule("Bolt", 3.0, 0.0, 0.0) } ] } } "the reaction AttachPustule"
         // both reasons of a fight with two
         let two = { fine with Replace = true; Player = { player with Banners = [ { Name = "War Banner"; Glory = 100.0; PerAttackHit = 5.0; Duration = 10.0; Mods = [] } ] } }
         if (Flat.unsupported two).Length <> 2 then failwithf "expected two reasons, got %A" (Flat.unsupported two))
