@@ -1,6 +1,7 @@
 // How many of the corpus's fights the fast engine (Flat) plays, and what keeps it from the
 // others, ranked by how many characters each thing stops. The characters are loaded and
-// fought as tools/corpus/run.fsx does. Prints counts only, nothing of a character.
+// fought as tools/corpus/run.fsx does. Prints counts, and of a character whose fight the two
+// engines play differently its file's name, the first seed and what differs; nothing else.
 //   dotnet fsi --optimize+ tools/flat/coverage.fsx [corpus dir]
 #r "../../src/PoEtry/bin/Release/net8.0/PoEtry.dll"
 open PoEtry
@@ -47,7 +48,7 @@ let report (title: string) (o: Options) =
                 match fightOf f o with
                 | Some fight ->
                     let reasons = Flat.unsupported fight
-                    let same = match reasons, Flat.compile fight with [], Ok p -> Some(fight, p) | _ -> None
+                    let same = match reasons, Flat.compile fight with [], Ok p -> Some(System.IO.Path.GetFileNameWithoutExtension f, fight, p) | _ -> None
                     Some(reasons, same)
                 | None -> None
             with _ -> None)
@@ -62,9 +63,34 @@ let report (title: string) (o: Options) =
         near a.Duration b.Duration && a.Ttk.IsSome = b.Ttk.IsSome && a.Kills.Length = b.Kills.Length && nearMap a.DamageBy b.DamageBy && nearMap a.DamageByType b.DamageByType && a.Counts = b.Counts
         && nearMap a.Uptime b.Uptime && a.Died.IsSome = b.Died.IsSome && near a.DamageTaken b.DamageTaken && near a.Evened b.Evened && near a.Overkill b.Overkill && near a.MinLife b.MinLife
         && nearMap a.ManaGained b.ManaGained && near a.ManaStarved b.ManaStarved
+    /// What of two outcomes is not the same (the first thing found).
+    let differing (a: Outcome) (b: Outcome) : string =
+        let maps (what: string) (x: Map<string, float>) (y: Map<string, float>) =
+            if nearMap x y then "" else
+                let keys = (x |> Map.toList |> List.map fst) @ (y |> Map.toList |> List.map fst) |> List.distinct
+                let key = keys |> List.find (fun k -> match Map.tryFind k x, Map.tryFind k y with Some v, Some w -> not (near v w) | _ -> true)
+                sprintf "%s[%s]: reference %A, flat %A" what key (Map.tryFind key x) (Map.tryFind key y)
+        [ (if near a.Duration b.Duration then "" else sprintf "Duration: reference %.17g, flat %.17g" a.Duration b.Duration)
+          (if a.Ttk.IsSome = b.Ttk.IsSome then "" else "Ttk")
+          (if a.Kills.Length = b.Kills.Length then "" else sprintf "Kills: reference %d, flat %d" a.Kills.Length b.Kills.Length)
+          maps "DamageBy" a.DamageBy b.DamageBy
+          maps "DamageByType" a.DamageByType b.DamageByType
+          (if a.Counts = b.Counts then "" else
+               let keys = (a.Counts |> Map.toList |> List.map fst) @ (b.Counts |> Map.toList |> List.map fst) |> List.distinct
+               let key = keys |> List.find (fun k -> Map.tryFind k a.Counts <> Map.tryFind k b.Counts)
+               sprintf "Counts[%s]: reference %A, flat %A" key (Map.tryFind key a.Counts) (Map.tryFind key b.Counts))
+          maps "Uptime" a.Uptime b.Uptime
+          (if a.Died.IsSome = b.Died.IsSome then "" else sprintf "Died: reference %A, flat %A" a.Died b.Died)
+          (if near a.DamageTaken b.DamageTaken then "" else sprintf "DamageTaken: reference %.17g, flat %.17g" a.DamageTaken b.DamageTaken)
+          (if near a.Evened b.Evened then "" else sprintf "Evened: reference %.17g, flat %.17g" a.Evened b.Evened)
+          (if near a.Overkill b.Overkill then "" else sprintf "Overkill: reference %.17g, flat %.17g" a.Overkill b.Overkill)
+          (if near a.MinLife b.MinLife then "" else sprintf "MinLife: reference %.17g, flat %.17g" a.MinLife b.MinLife)
+          maps "ManaGained" a.ManaGained b.ManaGained
+          (if near a.ManaStarved b.ManaStarved then "" else sprintf "ManaStarved: reference %.17g, flat %.17g" a.ManaStarved b.ManaStarved) ]
+        |> List.tryFind (fun d -> d <> "") |> Option.defaultValue "?"
     let seeds = [ 1u .. 40u ]
     let timed =
-        compiled |> Array.choose snd |> Array.map (fun (fight, p) ->
+        compiled |> Array.choose snd |> Array.map (fun (file, fight, p) ->
             for seed in 100u .. 103u do
                 Sim.run fight seed |> ignore
                 Flat.run p seed |> ignore
@@ -87,6 +113,9 @@ let report (title: string) (o: Options) =
             let simWarm = sw.Elapsed.TotalMilliseconds / 20.0
             let events = ref 0
             Flat.traced (fun _ k _ _ _ -> if k <> "hit" && k <> "crit" then events.Value <- events.Value + 1) p 1u |> ignore
+            (match List.zip3 seeds a b |> List.tryFind (fun (_, x, y) -> not (same x y)) with
+             | Some (seed, x, y) -> printfn "   DIFFERS %s, seed %d: %s" file seed (differing x y)
+             | None -> ())
             List.forall2 same a b, simMs, flatMs, events.Value, simWarm, flatWarm)
     printfn "\n== %s: %d characters with a fight, %d compile (%d of them the same as the reference within 1e-9 with seeds 1 to 40)" title results.Length compiled.Length (timed |> Array.filter (fun (ok, _, _, _, _, _) -> ok) |> Array.length)
     for (_, simMs, flatMs, events, simWarm, flatWarm) in timed do
