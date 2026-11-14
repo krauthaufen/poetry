@@ -240,7 +240,7 @@ let randomFight (case: uint32) : Fight * string =
             (if attack then [ Attack ] else [ Spell ])
             @ (if chance 0.3 then [ Melee ] else []) @ (if chance 0.2 then [ Slam ] else []) @ (if chance 0.2 then [ Area ] else [])
             @ (if chance 0.1 then [ Tag "Type:Sustained" ] else []) @ (if chance 0.1 then [ Tag "SpellDot" ] else [])
-            @ (if chance 0.1 then [ Warcry ] else []) @ (if chance 0.2 then [ Tag "Type:Barrageable" ] else [])
+            @ (if chance 0.1 then [ Warcry ] else []) @ (if chance 0.3 then [ Tag "Type:Barrageable" ] else [])
         { Skill.make (sprintf "Skill %d" i) tags with
             BaseDamage = (if chance 0.08 then Map.empty else damage ())
             BaseMultiplier = (if chance 0.3 then between 0.5 2.5 else 1.0)
@@ -272,6 +272,17 @@ let randomFight (case: uint32) : Fight * string =
                   if chance 0.06 then
                       yield Mod.base' (Named "Requires:Combo") (float (whole 1 5))
                       if chance 0.5 then yield Mod.base' (Named "ComboExtraChance") (between 10.0 90.0)
+                  if chance 0.08 then
+                      yield Mod.base' (Named "MaxSeals") (float (whole 1 4))
+                      yield (if chance 0.5 then Mod.base' (Named "SealIntervalMs") (between 150.0 1500.0) else Mod.base' (Named "SealIntervalPercentOfUse") (between 20.0 120.0))
+                      if chance 0.6 then yield Mod.base' (Named "SealRepeats") 1.0
+                      if chance 0.5 then yield Mod.base' (Named "SealRepeatDamage") (between -50.0 50.0)
+                      if chance 0.5 then yield Mod.base' (Named "SealProjectiles") (float (whole 1 2))
+                  if chance 0.07 then
+                      yield Mod.base' (Named "BarrageRepeats") (float (whole 1 3))
+                      if chance 0.5 then yield Mod.base' (Named "BarrageRepeatsPerFrenzy") 1.0
+                      yield Mod.base' (Named "BarrageRepeatLess") (between 10.0 60.0)
+                      if chance 0.6 then yield Mod.base' (Named "BarrageCooldownPct") (between 30.0 200.0)
                   if chance 0.05 then yield Mod.base' (Named("NeedsEnemyStacks:" + pick [ "Poisoned"; "Marked by pain"; "Shocked" ])) (float (whole 1 3)) ]
             Consumes = (if chance 0.25 then Some(pick [ "PowerCharge"; "FrenzyCharge" ]) else None)
             Cost = (if chance 0.5 then between 3.0 45.0 else 0.0)
@@ -670,13 +681,10 @@ let randomFight (case: uint32) : Fight * string =
             { fight with Player = player'; Enemies = enemies'; Minions = persistent @ totems @ pack }
     // now and then something the fast engine does not play: it must say so
     let fight =
-        match (if chance 0.12 then pick [ 1; 3 ] else -1) with
+        match (if chance 0.06 then 1 else -1) with
         | 1 ->
             note "pustule"
             { fight with Player = { fight.Player with Rules = { Hook = OnHit; Filter = AnySkill; Chance = 100.0; Reaction = AttachPustule(fight.Player.Skills.Head.Name, 3.0, 0.0, 0.0) } :: fight.Player.Rules } }
-        | 3 ->
-            note "seals"
-            { fight with Player = { fight.Player with Skills = fight.Player.Skills |> List.map (fun s -> { s with Mods = Mod.base' (Named "MaxSeals") 2.0 :: Mod.base' (Named "SealIntervalMs") 900.0 :: Mod.base' (Named "SealRepeats") 1.0 :: s.Mods }) } }
         | _ -> fight
     // a pack that never ends: the dead are replaced (several enemies, most of them weak enough to die)
     let fight =
@@ -1104,10 +1112,10 @@ let run (test: string -> (unit -> unit) -> unit) =
         refused { fine with Minions = [ Actor.make "Player" [] [ strike "Bite" 1.0 2.0 ] ] } "actors of the same name"
         refused { fine with Player = { player with Metas = [ Meta.simple "Cast on Crit" 100.0 "Bolt"; Meta.simple "Cast on Crit" 50.0 "Bolt" ] } } "meta gems of the same name"
         refused { fine with Player = { player with Infusions = Some { Remnants = []; ExtraRemnantChance = 0.0; Delay = 0.5; Consumers = Map.ofList [ "Bolt", ("FireInfusion", "No such skill") ]; Wildcard = None } } } "an infusion of a skill"
-        refused { fine with Player = { player with Skills = [ { spell "Bolt" Fire 1.0 2.0 with Mods = [ Mod.base' (Named "MaxSeals") 2.0 ] } ] } } "sealed skills"
+        refused { fine with Player = { player with Skills = [ { spell "Bolt" Fire 1.0 2.0 with Mods = [ Mod.flag (Named "Crystals") ] } ] } } "Ice Crystals"
         refused { fine with Player = { player with Rules = [ { Hook = OnHit; Filter = AnySkill; Chance = 100.0; Reaction = AttachPustule("Bolt", 3.0, 0.0, 0.0) } ] } } "the reaction AttachPustule"
         // both reasons of a fight with two
-        let two = { fine with Enemies = [ { boss 1e9 with Name = "boss+" } ]; Replace = true; Player = { player with Skills = [ { spell "Bolt" Fire 1.0 2.0 with Mods = [ Mod.base' (Named "MaxSeals") 2.0 ] } ] } }
+        let two = { fine with Enemies = [ { boss 1e9 with Name = "boss+" } ]; Replace = true; Player = { player with Skills = [ { spell "Bolt" Fire 1.0 2.0 with Mods = [ Mod.flag (Named "Crystals") ] } ] } }
         if (Flat.unsupported two).Length <> 2 then failwithf "expected two reasons, got %A" (Flat.unsupported two))
 
     test "flat: random fights give the reference's outcome, or are refused" (fun () ->

@@ -856,7 +856,23 @@ module Flat =
           /// of statuses the enemy aimed at must have.
           Requires: (string * float)[]
           NeedsStacks: (string * int)[]
-          CReload: int }
+          CReload: int
+          /// A sealed skill: the most seals, what a seal takes (milliseconds, and a share of
+          /// the use time in percent), the projectiles and repeats a broken seal gives, the
+          /// repeats' damage (percent more), the buff's mods for the projectiles.
+          MaxSeals: float
+          SealMs: float
+          SealPercent: float
+          SealProjectiles: float
+          SealRepeats: float
+          SealRepeatDamage: float
+          SealMods: Mod list
+          CSeals: int
+          /// Barrage: the repeats a use readies (and per Frenzy Charge), what the buff carries.
+          BarrageRepeats: float
+          BarragePerFrenzy: float
+          BarrageMods: Mod list
+          CBarraged: int }
 
     type private EnemyInfo =
         { Def: EnemyDef
@@ -923,6 +939,11 @@ module Flat =
               RemnantDelay: float
               BConsumedInfusion: int
               BReloaded: int
+              BSealsBroken: int
+              BBarrage: int
+              CBarrageReadied: int
+              /// The actor's skills and parts by name.
+              SkillIds: Dictionary<string, int>
               /// Trinity: the resonance of each element (lightning, cold, fire), and their sum.
               BResonance: int[]
               BResonanceSum: int
@@ -1112,8 +1133,6 @@ module Flat =
           "Crystals", "Ice Crystals"
           "SeqLength", "chained attacks"
           "SeqHits", "chained attacks"
-          "MaxSeals", "sealed skills"
-          "BarrageRepeats", "Barrage"
           "WindowSeconds", "skills with a window (Requiem)"
           "SpendsRage", "parts that spend Rage"
           "RecordsDamage", "debuffs that record damage (Inevitable Agony)" ]
@@ -1124,7 +1143,7 @@ module Flat =
           "ToggleBuff:", "forms that are switched on" ]
 
     /// Buffs the reference treats in a way of its own that is not built here.
-    let private unbuiltBuffs = [ "Demon Form", "Demon Form"; "Barrage", "Barrage" ]
+    let private unbuiltBuffs = [ "Demon Form", "Demon Form" ]
     let private unbuiltBuffPrefixes = [ "Warped:", "warps into projectiles" ]
 
     let private recentlyNames = [ "HitRecently"; "NonCritRecently"; "CritRecently"; "CritInPast8Seconds"; "KilledRecently" ]
@@ -1548,6 +1567,19 @@ module Flat =
                 consumedOf.Add charge
             // (a number a skill's own mods give: `own` in the reference)
             let ownBase (s: Skill) (name: string) = s.Mods |> List.sumBy (fun m -> if m.Stat = Named name && m.Kind = Base then m.Value else 0.0)
+            // the buffs a use of a skill itself brings: a sealed skill's broken seals, the repeats
+            // Barrage readies (before the skills' answers are made, which have a place for their mods)
+            let sealMods = Dictionary<string, Mod list>()
+            let barrageMods = Dictionary<string, Mod list>()
+            for s in all do
+                if ownBase s "SealProjectiles" > 0.0 && not (sealMods.ContainsKey s.Name) then
+                    let mods = [ Mod.base' AdditionalProjectiles (ownBase s "SealProjectiles") |> Mod.whenever (SkillNamed s.Name) ]
+                    buffMods mods
+                    sealMods.[s.Name] <- mods
+                if ownBase s "BarrageRepeats" > 0.0 && not (barrageMods.ContainsKey s.Name) then
+                    let mods = [ Mod.base' (Named "BarrageRepeatLess") (ownBase s "BarrageRepeatLess"); Mod.base' (Named "BarrageCooldownPct") (ownBase s "BarrageCooldownPct") |> Mod.from s.Name ]
+                    buffMods mods
+                    barrageMods.[s.Name] <- mods
             // a skill's answers: its mods and the character's, newest first, by stat and kind
             let queriesOf (s: Skill) : (int * ModKind * Stat list) -> Query =
                 let byKey = Dictionary<string, ResizeArray<Mod>>()
@@ -1707,7 +1739,19 @@ module Flat =
                            "Combo:" + s.Name, ownBase s "Requires:Combo" |]
                         |> Array.filter (fun (_, n) -> n > 0.0)
                       NeedsStacks = [| for m in s.Mods do match m.Stat with Named n when n.StartsWith "NeedsEnemyStacks:" -> yield n.Substring 17, int m.Value | _ -> () |]
-                      CReload = counts.Id("reload:" + s.Name) })
+                      CReload = counts.Id("reload:" + s.Name)
+                      MaxSeals = ownBase s "MaxSeals"
+                      SealMs = ownBase s "SealIntervalMs"
+                      SealPercent = ownBase s "SealIntervalPercentOfUse"
+                      SealProjectiles = ownBase s "SealProjectiles"
+                      SealRepeats = ownBase s "SealRepeats"
+                      SealRepeatDamage = ownBase s "SealRepeatDamage"
+                      SealMods = (match sealMods.TryGetValue s.Name with | true, mods -> mods | _ -> [])
+                      CSeals = counts.Id("seals:" + s.Name)
+                      BarrageRepeats = ownBase s "BarrageRepeats"
+                      BarragePerFrenzy = ownBase s "BarrageRepeatsPerFrenzy"
+                      BarrageMods = (match barrageMods.TryGetValue s.Name with | true, mods -> mods | _ -> [])
+                      CBarraged = counts.Id("barraged:" + s.Name) })
                 |> Array.ofList
             let sIso, sClose, sOpen = statuses.Id "Isolated", statuses.Id "Close", statuses.Id "OpenWeakness"
             let sDerived = derivedStatuses |> List.map statuses.Id |> Array.ofList
@@ -1745,6 +1789,8 @@ module Flat =
             // (named here, while names are still given numbers)
             buffs.Id "ConsumedInfusionRecently" |> ignore
             buffs.Id "ReloadedRecently" |> ignore
+            buffs.Id "SealsBroken" |> ignore
+            buffs.Id "Barrage" |> ignore
             for t in DamageType.elemental do
                 buffs.Id("Resonance:" + DamageType.name t) |> ignore
             buffs.Id "Resonance" |> ignore
@@ -1805,6 +1851,10 @@ module Flat =
                       RemnantDelay = (match actor.Infusions with Some inf -> inf.Delay | None -> 0.0)
                       BConsumedInfusion = buffs.Id "ConsumedInfusionRecently"
                       BReloaded = buffs.Id "ReloadedRecently"
+                      BSealsBroken = buffs.Id "SealsBroken"
+                      BBarrage = buffs.Id "Barrage"
+                      CBarrageReadied = count "barrage readied"
+                      SkillIds = skillIds
                       BResonance = DamageType.elemental |> List.map (fun t -> buffs.Id("Resonance:" + DamageType.name t)) |> Array.ofList
                       BResonanceSum = buffs.Id "Resonance"
                       Builders = builders
@@ -2284,6 +2334,8 @@ module Flat =
           /// not been paid for yet (the cost is paid with the first shot of a load).
           Ammo: int[]
           LoadDue: bool[]
+          /// By sealed skill: when its seals were last broken (NaN: never).
+          SealBreak: float[]
           /// A minion's life and energy shield, when it was last hit, whether it is out of the
           /// fight (killed, or not summoned), and when a temporary one's time is up.
           mutable Health: float
@@ -3663,6 +3715,7 @@ module Flat =
             let doubled = skill.Cooldown.IsSome && sumQ ev qDoubleUses > 0.0
             let lose = if p.Vitals.IsSome then sumQ ev qLosePools / 100.0 else 0.0
             let dodge = if p.Metas.Length > 0 && skill.Tags.Contains(Tag "DodgeRoll") then Constants.dodgeRollDistance + sumQ ev qDodgeDistance else 0.0
+            let lasting = if info.BarrageRepeats > 0.0 && skill.Duration > 0.0 then multQ ev qSkillDuration else 1.0
             release s
             match skill.Cooldown with
             | Some cd ->
@@ -3683,6 +3736,79 @@ module Flat =
                     s.Mana <- max 0.0 (s.Mana - lose * v.Mana)
                     bump s p.CPoolLoss
              | None -> ())
+            // (what the use reads of the buffs as they were when it began)
+            let charged = info.Consumes >= 0 && stacksOf s info.Consumes > 0
+            let barrage = p.BBarrage
+            let repeats = if info.SpendsRepeats && (at s.A.BHas barrage) && (at s.A.BStacks barrage) > 0 then (at s.A.BStacks barrage) else 0
+            let repeatsUntil = if repeats > 0 then (at s.A.BExpires barrage) else 0.0
+            let repeatsMods = if repeats > 0 then (at s.A.BMods barrage) else []
+            // when the use's hits land (see `SkillInfo.PatShare`): the skill's own pattern,
+            // unless seals or readied repeats add to it
+            let mutable patShare = info.PatShare
+            let mutable patAt = info.PatAt
+            let mutable patMult = info.PatMult
+            // Sealed skills: a seal every so often (a fixed time, or a share of the use time), up to
+            // a maximum; the use breaks them all. A fight starts with the seals full.
+            if info.MaxSeals > 0.0 then
+                let interval = info.SealMs / 1000.0 + info.SealPercent / 100.0 * useTime
+                let broken = at s.A.SealBreak sid
+                let seals =
+                    if interval <= 0.0 || useTime <= 0.0 then 0
+                    elif System.Double.IsNaN broken then int info.MaxSeals
+                    else int (min info.MaxSeals (floor ((s.Time - broken) / interval)))
+                if seals > 0 then
+                    put s.A.SealBreak sid s.Time
+                    // "additional Projectiles are fired": for this use
+                    if info.SealProjectiles > 0.0 then setBuff s p.BSealsBroken seals (s.Time + useTime + skill.HitDelay + 1e-6) info.SealMods
+                    bump s info.CSeals
+                // (a use without seals still restarts the count)
+                elif System.Double.IsNaN broken then put s.A.SealBreak sid s.Time
+                // "each causing the Spell to Repeat": the hits again per seal, with the repeats' own damage
+                let again = seals * int info.SealRepeats
+                if again > 0 then
+                    let k = 1.0 + info.SealRepeatDamage / 100.0
+                    let n = patAt.Length
+                    patShare <- Array.append patShare (Array.create (again * n) false)
+                    patAt <- Array.append patAt (Array.init (again * n) (fun j -> useTime + 0.1 * float (j / n + 1)))
+                    patMult <- Array.append patMult (Array.init (again * n) (fun j -> (at patMult (j % n)) * k))
+            // Barrage readies repeats for the next Repeatable attack: its base number and one per
+            // Frenzy Charge, all of which it consumes
+            if info.BarrageRepeats > 0.0 then
+                let frenzy = at p.BCharges 1
+                let n = int (info.BarrageRepeats + info.BarragePerFrenzy * float (stacksOf s frenzy))
+                let lasts = useTime + (if skill.Duration > 0.0 then skill.Duration * lasting else 5.0)
+                removeBuff s frenzy
+                setBuff s barrage n (s.Time + lasts) info.BarrageMods
+                expireAt s (s.Time + lasts)
+                bump s p.CBarrageReadied
+            // a Repeatable attack with Barrage readied fires again for every repeat, within the
+            // same (longer) use; the repeats deal less. Barrage's cooldown grows by a share of
+            // the attack's time
+            if repeats > 0 && s.Time < repeatsUntil && useTime > 0.0 then
+                let value (name: string) = repeatsMods |> List.sumBy (fun m -> if m.Stat = Named name then m.Value else 0.0)
+                let k = 1.0 - value "BarrageRepeatLess" / 100.0
+                let n = patAt.Length
+                let share, time, mult = patShare, patAt, patMult
+                patShare <- Array.init ((repeats + 1) * n) (fun j -> at share (j % n))
+                patAt <-
+                    Array.init ((repeats + 1) * n) (fun j ->
+                        let i = j / n
+                        if (at share (j % n)) then (float i + (at time (j % n))) / float (repeats + 1)
+                        else (at time (j % n)) + useTime * float i / float (repeats + 1))
+                patMult <- Array.init ((repeats + 1) * n) (fun j -> if j / n = 0 then (at mult (j % n)) else (at mult (j % n)) * k)
+                removeBuff s barrage
+                let extra = value "BarrageCooldownPct" / 100.0 * useTime
+                (match repeatsMods |> List.tryPick (fun m -> if m.Stat = Named "BarrageCooldownPct" && m.Source <> "" then Some m.Source else None) with
+                 | Some name when extra > 0.0 ->
+                    match p.SkillIds.TryGetValue name with
+                    | true, source ->
+                        // "to a maximum of 30 seconds"
+                        let ready = min (s.Time + 30.0) (max s.Time (at s.A.Cooldowns source) + extra)
+                        put s.A.Cooldowns source ready
+                        put s.A.Recharges source [ ready ]
+                    | _ -> ()
+                 | _ -> ())
+                bump s info.CBarraged
             bump s info.CUses
             // the Glory or Combo the skill needed is spent
             for k in 0 .. info.Requires.Length - 1 do
@@ -3690,18 +3816,16 @@ module Flat =
             // (a skill whose rule says what it does with corpses takes them there)
             if info.TakesCorpse && corpses s > 0 then s.CorpsesUsed <- s.CorpsesUsed + 1
             if useTime > 0.0 then s.A.LastUsed <- sid
-            let hits = info.PatAt.Length
+            let hits = patAt.Length
             let mutable first = infinity
             let mutable last = s.Time
             for i in 0 .. hits - 1 do
-                let at = (if (at info.PatShare i) then s.Time + (at info.PatAt i) * useTime + skill.HitDelay else s.Time + (at info.PatAt i) + skill.HitDelay)
+                let at = (if (at patShare i) then s.Time + (at patAt i) * useTime + skill.HitDelay else s.Time + (at patAt i) + skill.HitDelay)
                 first <- min first at
                 last <- max last at
-            // (the buffs are what they were when the use began: nothing above changes them)
-            let charged = info.Consumes >= 0 && stacksOf s info.Consumes > 0
             for i in 0 .. hits - 1 do
-                let at = (if (at info.PatShare i) then s.Time + (at info.PatAt i) * useTime + skill.HitDelay else s.Time + (at info.PatAt i) + skill.HitDelay)
-                let mult = info.PatMult.[i]
+                let at = (if (at patShare i) then s.Time + (at patAt i) * useTime + skill.HitDelay else s.Time + (at patAt i) + skill.HitDelay)
+                let mult = patMult.[i]
                 for part in info.Parts do
                     let pi = p.Skills.[part]
                     let happens =
@@ -3783,7 +3907,10 @@ module Flat =
         if t >= 0 then useStatus s ev (at s.Foes t)
         keepAnswers s ev sid t 1
         let speed = multQ ev qSpeed
-        let time = info.Skill.BaseTime / speed * (1.0 + Constants.longerPerRepeat * 0.0) + sumQ ev qFixedUse
+        // "Skills take 5% longer to perform for each time they Repeat"
+        let barrage = s.P.BBarrage
+        let repeats = if info.SpendsRepeats && (at s.A.BHas barrage) && (at s.A.BStacks barrage) > 0 && s.Time < (at s.A.BExpires barrage) then float (at s.A.BStacks barrage) else 0.0
+        let time = info.Skill.BaseTime / speed * (1.0 + Constants.longerPerRepeat * repeats) + sumQ ev qFixedUse
         release s
         time
 
@@ -5851,6 +5978,7 @@ module Flat =
                   Waiting = Array.zeroCreate nk
                   Ammo = Array.create nk -1
                   LoadDue = Array.create nk false
+                  SealBreak = Array.create nk nan
                   Health = (match pr.Body with Some body -> body.Life | None -> 0.0)
                   Barrier = (match pr.Body with Some body -> body.EnergyShield | None -> 0.0)
                   HitAt = -1e9
