@@ -67,8 +67,8 @@
         const rs = f.results;
         const clears = rs.map((r) => r.clear && r.clear.mean).filter((x) => x != null);
         return {
-          gem: f.gem, engine: rs[0].engine || "", play: rs[0].play || [], scenario: rs[0].scenario, runs: rs.length, more: rs.length < f.total && !f.failed,
-          replay: (rs.find((r) => r.replay) || {}).replay || null,
+          gem: f.gem, engine: rs[0].engine || "", play: rs[0].play || [], scenario: rs[0].scenario, runs: rs.length, more: (rs.length < f.total || !f.shown) && !f.failed,
+          replay: f.replay,
           killRate: mean(rs.map((r) => r.killRate)),
           clear: clears.length === rs.length ? stats(clears) : null,
           dps: stats(rs.map((r) => r.dps.mean)),
@@ -89,19 +89,22 @@
         // whoever waits is answered once there is more than was last told (or nothing more comes)
         if (!f.waiters.length) return;
         if (f.error) { f.waiters.splice(0).forEach((w) => w.done(JSON.stringify({ error: f.error }))); return; }
-        const done = (f.results.length >= f.total || f.failed) && f.results.length > 0;
-        // (who asked ahead waits for all of it and is not counted as told)
-        const ready = f.waiters.filter((w) => done || (!w.all && f.results.length > f.told));
+        // (the fight for showing comes on its own, see below: the numbers do not wait for it)
+        const full = (f.results.length >= f.total || f.failed) && f.results.length > 0;
+        const done = full && (f.shown || f.failed);
+        const news = f.results.length > f.told || (f.shown && !f.toldShown);
+        // (who asked ahead waits for all the numbers and is not counted as told)
+        const ready = f.waiters.filter((w) => done || (w.all ? full : news));
         if (!ready.length) return;
         const text = JSON.stringify(merged(f));
-        if (ready.some((w) => !w.all)) f.told = f.results.length;
+        if (ready.some((w) => !w.all)) { f.told = f.results.length; f.toldShown = f.shown; }
         f.waiters = f.waiters.filter((w) => !ready.includes(w));
         ready.forEach((w) => w.done(text));
       };
       const fight = (key, request, all) => {
         let f = fights.get(key);
         if (!f) {
-          f = { results: [], total: Math.max(1, request.runs || 12), told: 0, waiters: [], gem: "", error: "", failed: false };
+          f = { results: [], total: Math.max(1, request.runs || 12), told: 0, waiters: [], gem: "", error: "", failed: false, replay: null, shown: false, toldShown: false };
           fights.set(key, f);
           if (fights.size > 24) fights.delete(fights.keys().next().value);
           // runs of the question before that no worker has begun are not wanted any more,
@@ -114,14 +117,26 @@
             if (dropped) { fights.delete(other); dropped.error = dropped.results.length ? "" : "dropped"; dropped.failed = true; settle(dropped); }
           }
           current = key;
-          const one = (seed, gem) => ask({ ...request, runs: 1, seed, ...(seed === 1 ? { trace: 1 } : {}), ...(gem ? { gem } : {}) }, key).then((text) => {
+          const one = (seed, gem) => ask({ ...request, runs: 1, seed, ...(gem ? { gem } : {}) }, key).then((text) => {
             let r; try { r = JSON.parse(text); } catch { r = { error: "no answer" }; }
             if (r.error) { if (!f.results.length) f.error = r.error; f.failed = true; } else { f.results.push(r); f.gem = r.gem; }
             settle(f);
             return r;
           });
           // the first run finds the gem to press (if none was named); the others press it
-          one(1, request.gem).then((r) => { if (!r.error && fights.get(key) === f) for (let s = 2; s <= f.total; s++) one(s, r.gem); });
+          // The fight that is shown is the first one again, every event of it kept: that is the
+          // slow engine's work, so the first numbers do not wait for it. It is the next thing
+          // a worker does, while the others fight on.
+          const picture = (gem, first) => ask({ ...request, runs: 1, seed: 1, trace: 1, ...(gem ? { gem } : {}) }, key, first).then((text) => {
+            try { f.replay = JSON.parse(text).replay || null; } catch { f.replay = null; }
+            f.shown = true;
+            settle(f);
+          });
+          one(1, request.gem).then((r) => {
+            if (r.error || fights.get(key) !== f) { f.shown = true; settle(f); return; }
+            for (let s = 2; s <= f.total; s++) one(s, r.gem);
+            picture(r.gem, true);
+          });
         }
         return new Promise((done) => { f.waiters.push({ done, all }); settle(f); });
       };
