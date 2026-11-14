@@ -117,7 +117,7 @@
             if (dropped) { fights.delete(other); dropped.error = dropped.results.length ? "" : "dropped"; dropped.failed = true; settle(dropped); }
           }
           current = key;
-          const one = (seed, gem) => ask({ ...request, runs: 1, seed, ...(gem ? { gem } : {}) }, key).then((text) => {
+          const one = (seed, gem, scale) => ask({ ...request, runs: 1, seed, ...(gem ? { gem } : {}), ...(scale ? { scale } : {}) }, key).then((text) => {
             let r; try { r = JSON.parse(text); } catch { r = { error: "no answer" }; }
             if (r.error) { if (!f.results.length) f.error = r.error; f.failed = true; } else { f.results.push(r); f.gem = r.gem; }
             settle(f);
@@ -127,15 +127,16 @@
           // The fight that is shown is the first one again, every event of it kept: that is the
           // slow engine's work, so the first numbers do not wait for it. It is the next thing
           // a worker does, while the others fight on.
-          const picture = (gem, first) => ask({ ...request, runs: 1, seed: 1, trace: 1, ...(gem ? { gem } : {}) }, key, first).then((text) => {
+          const picture = (gem, first, scale) => ask({ ...request, runs: 1, seed: 1, trace: 1, ...(gem ? { gem } : {}), ...(scale ? { scale } : {}) }, key, first).then((text) => {
             try { f.replay = JSON.parse(text).replay || null; } catch { f.replay = null; }
             f.shown = true;
             settle(f);
           });
           one(1, request.gem).then((r) => {
             if (r.error || fights.get(key) !== f) { f.shown = true; settle(f); return; }
-            for (let s = 2; s <= f.total; s++) one(s, r.gem);
-            picture(r.gem, true);
+            // (the others fight the enemies the first one found, see LEAST)
+            for (let s = 2; s <= f.total; s++) one(s, r.gem, r.scale);
+            picture(r.gem, true, r.scale);
           });
         }
         return new Promise((done) => { f.waiters.push({ done, all }); settle(f); });
@@ -147,8 +148,14 @@
       const bases = new Map();
       // (depth 0: at once and rough; depth 1: asked after it, more and longer fights)
       const scenes = (depth) => depth
-        ? [["boss", 20, 1e12, 10], ["pinnacle", 20, 1e12, 10], ["pack", 8, 0, 10], ["surrounded", 8, 0, 10]]
-        : [["boss", 8, 1e12, 3], ["pinnacle", 8, 1e12, 3], ["pack", 4, 0, 3], ["surrounded", 4, 0, 3]];
+        ? [["boss", 30, 0, 32], ["pinnacle", 30, 0, 32], ["pack", 30, 0, 32], ["surrounded", 30, 0, 32]]
+        : [["boss", 30, 0, 8], ["pinnacle", 30, 0, 8], ["pack", 30, 0, 8], ["surrounded", 30, 0, 8]];
+      // The enemies die for real, with so much life that a fight lasts at least so many
+      // seconds (the simulator finds how much, "scale" in its answer); the fights that are
+      // compared have the same enemies: those of the fight as it is.
+      const LEAST = 4;
+      const scales = new Map();
+      const scaleOf = (text) => { try { return JSON.parse(text).scale || 1; } catch { return 1; } };
       let compared = "";
       const compare = async (request) => {
         const { op, depth, base, basechoices, passives, choices, ...rest } = request;
@@ -158,16 +165,22 @@
         // (against enemies that do not die, every hit counted as what it deals on average over
         // critical hit or not: the same in the long run, steadier from few fights)
         const dps = (text) => { try { const r = JSON.parse(text); return r.error ? null : (r.dpsEvened != null && r.killRate === 0 ? r.dpsEvened : r.dps.mean); } catch { return null; } };
-        const of = (scene, tree, seed) => ({ ...rest, ...tree, op: "fight", scenario: scene[0], time: scene[1], runs: 1, seed: seed || 1, ...(scene[2] ? { life: scene[2] } : {}) });
+        const of = (scene, tree, seed) => ({ ...rest, ...tree, op: "fight", scenario: scene[0], time: scene[1], runs: 1, seed: seed || 1, ...(scene[2] ? { life: scene[2] } : { least: LEAST }) });
         // (a fight a job: whatever is asked next need not wait for more than one)
         const seeds = (scene) => Array.from({ length: scene[3] }, (_, i) => scene[3] - i);
         // (every fight's damage, in the order of the seeds: the same fights with and without the
         // change are told apart pair by pair)
-        const several = (scene, tree, kind) => Promise.all(seeds(scene).map((seed) => ask(of(scene, tree, seed), kind, true).then(dps)))
+        const scale = (scene) => {
+          const k = baseKey(scene);
+          if (!scales.has(k)) scales.set(k, ask(of(scene, was, 1), "base", true).then(scaleOf));
+          return scales.get(k);
+        };
+        const several = (scene, tree, kind) => scale(scene)
+          .then((k) => Promise.all(seeds(scene).map((seed) => ask({ ...of(scene, tree, seed), scale: k }, kind, true).then(dps))))
           .then((xs) => (xs.some((x) => x == null) ? null : xs));
         const was = base === undefined || base === "" ? {} : { passives: base, choices: basechoices || "" };
         const baseKey = (scene) => scene[3] + "|" + JSON.stringify({ ...of(scene, was), build: undefined });
-        if (bases.size > 64) bases.clear();
+        if (bases.size > 64) { bases.clear(); scales.clear(); }
         // another change is asked about: what still waits for the one before is not wanted
         const now = String(passives) + "|" + String(choices) + "|" + JSON.stringify(then);
         if (now !== compared) {
@@ -215,7 +228,9 @@
           a = { results: [], total: entries.length, told: -1, waiters: [] };
           analyses.set(key, a);
           const dps = (text) => { try { const r = JSON.parse(text); return r.error ? null : (r.dpsEvened != null && r.killRate === 0 ? r.dpsEvened : r.dps.mean); } catch { return null; } };
-          const several = (extra) => Promise.all(Array.from({ length: seeds || 5 }, (_, i) => ask({ ...rest, ...extra, op: "fight", scenario: scene[0], time: Math.min(scene[1], 14), runs: 1, seed: i + 1, ...(scene[2] ? { life: scene[2] } : {}) }, "analyse").then(dps)))
+          const fought = (extra, seed) => ({ ...rest, ...extra, op: "fight", scenario: scene[0], time: scene[1], runs: 1, seed, ...(scene[2] ? { life: scene[2] } : { least: LEAST }) });
+          const scale = ask(fought({}, 1), "analyse").then(scaleOf);
+          const several = (extra) => scale.then((k) => Promise.all(Array.from({ length: seeds || 12 }, (_, i) => ask({ ...fought(extra, i + 1), scale: k }, "analyse").then(dps))))
             .then((xs) => (xs.some((x) => x == null) ? null : mean(xs)));
           const base = several({});
           entries.forEach((e) => several({ [e.param]: e.value }).then(async (changed) => { a.results.push({ key: e.key, base: await base, changed }); told(a); }));

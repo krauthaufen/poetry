@@ -319,7 +319,9 @@ module Report =
           Steps: (Play * string) list
           Fight: Fight
           Run: uint32 -> Outcome
-          Engine: string }
+          Engine: string
+          /// How many times their own life the enemies have (see "least").
+          Scale: float }
 
     let prepare (c: Loaded) (request: Json) : Ready =
         let n key d = Json.numField key request |> Option.defaultValue d
@@ -336,7 +338,10 @@ module Report =
         // others are upon one)
         let packs = s "scenario" "boss" = "pack" || s "scenario" "boss" = "surrounded"
         let o = { o with Targeting = (match s "target" (if packs then "nearest" else "strongest") with "nearest" -> Nearest | _ -> Strongest) }
-        let o = { o with Replace = (s "scenario" "boss" = "pack" || s "scenario" "boss" = "surrounded") && n "life" 0.0 <= 0.0 }
+        // ("least": the enemies die for real, with so much life that the fight lasts at least so
+        // many seconds; then a pack ends too)
+        let least = if n "life" 0.0 > 0.0 then 0.0 else n "least" 0.0
+        let o = { o with Replace = (s "scenario" "boss" = "pack" || s "scenario" "boss" = "surrounded") && n "life" 0.0 <= 0.0 && least <= 0.0 }
         let scenario = s "scenario" "boss"
         let profile r =
             let p = Rarity.defaults r
@@ -388,15 +393,40 @@ module Report =
             | "pack" | "surrounded" -> Encounter.pack level profile [ Normal, 8; Magic, 3; Rare, 1 ] distance 25.0 (scenario = "surrounded") 1u
             | _ -> Encounter.boss level profile distance
         let enemies = match n "life" 0.0 with l when l > 0.0 -> enemies |> List.map (fun e -> { e with Life = l }) | _ -> enemies
-        let f = Setup.fight c o player enemies
         // ("engine": "reference" asks for the reference engine whatever the fight)
-        let run, engine =
-            if s "engine" "" = "reference" then Sim.run f, "reference (asked for)"
+        let made (k: float) =
+            let f = Setup.fight c o player (if k = 1.0 then enemies else enemies |> List.map (fun e -> { e with Life = e.Life * k }))
+            if s "engine" "" = "reference" then f, Sim.run f, "reference (asked for)"
             else
                 match Flat.compile f with
-                | Ok program -> Flat.runner program, "flat"
-                | Error why -> Sim.run f, "reference: " + why
-        { Gem = gem; Scenario = scenario; Steps = steps; Fight = f; Run = run; Engine = engine }
+                | Ok program -> f, Flat.runner program, "flat"
+                | Error why -> f, Sim.run f, "reference: " + why
+        // How much life makes the fight last "least" seconds is found by fighting: nine fights
+        // (seeds of their own, the same for whoever asks), and more life while the middle one
+        // of them is over too soon. ("scale": the answer of an earlier question, e.g. of the fight this one is
+        // compared with: the same enemies for both.)
+        let scale =
+            match Json.numField "scale" request with
+            | Some k when k > 0.0 -> k
+            | _ when least <= 0.0 -> 1.0
+            | _ ->
+                // (life and length do not go together evenly: there is the time before the first
+                // hit, and what is dealt early is not what is dealt later. So: three times the
+                // life until it lasts, then between the last two, three times halved)
+                let lasts (k: float) =
+                    let _, run, _ = made k
+                    ([ 7001u .. 7009u ] |> List.map (fun seed -> (run seed).Duration) |> List.sort).[4] >= least
+                let rec up (k: float) (left: int) = if left = 0 || lasts k then k else up (k * 3.0) (left - 1)
+                let rec between (short: float) (long: float) (left: int) =
+                    if left = 0 then long
+                    else
+                        let mid = sqrt (short * long)
+                        if lasts mid then between short mid (left - 1) else between mid long (left - 1)
+                match up 1.0 16 with
+                | 1.0 -> 1.0
+                | k -> between (k / 3.0) k 3
+        let f, run, engine = made scale
+        { Gem = gem; Scenario = scenario; Steps = steps; Fight = f; Run = run; Engine = engine; Scale = scale }
 
     let fought (ready: Ready) (request: Json) : Json =
         let n key d = Json.numField key request |> Option.defaultValue d
@@ -411,6 +441,7 @@ module Report =
         obj
             [ "gem", JStr gem
               "engine", JStr ready.Engine
+              "scale", num ready.Scale
               // what is pressed, first to last
               "play", JArr(steps |> List.collect (fun (p, code) ->
                   let how =

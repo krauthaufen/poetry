@@ -562,7 +562,7 @@ let private spotName (m : Model) (spot : string) : string =
     | None -> slotOf spot + " (empty)"
 
 let private sheetUrl (m : Model) = "__sim?op=character" + knobs m + passives m + "&build=" + m.Build
-let private fightOf (m : Model) (scenario : string) (ask : string) = "__sim?op=fight&runs=32&time=20" + (if scenario = "pack" || scenario = "surrounded" then "" else "&life=1e12") + ask + "&scenario=" + scenario + (if m.Pressing <> "" then "&gem=" + m.Pressing.Replace (" ", "%20") else "") + fightKnobs m + knobs m + passives m + "&build=" + m.Build
+let private fightOf (m : Model) (scenario : string) (ask : string) = "__sim?op=fight&runs=96&time=30&least=4" + ask + "&scenario=" + scenario + (if m.Pressing <> "" then "&gem=" + m.Pressing.Replace (" ", "%20") else "") + fightKnobs m + knobs m + passives m + "&build=" + m.Build
 let private fightUrl (m : Model) = fightOf m m.Scenario ("&round=" + string m.Round)
 
 let private scenarios = [ "boss"; "pinnacle"; "pack"; "surrounded" ]
