@@ -280,8 +280,8 @@ module Flat =
 
     let private passes (ev: Ev) (it: Item) =
         let mutable ok = true
-        for i__1 in 0 .. it.Conds.Length - 1 do
-            let c = at it.Conds i__1
+        for cond in 0 .. it.Conds.Length - 1 do
+            let c = at it.Conds cond
             if ok && not (holds ev c) then ok <- false
         ok
 
@@ -289,8 +289,8 @@ module Flat =
     let private amount (ev: Ev) (it: Item) =
         if it.Stacky then
             let mutable k = 1.0
-            for i__2 in 0 .. it.Conds.Length - 1 do
-                let c = at it.Conds i__2
+            for cond in 0 .. it.Conds.Length - 1 do
+                let c = at it.Conds cond
                 match c with
                 | CPerStack (b, every) -> k <- k * floor (float (buffStacksOf ev b) / every)
                 | CPerEnemy (i, every) -> k <- k * floor (float (statusStacks ev i) / every)
@@ -305,8 +305,8 @@ module Flat =
             let it = (at q.Items i)
             if it.Slot < 0 then (if it.Conds.Length = 0 || passes ev it then acc <- acc + amount ev it)
             else
-                for i__3 in 0 .. (at ev.Dyn it.Slot).Length - 1 do
-                    let d = at (at ev.Dyn it.Slot) i__3
+                for entry in 0 .. (at ev.Dyn it.Slot).Length - 1 do
+                    let d = at (at ev.Dyn it.Slot) entry
                     if d.Conds.Length = 0 || passes ev d then acc <- acc + amount ev d
         acc
 
@@ -319,8 +319,8 @@ module Flat =
             else
                 // (Rage's more attack damage is the newest mod of all)
                 if it.Slot = ev.RageSlot && ev.AsAttack && not (System.Double.IsNaN ev.RageMore) then acc <- acc * (1.0 + ev.RageMore / 100.0)
-                for i__4 in 0 .. (at ev.Dyn it.Slot).Length - 1 do
-                    let d = at (at ev.Dyn it.Slot) i__4
+                for entry in 0 .. (at ev.Dyn it.Slot).Length - 1 do
+                    let d = at (at ev.Dyn it.Slot) entry
                     if d.Conds.Length = 0 || passes ev d then acc <- acc * (1.0 + amount ev d / 100.0)
         acc
 
@@ -331,8 +331,8 @@ module Flat =
                 let it = (at q.Items i)
                 if it.Slot < 0 then (if (it.Conds.Length = 0 || passes ev it) && amount ev it <> 0.0 then acc <- true)
                 else
-                    for i__5 in 0 .. (at ev.Dyn it.Slot).Length - 1 do
-                        let d = at (at ev.Dyn it.Slot) i__5
+                    for entry in 0 .. (at ev.Dyn it.Slot).Length - 1 do
+                        let d = at (at ev.Dyn it.Slot) entry
                         if (d.Conds.Length = 0 || passes ev d) && amount ev d <> 0.0 then acc <- true
         acc
 
@@ -347,8 +347,8 @@ module Flat =
                     v <- amount ev it
                     ev.Found <- true
             else
-                for i__6 in 0 .. (at ev.Dyn it.Slot).Length - 1 do
-                    let d = at (at ev.Dyn it.Slot) i__6
+                for entry in 0 .. (at ev.Dyn it.Slot).Length - 1 do
+                    let d = at (at ev.Dyn it.Slot) entry
                     if d.Conds.Length = 0 || passes ev d then
                         v <- amount ev d
                         ev.Found <- true
@@ -491,8 +491,8 @@ module Flat =
             // reference takes each in its turn: the same but for rounding where a conditional
             // one, or a buff's, counts too)
             let mutable acc = if kind = More then 1.0 else 0.0
-            for i__7 in 0 .. items.Length - 1 do
-                let it = at items i__7
+            for place in 0 .. items.Length - 1 do
+                let it = at items place
                 if fixed' it then acc <- (if kind = More then acc * (1.0 + it.V / 100.0) else acc + it.V)
             { Items = items |> Array.filter (fun it -> not (fixed' it)); Start = 0; Init = acc; OnBuffs = false; OnStatus = false; HasSlot = false }
 
@@ -2824,8 +2824,8 @@ module Flat =
             let mutable limits : int[] = Array.zeroCreate 8
             let mutable count = 0
             let dots = List.toArray e.Dots
-            for i__18 in 0 .. dots.Length - 1 do
-                let d = at dots i__18
+            for dot in 0 .. dots.Length - 1 do
+                let d = at dots dot
                 let mutable g = -1
                 for i in 0 .. count - 1 do
                     if g < 0 && (at labels i) = d.Label then g <- i
@@ -2845,8 +2845,8 @@ module Flat =
                     let label = (at labels g)
                     let mutable top : FDot[] = Array.zeroCreate (min limit 16)
                     let mutable n = 0
-                    for i__19 in 0 .. dots.Length - 1 do
-                        let d = at dots i__19
+                    for dot in 0 .. dots.Length - 1 do
+                        let d = at dots dot
                         if d.Label = label && (n < limit || d.Dps > (at top (n - 1)).Dps) then
                             let mutable at = n
                             while at > 0 && top.[at - 1].Dps < d.Dps do
@@ -2872,8 +2872,8 @@ module Flat =
     /// event. The reference adds event by event; the sums are the same but for rounding.)
     let private flushUptime (s: State) (e: Foe) =
         if e.UpAny then
-            for i__20 in 0 .. e.StatusKeys.Length - 1 do
-                let k = at e.StatusKeys i__20
+            for key in 0 .. e.StatusKeys.Length - 1 do
+                let k = at e.StatusKeys key
                 put s.Uptime k ((at s.Uptime k) + e.UpPending)
                 put s.UptimeSeen k (true)
             e.UpPending <- 0.0
@@ -3145,8 +3145,8 @@ module Flat =
     let private dmult (e: Foe) (stats: Stat[]) : float =
         let mutable inc = 0.0
         let mutable more = 1.0
-        for i__24 in 0 .. stats.Length - 1 do
-            let stat = at stats i__24
+        for which in 0 .. stats.Length - 1 do
+            let stat = at stats which
             inc <- dsum e Inc stat inc
             more <- dmore e stat more
         max 0.0 ((1.0 + inc / 100.0) * more)
@@ -3210,8 +3210,8 @@ module Flat =
         let dt = t - s.Time
         if dt > 0.0 then
             let n = float s.AliveCount
-            for i__26 in 0 .. s.Live.Length - 1 do
-                let e = at s.Foes (at s.Live i__26)
+            for live in 0 .. s.Live.Length - 1 do
+                let e = at s.Foes (at s.Live live)
                 if e.Life > 0.0 then
                     if e.Dots.IsEmpty then
                         refreshStatus s e
@@ -3267,8 +3267,8 @@ module Flat =
                         if dead then kill s e (s.Time + span) else e.Life <- life
             // monsters walk towards the player until they're in attack range
             if s.P.Walks then
-                for i__27 in 0 .. s.Live.Length - 1 do
-                    let e = at s.Foes (at s.Live i__27)
+                for live in 0 .. s.Live.Length - 1 do
+                    let e = at s.Foes (at s.Live live)
                     match e.Def.Attack with
                     | Some atk when e.Life > 0.0 ->
                         let d = Vec.length e.Def.Position
@@ -3363,8 +3363,8 @@ module Flat =
     let private recover (s: State) (dt: float) =
         match s.P.Vitals with
         | Some _ when dt > 0.0 && s.P.Charms |> Array.exists (fun c -> c.Charm.ChargesPerSecond > 0.0) ->
-            for i__28 in 0 .. s.P.Charms.Length - 1 do
-                let c = at s.P.Charms i__28
+            for place in 0 .. s.P.Charms.Length - 1 do
+                let c = at s.P.Charms place
                 put s.CharmCharges c.CBuff (min c.Charm.MaxCharges ((at s.CharmCharges c.CBuff) + c.Charm.ChargesPerSecond * c.Charm.ChargeGainMult * dt))
         | _ -> ()
         match s.P.Vitals with
@@ -3426,8 +3426,8 @@ module Flat =
 
     /// What has run out of the enemies' debuffs and damage over time goes (`Sim.prune`).
     let private pruneFoes (s: State) =
-        for i__29 in 0 .. s.Live.Length - 1 do
-            let e = at s.Foes (at s.Live i__29)
+        for live in 0 .. s.Live.Length - 1 do
+            let e = at s.Foes (at s.Live live)
             if not (e.Soonest > s.Time) then
                 let mutable soonest = infinity
                 for id in 0 .. e.Has.Length - 1 do
@@ -3625,8 +3625,8 @@ module Flat =
                         put s.A.BComp id (compileBuffMods p (at s.A.BMods id))
                         put s.A.BCompOf id ((at s.A.BMods id))
                     if counts.Length = 0 then counts <- Array.zeroCreate p.DynCount
-                    for i__30 in 0 .. (at s.A.BComp id).Length - 1 do
-                        let (slot, _) = at (at s.A.BComp id) i__30
+                    for entry in 0 .. (at s.A.BComp id).Length - 1 do
+                        let (slot, _) = at (at s.A.BComp id) entry
                         put counts slot ((at counts slot) + 1)
             if counts.Length = 0 then s.A.Dyn <- p.NoDyn
             else
@@ -3836,8 +3836,8 @@ module Flat =
     let inline private corpses (s: State) = s.Kills.Count - s.CorpsesUsed
 
     let rec private react (s: State) (rng: Rng) (rules: CRule[]) (killed: string) (sid: int) (target: int) =
-        for i__31 in 0 .. rules.Length - 1 do
-            let r = at rules i__31
+        for rule in 0 .. rules.Length - 1 do
+            let r = at rules rule
             if (at r.Applies sid) && (killed = "" || r.Killed = killed) then
                 if rng.Chance r.Chance then perform s rng sid target r.Re
 
@@ -3858,8 +3858,8 @@ module Flat =
         | REmpower (b, perPower, cap, counts) ->
             // a warcry: one attack per so much monster power among the living, at least one
             let mutable power = 0.0
-            for i__32 in 0 .. s.Live.Length - 1 do
-                let e = at s.Foes (at s.Live i__32)
+            for live in 0 .. s.Live.Length - 1 do
+                let e = at s.Foes (at s.Live live)
                 if e.Life > 0.0 then power <- power + MonsterPower.ofRarity e.Def.Rarity
             let n = max 1 (int (floor (min cap power / max 1.0 perPower)))
             bump s (at counts n)
@@ -3992,8 +3992,8 @@ module Flat =
              | AtMaximum -> ())
             bump s info.Released
             for _ in 1 .. triggers do
-                for i__33 in 0 .. info.Triggers.Length - 1 do
-                    let skill = at info.Triggers i__33
+                for place in 0 .. info.Triggers.Length - 1 do
+                    let skill = at info.Triggers place
                     trigger s rng skill
 
     /// A use of a skill starts now, aimed at the current target (`Sim.startUse`).
@@ -4007,8 +4007,8 @@ module Flat =
             // the use's critical hit roll, for the skill and every part of it
             let r = Rng(Sim.streamSeedOf s.Seed info.RollKey (at s.A.Rolled sid)).Float()
             put s.A.Rolled sid ((at s.A.Rolled sid) + 1)
-            for i__34 in 0 .. info.Parts.Length - 1 do
-                let part = at info.Parts i__34
+            for place in 0 .. info.Parts.Length - 1 do
+                let part = at info.Parts place
                 put s.A.CritRoll part (r)
                 put s.A.HasCritRoll part (true)
             // (what the use asks of the mods, with the buffs and the enemy as they are now)
@@ -4242,12 +4242,12 @@ module Flat =
             // and a Repeatable attack one of the repeats readied for it
             if useTime > 0.0 && (info.SpendsEmpowered || info.SpendsRepeats) then
                 if info.SpendsEmpowered then
-                    for i__36 in 0 .. p.Empowering.Length - 1 do
-                        let b = at p.Empowering i__36
+                    for place in 0 .. p.Empowering.Length - 1 do
+                        let b = at p.Empowering place
                         if (at s.A.BHas b) then schedule s (last + 1e-9) ESpendBuff b 0 0.0 0.0
                 if info.SpendsRepeats then
-                    for i__37 in 0 .. p.Readied.Length - 1 do
-                        let b = at p.Readied i__37
+                    for place in 0 .. p.Readied.Length - 1 do
+                        let b = at p.Readied place
                         if (at s.A.BHas b) then schedule s (last + 1e-9) ESpendBuff b 0 0.0 0.0
             if info.Consumes >= 0 then
                 schedule s (last + 1e-9) EConsume info.Consumes sid 0.0 0.0
@@ -4459,8 +4459,8 @@ module Flat =
         let mutable firstUsable = -1
         let mutable choice = -1
         // (every step's condition is asked, as the reference asks them all)
-        for i__38 in 0 .. p.Rotation.Length - 1 do
-            let (sid, cond) = at p.Rotation i__38
+        for step in 0 .. p.Rotation.Length - 1 do
+            let (sid, cond) = at p.Rotation step
             let info = (at p.Skills sid)
             let usable =
                 cond v && ready s sid
@@ -4554,12 +4554,12 @@ module Flat =
         else
             // Nothing usable: wait for the next cooldown, or a server tick.
             let mutable next = infinity
-            for i__39 in 0 .. s.A.Cooldowns.Length - 1 do
-                let t = at s.A.Cooldowns i__39
+            for skill in 0 .. s.A.Cooldowns.Length - 1 do
+                let t = at s.A.Cooldowns skill
                 if t > s.Time && t < infinity && t < next then next <- t
             if s.A.ArchonRecovery > s.Time && s.A.ArchonRecovery < infinity && s.A.ArchonRecovery < next then next <- s.A.ArchonRecovery
-            for i__40 in 0 .. s.A.InvocationReady.Length - 1 do
-                let t = at s.A.InvocationReady i__40
+            for meta in 0 .. s.A.InvocationReady.Length - 1 do
+                let t = at s.A.InvocationReady meta
                 if t > s.Time && t < infinity && t < next then next <- t
             schedule s (if next < infinity then next else s.Time + Constants.serverTick) EReady 0 0 0.0 0.0
 
@@ -4701,8 +4701,8 @@ module Flat =
 
     let private anyDyn (ev: Ev) (slots: int[]) =
         let mutable any = false
-        for i__41 in 0 .. slots.Length - 1 do
-            let slot = at slots i__41
+        for place in 0 .. slots.Length - 1 do
+            let slot = at slots place
             if (at ev.Dyn slot).Length > 0 then any <- true
         any
 
@@ -4879,8 +4879,8 @@ module Flat =
             | Shock when flagQ ev qAllShocks -> allTypes
             | _ -> (at scalesOf (ailmentIndex a))
         let mutable sum = 0.0
-        for i__42 in 0 .. types.Length - 1 do
-            let t = at types i__42
+        for place in 0 .. types.Length - 1 do
+            let t = at types place
             sum <- sum + (at un t)
         sum
 
@@ -4918,8 +4918,8 @@ module Flat =
         // (written out as loops: a list made from a sequence is slow in JavaScript)
         let out = ev.Inflicted
         out.Clear()
-        for i__43 in 0 .. damagingAilments.Length - 1 do
-            let a = at damagingAilments i__43
+        for place in 0 .. damagingAilments.Length - 1 do
+            let a = at damagingAilments place
             if source ev a un > 0.0 && rng.Chance(ailmentChance ev n flammable threshold a un) then
                 let faster = incQ ev (if a = Ignite then qFasterIgnite else qFaster)
                 let dps = source ev a un * Ailments.percentPerSecond a / 100.0 * multQ ev (at qMagnitude (ailmentIndex a)) * faster
@@ -4930,11 +4930,11 @@ module Flat =
          let effect = Constants.chillEffectMultiplier * cold / threshold * multQ ev (at qMagnitude (ailmentIndex Chill))
          if effect >= 1.0 then
             out.Add(Status(Chill, min Constants.chillMaxEffect (max Constants.chillMinEffect effect), ailmentDuration ev Chill)))
-        for i__44 in 0 .. flatAilments.Length - 1 do
-            let a = at flatAilments i__44
+        for place in 0 .. flatAilments.Length - 1 do
+            let a = at flatAilments place
             if rng.Chance(ailmentChance ev n flammable threshold a un) then out.Add(Status(a, 0.0, ailmentDuration ev a))
-        for i__45 in 0 .. buildupAilments.Length - 1 do
-            let a = at buildupAilments i__45
+        for place in 0 .. buildupAilments.Length - 1 do
+            let a = at buildupAilments place
             let enabled =
                 match a with
                 | Freeze | HeavyStun -> true
@@ -5022,8 +5022,8 @@ module Flat =
             let beforeHas, beforeStacks = e.SHas, e.SStacks
             // Isolated: none of its allies within 6 m; Close Range: within 2 m of the player (keyword text)
             let mutable alone = true
-            for i__46 in 0 .. s.Live.Length - 1 do
-                let o = at s.Foes (at s.Live i__46)
+            for live in 0 .. s.Live.Length - 1 do
+                let o = at s.Foes (at s.Live live)
                 if o.Life > 0.0 && o.Index <> e.Index && not (Vec.dist o.Def.Position def0.Position > 60.0) then alone <- false
             ev.Iso <- alone
             ev.Close <- Vec.length def0.Position - def0.Size <= 20.0
@@ -5327,8 +5327,8 @@ module Flat =
                         ev.Tags <- info.DotTags
                         ev.AsAttack <- false
                         if not (obj.ReferenceEquals(ev.Dyn, ev.DynRaw)) then ev.Dyn <- resolveDyn ev.DynRaw info.DotTags skill.Name
-                    for i__47 in 0 .. info.Dots.Length - 1 do
-                        let (t, perSecond, _, label) = at info.Dots i__47
+                    for place in 0 .. info.Dots.Length - 1 do
+                        let (t, perSecond, _, label) = at info.Dots place
                         let ti = typeIndex t
                         let dps =
                             if info.SpellDot then perSecond * multQ ev (at qDamage ti) * multQ ev qSpellDotDamage
@@ -5507,8 +5507,8 @@ module Flat =
                 // (the player's charms, whoever made the kill)
                 if dead && s.Main.Charms.Length > 0 then
                     if s.Main.Vitals.IsSome then
-                        for i__48 in 0 .. s.Main.Charms.Length - 1 do
-                            let c = at s.Main.Charms i__48
+                        for place in 0 .. s.Main.Charms.Length - 1 do
+                            let c = at s.Main.Charms place
                             // "granting charges equal to half of the monster's Power"
                             let gain = (MonsterPower.ofRarity def0.Rarity / 2.0 + (if rng.Chance c.Charm.ChargeOnKillChance then 1.0 else 0.0)) * c.Charm.ChargeGainMult
                             put s.CharmCharges c.CBuff (min c.Charm.MaxCharges ((at s.CharmCharges c.CBuff) + gain))
@@ -5881,8 +5881,8 @@ module Flat =
                 gain r (stacksOf s r + 1)
         | PGainWeighted weights ->
             let mutable total = 0.0
-            for i__49 in 0 .. weights.Length - 1 do
-                let (_, _, w) = at weights i__49
+            for place in 0 .. weights.Length - 1 do
+                let (_, _, w) = at weights place
                 total <- total + w
             let roll = rng.Float() * total
             let mutable picked = -1
@@ -5918,8 +5918,8 @@ module Flat =
                 schedule s (s.Time + duration) ESpendBuff b 0 0.0 0.0
                 bump s (at p.CGained b)
         | PConsumeEach resources ->
-            for i__50 in 0 .. resources.Length - 1 do
-                let r = at resources i__50
+            for place in 0 .. resources.Length - 1 do
+                let r = at resources place
                 if stacksOf s r <> 0 then
                     let have = stacksOf s r
                     markStatus s (at p.ConsumedRecently r)
@@ -6196,8 +6196,8 @@ module Flat =
          setState s 8 leeching)
         // surrounded: at least 5 monsters within 3 m
         let mutable near = 0
-        for i__52 in 0 .. s.Live.Length - 1 do
-            let e = at s.Foes (at s.Live i__52)
+        for live in 0 .. s.Live.Length - 1 do
+            let e = at s.Foes (at s.Live live)
             if e.Life > 0.0 && Vec.length e.Def.Position - e.Def.Size <= 30.0 then near <- near + 1
         setState s 9 (near >= max 1 v.SurroundedAt)
         // charge states: "while at maximum Power Charges", "while you have no Frenzy Charges"
@@ -6695,8 +6695,8 @@ module Flat =
               VitalsLast = None
               Gained = Array.zeroCreate gainedNames.Length
               GainedSeen = Array.create gainedNames.Length false }
-        for i__54 in 0 .. p.Charms.Length - 1 do
-            let c = at p.Charms i__54
+        for place in 0 .. p.Charms.Length - 1 do
+            let c = at p.Charms place
             put s.CharmCharges c.CBuff (c.Charm.MaxCharges)
         // every actor in its turn, the player first (the reference's order, and with it the
         // order in which the fight's random numbers are drawn)
@@ -6721,8 +6721,8 @@ module Flat =
             s.P.Cycles |> Array.iteri (fun i _ -> schedule s 0.0 ECycle i 0 0.0 0.0)
         for who in 0 .. progs.Length - 1 do
             enter s who
-            for i__56 in 0 .. s.P.Timed.Length - 1 do
-                let id = at s.P.Timed i__56
+            for place in 0 .. s.P.Timed.Length - 1 do
+                let id = at s.P.Timed place
                 if (at s.A.BHas id) && (at s.A.BExpires id) < infinity then expireAt s (at s.A.BExpires id)
         // periodic actions start at a random point of their first period
         for who in 0 .. progs.Length - 1 do
@@ -6730,8 +6730,8 @@ module Flat =
             s.P.Periodics |> Array.iteri (fun i pd -> schedule s (s.Rng.Float() * pd.Every) EPeriodic i 0 0.0 0.0)
         enter s 0
         // monsters start attacking at random points in their first interval
-        for i__57 in 0 .. p.Attackers.Length - 1 do
-            let i = at p.Attackers i__57
+        for place in 0 .. p.Attackers.Length - 1 do
+            let i = at p.Attackers place
             schedule s (s.Rng.Float() * (at p.Enemies i).Def.Attack.Value.Interval) EEnemyAttack i 0 0.0 0.0
         expireAt s fight.MaxTime
         s
@@ -6785,8 +6785,8 @@ module Flat =
         // a fight that needs more events than this is a runaway (a zero-time loop): stop it
         let s = played p seed tell 3000000 kept
         let maxTime = p.Fight.MaxTime
-        for i__58 in 0 .. s.Foes.Length - 1 do
-            let e = at s.Foes i__58
+        for foe in 0 .. s.Foes.Length - 1 do
+            let e = at s.Foes foe
             flushUptime s e
             flushDots s e
         let cleared = if s.AliveCount = 0 then s.Kills |> Seq.map (fun (_, _, t) -> t) |> Seq.fold max 0.0 |> Some else None
