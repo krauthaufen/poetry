@@ -822,11 +822,11 @@ module Flat =
     type Program =
         private
             { Fight: Fight
-              /// The actor this is the program of, its place among the actors (the player: 0,
-              /// then the minions as the fight lists them), and the minions' programs (in the
-              /// player's only). The names and their numbers are the same in all of them.
+              /// The actor this is the program of, whether it is the player, and the minions'
+              /// programs (in the player's only). The names and their numbers are the same in
+              /// all of them. An actor's place among the actors is 0 for the player, then the
+              /// minions' as the fight lists them.
               Actor: Actor
-              Index: int
               IsPlayer: bool
               Minions: Program[]
               /// The actor's own "increased Exposure effect".
@@ -1637,7 +1637,6 @@ module Flat =
                 let program : Program =
                     { Fight = fight
                       Actor = actor
-                      Index = index
                       IsPlayer = isPlayer
                       Minions = [||]
                       ExposureEffect = exposureEffect
@@ -2047,9 +2046,7 @@ module Flat =
     /// The player or a minion during a run (`Sim.ActorState`): its buffs, what is kept of
     /// its skills' answers, its cooldowns and rolls, and a minion's body.
     type private Agent =
-        { /// Its place among the actors: the player 0, then the minions as the fight lists them.
-          Index: int
-          // its buffs, by buff
+        { // its buffs, by buff
           /// (Whoever asks conditions keeps these two as they are when it begins: a change
           /// while one is kept is made on a copy, see `ownBuffs`.)
           mutable BHas: bool[]
@@ -5094,106 +5091,106 @@ module Flat =
     let private step (s: State) =
         let q = s.Queue
         q.Pop()
-        let t, kind, who, a, b, x, y = q.Time, q.Kind, q.Who, q.A, q.B, q.X, q.Y
         // what a minion had begun when it left the fight is lost (the reference takes it out of the queue)
-        if (kind = EReady || kind = EStrike || kind = EPassing || kind = EDirect) && q.Tag <> (at s.Agents who).Epoch then ()
-        else
-        let dt = t - s.Time
-        enter s who
-        let p = s.P
-        (match s.Tell with
-         | Some tell ->
-            let name = p.Actor.Name
-            match kind with
-            | EReady -> tell t "Ready" name "" (float q.Seq)
-            | EStrike | EPassing | EDirect -> tell t (kindName kind) name (at p.Skills a).Skill.Name (float q.Seq)
-            | EConsume | EGainStacks | ESpendBuff -> tell t (kindName kind) name (at p.BuffNames a) (float q.Seq)
-            | ECycle -> tell t "CycleTick" name (at p.BuffNames ((at p.Cycles a).Buff)) (float q.Seq)
-            | EPeriodic -> tell t "PeriodicTick" name p.Actor.Periodics.[a].Name (float q.Seq)
-            | EEnemyAttack -> tell t "EnemyAttack" (at p.Enemies a).Def.Name "" (float q.Seq)
-            | EEnergy -> tell t "EnergyArrives" name (at p.Metas a).Meta.Name (float q.Seq)
-            | EExpose -> tell t "Expose" name (at p.Enemies a).Def.Name (float q.Seq)
-            | ERevive -> tell t "ReviveMinions" "" "" (float q.Seq)
-            | ELeaves -> tell t "MinionLeaves" name "" (float q.Seq)
-            | _ -> tell t "Expire" "" "" (float q.Seq)
-         | None -> ())
-        // a skill's hits roll from a stream of that skill alone: its first event, its second, ...
-        let rng =
-            match kind with
-            | EStrike | EPassing | EDirect ->
-                let n = (at s.A.StrikeStream a)
-                put s.A.StrikeStream a (n + 1)
-                Rng(Sim.streamSeedOf s.Seed (at p.Skills a).StrikeKey n)
-            | EConsume ->
-                let n = (at s.A.ConsumeStream b)
-                put s.A.ConsumeStream b (n + 1)
-                Rng(Sim.streamSeedOf s.Seed (at p.Skills b).ConsumeKey n)
-            | EEnemyAttack ->
-                let n = (at s.AttackStream a)
-                put s.AttackStream a (n + 1)
-                Rng(Sim.streamSeedOf s.Seed (at p.AttackKeys a) n)
-            | EPeriodic ->
-                let n = (at s.A.PeriodicStream a)
-                put s.A.PeriodicStream a (n + 1)
-                Rng(Sim.streamSeedOf s.Seed (at p.Periodics a).Key n)
-            | _ -> s.Rng
-        // (time passes for the player, whoever the event is of)
-        enter s 0
-        let p = s.P
-        advance s t
-        recover s dt
-        if s.AliveCount > 0 && alive s then
-            pruneAll s
-            // rage: regenerated all the time, lost once none has been gained for a while
-            (let have = stacksOf s p.BRage
-             if not (dt <= 0.0 || p.MaxRage <= 0 || (p.RageRegen <= 0.0 && have = 0)) then
-                let losing = if s.Time - s.A.RageAt > p.RageDelay then p.RageLoss else 0.0
-                // Berserk: life lost for every Rage held while Rage is not being lost (not below 1)
-                (match p.Vitals with
-                 | Some v when losing <= p.RageRegen && have > 0 && p.BerserkLoss > 0.0 ->
-                    let life = max (min s.Life 1.0) (s.Life - p.BerserkLoss / 100.0 / 60.0 * float have * v.Life * dt)
-                    s.Life <- life
-                    s.MinLife <- min s.MinLife (life / max 1.0 v.Life)
-                 | _ -> ())
-                let carry = s.A.RageCarry + (p.RageRegen - losing) * dt
-                let whole = int (System.Math.Truncate carry)
-                let n = max 0 (min p.MaxRage (have + whole))
-                if n <> have then setStacks s false p.BRage n
-                s.A.RageCarry <- (if n = 0 && carry < 0.0 then 0.0 elif n = p.MaxRage && carry > 0.0 then 0.0 else carry - float whole))
-            (match p.Vitals with
-             | Some v -> playerStates s v
-             | None -> ())
-            // a minion that is out of the fight does nothing
-            if (kind = EReady || kind = EStrike || kind = EPassing || kind = EDirect) && (at s.Agents who).Gone then ()
-            else
+        let lost = (q.Kind = EReady || q.Kind = EStrike || q.Kind = EPassing || q.Kind = EDirect) && q.Tag <> (at s.Agents q.Who).Epoch
+        if not lost then
+            let t, kind, who, a, b, x, y = q.Time, q.Kind, q.Who, q.A, q.B, q.X, q.Y
+            let dt = t - s.Time
+            enter s who
+            let p = s.P
+            (match s.Tell with
+             | Some tell ->
+                let name = p.Actor.Name
                 match kind with
-                | EEnemyAttack -> enemyAttack s rng a
-                | ERevive -> reviveMinions s x
-                | ELeaves ->
-                    let minion = at s.Agents who
-                    if not (minion.Gone || minion.Leaves <> x) then
-                        leave s who
-                        bump s p.CMinionLeft
-                | EExpire -> ()
-                | _ ->
-                    // (what an actor does, it does in its own place)
-                    enter s who
-                    (match kind with
-                     | EReady -> onReady s rng
-                     | EStrike -> onStrike s rng a x b 0.0 false false
-                     | EPassing -> onStrike s rng a x b y true false
-                     | EDirect -> onStrike s rng a x b 0.0 false true
-                     | EConsume -> onConsume s rng a b
-                     | ECycle -> onCycle s rng a
-                     | EGainStacks -> onGainStacks s rng a b
-                     | EExpose -> expose s a DamageType.all.[b] x y
-                     | EPeriodic -> onPeriodic s rng a
-                     | EEnergy -> gainEnergy s rng a x
-                     | ESpendBuff ->
-                        if (at s.A.BHas a) && (at s.A.BStacks a) > 1 then setBuff s a ((at s.A.BStacks a) - 1) (at s.A.BExpires a) (at s.A.BMods a)
-                        else removeBuff s a
+                | EReady -> tell t "Ready" name "" (float q.Seq)
+                | EStrike | EPassing | EDirect -> tell t (kindName kind) name (at p.Skills a).Skill.Name (float q.Seq)
+                | EConsume | EGainStacks | ESpendBuff -> tell t (kindName kind) name (at p.BuffNames a) (float q.Seq)
+                | ECycle -> tell t "CycleTick" name (at p.BuffNames ((at p.Cycles a).Buff)) (float q.Seq)
+                | EPeriodic -> tell t "PeriodicTick" name p.Actor.Periodics.[a].Name (float q.Seq)
+                | EEnemyAttack -> tell t "EnemyAttack" (at p.Enemies a).Def.Name "" (float q.Seq)
+                | EEnergy -> tell t "EnergyArrives" name (at p.Metas a).Meta.Name (float q.Seq)
+                | EExpose -> tell t "Expose" name (at p.Enemies a).Def.Name (float q.Seq)
+                | ERevive -> tell t "ReviveMinions" "" "" (float q.Seq)
+                | ELeaves -> tell t "MinionLeaves" name "" (float q.Seq)
+                | _ -> tell t "Expire" "" "" (float q.Seq)
+             | None -> ())
+            // a skill's hits roll from a stream of that skill alone: its first event, its second, ...
+            let rng =
+                match kind with
+                | EStrike | EPassing | EDirect ->
+                    let n = (at s.A.StrikeStream a)
+                    put s.A.StrikeStream a (n + 1)
+                    Rng(Sim.streamSeedOf s.Seed (at p.Skills a).StrikeKey n)
+                | EConsume ->
+                    let n = (at s.A.ConsumeStream b)
+                    put s.A.ConsumeStream b (n + 1)
+                    Rng(Sim.streamSeedOf s.Seed (at p.Skills b).ConsumeKey n)
+                | EEnemyAttack ->
+                    let n = (at s.AttackStream a)
+                    put s.AttackStream a (n + 1)
+                    Rng(Sim.streamSeedOf s.Seed (at p.AttackKeys a) n)
+                | EPeriodic ->
+                    let n = (at s.A.PeriodicStream a)
+                    put s.A.PeriodicStream a (n + 1)
+                    Rng(Sim.streamSeedOf s.Seed (at p.Periodics a).Key n)
+                | _ -> s.Rng
+            // (time passes for the player, whoever the event is of)
+            enter s 0
+            let p = s.P
+            advance s t
+            recover s dt
+            if s.AliveCount > 0 && alive s then
+                pruneAll s
+                // rage: regenerated all the time, lost once none has been gained for a while
+                (let have = stacksOf s p.BRage
+                 if not (dt <= 0.0 || p.MaxRage <= 0 || (p.RageRegen <= 0.0 && have = 0)) then
+                    let losing = if s.Time - s.A.RageAt > p.RageDelay then p.RageLoss else 0.0
+                    // Berserk: life lost for every Rage held while Rage is not being lost (not below 1)
+                    (match p.Vitals with
+                     | Some v when losing <= p.RageRegen && have > 0 && p.BerserkLoss > 0.0 ->
+                        let life = max (min s.Life 1.0) (s.Life - p.BerserkLoss / 100.0 / 60.0 * float have * v.Life * dt)
+                        s.Life <- life
+                        s.MinLife <- min s.MinLife (life / max 1.0 v.Life)
                      | _ -> ())
-                    enter s 0
+                    let carry = s.A.RageCarry + (p.RageRegen - losing) * dt
+                    let whole = int (System.Math.Truncate carry)
+                    let n = max 0 (min p.MaxRage (have + whole))
+                    if n <> have then setStacks s false p.BRage n
+                    s.A.RageCarry <- (if n = 0 && carry < 0.0 then 0.0 elif n = p.MaxRage && carry > 0.0 then 0.0 else carry - float whole))
+                (match p.Vitals with
+                 | Some v -> playerStates s v
+                 | None -> ())
+                // a minion that is out of the fight does nothing
+                if (kind = EReady || kind = EStrike || kind = EPassing || kind = EDirect) && (at s.Agents who).Gone then ()
+                else
+                    match kind with
+                    | EEnemyAttack -> enemyAttack s rng a
+                    | ERevive -> reviveMinions s x
+                    | ELeaves ->
+                        let minion = at s.Agents who
+                        if not (minion.Gone || minion.Leaves <> x) then
+                            leave s who
+                            bump s p.CMinionLeft
+                    | EExpire -> ()
+                    | _ ->
+                        // (what an actor does, it does in its own place)
+                        enter s who
+                        (match kind with
+                         | EReady -> onReady s rng
+                         | EStrike -> onStrike s rng a x b 0.0 false false
+                         | EPassing -> onStrike s rng a x b y true false
+                         | EDirect -> onStrike s rng a x b 0.0 false true
+                         | EConsume -> onConsume s rng a b
+                         | ECycle -> onCycle s rng a
+                         | EGainStacks -> onGainStacks s rng a b
+                         | EExpose -> expose s a DamageType.all.[b] x y
+                         | EPeriodic -> onPeriodic s rng a
+                         | EEnergy -> gainEnergy s rng a x
+                         | ESpendBuff ->
+                            if (at s.A.BHas a) && (at s.A.BStacks a) > 1 then setBuff s a ((at s.A.BStacks a) - 1) (at s.A.BExpires a) (at s.A.BMods a)
+                            else removeBuff s a
+                         | _ -> ())
+                        enter s 0
 
     /// What a runner keeps from one run to the next (see `runner`): the queue's arrays and
     /// the scratch of the hits, emptied for every run, and the defences per set of buffs
@@ -5288,10 +5285,9 @@ module Flat =
         let progs = Array.append [| p |] p.Minions
         let agents =
             progs
-            |> Array.mapi (fun i (pr: Program) ->
+            |> Array.map (fun (pr: Program) ->
                 let nk = pr.Skills.Length
-                { Index = i
-                  BKept = false
+                { BKept = false
                   BHas = Array.create nb false
                   BStacks = Array.zeroCreate nb
                   BExpires = Array.zeroCreate nb
