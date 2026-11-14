@@ -3611,7 +3611,7 @@ module Flat =
             let es =
                 (if s.Time - s.LastHit >= v.ESRechargeDelay then s.Shield + v.EnergyShieldRecharge * dt else s.Shield)
                 + v.ESRegen * dt + (at streams PES) + (at streams PShroudES)
-                |> min (max s.Shield v.EnergyShield)
+                |> min (max s.Shield (min v.EnergyShield v.ESRecoverCap))
             let flask = s.FlaskRate * max 0.0 (min s.Time s.FlaskUntil - t0)
             let recouped = at streams PMana
             let mana = min v.Mana (mana + flask + recouped)
@@ -5678,7 +5678,7 @@ module Flat =
                     s.FlaskCharges <- charges
                     s.LifeFlaskCharges <- lifeCharges
                     s.Life <- min (max s.Life v.Life) (s.Life + (if v.Life > 1.0 then onHit else 0.0) + (if dead then v.LifeOnKill else 0.0))
-                    s.Shield <- min (max s.Shield v.EnergyShield) (s.Shield + (if dead then v.ESOnKill else 0.0))
+                    s.Shield <- min (max s.Shield (min v.EnergyShield v.ESRecoverCap)) (s.Shield + (if dead then v.ESOnKill else 0.0))
                     if manaOnHit > 0.0 then gainMana s v 4 manaOnHit
                     if dead then
                         let evE = acquireRaw s
@@ -6460,6 +6460,12 @@ module Flat =
                                     | None -> d
                             d * (Map.tryFind t v.TakenMult |> Option.defaultValue 1.0) * (1.0 + shocked / 100.0)
                               * (if blocked then v.BlockedDamageTaken / 100.0 else 1.0))
+                    // Scarred Faith: what mitigation kept of the hit's physical damage (`Sim.attackPlayer`)
+                    let preventedRecoup =
+                        if v.RecoupPreventedPerPower <= 0.0 then 0.0
+                        else
+                            let prevented = max 0.0 ((Map.tryFind Physical unmitigated |> Option.defaultValue 0.0) - (Map.tryFind Physical taken |> Option.defaultValue 0.0))
+                            prevented * v.RecoupPreventedPerPower / 100.0 * MonsterPower.ofRarity e.Def.Rarity * v.ESRecoveryRate
                     // "x% of Damage from Hits is taken from your Companion's Life before you": the
                     // first minion that does so and is alive takes its share, as much as it has
                     let taken =
@@ -6477,6 +6483,7 @@ module Flat =
                             hurtMinion s rng guard (taken |> Map.map (fun _ d -> d * k))
                             taken |> Map.map (fun _ d -> d * (1.0 - k))
                     takeDamage s pools taken
+                    if preventedRecoup > 0.0 then s.Recoups <- (s.Time + v.RecoupSeconds, preventedRecoup / v.RecoupSeconds, PES) :: s.Recoups
                     s.LastHit <- s.Time
                     gainRage s p.RageWhenHit
                     if p.FirstSkill >= 0 then react s rng p.WhenHit "" p.FirstSkill index

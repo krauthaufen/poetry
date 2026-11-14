@@ -66,6 +66,11 @@ type PlayerStats =
       SurroundedAt: int
       /// "increased Stun Recovery": a stun is over this many times as fast (1: as it is).
       StunRecovery: float
+      /// Energy shield is not recovered above this (Scarred Faith: the armour; infinity: no cap).
+      ESRecoverCap: float
+      /// Percent of the physical damage a hit's mitigation prevents that is recouped as energy
+      /// shield, per unit of the hitting monster's power (Scarred Faith).
+      RecoupPreventedPerPower: float
       /// Runic Ward: takes damage once life is down to 1; regenerates all the time.
       Ward: float
       WardRegen: float
@@ -139,7 +144,7 @@ module PlayerStats =
           SelfEffect = Map.empty; SelfDuration = Map.empty; LifeOnKill = 0.0; ESOnKill = 0.0; LifeOnBlock = 0.0
           ManaOnBlock = 0.0; Recoup = []; RecoupSeconds = 4.0; LifeRecoveryRate = 1.0; ManaRecoveryRate = 1.0
           ESRecoveryRate = 1.0; LifeFlask = None; CostsLife = false; LifeRecharge = 0.0; UnluckyEvade = false
-          LuckyDeflect = false; LifeLeechRate = 1.0; DeflectEffect = 40.0; StartLife = 1.0; LifeReserved = 0.0; LifeFrozenWithES = false; SurroundedAt = 5; StunRecovery = 1.0 }
+          LuckyDeflect = false; LifeLeechRate = 1.0; DeflectEffect = 40.0; StartLife = 1.0; LifeReserved = 0.0; LifeFrozenWithES = false; SurroundedAt = 5; StunRecovery = 1.0; ESRecoverCap = infinity; RecoupPreventedPerPower = 0.0 }
 
 /// Hit resolution against the player (formulas: PoB CalcDefence, constants: game data).
 module Vitals =

@@ -273,7 +273,8 @@ Checked against PoB's defensive numbers for 131 public characters (`tools/corpus
 | Elemental Equilibrium | infusion remnants rotate: fire -> lightning -> cold -> fire | data |
 | Wildsurge Incantation | Storm and Plant spells: 50% more damage, 50% less cost, 75% less duration | data |
 | Whispers of Doom | +1 curse (curses themselves not simulated yet) | partial |
-| Ritual Cadence, Resonance, Heartstopper, Primal Hunger, Scarred Faith, Hollow Palm Technique, Conduit, Necromantic Talisman, Trusted Kinship, Ancestral Bond, Lord of the Wilds, Bulwark | NOT modelled | todo |
+| Scarred Faith | energy shield does not recharge and is not regenerated, and no recovery brings it above the armour (the sheet's); of every monster hit, 5% of the physical damage mitigation kept off (what the hit had before mitigation less what was taken) is recouped as energy shield per unit of the monster's power (a boss 20: all of it), over the recoup time, x energy shield recovery rate. The fight starts with full energy shield even above the armour | keystone text; what "prevented" covers and the start are guesses | data / guess |
+| Ritual Cadence, Resonance, Heartstopper, Primal Hunger, Hollow Palm Technique, Conduit, Necromantic Talisman, Trusted Kinship, Ancestral Bond, Lord of the Wilds, Bulwark | NOT modelled | todo |
 
 ### Minions
 

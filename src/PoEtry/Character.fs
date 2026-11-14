@@ -516,6 +516,9 @@ module Tree =
           "Wildsurge Incantation", "have 75% less duration",
           [ for t in [ "Type:Storm"; "Type:Plant" ] -> Mod.more SkillDuration -75.0 |> Mod.whenever (SkillIs Spell) |> Mod.whenever (SkillIs(Tag t)) ]
           "Scarred Faith", "Energy Shield does not Recharge", [ Mod.flag (Named "NoESRecharge") ]
+          "Scarred Faith", "5% of Physical Damage prevented Recouped as Energy Shield per enemy Power", [ Mod.base' (Named "RecoupPreventedPhysicalAsESPerPower") 5.0 ]
+          "Scarred Faith", "You cannot Recover Energy Shield from Regeneration", [ Mod.flag (Named "NoESRegen") ]
+          "Scarred Faith", "You cannot Recover Energy Shield to above Armour", [ Mod.flag (Named "ESRecoveryCappedAtArmour") ]
           "Whispers of Doom", "Double Activation Delay of Curses", []
           "Unwavering Stance", "Cannot Dodge Roll or Sprint", [] ]
 

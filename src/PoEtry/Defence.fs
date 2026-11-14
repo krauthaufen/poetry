@@ -250,7 +250,8 @@ module Defence =
                     if v > 0.0 then yield from, into, v ]
           // "X% faster start of Energy Shield Recharge"
           ESRechargeDelay = max 0.0 (Constants.energyShieldRechargeDelay + named "ESRechargeDelayFlat") / max 0.1 (Mods.inc c [ Named "ESRechargeFaster" ] db)
-          ESRegen = (es * named "ESRegenPercent" / 100.0 + (if regenToES then lifeRegen else 0.0)) * esRecovery
+          // "You cannot Recover Energy Shield from Regeneration"
+          ESRegen = if flag "NoESRegen" then 0.0 else (es * named "ESRegenPercent" / 100.0 + (if regenToES then lifeRegen else 0.0)) * esRecovery
           ManaBeforeLife = named "DamageRemovedFromManaFirst"
           BypassES = named "BypassES"
           ArmourAppliesTo = DamageType.all |> List.map (fun t -> t, named ("ArmourAppliesTo:" + DamageType.name t)) |> List.filter (fun (_, v) -> v > 0.0) |> Map.ofList
@@ -317,7 +318,10 @@ module Defence =
           LifeReserved = min 1.0 (named "LifeReservedPercent" / 100.0)
           LifeFrozenWithES = flag "LifeFrozenWithES"
           SurroundedAt = 5 + int (named "SurroundedOffset")
-          StunRecovery = max 0.01 (Mods.mult c [ Named "StunRecovery" ] db) }
+          StunRecovery = max 0.01 (Mods.mult c [ Named "StunRecovery" ] db)
+          // "You cannot Recover Energy Shield to above Armour"
+          ESRecoverCap = (if flag "ESRecoveryCappedAtArmour" then armour else infinity)
+          RecoupPreventedPerPower = named "RecoupPreventedPhysicalAsESPerPower" }
 
     let compute bases sheet = computeWith Map.empty bases sheet
 

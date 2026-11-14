@@ -18,7 +18,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
    whose description or behaviour changed.
 5. Go through the lists below; the wiki's version history of a skill says what changed.
 
-## Rules (112)
+## Rules (113)
 
 ### Hit damage
 
@@ -84,6 +84,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | Buffs and debuffs that expire faster | stat descriptions; which effects count as buffs (the stat's id: "only buff category") is a guess | guess |
 | Slowing potency on the player | stat description; that it is a multiplier of its own is a guess | guess |
 | Light stun on the player | game constants; formula a guess | guess |
+| Scarred Faith | keystone text; what "prevented" covers and the start are guesses | data / guess |
 | Which monster | game data (PoB Minions / Spectres export); which variant a name means is not in the API | data; the variant by name is a guess |
 | Skills | game data | data; that the player commands whenever the cooldown allows is a guess |
 | Minions inflict Withered | stat text | data; 4 s is a guess |

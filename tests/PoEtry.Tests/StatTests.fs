@@ -706,3 +706,32 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         let plain = builds []
         if plain <= 0.0 then failwith "Hammer of the Gods builds no Glory"
         near (plain * 1.25) (builds [ "25% increased Glory generation" ]))
+
+    // ---- Scarred Faith ----
+
+    test "Scarred Faith: prevented physical damage recouped as energy shield per enemy power; no regeneration; none above armour" (fun () ->
+        // a boss (power 20) hits for 400 physical every 5 s; 4000 armour stops half: 200 taken,
+        // 200 prevented, 5% x 20 of it (200) comes back over 4 s. 300 energy shield, 10 life
+        let brute =
+            { EnemyDef.make Rarity.defaults 70 Unique "brute" (Vec.make 5.0 0.0) with
+                Life = 1e9; Mods = []
+                Attack = Some { Interval = 5.0; Damage = Map.ofList [ Physical, 400.0 ]; Accuracy = 1e9; Range = 20.0; CritChance = 0.0; Melee = true } }
+        let bolt = { Skill.make "Bolt" [ Spell ] with BaseDamage = Map.ofList [ Chaos, { Min = 1.0; Max = 1.0 } ]; BaseTime = 0.5 }
+        let fight recoup cap =
+            let vitals = { PlayerStats.basic 10.0 0.0 with EnergyShield = 300.0; Armour = 4000.0; StunThreshold = 1e9; AilmentThreshold = 1e9; RecoupPreventedPerPower = recoup; ESRecoverCap = cap }
+            Fight.single brute { Actor.make "Player" [] [ bolt ] with Vitals = Some vitals } 12.0
+        let died f = (Sim.run f 1u).Died.IsSome
+        // with the recoup the shield is full again before the next hit: alive
+        equal (box false) (box (died (fight 5.0 infinity)))
+        // without it, or when it may not rise above 150: the second hit reaches the 10 life
+        equal (box true) (box (died (fight 0.0 infinity)))
+        equal (box true) (box (died (fight 5.0 150.0)))
+        same (fight 5.0 infinity) seeds
+        same (fight 5.0 150.0) seeds
+        // the keystone's lines on the sheet
+        let node = treeJson.Value |> Tree.parseNodes |> Map.toList |> List.pick (fun (id, n) -> if n.Name = "Scarred Faith" then Some id else None)
+        let v = (load { blank with TreeNodes = [ node ]; ExtraLines = [ "+500 to Armour"; "+100 to maximum Energy Shield"; "Regenerate 1% of maximum Energy Shield per second" ] } Options.defaults).Vitals
+        near 5.0 v.RecoupPreventedPerPower
+        near v.Armour v.ESRecoverCap
+        near 0.0 v.ESRegen
+        near 0.0 v.EnergyShieldRecharge)

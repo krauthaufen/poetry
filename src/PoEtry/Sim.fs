@@ -1127,7 +1127,7 @@ module Sim =
             let es =
                 (if w.Time - p.LastHit >= v.ESRechargeDelay then p.EnergyShield + v.EnergyShieldRecharge * dt else p.EnergyShield)
                 + v.ESRegen * dt + stream "ES" + stream "ShroudES"
-                |> min (max p.EnergyShield v.EnergyShield)
+                |> min (max p.EnergyShield (min v.EnergyShield v.ESRecoverCap))
             let flask = p.FlaskRate * overlap p.FlaskUntil
             let recouped = stream "Mana"
             let mana = min v.Mana (mana + flask + recouped)
@@ -2623,7 +2623,7 @@ module Sim =
                                             FlaskCharges = charges
                                             LifeFlaskCharges = lifeCharges
                                             Life = min (max p.Life v.Life) (p.Life + (if v.Life > 1.0 then onHit else 0.0) + (if dead then v.LifeOnKill else 0.0))
-                                            EnergyShield = min (max p.EnergyShield v.EnergyShield) (p.EnergyShield + (if dead then v.ESOnKill else 0.0)) } }
+                                            EnergyShield = min (max p.EnergyShield (min v.EnergyShield v.ESRecoverCap)) (p.EnergyShield + (if dead then v.ESOnKill else 0.0)) } }
                         let w = if manaOnHit > 0.0 then gainMana v "hit" manaOnHit w else w
                         if dead then
                             let kill = (Mods.sumBase Ctx.empty [ ManaOnKill ] mods + v.Mana * Mods.sumBase Ctx.empty [ Named "ManaPercentOnKill" ] mods / 100.0) * v.ManaRecoveryRate
@@ -3242,6 +3242,13 @@ module Sim =
                                     | None -> d
                             d * (Map.tryFind t v.TakenMult |> Option.defaultValue 1.0) * (1.0 + shocked / 100.0)
                               * (if blocked then v.BlockedDamageTaken / 100.0 else 1.0))
+                    // Scarred Faith: "5% of Physical Damage prevented Recouped as Energy Shield per
+                    // enemy Power": what mitigation kept of the hit's physical damage
+                    let preventedRecoup =
+                        if v.RecoupPreventedPerPower <= 0.0 then 0.0
+                        else
+                            let prevented = max 0.0 ((Map.tryFind Physical unmitigated |> Option.defaultValue 0.0) - (Map.tryFind Physical taken |> Option.defaultValue 0.0))
+                            prevented * v.RecoupPreventedPerPower / 100.0 * MonsterPower.ofRarity e.Def.Rarity * v.ESRecoveryRate
                     // "x% of Damage from Hits is taken from your Companion's Life before you": the
                     // first minion that does so and is alive takes its share, as much as it has
                     let taken, w =
@@ -3260,6 +3267,10 @@ module Sim =
                     let p = w.Player |> Option.defaultValue p
                     let w = if w.Tracing then { w with Shown = Hurt(w.Time, name, taken |> Map.fold (fun s _ v -> s + v) 0.0) :: w.Shown } else w
                     let w = takeDamage pools taken { w with Player = Some p } |> fun w -> { w with Player = w.Player |> Option.map (fun p -> { p with LastHit = w.Time }) }
+                    let w =
+                        if preventedRecoup > 0.0 then
+                            { w with Player = w.Player |> Option.map (fun p -> { p with Recoups = (w.Time + v.RecoupSeconds, preventedRecoup / v.RecoupSeconds, "ES") :: p.Recoups }) }
+                        else w
                     let w = (let _, _, _, whenHit, _ = env.Rage in gainRage env whenHit w)
                     let w = (match env.Fight.Player.Skills |> List.tryHead with Some any -> react env rng env.Fight.Player WhenHit any (Some name) w | None -> w)
                     // "Rage loss is paused for 4 seconds upon gaining Rage, or after taking damage"
