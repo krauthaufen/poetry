@@ -422,6 +422,13 @@ module StatMap =
         | "active_skill_chill_effect_+%_final" -> one (Mod.more (AilmentMagnitude(Some Chill)) v)
         | "active_skill_shock_chance_+%_final" -> one (Mod.more (AilmentChance Shock) v)
         | "active_skill_hit_damage_freeze_multiplier_+%_final" -> one (Mod.more (Buildup Freeze) v)
+        // (-100: "Cannot cause Stun buildup")
+        | "active_skill_hit_damage_stun_multiplier_+%_final" -> one (Mod.more (Buildup HeavyStun) v)
+        // "Companions have X% chance to gain Onslaught on Kill" (4 s where no time is named, as the player's)
+        | "companion_onslaught_on_kill_%" -> one (Mod.base' (ForMinions(Named "Rule:OnKill:Onslaught:4")) v |> Mod.whenever (SkillIs(Tag "Companion")))
+        // how long the character takes to turn to where a skill is aimed: the player stands and
+        // faces what it aims at
+        | "active_skill_override_turn_duration_ms" -> Some Structural
         | "never_freeze" -> one (Mod.more (Buildup Freeze) -100.0)
         | "cannot_inflict_elemental_ailments" ->
             Some(Mods [ Mod.more (AilmentChance Ignite) -100.0; Mod.more (AilmentChance Shock) -100.0; Mod.more (AilmentMagnitude(Some Chill)) -100.0; Mod.more (Buildup Freeze) -100.0; Mod.more (Buildup Electrocute) -100.0 ])
@@ -943,7 +950,6 @@ module StatMap =
             Some(Mods(DamageType.elemental |> List.map (fun t -> Mod.base' (Penetration t) v)))
         | "critical_hit_damaging_ailment_effect_+%" ->
             Some(Mods(Ailment.damaging |> List.map (fun a -> Mod.inc (AilmentMagnitude(Some a)) v |> Mod.whenever IsCrit)))
-        | "damaging_ailments_deal_damage_+%_faster" | "faster_burn_%" -> Some(Unsimulated "faster ailments")
         | "non_skill_base_all_damage_%_to_gain_as_cold_fire_lightning" ->
             Some(Mods [ for into in DamageType.elemental do for from in DamageType.all do yield Mod.base' (GainAs(from, into)) v ])
         | "attack_additional_critical_strike_chance_permyriad" -> one (Mod.base' CritChance (v / 100.0) |> Mod.whenever (SkillIs Attack))
@@ -1518,6 +1524,7 @@ module StatMap =
     let private howItIsBuilt (id: string) =
         [ "enable_ring_slot_3"; "titan_additional_inventory"; "can_have_2_companions"; "can_have_unlimited_companions"
           "ascendancy_disconnected_passives_can_be_allocated_around_allocated_keystones"; "local_unique_jewel_nearby_disconnected_passives_can_be_allocated"
+          "unique_jewel_nearby_disconnected_passives_can_be_allocated"
           "tame_beast_can_target_unique_beasts"; "ascendancy_shaman_gain_additional_socketable_mods" ]
         |> List.contains id
 

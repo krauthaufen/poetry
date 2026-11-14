@@ -493,6 +493,26 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         equal (box ([]: (ModKind * float) list)) (box (curse []))
         equal (box [ More, -15.0 ]) (box (curse [ "Enemies you Curse are Hindered, with 15% reduced Movement Speed" ])))
 
+    test "stats: ailments that deal their damage faster are read; no stun buildup; companions' Onslaught; a weapon's lines about building" (fun () ->
+        // (was shadowed by an older line that called it not simulated, while the engine has the rule)
+        equal (box [ Mod.inc (Named "FasterAilments") 12.0 ]) (box (mods "damaging_ailments_deal_damage_+%_faster" 12.0))
+        // an Ignite of 20 a second for 4 s, 25% faster: 25 a second for 3.2 s. One hit at 0.5 s
+        // of a 3 s fight: 2.5 s of burning either way
+        let bolt = { Skill.make "Bolt" [ Spell ] with BaseDamage = Map.ofList [ Fire, { Min = 100.0; Max = 100.0 } ]; BaseTime = 0.5; BaseCrit = 0.0 }
+        let burning (ms: Mod list) =
+            let player = { Actor.make "Player" (Mod.base' (AilmentChance Ignite) 100.0 :: ms) [ bolt ] with Rotation = [ { Use = "Bolt"; When = fun v -> v.Time < 0.25 } ] }
+            Fight.single { EnemyDef.atLevel 83 1e9 with Mods = [] } player 3.0
+        let ignite f = (Sim.run f 1u).DamageBy |> Map.tryFind "Ignite" |> Option.defaultValue 0.0
+        near (2.5 * 20.0) (ignite (burning []))
+        near (2.5 * 25.0) (ignite (burning (mods "damaging_ailments_deal_damage_+%_faster" 25.0)))
+        same (burning (mods "damaging_ailments_deal_damage_+%_faster" 25.0)) seeds
+        equal (box [ Mod.more (Buildup HeavyStun) -100.0 ]) (box (mods "active_skill_hit_damage_stun_multiplier_+%_final" -100.0))
+        equal
+            (box [ Mod.base' (ForMinions(Named "Rule:OnKill:Onslaught:4")) 20.0 |> Mod.whenever (SkillIs(Tag "Companion")) ])
+            (box (mods "companion_onslaught_on_kill_%" 20.0))
+        equal (box Structural) (box (StatMap.meaning "active_skill_override_turn_duration_ms" 100.0))
+        equal (box NotOffensive) (box (StatMap.meaning "unique_jewel_nearby_disconnected_passives_can_be_allocated" 1.0)))
+
     // ---- allies, recovery while standing, stun recovery, what monsters never do ----
 
     test "stats: what allies in the Presence gain and regenerate; costs without energy shield; recovery while stationary" (fun () ->

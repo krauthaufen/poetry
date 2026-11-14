@@ -361,6 +361,8 @@ module Items =
                             | Mods found ->
                                 // a weapon's own stats are for attacks with it
                                 ms @ (if baseName.IsSome then found |> List.map (Mod.whenever (SkillIs Attack)) else found), c
+                            // (understood, and nothing in a fight: as the same stat without "local_")
+                            | NotOffensive | Structural -> ms, c
                             | _ -> ms, { c with Unsimulated = c.Unsimulated @ [ id, "item-local" ] }
                     | _ -> ms, c)
                 ([], Coverage.empty)
