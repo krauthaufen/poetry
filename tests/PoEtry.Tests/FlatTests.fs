@@ -212,6 +212,7 @@ let randomFight (case: uint32) : Fight * string =
           (fun () -> [ Mod.flag (Named "NoHitDamage") |> Mod.whenever (SkillNamed "Skill 2") ])
           (fun () -> [ Mod.override' HitChance (between 40.0 100.0) |> Mod.whenever (SkillNamed "Skill 1") ])
           (fun () -> [ Mod.base' (Named "TrinityGain") (between 5.0 40.0); Mod.base' (Named "TrinityLoss") (between 1.0 20.0); Mod.more (Damage AllDamage) 2.0 |> Mod.whenever (PerStack("Resonance", 10.0)); Mod.inc CritChance 30.0 |> Mod.whenever (WhileBuff "Resonance:Fire") ])
+          (fun () -> [ Mod.base' (Named "KeepAmmoChance") (between 5.0 60.0) |> withConds; Mod.inc (Named "ReloadSpeed") (between 10.0 80.0) |> withConds; Mod.base' (Named "InstantReloadChance") (between 5.0 50.0) ])
           (fun () -> [ Mod.base' (Named "CascadesPerSide") (float (whole 1 2)); Mod.more (Named "CascadeArea") (between -60.0 30.0) ]) ]
     // (now and then a build around something: ailments that deal damage, charges, leech)
     let theme =
@@ -277,7 +278,9 @@ let randomFight (case: uint32) : Fight * string =
             CostPerSecond = (if chance 0.1 then between 3.0 30.0 else 0.0)
             HitDelay = (if chance 0.15 then between 0.1 1.0 else 0.0)
             Dots = (if chance 0.2 then Map.ofList [ pick types, between 20.0 300.0 ] else Map.empty)
-            Duration = (if chance 0.4 then between 0.5 5.0 else 0.0) }
+            Duration = (if chance 0.4 then between 0.5 5.0 else 0.0)
+            Clip = (if chance 0.1 then whole 1 6 else 0)
+            ReloadTime = between 0.2 2.5 }
     let withParts (s: Skill) : Skill =
         if chance 0.75 then s
         else
@@ -1104,7 +1107,7 @@ let run (test: string -> (unit -> unit) -> unit) =
         refused { fine with Player = { player with Skills = [ { spell "Bolt" Fire 1.0 2.0 with Mods = [ Mod.base' (Named "MaxSeals") 2.0 ] } ] } } "sealed skills"
         refused { fine with Player = { player with Rules = [ { Hook = OnHit; Filter = AnySkill; Chance = 100.0; Reaction = AttachPustule("Bolt", 3.0, 0.0, 0.0) } ] } } "the reaction AttachPustule"
         // both reasons of a fight with two
-        let two = { fine with Enemies = [ { boss 1e9 with Name = "boss+" } ]; Replace = true; Player = { player with Skills = [ { spell "Bolt" Fire 1.0 2.0 with Clip = 3 } ] } }
+        let two = { fine with Enemies = [ { boss 1e9 with Name = "boss+" } ]; Replace = true; Player = { player with Skills = [ { spell "Bolt" Fire 1.0 2.0 with Mods = [ Mod.base' (Named "MaxSeals") 2.0 ] } ] } }
         if (Flat.unsupported two).Length <> 2 then failwithf "expected two reasons, got %A" (Flat.unsupported two))
 
     test "flat: random fights give the reference's outcome, or are refused" (fun () ->

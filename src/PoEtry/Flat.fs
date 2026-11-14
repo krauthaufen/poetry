@@ -618,6 +618,9 @@ module Flat =
     let private qConsumeEvery = site MEmpty Base (named "ConsumeChargeEveryMs")
     let private qConsumeCount = site MEmpty Base (named "ConsumeChargeCount")
     let private qRageEffect = siteMult MEmpty (named "RageEffect")
+    let private qKeepAmmo = site MSkill Base (named "KeepAmmoChance")
+    let private qReloadSpeed = siteMult MSkill (named "ReloadSpeed")
+    let private qInstantReload = site MSkill Base (named "InstantReloadChance")
     let private qTrinityGain = site MSkill Base (named "TrinityGain")
     let private qTrinityLoss = site MSkill Base (named "TrinityLoss")
     let private qCascades = site MSkill Base (named "CascadesPerSide")
@@ -852,7 +855,8 @@ module Flat =
           /// The Glory and Combo the skill needs to be used (counter, amount), and the stacks
           /// of statuses the enemy aimed at must have.
           Requires: (string * float)[]
-          NeedsStacks: (string * int)[] }
+          NeedsStacks: (string * int)[]
+          CReload: int }
 
     type private EnemyInfo =
         { Def: EnemyDef
@@ -918,6 +922,7 @@ module Flat =
               RemnantExtra: float
               RemnantDelay: float
               BConsumedInfusion: int
+              BReloaded: int
               /// Trinity: the resonance of each element (lightning, cold, fire), and their sum.
               BResonance: int[]
               BResonanceSum: int
@@ -1264,7 +1269,6 @@ module Flat =
             let all = actor.Skills @ (actor.Skills |> List.collect (fun s -> s.Parts))
             if (all |> List.map (fun s -> s.Name) |> List.distinct).Length <> all.Length then reject "skills or parts of the same name"
             if actor.Skills |> List.exists (fun s -> s.Parts |> List.exists (fun p -> not p.Parts.IsEmpty)) then reject "parts that have parts"
-            if all |> List.exists (fun s -> s.Clip > 0) then reject "crossbow ammunition"
             // (the reference keeps these beside the skills' cooldowns, under these names)
             if all |> List.exists (fun s -> s.Name = "ArchonRecovery" || s.Name.StartsWith "invocation:" || s.Name.StartsWith "SealBreak:") then reject "a skill named like a cooldown of the engine's own"
             let skillIds = Dictionary<string, int>()
@@ -1702,7 +1706,8 @@ module Flat =
                         [| "Glory:" + s.Name, ownBase s "Requires:Glory" * (1.0 + ownBase s "GloryRequiredMore" / 100.0)
                            "Combo:" + s.Name, ownBase s "Requires:Combo" |]
                         |> Array.filter (fun (_, n) -> n > 0.0)
-                      NeedsStacks = [| for m in s.Mods do match m.Stat with Named n when n.StartsWith "NeedsEnemyStacks:" -> yield n.Substring 17, int m.Value | _ -> () |] })
+                      NeedsStacks = [| for m in s.Mods do match m.Stat with Named n when n.StartsWith "NeedsEnemyStacks:" -> yield n.Substring 17, int m.Value | _ -> () |]
+                      CReload = counts.Id("reload:" + s.Name) })
                 |> Array.ofList
             let sIso, sClose, sOpen = statuses.Id "Isolated", statuses.Id "Close", statuses.Id "OpenWeakness"
             let sDerived = derivedStatuses |> List.map statuses.Id |> Array.ofList
@@ -1739,6 +1744,7 @@ module Flat =
                 | None -> [||]
             // (named here, while names are still given numbers)
             buffs.Id "ConsumedInfusionRecently" |> ignore
+            buffs.Id "ReloadedRecently" |> ignore
             for t in DamageType.elemental do
                 buffs.Id("Resonance:" + DamageType.name t) |> ignore
             buffs.Id "Resonance" |> ignore
@@ -1798,6 +1804,7 @@ module Flat =
                       RemnantExtra = (match actor.Infusions with Some inf -> inf.ExtraRemnantChance | None -> 0.0)
                       RemnantDelay = (match actor.Infusions with Some inf -> inf.Delay | None -> 0.0)
                       BConsumedInfusion = buffs.Id "ConsumedInfusionRecently"
+                      BReloaded = buffs.Id "ReloadedRecently"
                       BResonance = DamageType.elemental |> List.map (fun t -> buffs.Id("Resonance:" + DamageType.name t)) |> Array.ofList
                       BResonanceSum = buffs.Id "Resonance"
                       Builders = builders
@@ -2273,6 +2280,10 @@ module Flat =
           mutable RageCarry: float
           /// By skill: how many of a part that waits to be set off by another skill wait.
           Waiting: int[]
+          /// By crossbow skill: the bolts left (-1: a full load), and whether its load has
+          /// not been paid for yet (the cost is paid with the first shot of a load).
+          Ammo: int[]
+          LoadDue: bool[]
           /// A minion's life and energy shield, when it was last hit, whether it is out of the
           /// fight (killed, or not summoned), and when a temporary one's time is up.
           mutable Health: float
@@ -3848,7 +3859,8 @@ module Flat =
             let costMult = multQ ev qManaCost
             let efficiency = incQ ev qCostEfficiency
             release s
-            let ownCost = skill.Cost
+            // crossbow ammunition: the cost is for loading, paid with the first shot of a new load
+            let ownCost = if skill.Clip > 0 && not (at s.A.LoadDue sid) then 0.0 else skill.Cost
             let ownCost =
                 if skill.CostPerSecond <= 0.0 then ownCost
                 else (if s.A.LastUsed = sid then 0.0 else ownCost) + skill.CostPerSecond * seconds ()
@@ -3884,8 +3896,37 @@ module Flat =
             // nothing is faster than a server tick (instant skills)
             let t = max Constants.serverTick (useTime s sid)
             let go () =
-                startUse s rng sid t
-                schedule s (s.Time + t + 0.0) EReady 0 0 0.0 0.0
+                let clip = info.Skill.Clip
+                if clip <= 0 then
+                    startUse s rng sid t
+                    schedule s (s.Time + t + 0.0) EReady 0 0 0.0 0.0
+                else
+                    // after the last bolt of a load: reload (attack speed and reload speed shorten
+                    // it), unless the reload is instant
+                    // (asked of the mods as they are before the use, with the buffs as they are after it)
+                    let ev = acquire s sid
+                    startUse s rng sid t
+                    ev.BOn <- true
+                    ev.BHas <- s.A.BHas
+                    ev.BStacks <- s.A.BStacks
+                    s.A.BKept <- true
+                    let left = if (at s.A.Ammo sid) < 0 then clip else (at s.A.Ammo sid)
+                    let left = if rng.Chance(sumQ ev qKeepAmmo) then left else left - 1
+                    put s.A.Ammo sid left
+                    put s.A.LoadDue sid false
+                    let extra =
+                        if left > 0 then 0.0
+                        else
+                            let speed = (1.0 + (sumQ ev qSpeed + sumQ ev qReloadSpeed) / 100.0) * moreQ ev (qSpeed + 1) * moreQ ev (qReloadSpeed + 1)
+                            let seconds = if rng.Chance(sumQ ev qInstantReload) then 0.0 else info.Skill.ReloadTime / max 0.1 speed
+                            put s.A.Ammo sid clip
+                            put s.A.LoadDue sid true
+                            setBuff s p.BReloaded 1 (s.Time + t + seconds + 4.0) []
+                            expireAt s (s.Time + t + seconds + 4.0)
+                            bump s info.CReload
+                            seconds
+                    release s
+                    schedule s (s.Time + t + extra) EReady 0 0 0.0 0.0
             match p.Vitals with
             | None -> go ()
             | Some pools ->
@@ -5808,6 +5849,8 @@ module Flat =
                   RageAt = 0.0
                   RageCarry = 0.0
                   Waiting = Array.zeroCreate nk
+                  Ammo = Array.create nk -1
+                  LoadDue = Array.create nk false
                   Health = (match pr.Body with Some body -> body.Life | None -> 0.0)
                   Barrier = (match pr.Body with Some body -> body.EnergyShield | None -> 0.0)
                   HitAt = -1e9
