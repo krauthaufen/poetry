@@ -443,7 +443,7 @@ module StatMap =
         // how a skill is aimed and animated, where remnants can be collected, things monsters never do to the player
         | "critical_chance_against_aura_apply_brittle_every_x_ms" | "skill_withering_presence_frequency_ms" | "herald_of_thunder_storm_max_hits" | "herald_of_ash_overkill_threshold_%" | "herald_of_ash_burning_%_overkill_damage_per_minute" | "action_requires_aiming_stance" | "action_required_target_facing_angle_tolerance_degrees" | "crossbow_barrage_recoil_per_shot"
         | "crossbow_barrage_total_recoil_buff_count" | "crossbow_barrage_debuff_duration_ms" | "crossbow_barrage_attack_time_ratio_%"
-        | "base_minimum_channel_time_ms" | "base_melee_dash_range" | "base_knockback_distance" | "main_hand_weapon_range_+"
+        | "base_minimum_channel_time_ms" | "base_melee_dash_range" | "main_hand_weapon_range_+"
         | "remnant_pickup_range_+%" | "immune_to_maim" | "immune_to_hinder" | "enemy_extra_damage_rolls_chance_%"
         | "action_can_be_used_in_upward_aiming_stance" | "projectiles_crossbow_barrage" -> Some Structural
         // armour break (see Sim.hitEnemy)
@@ -499,7 +499,7 @@ module StatMap =
         | "skill_cannot_be_knocked_back" | "skill_cannot_be_frozen" | "skill_cannot_be_electrocuted" | "skill_cannot_be_interrupted"
         | "base_skill_is_totemified" | "skill_is_deploy_skill" | "skill_is_command" | "minions_do_not_move_to_skill_target"
         | "melee_defer_damage_prediction" | "action_do_not_face_target" | "usable_with_talisman" | "ignores_proximity_shield"
-        | "disable_quadruped_head_control" | "global_knockback" | "ballistic_projectiles_always_bounce" | "range_backflip_conditional_distance"
+        | "disable_quadruped_head_control" | "ballistic_projectiles_always_bounce" | "range_backflip_conditional_distance"
         | "channel_start_lock_cancelling_of_attack_time_%" | "base_skill_enabled_while_mounted" | "support_double_barrel_number_of_crossbow_bolts_+"
         | "base_number_of_crossbow_bolts" | "number_of_projectiles_cannot_be_modified" -> Some Structural
         // read where the skill is built: the infusion a skill consumes (Behaviours.infusedCopy);
@@ -510,9 +510,23 @@ module StatMap =
         // how far away the skill can be aimed (Falling Thunder with charges): the player stands
         // and every enemy can be aimed at, as with "attack_maximum_action_distance_+"
         | "lightning_strike_maximum_action_distance_+_when_empowered" -> Some Structural
-        | id when id.StartsWith "triggered_by_" || id.StartsWith "generic_knockback_" || id.StartsWith "monster_"
+        | id when id.StartsWith "triggered_by_" || id.StartsWith "monster_"
                   || ((id.StartsWith "spell_minimum_base_" || id.StartsWith "spell_maximum_base_") && id.EndsWith "_damage")
                   || (id.StartsWith "base_" && id.EndsWith "_damage_to_deal_per_minute") -> Some Structural
+        // Knockback (Sim.hitEnemy): which hits knock back, how far (a skill's own distance; more
+        // or less by how close the enemy is), and what scales it. How fast the monster is pushed
+        // is nothing here: it is where it lands at once.
+        | "global_knockback" | "knockback" -> one (Mod.base' (Named "KnockbackChance") 100.0)
+        | "knockback_on_crit_with_quarterstaff" -> one (Mod.base' (Named "KnockbackChance") 100.0 |> Mod.whenever IsCrit |> Mod.whenever (SkillIs Quarterstaff))
+        | "area_skill_knockback_chance_%" -> one (Mod.base' (Named "KnockbackChance") v |> Mod.whenever (SkillIs Area))
+        | "cannot_knockback" -> one (Mod.flag (Named "CannotKnockback"))
+        | "base_knockback_distance" -> one (Mod.base' (Named "KnockbackBase") v)
+        | "knockback_distance_+%" -> one (Mod.inc (Named "KnockbackDistance") v)
+        | "support_arms_length_knockback_distance_+%_final" | "active_skill_knockback_distance_+%_final" -> one (Mod.more (Named "KnockbackDistance") v)
+        | "generic_knockback_distance_limit" -> one (Mod.base' (Named "KnockbackLimit") v)
+        | "generic_knockback_+%_final_at_min_distance" -> one (Mod.base' (Named "KnockbackAtMin") v)
+        | "generic_knockback_+%_final_at_max_distance" -> one (Mod.base' (Named "KnockbackAtMax") v)
+        | "base_knockback_speed_+%" -> Some Structural
         // warcries: the attacks they empower, and the cry itself
         | "empowered_attack_damage_+%" -> one (Mod.inc (Damage AllDamage) v |> Mod.whenever (SkillIs Attack) |> Mod.whenever (WhileBuff "EmpoweredAttacks"))
         // "Empowered Attacks Gain X% of Physical Damage as Extra Fire damage"

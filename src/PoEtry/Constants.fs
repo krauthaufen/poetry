@@ -239,3 +239,10 @@ module Constants =
     /// Exposure where nothing names its size: "By default it lowers Resistances by -20%"
     /// (keyword text, poe2db).
     let exposureMagnitude = 20.0
+
+    /// Knockback: a skill's "base_knockback_distance" is read as hundredths of a metre (Rapid
+    /// Shot 30, Explosive Shot 400, Shield Charge 900): so many of them to a game unit. A
+    /// guess: the numbers fit nothing else. And how far a hit pushes where the skill names no
+    /// distance (Ice Nova, a passive's "Knocks Back Enemies"): a metre. A guess.
+    let knockbackUnitsPerDistance = 10.0
+    let knockbackDefault = 10.0

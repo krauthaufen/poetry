@@ -2880,6 +2880,30 @@ module Sim =
                         let w = if onHit > 0.0 then updateActor actor.Name (fun st -> { st with Energy = Map.add "RageHitAt" w.Time st.Energy }) w else w
                         let _, _, _, _, onKill = env.Rage
                         gainRage env (onHit + (if dead then onKill else 0.0)) w
+                // Knockback: a hit that knocks back pushes the monster straight away from the player
+                // (a boss is not moved). How far: the skill's own distance, or a metre where it names
+                // none, x "increased Knockback Distance"; skills that knock back "based on how close
+                // they are to you" push more from close by and less towards their limit. It walks
+                // back like any monster that is out of its reach. Walls are not in its way.
+                let w =
+                    let kctx = { ctx with Crit = hit.Crit }
+                    let chance = if dead || e.Def.Rarity = Unique then 0.0 else Mods.sumBase kctx [ Named "KnockbackChance" ] mods
+                    if chance > 0.0 && not (Mods.flag kctx (Named "CannotKnockback") mods) && rng.Chance chance then
+                        let pos = e.Def.Position
+                        let d = Vec.length pos
+                        let limit = Mods.sumBase kctx [ Named "KnockbackLimit" ] mods
+                        let byDistance =
+                            if limit <= 0.0 then 1.0
+                            else
+                                let k = min 1.0 (max 0.0 (d - e.Def.Size) / limit)
+                                1.0 + (Mods.sumBase kctx [ Named "KnockbackAtMin" ] mods * (1.0 - k) + Mods.sumBase kctx [ Named "KnockbackAtMax" ] mods * k) / 100.0
+                        let own = Mods.sumBase kctx [ Named "KnockbackBase" ] mods
+                        let far = (if own > 0.0 then own / Constants.knockbackUnitsPerDistance else Constants.knockbackDefault) * Mods.mult kctx [ Named "KnockbackDistance" ] mods * byDistance
+                        if far <= 0.0 then w
+                        else
+                            let pushed = if d > 1e-9 then Vec.scale ((d + far) / d) pos else Vec.make far 0.0
+                            { updateEnemyDef target pushed w with Counts = bump "knockback" w.Counts }
+                    else w
                 let w = markRecently actor.Name true hit.Crit dead w
                 let w = react env rng actor OnHit skill (Some target) w
                 if hit.Crit then react env rng actor OnCrit skill (Some target) w else w

@@ -358,6 +358,54 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         | Some p -> equal (box [ 15.0 ]) (box (p.Rules |> List.choose (fun r -> match r.Reaction with DropRemnant (_, _, extra) -> Some extra | _ -> None)))
         | None -> failwith "Frost Bomb not built")
 
+    test "knockback: a hit pushes a monster away from the player, by the skill's distance or a metre; a boss stays" (fun () ->
+        let bolt (ms: Mod list) = { Skill.make "Bolt" [ Spell ] with BaseDamage = Map.ofList [ Chaos, { Min = 1.0; Max = 1.0 } ]; BaseTime = 0.5; BaseCrit = 0.0; Mods = ms }
+        // a monster that does not walk, 3 m away (its body 0.5 m): six hits in 3.2 s
+        let dummy rarity = { EnemyDef.make Rarity.defaults 70 rarity "dummy" (Vec.make 30.0 0.0) with Life = 1e9; Mods = []; Size = 5.0; Attack = None }
+        let fight rarity ms = Fight.single (dummy rarity) (Actor.make "Player" [] [ bolt ms ]) 3.2
+        let ends f =
+            let out = Sim.shown f 1u
+            let at = out.Shown |> List.choose (function Moved (_, _, p) -> Some(Vec.length p) | _ -> None) |> List.tryLast |> Option.defaultValue 30.0
+            at, count out "knockback"
+        let knocks = Mod.base' (Named "KnockbackChance") 100.0
+        // no knockback: it stays; with it: a metre a hit
+        equal (box (30.0, 0)) (box (ends (fight Normal [])))
+        equal (box (90.0, 6)) (box (ends (fight Normal [ knocks ])))
+        // 50% increased distance: 1.5 m a hit; the skill's own 400 (4 m) in place of the metre
+        equal (box (120.0, 6)) (box (ends (fight Normal [ knocks; Mod.inc (Named "KnockbackDistance") 50.0 ])))
+        equal (box (270.0, 6)) (box (ends (fight Rare [ knocks; Mod.base' (Named "KnockbackBase") 400.0 ])))
+        // a boss is not moved; a skill that cannot knock back does not
+        equal (box (30.0, 0)) (box (ends (fight Unique [ knocks ])))
+        equal (box (30.0, 0)) (box (ends (fight Normal [ knocks; Mod.flag (Named "CannotKnockback") ])))
+        // by how close it is: 50% more at no distance, 90% less from 2 m on (its edge is 2.5 m away): 0.1 m a hit
+        let scaled = [ knocks; Mod.base' (Named "KnockbackLimit") 20.0; Mod.base' (Named "KnockbackAtMin") 50.0; Mod.base' (Named "KnockbackAtMax") -90.0 ]
+        let far, n = ends (fight Normal scaled)
+        near 36.0 far
+        equal (box 6) (box n)
+        // only on a critical hit with a quarterstaff: a passive's line on a spell does nothing
+        equal (box [ Mod.base' (Named "KnockbackChance") 100.0 |> Mod.whenever IsCrit |> Mod.whenever (SkillIs Quarterstaff) ]) (box (mods "knockback_on_crit_with_quarterstaff" 1.0))
+        equal (box (30.0, 0)) (box (ends (fight Normal (mods "knockback_on_crit_with_quarterstaff" 1.0))))
+        equal (box [ Mod.inc (Named "KnockbackDistance") 20.0 ]) (box (mods "knockback_distance_+%" 20.0))
+        // Ice Nova's own numbers are read from the gem
+        match Gems.skill db.Value ModDb.empty None { Gem = "Ice Nova"; Level = 20; Quality = 0; StatSet = 1; Supports = [] } with
+        | Ok (s, _) ->
+            let value n = s.Mods |> List.sumBy (fun m -> if m.Stat = Named n then m.Value else 0.0)
+            equal (box (100.0, 20.0, 50.0, -90.0)) (box (value "KnockbackChance", value "KnockbackLimit", value "KnockbackAtMin", value "KnockbackAtMax"))
+        | Error e -> failwith e
+        // a monster that walks and hits: pushed back a metre every half second, it has to walk
+        // up again and hits less often
+        let brute =
+            { EnemyDef.make Rarity.defaults 70 Magic "brute" (Vec.make 12.0 0.0) with
+                Life = 1e9; Mods = []; Size = 5.0; Speed = 12.0
+                Attack = Some { Interval = 0.4; Damage = Map.ofList [ Physical, 10.0 ]; Accuracy = 1e9; Range = 6.0; CritChance = 0.0; Melee = true } }
+        let melee ms = Fight.single brute { Actor.make "Player" [] [ bolt ms ] with Vitals = Some { PlayerStats.basic 1e7 0.0 with StunThreshold = 1e12 } } 20.0
+        let hits ms = count (Sim.run (melee ms) 1u) "enemy:hit"
+        if not (hits [ knocks ] < hits [] * 3 / 4) then failwithf "%d hits taken with knockback, %d without" (hits [ knocks ]) (hits [])
+        same (melee [ knocks ]) seeds
+        same (melee [ Mod.base' (Named "KnockbackChance") 40.0; Mod.inc (Named "KnockbackDistance") 30.0 ]) seeds
+        same (melee scaled) seeds
+        same (fight Normal [ knocks ]) seeds)
+
     // ---- allies, recovery while standing, stun recovery, what monsters never do ----
 
     test "stats: what allies in the Presence gain and regenerate; costs without energy shield; recovery while stationary" (fun () ->

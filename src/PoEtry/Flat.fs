@@ -610,6 +610,13 @@ module Flat =
     let private qChains = site MSkill Base [ Chains ]
     let private qTerrainChain = site MSkill Base (named "TerrainChain")
     let private qAftershock = site MSkill Base (named "AftershockChance")
+    let private qKnockChance = site MSkill Base (named "KnockbackChance")
+    let private qKnockNever = site MSkill Flag (named "CannotKnockback")
+    let private qKnockLimit = site MSkill Base (named "KnockbackLimit")
+    let private qKnockAtMin = site MSkill Base (named "KnockbackAtMin")
+    let private qKnockAtMax = site MSkill Base (named "KnockbackAtMax")
+    let private qKnockBase = site MSkill Base (named "KnockbackBase")
+    let private qKnockDistance = siteMult MSkill (named "KnockbackDistance")
     let private qCooldownRecovery = siteMult MSkill [ CooldownRecovery ]
     let private qDoubleUses = site MSkill Base (named "DoubleCooldownUses")
     let private qLosePools = site MSkill Base (named "LosePoolsOnUse")
@@ -1157,6 +1164,7 @@ module Flat =
               BChilled: int
               BBeenHit: int
               CStopped: int
+              CKnockback: int
               CEvaded: int
               CEnemyHit: int
               CDeflected: int
@@ -2106,6 +2114,7 @@ module Flat =
                       BChilled = bChilled
                       BBeenHit = bBeenHit
                       CStopped = cStopped
+                      CKnockback = counts.Id "knockback"
                       CEvaded = cEvaded
                       CEnemyHit = cEnemyHit
                       CDeflected = cDeflected
@@ -5641,6 +5650,26 @@ module Flat =
                     let onHit = if fresh then sumQ ev qRageOnHit else 0.0
                     if onHit > 0.0 then s.A.Energy <- Map.add "RageHitAt" s.Time s.A.Energy
                     gainRage s (onHit + (if dead then p.RageOnKill else 0.0))
+                // Knockback: the monster is pushed straight away from the player (see the reference)
+                if not dead && def0.Rarity <> Unique then
+                    ev.Crit <- crit
+                    let chance = sumQ ev qKnockChance
+                    if chance > 0.0 && not (flagQ ev qKnockNever) && rng.Chance chance then
+                        let pos = def0.Position
+                        let d = Vec.length pos
+                        let limit = sumQ ev qKnockLimit
+                        let byDistance =
+                            if limit <= 0.0 then 1.0
+                            else
+                                let k = min 1.0 (max 0.0 (d - def0.Size) / limit)
+                                1.0 + (sumQ ev qKnockAtMin * (1.0 - k) + sumQ ev qKnockAtMax * k) / 100.0
+                        let own = sumQ ev qKnockBase
+                        let far = (if own > 0.0 then own / Constants.knockbackUnitsPerDistance else Constants.knockbackDefault) * multQ ev qKnockDistance * byDistance
+                        if far > 0.0 then
+                            e.Def <- { e.Def with Position = (if d > 1e-9 then Vec.scale ((d + far) / d) pos else Vec.make far 0.0) }
+                            s.AliveStale <- true
+                            bump s p.CKnockback
+                    ev.Crit <- false
                 // what the game tracks for "recently" conditions
                 mark s p.BHit 4.0
                 if not crit then mark s p.BNonCrit 4.0
