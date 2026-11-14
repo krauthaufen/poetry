@@ -305,7 +305,10 @@ module Behaviours =
                       Sources = sources
                       EnergyMult = 1.0 + sum ((=) "energy_generated_+%") / 100.0
                       EnergyMods = ModDb.ofList (sheet.Mods |> List.filter (fun m -> m.Stat = Named "EnergyGenerated"))
-                      RefundChance = sum ((=) "trigger_skills_refund_half_energy_spent_chance_%") }
+                      // (the gem's own and the character's: the passive Energise)
+                      RefundChance =
+                        sum ((=) "trigger_skills_refund_half_energy_spent_chance_%")
+                        + (sheet.Mods |> List.filter (fun m -> m.Stat = Named "EnergyRefundChance") |> List.sumBy (fun m -> m.Value)) }
                 Some(meta, triggered |> List.map fst, consumers))
 
     /// Runic Ward Remnants from a persistent gem with `ward_remnants_gain_per_globe`, with its
