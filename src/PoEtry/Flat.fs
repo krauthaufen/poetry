@@ -2794,7 +2794,8 @@ module Flat =
     /// to (see `Agent.Epoch`, `Agent.Flight`). A strike that is put in the queue is counted
     /// as on its way.
     let private stamp (agent: Agent) (kind: int) (skill: int) : int =
-        if kind = EStrike || kind = EPassing then
+        // (a strike of a part no name stands for has no flight to be taken out of)
+        if (kind = EStrike || kind = EPassing) && skill >= 0 then
             put agent.InFlight skill ((at agent.InFlight skill) + 1)
             agent.Epoch * 65536 + (at agent.Flight skill)
         else agent.Epoch * 65536
@@ -6567,11 +6568,11 @@ module Flat =
         // what a minion had begun when it left the fight is lost (the reference takes it out of the queue)
         let lost =
             let agent = at s.Agents q.Who
-            if q.Kind = EStrike || q.Kind = EPassing then
+            if (q.Kind = EStrike || q.Kind = EPassing) && q.A >= 0 then
                 let still = q.Tag = agent.Epoch * 65536 + (at agent.Flight q.A)
                 if still then put agent.InFlight q.A ((at agent.InFlight q.A) - 1)
                 not still
-            else (q.Kind = EReady || q.Kind = EDirect) && q.Tag <> agent.Epoch * 65536
+            else (q.Kind = EReady || q.Kind = EDirect || q.Kind = EStrike || q.Kind = EPassing) && q.Tag <> agent.Epoch * 65536
         if not lost then
             let t, kind, who, a, b, x, y = q.Time, q.Kind, q.Who, q.A, q.B, q.X, q.Y
             let dt = t - s.Time
