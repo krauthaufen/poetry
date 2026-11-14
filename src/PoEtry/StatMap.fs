@@ -304,6 +304,8 @@ module StatMap =
         | "support_deadly_poison_poison_effect_+%_final" -> one (Mod.more (AilmentMagnitude(Some Poison)) v)
         | "support_unseen_critical_damage_multiplier_+%_final_vs_blinded_enemies" -> one (Mod.more CritBonus v |> Mod.whenever (EnemyHas "Blinded"))
         | "support_ignition_chance_to_ignite_+%_final" -> one (Mod.more (AilmentChance Ignite) v)
+        // Ice Bite's buff on freezing an enemy: read by Behaviours.iceBite
+        | "support_ice_bite_buff_grant_%_added_cold_attack_damage" | "support_ice_bite_base_buff_duration" -> Some Structural
         // sealed skills (Salvo, Unleash, Zarokh's Revolt, Freezing Salvo): read by the engine at use
         | "base_maximum_seals_for_skill" -> one (Mod.base' (Named "MaxSeals") v)
         | "base_skill_seal_gain_interval_ms" -> one (Mod.base' (Named "SealIntervalMs") v)
@@ -480,11 +482,22 @@ module StatMap =
         | "disable_quadruped_head_control" | "global_knockback" | "ballistic_projectiles_always_bounce" | "range_backflip_conditional_distance"
         | "channel_start_lock_cancelling_of_attack_time_%" | "base_skill_enabled_while_mounted" | "support_double_barrel_number_of_crossbow_bolts_+"
         | "base_number_of_crossbow_bolts" | "number_of_projectiles_cannot_be_modified" -> Some Structural
+        // read where the skill is built: the infusion a skill consumes (Behaviours.infusedCopy);
+        // a projectile part that has only what its charges give it (Gems: no base count beside
+        // "..._number_of_projectiles_per_power_charge", so none without charges)
+        | "active_skill_consumes_a_fire_infusion" | "active_skill_consumes_a_cold_infusion" | "active_skill_consumes_a_lightning_infusion"
+        | "zero_projectiles_if_no_power_charges" -> Some Structural
+        // how far away the skill can be aimed (Falling Thunder with charges): the player stands
+        // and every enemy can be aimed at, as with "attack_maximum_action_distance_+"
+        | "lightning_strike_maximum_action_distance_+_when_empowered" -> Some Structural
         | id when id.StartsWith "triggered_by_" || id.StartsWith "generic_knockback_" || id.StartsWith "monster_"
                   || ((id.StartsWith "spell_minimum_base_" || id.StartsWith "spell_maximum_base_") && id.EndsWith "_damage")
                   || (id.StartsWith "base_" && id.EndsWith "_damage_to_deal_per_minute") -> Some Structural
         // warcries: the attacks they empower, and the cry itself
         | "empowered_attack_damage_+%" -> one (Mod.inc (Damage AllDamage) v |> Mod.whenever (SkillIs Attack) |> Mod.whenever (WhileBuff "EmpoweredAttacks"))
+        // "Empowered Attacks Gain X% of Physical Damage as Extra Fire damage"
+        | "empowered_attack_physical_damage_%_to_gain_as_fire" ->
+            one (Mod.base' (GainAs(Physical, Fire)) v |> Mod.whenever (SkillIs Attack) |> Mod.whenever (WhileBuff "EmpoweredAttacks"))
         | "warcry_speed_+%" -> one (Mod.inc Speed v |> Mod.whenever (SkillIs Warcry))
         | "warcry_cooldown_speed_+%" -> one (Mod.inc CooldownRecovery v |> Mod.whenever (SkillIs Warcry))
         | "support_voranas_siege_hit_damage_+%_final_vs_isolated_enemies" -> one (Mod.more (Damage AllDamage) v |> Mod.whenever (EnemyHas "Isolated"))
@@ -504,6 +517,12 @@ module StatMap =
         | "gain_arcane_surge_on_kill_chance_%" -> one (Mod.base' (Named "Rule:OnKill:ArcaneSurge:10") v)
         | "onslaught_buff_duration_on_kill_ms" -> one (Mod.base' (Named(sprintf "Rule:OnKill:Onslaught:%g" (v / 1000.0))) 100.0)
         | "onslaught_time_granted_on_kill_ms" -> one (Mod.base' (Named "Rule:OnKill:Onslaught:4") v)
+        // "X% chance to gain Onslaught on Killing Hits with this Weapon" (the weapon's own line,
+        // read without "local_": for attacks), "... on Killing Blow with Axes": the text names
+        // no duration; 4 s as "for 4 seconds on Kill" (guess)
+        | "chance_to_gain_onslaught_on_killing_blow_%" | "chance_to_gain_onslaught_on_kill_for_4_seconds_%" -> one (Mod.base' (Named "Rule:OnKill:Onslaught:4") v)
+        | "chance_to_gain_onslaught_on_kill_with_axes_%" -> one (Mod.base' (Named "Rule:OnKill:Onslaught:4") v |> Mod.whenever (SkillIs Axe))
+        | "chance_to_gain_onslaught_on_kill_for_10_seconds_%" -> one (Mod.base' (Named "Rule:OnKill:Onslaught:10") v)
         | "onslaught_on_crit_duration_ms" -> one (Mod.base' (Named(sprintf "Rule:OnCrit:Onslaught:%g" (v / 1000.0))) 100.0)
         | "withered_on_hit_chance_%" | "withered_on_hit_for_4_seconds_%_chance" -> one (Mod.base' (Named "Rule:OnHit:Withered:4") v)
         | "withered_on_hit_for_2_seconds_%_chance" | "local_withered_on_hit_for_2_seconds_%_chance" -> one (Mod.base' (Named "Rule:OnHit:Withered:2") v)
@@ -688,6 +707,9 @@ module StatMap =
         | "base_cannot_be_ignited" -> one (Mod.base' (Named "Avoid:Ignite") 100.0)
         | "base_cannot_be_chilled_or_frozen" -> Some(Mods [ Mod.base' (Named "Avoid:Chill") 100.0; Mod.base' (Named "Avoid:Freeze") 100.0 ])
         | "cannot_be_poisoned" -> one (Mod.base' (Named "Avoid:Poison") 100.0)
+        // "X% increased Slowing Potency of Debuffs on You": a multiplier of its own on how much
+        // a slow on the player slows (the Chill of a monster's cold hit is the one slow there is)
+        | "base_slow_potency_+%" -> one (Mod.inc (Named "SlowPotencyOnSelf") v)
         | "shocked_effect_on_self_+%" -> one (Mod.inc (Named "SelfEffect:Shock") v)
         | "chill_effectiveness_on_self_+%" -> one (Mod.inc (Named "SelfEffect:Chill") v)
         | "ignite_effect_on_self_+%" -> one (Mod.inc (Named "SelfEffect:Ignite") v)
@@ -762,6 +784,8 @@ module StatMap =
         | "minion_cast_speed_+%" -> one (Mod.inc (ForMinions Speed) v |> Mod.whenever (SkillIs Spell))
         | "minion_attack_and_cast_speed_+%" -> one (Mod.inc (ForMinions Speed) v)
         | "base_cooldown_speed_+%" -> one (Mod.inc CooldownRecovery v)
+        // "Supported Spells have X% increased Cooldown Recovery Rate"
+        | "base_spell_cooldown_speed_+%" -> one (Mod.inc CooldownRecovery v |> Mod.whenever (SkillIs Spell))
         | "base_cooldown_speed_+%_final" -> one (Mod.more CooldownRecovery v)
         | "support_double_number_of_cooldown_uses" -> one (Mod.base' (Named "DoubleCooldownUses") 1.0)
         | "lose_%_of_life_es_and_mana_when_skill_is_used" -> one (Mod.base' (Named "LosePoolsOnUse") v)
@@ -889,7 +913,9 @@ module StatMap =
                   || id = "base_remnant_duration_ms" || id = "verisium_infusion_skill_number_of_verisium_infusion_to_grant" -> Some Structural
         // ---- more offence ----
         // projectile speed changes nothing here: projectiles land when the use hits
-        | id when id.EndsWith "projectile_speed_+%" || id.EndsWith "projectile_speed_+%_final" -> Some NotOffensive
+        // (how much the speed varies from one projectile to the next: read for shards that live
+        // a fixed time, Gems `RangeVariation`; for the others as their speed)
+        | id when id.EndsWith "projectile_speed_+%" || id.EndsWith "projectile_speed_+%_final" || id = "active_skill_projectile_speed_+%_variation_final" -> Some NotOffensive
         | "base_cooldown_modifiable_repeat_interval_ms" | "cooldown_recovery_modifiers_also_apply_to_repeat_interval" -> Some Structural
         | "base_chance_to_pierce_%" -> one (Mod.base' (Named "PierceChance") v)
         | "always_pierce" -> one (Mod.base' Pierce 99.0)
@@ -920,7 +946,7 @@ module StatMap =
             Some(Mods([ Freeze; HeavyStun; Electrocute; Pin ] |> List.map (fun a -> Mod.inc (Buildup a) v)))
         | "non_damaging_ailment_effect_+%" -> Some(Mods([ Shock; Chill ] |> List.map (fun a -> Mod.inc (AilmentMagnitude(Some a)) v)))
         | "base_damage_%_deflected" -> one (Mod.base' (Named "DeflectEffect") v)
-        | "slows_have_no_potency_on_you" -> one (Mod.more (Named "SelfEffect:Chill") -100.0)
+        | "slows_have_no_potency_on_you" -> one (Mod.more (Named "SlowPotencyOnSelf") -100.0)
         // ---- persistent buff gems ----
         // Archmage: non-channelling spells gain X% of damage as lightning per 100 maximum mana, and cost more
         | "archmage_all_damage_%_to_gain_as_lightning_to_grant_to_non_channelling_spells_per_100_max_mana" ->

@@ -2570,10 +2570,15 @@ module Sim =
                         inflicted
                         |> List.fold
                             (fun w i ->
+                                // (a bar that this hit fills: the enemy is Frozen, Electrocuted,
+                                // Heavily Stunned or Pinned by it, and was not before)
+                                let had = match i with AddBuildup (a, _) -> Map.containsKey (Ailment.status a) w.Enemies.[target].Debuffs | _ -> true
                                 let w = inflict target actor.Name i w
                                 match i with
                                 | Dot (a, _, _, _, _) | Status (a, _, _) ->
                                     react env rng actor (OnInflict a) skill (Some target) { w with Counts = bump ("inflict:" + Ailment.name a) w.Counts }
+                                | AddBuildup (a, _) when not had && Map.containsKey (Ailment.status a) w.Enemies.[target].Debuffs ->
+                                    react env rng actor (OnInflict a) skill (Some target) w
                                 | AddBuildup _ -> w)
                             w
                 // the skill's own damage over time: one instance per skill and type, the strongest stays

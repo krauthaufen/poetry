@@ -235,6 +235,7 @@ Checked against PoB's defensive numbers for 131 public characters (`tools/corpus
 | Life flask | drunk when life falls below half, if charges allow; amount x life recovery rate over its duration | player behaviour | guess |
 | Leech (life, mana) | % of physical attack damage dealt, from one enemy per hit event; each instance is recovered over one second ("Leech Life X% less quickly" stretches it) | game keyword text; the one-enemy rule is a guess; wiki Leech: over one second, hit damage capped at 40,000, "only the instance with the highest recovery rate will be active" | data |
 | Ailments on the player | threshold = half of maximum life (PlayerAilmentThresholdLifeFactor) + mods. Ignite: chance = fire / threshold x IgniteChanceMultiplier, burns 4 s, strongest only, lowered by fire resistance. Shock: chance likewise, +20% damage taken for 4 s. Chill: slow = ChillEffectMultiplier x cold / threshold for 2 s. Freeze: builds cold x FreezeDamageScalePlayer / freeze threshold, frozen 2 s at 100%. "Avoid", "effect on you" and duration stats apply. Unmitigated hit damage is used. Bleed / poison from monsters: not modelled | GameConstants "...Player" | data; using unmitigated damage is a guess |
+| Slowing potency on the player | "X% increased / reduced Slowing Potency of Debuffs on You" multiplies how much a slow on the player slows, apart from "Effect of Chill on you" (30% reduced and 20% reduced: 0.7 x 0.8). The Chill of a monster's cold hit is the only slow on the player there is (no Maim, Hinder or Temporal Chains from monsters) | stat description; that it is a multiplier of its own is a guess | guess |
 | Light stun on the player | chance = hit / stun threshold (maximum life before CI + mods); physical +100%, melee +33% (monster object stats); nothing below 15% (LightStunMinimumChancePlayer); interrupts for 0.35 s (GUESS); a stun only delays the next action, it does not cancel one under way. | game constants; formula a guess | guess |
 | Heavy stun on the player | not applied: "Players and their Minions usually cannot be Heavily Stunned" (only while raising a shield, parrying or mounted, which are not modelled) | game keyword text | data |
 
@@ -352,6 +353,7 @@ The game's standard buffs and debuffs, with the numbers of its keyword text. Sta
 | Effect | Rule | Source | Confidence |
 |---|---|---|---|
 | Onslaught | 20% increased skill speed (x Onslaught effect) | keyword text | data |
+| Onslaught on kill | "X% chance to gain Onslaught on Killing Hits with this Weapon" (kills by attacks), "on Killing Blow with Axes", "for 4 / 10 seconds on Kill": the chance is rolled for every kill. Where the text names no time it is 4 s | stat descriptions; 4 s as the stat that names it | data; 4 s guess |
 | Arcane Surge | 15% increased cast speed (x effect); its 20% more mana regeneration is not applied; 4 s | keyword text; duration is a guess; wiki: 15% increased cast speed, 20% more mana regeneration, 10 s | data |
 | Unholy Might | 30% of damage gained as extra chaos (x magnitude); "You have Unholy Might", also "while not on Low Mana" and "while you have no Energy Shield"; minions likewise | keyword text | data |
 | Tailwind | per stack 2% increased skill speed and 10% increased evasion, up to 10; a stack per skill use, all lost when hit; it does not expire by itself (guess) | keyword text; buff table limit 10; wiki: 2% skill speed, 10% evasion, 1% movement speed per stack | data |
@@ -377,7 +379,7 @@ The game's standard buffs and debuffs, with the numbers of its keyword text. Sta
 |---|---|---|---|
 | Empowering | a warcry empowers one attack per `warcry_empowers_per_X_monster_power` of enemy power (normal 1, magic 2, rare 5, unique 20), counting up to its cap, at least one; all living enemies count (the cry's area is not checked) | gem stats | data; area ignored |
 | Using them up | each attack the player makes while empowered uses one, after its hits; triggered attacks and the cry itself don't | game rule | guess |
-| What empowered attacks get | "Empowered Attacks deal X% increased Damage"; Infernal Cry: gain X% of damage as extra fire; Seismic Cry: slams cause an additional aftershock | stat text, gem stats | data |
+| What empowered attacks get | "Empowered Attacks deal X% increased Damage", "Empowered Attacks Gain X% of Physical Damage as Extra Fire damage"; Infernal Cry: gain X% of damage as extra fire; Seismic Cry: slams cause an additional aftershock | stat text, gem stats | data |
 | Not modelled | the cries' own explosions and knockback, Guard (Fortifying Cry), rage per power (Ferocious Roar), Ancestral Cry, Arctic Howl's added cold damage | - | missing |
 
 ### Heralds
@@ -499,6 +501,8 @@ The game's standard buffs and debuffs, with the numbers of its keyword text. Sta
 |---|---|---|---|
 | Impending Doom | "trigger an explosion when the curse ends": casting the curse on an enemy that already has it ends the old one and triggers Doom Blast (the support's granted skill at the curse gem's level, with the group's supports). A curse running out by itself is not modelled | gem data `trigger_vicious_hex_explosion_when_curse_ends`, additionalGrantedEffectId1 | data; "recast ends the curse" is game knowledge |
 | Other support-granted skills (Doedre's Undoing, ...) | not modelled | - | missing |
+| Ice Bite | "Gain 30% of Damage as Cold Damage for 6 seconds on Freezing an enemy with Supported Skills": a buff on the character, for everything it does, whenever the supported skill (a part of it, its infused form) freezes an enemy; a new freeze starts the time again; the time is a skill duration | stat description, support description ("infuses your damage with Cold damage"). The stat's id says "added cold attack damage": that it is for attacks only is not what the text says, so it is for all damage | data; all damage is a guess |
+| Rules for a bar that fills | "on Freezing / Electrocuting / Heavily Stunning / Pinning an enemy" happens once, with the hit that fills the bar, not with hits on an enemy that already is | engine | data |
 
 ### Curse auras
 

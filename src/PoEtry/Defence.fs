@@ -263,7 +263,11 @@ module Defence =
           FreezeThreshold = (ailmentThreshold + es * named "FreezeThresholdFromES" / 100.0) * Mods.mult c [ Named "FreezeThreshold" ] db
           AvoidStun = named "AvoidStun"
           Avoid = ailments |> List.map (fun a -> a, named ("Avoid:" + a)) |> Map.ofList
-          SelfEffect = ailments |> List.map (fun a -> a, max 0.0 (Mods.mult c [ Named("SelfEffect:" + a) ] db)) |> Map.ofList
+          // (Chill is a slow: "Slowing Potency of Debuffs on You" multiplies it once more)
+          SelfEffect =
+            ailments
+            |> List.map (fun a -> a, max 0.0 (Mods.mult c [ Named("SelfEffect:" + a) ] db) * (if a = "Chill" then max 0.0 (Mods.mult c [ Named "SlowPotencyOnSelf" ] db) else 1.0))
+            |> Map.ofList
           SelfDuration = ailments |> List.map (fun a -> a, max 0.0 (Mods.mult c [ Named("SelfDuration:" + a) ] db)) |> Map.ofList
           LifeOnKill = if ci || onlyLeech then 0.0 else (named "LifeOnKill" + life * named "LifePercentOnKill" / 100.0) * lifeRecovery
           ESOnKill = es * named "ESPercentOnKill" / 100.0 * esRecovery

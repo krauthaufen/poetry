@@ -5336,12 +5336,15 @@ module Flat =
                 else
                     for k in 0 .. inflicted.Count - 1 do
                         let i = inflicted.[k]
+                        // (a bar that this hit fills: the status is there after it and was not before)
+                        let had = match i with AddBuildup (a, _) -> at e.Has (at p.AilmentStatus (ailmentIndex a)) | _ -> true
                         inflict s e i
                         match i with
                         | Dot (a, _, _, _, _) | Status (a, _, _) ->
                             bump s (at p.CInflict (ailmentIndex a))
                             react s rng (at p.OnInflict (ailmentIndex a)) "" sid target
-                        | AddBuildup _ -> ()
+                        | AddBuildup (a, _) ->
+                            if not had && (at e.Has (at p.AilmentStatus (ailmentIndex a))) then react s rng (at p.OnInflict (ailmentIndex a)) "" sid target
                 // the skill's own damage over time: one instance per skill and type, the strongest stays
                 if not (dead || info.Dots.Length = 0) then
                     let duration = (if skill.Duration > 0.0 then skill.Duration else 1.0) * multQ ev qSkillDuration

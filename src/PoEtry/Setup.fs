@@ -407,7 +407,10 @@ module Setup =
                     let cryGrants = cryGrants @ (match tipped with Some (_, _, ms) -> ms | None -> [])
                     let wave = Behaviours.chargedShockwave db charMods (Gems.chooseWeapon db setup.Gem sheet.Weapons) setup s
                     let cryRules = cryRules @ (match wave with Some (_, rs) -> rs | None -> [])
-                    let rules = cryRules @ (match lasting with Some (_, rs) -> rs | None -> []) @ Behaviours.useRules db charMods setup s.Name o.Pickup @ Behaviours.buffRules db charMods setup s @ Behaviours.totemPlacement db charMods setup s @ curseRules
+                    let biteRules =
+                        let withParts (x: Skill) = x.Name :: (x.Parts |> List.map (fun p -> p.Name))
+                        Behaviours.iceBite db charMods setup s (withParts s @ (match copy with Some (_, _, cp) -> withParts cp | None -> []))
+                    let rules = cryRules @ biteRules @ (match lasting with Some (_, rs) -> rs | None -> []) @ Behaviours.useRules db charMods setup s.Name o.Pickup @ Behaviours.buffRules db charMods setup s @ Behaviours.totemPlacement db charMods setup s @ curseRules
                     let grants = Behaviours.verisiumGrant db charMods setup
                     let s = Behaviours.applyObserved s
                     // skills that deal no damage (buffs, infusion grants) don't hit

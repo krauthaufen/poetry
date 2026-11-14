@@ -1175,6 +1175,23 @@ module Behaviours =
             | _ -> []
         exposure @ remnant
 
+    /// Ice Bite: "Gain X% of Damage as Cold Damage for N seconds on Freezing an enemy with
+    /// Supported Skills": a buff on the character (for all it does: "infuses your damage with
+    /// Cold damage") whenever the supported skill, one of its parts or its infused form
+    /// (`names`) freezes an enemy; a new freeze starts its time again. The time is a skill
+    /// duration (the support makes the skill one with a duration).
+    let iceBite (db: GameDb) (charMods: ModDb) (setup: GemSetup) (skill: Skill) (names: string list) : Rule list =
+        let raw = Gems.rawStats db charMods setup
+        let sum id = raw |> List.filter (fun (k, _) -> k = id) |> List.sumBy snd
+        let gain, ms = sum "support_ice_bite_buff_grant_%_added_cold_attack_damage", sum "support_ice_bite_base_buff_duration"
+        if gain <= 0.0 || ms <= 0.0 then []
+        else
+            let ctx = { Ctx.empty with SkillTags = skill.Tags; SkillName = skill.Name }
+            let seconds = ms / 1000.0 * Mods.mult ctx [ SkillDuration ] (ModDb.ofList (ModDb.toList charMods @ skill.Mods))
+            let mods = [ for t in DamageType.all -> Mod.base' (GainAs(t, Cold)) gain |> Mod.from "Ice Bite" ]
+            names |> List.distinct |> List.map (fun n ->
+                { Hook = OnInflict Freeze; Filter = Called n; Chance = 100.0; Reaction = GrantBuff("Ice Bite", seconds, 1, mods) })
+
     /// The character's Spirit and what its persistent skills reserve.
     /// Spirit: flat amounts (quests, mods, sceptres' own value) and "per X on body armour",
     /// x increases. Reserved: each persistent gem's `spiritReservationFlat` at its level plus
