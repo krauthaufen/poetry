@@ -1070,6 +1070,27 @@ module Behaviours =
         @ [ Mod.inc Evasion (10.0 * Mods.inc Ctx.empty [ Named "TailwindEffect" ] db) |> Mod.whenever (PerStack("Tailwind", 1.0)) |> Mod.from "Tailwind"
             Mod.base' CritChance 0.5 |> Mod.whenever (PerEnemyStack("CriticalWeakness", 1.0)) |> Mod.from "Critical Weakness" ]
 
+    /// "Increases and Reductions to Minion Damage also affect you", "... to Companion Damage
+    /// also apply to you", "Increases and Reductions to Minion Attack Speed also affect you":
+    /// the character's increased / reduced minion damage (companion damage: the lines that name
+    /// companions) and minion attack speed, as its own (attack speed: for its attacks).
+    let minionIncreasesOnYou (sheet: CharacterSheet) : Mod list =
+        let db = ModDb.ofList sheet.Mods
+        let flag name = Mods.flag Ctx.empty (Named name) db
+        let minions, companions, speed = flag "MinionDamageAffectsYou", flag "CompanionDamageAffectsYou", flag "MinionAttackSpeedAffectsYou"
+        if not (minions || companions || speed) then []
+        else
+            let companion = SkillIs(Tag "Companion")
+            sheet.Mods |> List.choose (fun m ->
+                let named = List.contains companion m.Conds
+                let others = m.Conds |> List.filter (fun c -> c <> companion)
+                match m.Stat, m.Kind with
+                | ForMinions (Damage scope), Inc when (named && companions) || (not named && minions) ->
+                    Some { m with Stat = Damage scope; Conds = others; Source = m.Source + " (as minion damage)" }
+                | ForMinions Speed, Inc when speed && not named && not (List.contains (SkillIs Spell) m.Conds) ->
+                    Some { m with Stat = Speed; Conds = SkillIs Attack :: (others |> List.filter (fun c -> c <> SkillIs Attack)); Source = m.Source + " (as minion attack speed)" }
+                | _ -> None)
+
     /// Skills an item triggers: "Hits with this Weapon have N% chance to Trigger X per M
     /// Strength" is a "TriggerOnHit:X" stat; every hit of an attack the player uses rolls it.
     /// Returns (skill name, rule).

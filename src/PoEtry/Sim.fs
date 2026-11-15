@@ -1834,7 +1834,7 @@ module Sim =
                 | Some _ when free -> w
                 | Some cd ->
                     let recovery = Mods.mult ctx [ CooldownRecovery ] mods
-                    let uses = skill.StoredUses * (if Mods.sumBase ctx [ Named "DoubleCooldownUses" ] mods > 0.0 then 2 else 1)
+                    let uses = (skill.StoredUses + int (Mods.sumBase ctx [ Named "ExtraCooldownUses" ] mods)) * (if Mods.sumBase ctx [ Named "DoubleCooldownUses" ] mods > 0.0 then 2 else 1)
                     updateActor actor.Name (fun st ->
                         let pending = Map.tryFind skill.Name st.Recharges |> Option.defaultValue [] |> List.filter (fun t -> t > w.Time)
                         let start = if actor.ParallelUses || pending.IsEmpty then w.Time else List.max pending

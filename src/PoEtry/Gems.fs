@@ -893,6 +893,14 @@ module Gems =
     /// which "also applies to Projectile Speed", is increased damage of the skill's
     /// projectiles. Worked out when the skill is built: what holds only for a while in a
     /// fight (a buff's cast speed) is not counted.
+    /// "X% increased Grenade fuse duration": a grenade's hit comes that much later.
+    let private fuse (characterMods: ModDb) (sk: Skill) : Skill =
+        if sk.HitDelay <= 0.0 || not (sk.Tags.Contains(Tag "Grenade")) then sk
+        else
+            let ctx = { Ctx.empty with SkillName = sk.Name; SkillTags = sk.Tags }
+            let k = Mods.inc ctx [ Named "GrenadeFuse" ] (ModDb.addList sk.Mods characterMods)
+            if k = 1.0 then sk else { sk with HitDelay = sk.HitDelay * max 0.0 k }
+
     let private speedAsDamage (characterMods: ModDb) (sk: Skill) : Skill =
         if not (sk.Tags.Contains Projectile) then sk
         else
@@ -1084,7 +1092,7 @@ module Gems =
                     setup.Supports
                     |> List.choose (fun (name, lvl) -> supportOfGem db name |> Option.bind (fun s -> Map.tryFind (max 1 lvl) s.Levels |> Option.orElse (Map.tryFind 1 s.Levels)))
                     |> List.fold (fun k l -> k * (1.0 + (l.ManaMultiplier |> Option.defaultValue 0.0) / 100.0)) 1.0
-                let main, parts = speedAsDamage characterMods main, parts |> List.map (speedAsDamage characterMods)
+                let main, parts = speedAsDamage characterMods main |> fuse characterMods, parts |> List.map (speedAsDamage characterMods >> fuse characterMods)
                 Ok({ main with Parts = parts; Cost = main.Cost * costMult; CostPerSecond = main.CostPerSecond * costMult }, cov)
 
     /// The game stats of a socketed gem (own stat set, quality, alt quality, supports),

@@ -827,6 +827,13 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         near 3.0 (delay "Explosive Grenade" [])
         near 4.0 (delay "Frost Bomb" [])
         near 2.4 (delay "Frost Bomb" [ "Short Fuse I", 1 ])
+        // "20% increased Grenade Detonation Time": a grenade's fuse only
+        let later gem =
+            match Gems.skill db.Value (ModDb.ofList [ Mod.inc (Named "GrenadeFuse") 20.0 ]) None { Gem = gem; Level = 20; Quality = 0; StatSet = 1; Supports = [] } with
+            | Ok (s, _) -> s.HitDelay
+            | Error e -> failwith e
+        near 3.6 (later "Explosive Grenade")
+        near 4.0 (later "Frost Bomb")
         equal (box ([]: string list)) (box (Gems.unmodelledTypes db.Value "Frost Bomb" |> List.filter ((=) "DetonatesAfterTime")))
         equal (box [ "DetonatesAfterTime" ]) (box (Gems.unmodelledTypes db.Value "Explosive Spear" |> List.filter ((=) "DetonatesAfterTime")))
         // a skill with no gem of its own, by its name: Punch (the unarmed attack) is an attack

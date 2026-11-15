@@ -1318,3 +1318,20 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         let c = load { blank with Items = [ "Weapon 1", "Rarity: Normal\nWrapped Quarterstaff\n--------\n" ] } Options.defaults
         let p = Setup.player c Options.defaults [] None
         if not (p.Resources |> List.exists (fun (k, _) -> k = "WieldingTwoHandedWeapon")) then failwithf "no two handed weapon: %A" (p.Resources |> List.map fst))
+
+    test "minion damage and attack speed on the player; grenades' cooldown recovery, cooldown uses and fuse" (fun () ->
+        let sheetMods lines = (load { blank with ExtraLines = lines } Options.defaults).Sheet.Mods
+        let own (ms: Mod list) stat = ms |> List.filter (fun m -> m.Stat = stat && m.Kind = Inc) |> List.sumBy (fun m -> m.Value)
+        let lines = [ "Minions deal 30% increased Damage"; "Companions deal 20% increased Damage"; "Minions have 10% increased Attack Speed" ]
+        near 0.0 (own (sheetMods lines) (Damage AllDamage))
+        near 30.0 (own (sheetMods ("Increases and Reductions to Minion Damage also affect you" :: lines)) (Damage AllDamage))
+        near 20.0 (own (sheetMods ("Increases and Reductions to Companion Damage also apply to you" :: lines)) (Damage AllDamage))
+        let speed = sheetMods ("Increases and Reductions to Minion Attack Speed also affect you" :: lines) |> List.filter (fun m -> m.Stat = Speed && m.Kind = Inc)
+        equal (box [ [ SkillIs Attack ] ]) (box (speed |> List.map (fun m -> m.Conds)))
+        equal (box [ Mod.inc CooldownRecovery 25.0 |> Mod.whenever (SkillIs(Tag "Grenade")) ]) (box (mods "grenade_skill_cooldown_speed_+%" 25.0))
+        // "+1 Cooldown Use": a cooldown skill with one stored use is used twice at the start
+        let bomb = { Skill.make "Bomb" [ Spell; Tag "Grenade" ] with BaseDamage = Map.ofList [ Fire, { Min = 10.0; Max = 10.0 } ]; BaseTime = 0.5; Cooldown = Some 20.0; Mods = mods "grenade_skill_cooldown_count_+" 1.0 }
+        let player = { Actor.make "Player" [] [ bomb ] with Rotation = [ { Use = "Bomb"; When = fun _ -> true } ] }
+        let fight = Fight.single { EnemyDef.atLevel 83 1e9 with Mods = []; Attack = None } player 5.0
+        equal 2 (Sim.run fight 1u).Counts.["uses:Bomb"]
+        same fight seeds)

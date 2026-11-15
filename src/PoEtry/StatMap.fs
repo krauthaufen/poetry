@@ -1003,6 +1003,16 @@ module StatMap =
         // what minions have while the player is in some state ("if you've Hit Recently", "while
         // you are affected by a Herald", "while you are not on full Mana"): read off the player's
         // buffs and states (`OfOwner`)
+        // "Increases and Reductions to Minion Damage / Companion Damage / Minion Attack Speed also
+        // affect you" (Behaviours.minionIncreasesOnYou)
+        | "minion_damage_increases_and_reductions_also_affects_you" -> one (Mod.flag (Named "MinionDamageAffectsYou"))
+        | "companion_damage_increases_and_reductions_also_affects_you" -> one (Mod.flag (Named "CompanionDamageAffectsYou"))
+        | "additive_modifiers_to_minion_attack_speed_also_affect_you" -> one (Mod.flag (Named "MinionAttackSpeedAffectsYou"))
+        // grenades: "X% increased Cooldown Recovery Rate for Grenade Skills", "+1 Cooldown Use",
+        // "X% increased Grenade fuse duration" (Gems.fuse)
+        | "grenade_skill_cooldown_speed_+%" -> one (Mod.inc CooldownRecovery v |> Mod.whenever (SkillIs(Tag "Grenade")))
+        | "grenade_skill_cooldown_count_+" -> one (Mod.base' (Named "ExtraCooldownUses") v |> Mod.whenever (SkillIs(Tag "Grenade")))
+        | "grenade_fuse_duration_+%" -> one (Mod.inc (Named "GrenadeFuse") v)
         // Rageforged: "Supported Skills spend X Rage if possible to deal Y% more Damage", "Z% chance
         // to gain the benefits of this Support without spending additional Rage" (Sim.startUse)
         | "support_rageforged_consumes_X_rage_to_enrage_skill_use" -> one (Mod.base' (Named "RageforgedSpend") v)

@@ -646,6 +646,7 @@ module Flat =
     let private qKnockDistance = siteMult MSkill (named "KnockbackDistance")
     let private qCooldownRecovery = siteMult MSkill [ CooldownRecovery ]
     let private qDoubleUses = site MSkill Base (named "DoubleCooldownUses")
+    let private qExtraUses = site MSkill Base (named "ExtraCooldownUses")
     let private qLosePools = site MSkill Base (named "LosePoolsOnUse")
     let private qDodgeDistance = site MSkill Base (named "DodgeRollDistance")
     let private qRageforgedSpend = site MSkill Base (named "RageforgedSpend")
@@ -4399,6 +4400,7 @@ module Flat =
             useStatus s ev foe
             let recovery = if skill.Cooldown.IsSome then multQ ev qCooldownRecovery else 1.0
             let doubled = skill.Cooldown.IsSome && sumQ ev qDoubleUses > 0.0
+            let extraUses = if skill.Cooldown.IsSome then int (sumQ ev qExtraUses) else 0
             let lose = if p.Vitals.IsSome then sumQ ev qLosePools / 100.0 else 0.0
             let dodge = if p.Metas.Length > 0 && info.IsDodgeRoll then Constants.dodgeRollDistance + sumQ ev qDodgeDistance else 0.0
             let lasting = if info.AsksDuration then multQ ev qSkillDuration else 1.0
@@ -4422,7 +4424,7 @@ module Flat =
             match skill.Cooldown with
             | Some _ when free -> ()
             | Some cd ->
-                let uses = skill.StoredUses * (if doubled then 2 else 1)
+                let uses = (skill.StoredUses + extraUses) * (if doubled then 2 else 1)
                 let pending = (at s.A.Recharges sid) |> List.filter (fun t -> t > s.Time)
                 let start = if p.Actor.ParallelUses || pending.IsEmpty then s.Time else List.max pending
                 let pending = List.sort (pending @ [ start + cd / recovery ])

@@ -169,6 +169,7 @@ module Setup =
         let sheet = { sheet with Mods = sheet.Mods @ charmMods }
         // named effects the character has outright, and what their stacks add
         let sheet = { sheet with Mods = sheet.Mods @ Behaviours.keywordMods sheet }
+        let sheet = { sheet with Mods = sheet.Mods @ Behaviours.minionIncreasesOnYou sheet }
         let bases = classBases
         // motes: base maximum from the mote-granting gem's description stat
         let moteBase =
