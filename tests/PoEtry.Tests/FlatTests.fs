@@ -958,6 +958,18 @@ let run (test: string -> (unit -> unit) -> unit) =
         let fight = { Fight.single pack.Head player 25.0 with Enemies = pack }
         same fight seeds
         same { fight with BankedInvocations = 0.0 } seeds
+        // set off when the swing lands (`OnLand`) and not when it begins: by the player, and by
+        // a minion that leaves the fight with a swing under way
+        let landing (a: Actor) = { a with Rules = a.Rules |> List.map (fun r -> match r.Reaction with IfBuff (_, TriggerSkill _) -> { r with Hook = OnLand } | _ -> r) }
+        same { fight with Player = landing player } seeds
+        let hound = { landing { player with Name = "Hound" } with Pool = Some "Pack" }
+        let caller =
+            { Actor.make "Player" [] [ { Skill.make "Call" [ Spell ] with Hits = []; Cooldown = Some 2.6 }; spell "Bolt" Fire 50.0 90.0 ] with
+                Rotation = [ Actor.always "Call"; Actor.always "Bolt" ]
+                Rules = [ { Hook = OnUse; Filter = Called "Call"; Chance = 100.0; Reaction = Summon("Pack", 1, 1.9) } ] }
+        same { fight with Player = caller; Minions = [ hound ] } seeds
+        let landed = Sim.run { fight with Player = landing player } 1u
+        if not (landed.Counts.ContainsKey "uses:Charged Staff: Shockwave") then failwith "expected shockwaves when the swings land"
         let o = Sim.run fight 1u
         let count k = Map.tryFind k o.Counts |> Option.defaultValue 0
         // at most one shockwave a swing, and it hits more than one enemy; none without the buff

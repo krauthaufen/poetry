@@ -103,6 +103,8 @@ module Flat =
     let private EMana = 16
     [<Literal>]
     let private EPlant = 17
+    [<Literal>]
+    let private ELand = 18
 
     let private kindName kind =
         match kind with
@@ -123,6 +125,7 @@ module Flat =
         | EWard -> "WardArrives"
         | EMana -> "ManaArrives"
         | EPlant -> "PlantCrystals"
+        | ELand -> "Landed"
         | _ -> "Expire"
 
     let private ailmentIndex (a: Ailment) =
@@ -1192,6 +1195,7 @@ module Flat =
               OnInflict: CRule[][]
               WhenHit: CRule[]
               OnBlock: CRule[]
+              OnLand: CRule[]
               /// The charge buffs that are up when the fight starts: buff, charge, mods per
               /// stack, seconds per stack, chance (%) of twice the stacks.
               StartCharged: (int * int * Mod list * float * float) list
@@ -1676,6 +1680,7 @@ module Flat =
             let onInflict = allAilments |> List.map (fun a -> rulesOf (fun h -> h = OnInflict a)) |> Array.ofList
             let whenHit = rulesOf (fun h -> h = WhenHit)
             let onBlock = rulesOf (fun h -> h = OnBlock)
+            let onLand = rulesOf (fun h -> h = OnLand)
 
             // ---- meta gems ----
             let metas =
@@ -2264,6 +2269,7 @@ module Flat =
                       Overkill = overkill
                       Metas = metas
                       OnBlock = onBlock |> Array.map fixCurses
+                      OnLand = onLand |> Array.map fixCurses
                       Charms = charms
                       CPrevented = cPrevented
                       Periodics = periodics
@@ -4625,6 +4631,9 @@ module Flat =
                         for i in 1 .. n do
                             if pi.Passing then schedule s at EPassing part target mult (at - s.Time)
                             else schedule s (if n = 1 then at else s.Time + (at - s.Time) * float i / float n) EStrike part target mult 0.0
+            // what happens when the use lands: when its first hit is due, after that hit
+            if first < infinity && p.OnLand.Length > 0 && p.OnLand |> Array.exists (fun r -> at r.Applies sid) then
+                schedule s first ELand sid target 0.0 0.0
             // Ice Crystals the use leaves behind: each stands at a random spot of the skill's
             // area (around the user, or around the target), and those whose explosion reaches
             // the target count. They appear after the use's own hits, which do not damage them.
@@ -6978,7 +6987,7 @@ module Flat =
                 let still = q.Tag = agent.Epoch * 65536 + (at agent.Flight q.A)
                 if still then put agent.InFlight q.A ((at agent.InFlight q.A) - 1)
                 not still
-            else (q.Kind = EReady || q.Kind = EDirect || q.Kind = EStrike || q.Kind = EPassing) && q.Tag <> agent.Epoch * 65536
+            else (q.Kind = EReady || q.Kind = EDirect || q.Kind = EStrike || q.Kind = EPassing || q.Kind = ELand) && q.Tag <> agent.Epoch * 65536
         if not lost then
             let t, kind, who, a, b, x, y = q.Time, q.Kind, q.Who, q.A, q.B, q.X, q.Y
             let dt = t - s.Time
@@ -7001,6 +7010,7 @@ module Flat =
                 | EWard -> tell t "WardArrives" "" "" (float q.Seq)
                 | EMana -> tell t "ManaArrives" "" "" (float q.Seq)
                 | EPlant -> tell t "PlantCrystals" name (if a < 0 then "" else (at p.Skills a).Skill.Name) (float q.Seq)
+                | ELand -> tell t "Landed" name (at p.Skills a).Skill.Name (float q.Seq)
                 | _ -> tell t "Expire" "" "" (float q.Seq)
              | None -> ())
             // a skill's hits roll from a stream of that skill alone: its first event, its second, ...
@@ -7160,6 +7170,7 @@ module Flat =
                          | EExpose -> expose s a DamageType.all.[b] x y
                          | EPeriodic -> onPeriodic s rng a
                          | EEnergy -> gainEnergy s rng a x
+                         | ELand -> react s rng s.P.OnLand "" a b
                          | ESpendBuff ->
                             if (at s.A.BHas a) && (at s.A.BStacks a) > 1 then setBuff s a ((at s.A.BStacks a) - 1) (at s.A.BExpires a) (at s.A.BMods a)
                             else removeBuff s a

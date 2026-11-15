@@ -917,12 +917,24 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         near 12.804 (Map.find Physical ranges).Max
         near 30.624 (Map.find Lightning ranges).Min
         near 51.216 (Map.find Lightning ranges).Max
-        // the fight starts with the buff up (three charges, 18 s): one shockwave with every Falling Thunder
+        // the fight starts with the buff up (three charges, 18 s): one shockwave with every Falling
+        // Thunder that lands (the last one's slam may come after the fight is over)
         let count (o: Outcome) k = Map.tryFind k o.Counts |> Option.defaultValue 0
         let o = Sim.run plain 1u
-        equal (box true) (box (count o "uses:Falling Thunder" > 0))
-        equal (box (count o "uses:Falling Thunder")) (box (count o ("uses:" + name)))
-        equal (box (count o "uses:Falling Thunder")) (box (count o ("hits:" + name)))
+        equal (box true) (box (count o "uses:Falling Thunder" > 1))
+        equal (box true) (box (count o ("uses:" + name) = count o "uses:Falling Thunder" || count o ("uses:" + name) = count o "uses:Falling Thunder" - 1))
+        equal (box (count o ("uses:" + name))) (box (count o ("hits:" + name)))
+        // it is set off when the attack lands: every shockwave strikes at the time of a slam's
+        // strike, right after it, and none before the first slam
+        let slams, waves = ResizeArray<float>(), ResizeArray<float>()
+        let order = ResizeArray<string>()
+        Sim.traced (fun t kind who what _ ->
+            if kind = "Strike" && who = "Player" then
+                if what = "Falling Thunder" then (slams.Add t; order.Add "slam")
+                elif what = name then (waves.Add t; order.Add "wave")) plain 1u |> ignore
+        equal (box true) (box (waves.Count > 1 && waves |> Seq.forall (fun t -> slams.Contains t)))
+        equal (box "slam") (box order.[0])
+        equal (box true) (box (order |> Seq.pairwise |> Seq.forall (fun (a, b) -> a <> b)))
         equal (box true) (box (o.DamageBy.ContainsKey(name + " (hit)")))
         near 0.0 (Map.tryFind "leech" o.ManaGained |> Option.defaultValue 0.0)
         // Mana Leech in the Charged Staff group is for the shockwave: its hits leech

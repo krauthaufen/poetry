@@ -194,7 +194,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | Infusion remnants | gem data; pickup delay a guess | data + guess |
 | Fuses | gem data, descriptions | data; where it explodes is a guess |
 | Verisium in the rotation | player behaviour | guess |
-| Charged Staff's shockwave | `ChargedStaffShockwavePlayer` (baseMultiplier, `active_skill_base_area_of_effect_radius` 50, `charged_staff_cone_angle` 45, `charged_staff_bonus_width` 15, conversion 80); gem text ("adding Lightning damage and a Lightning shockwave to your Quarterstaff Attacks"); user: its hits deal a little physical damage and leech with the group's support. One per use and when it lands, 45 degrees being the whole angle, and what the bonus width widens are guesses | data / guess |
+| Charged Staff's shockwave | `ChargedStaffShockwavePlayer` (baseMultiplier, `active_skill_base_area_of_effect_radius` 50, `charged_staff_cone_angle` 45, `charged_staff_bonus_width` 15, conversion 80); gem text ("adding Lightning damage and a Lightning shockwave to your Quarterstaff Attacks"); user: its hits deal a little physical damage and leech with the group's support. One per use, and that it comes with the attack's first hit (user: it came too early when set off as the swing began), 45 degrees being the whole angle, and what the bonus width widens are guesses | data / guess |
 | Block | data / game text | data + guess (cap) |
 | Energy from melee hits / kills | gem stats; the scaling is taken to be the same as for crits | guess |
 

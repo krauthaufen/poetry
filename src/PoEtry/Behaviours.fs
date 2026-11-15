@@ -862,8 +862,9 @@ module Behaviours =
     /// Attacks". The shockwave is the gem's second effect (`triggered_by_charged_staff`): an
     /// attack with the weapon and its own multiplier, in a cone towards the target, with the
     /// gem's supports. Every use of a quarterstaff attack that is not itself triggered sets
-    /// one off while the buff is up, at the moment of the use (guess: the text does not say
-    /// how often; the user sees its hits and its leech).
+    /// one off while the buff is up, when the attack lands: at its first hit, after it (guess:
+    /// the text does not say how often or when; the user sees its hits and its leech, and saw
+    /// it come too early when it was set off as the swing began).
     /// Returns the shockwave and the rule.
     let chargedShockwave (db: GameDb) (charMods: ModDb) (weapon: Weapon option) (setup: GemSetup) (skill: Skill) : (Skill * Rule list) option =
         Map.tryFind setup.Gem db.Gems |> Option.map (fun g -> g.AdditionalEffects) |> Option.defaultValue []
@@ -882,7 +883,7 @@ module Behaviours =
                 Name = name; Tags = s.Tags.Add Triggered; Cost = 0.0; Cooldown = None; Parts = []
                 Delivery = Cone(sum "active_skill_base_area_of_effect_radius", sum "charged_staff_cone_angle", sum "charged_staff_bonus_width")
                 Hits = [ 1.0, 1.0 ] },
-            [ { Hook = OnUse; Filter = WithTags([ Quarterstaff ], [ Triggered ]); Chance = 100.0; Reaction = IfBuff(skill.Name + " buff", TriggerSkill name) } ])
+            [ { Hook = OnLand; Filter = WithTags([ Quarterstaff ], [ Triggered ]); Chance = 100.0; Reaction = IfBuff(skill.Name + " buff", TriggerSkill name) } ])
 
     /// Ice-Tipped Arrows: "Empowering your next Repeatable Bow or Projectile Spear Attacks to
     /// Convert Physical Damage to Cold Damage and Trigger Ice Fragments on Hit". The gem's second

@@ -32,6 +32,9 @@ type SkillFilter =
 type Hook =
     | OnBlock
     | OnUse
+    /// A use lands: once for a use, when its first hit is due, after that hit, whether it
+    /// kills, misses or hits nothing.
+    | OnLand
     | OnHit
     | OnCrit
     | OnKill
@@ -552,6 +555,8 @@ module Sim =
         | ReviveMinions of at: float
         /// A temporary minion's time is up (unless it was summoned anew since).
         | MinionLeaves of actor: string * at: float
+        /// A use of a skill lands (see `Hook.OnLand`): whose, of what, aimed at whom.
+        | Landed of actor: string * skill: string * aimedAt: string
         | PeriodicTick of actor: string * periodic: string
         /// A ward remnant's ward arrives.
         | WardArrives of amount: float
@@ -1561,7 +1566,7 @@ module Sim =
     let private leave name (w: World) =
         let its ev =
             match ev with
-            | Ready n | Strike (n, _, _, _) | PassingStrike (n, _, _, _, _) | DirectHit (n, _, _, _) -> n = name
+            | Ready n | Strike (n, _, _, _) | PassingStrike (n, _, _, _, _) | DirectHit (n, _, _, _) | Landed (n, _, _) -> n = name
             | _ -> false
         { w with Queue = w.Queue |> Map.filter (fun _ ev -> not (its ev)) }
         |> updateActor name (fun st -> { st with Gone = true; Life = 0.0; Shield = 0.0 })
@@ -2106,6 +2111,11 @@ module Sim =
                                 if passing then schedule at (PassingStrike(actor.Name, part.Name, mult, target.Def.Name, at - w.Time)) w
                                 else schedule (if n = 1 then at else w.Time + (at - w.Time) * float i / float n) (Strike(actor.Name, part.Name, mult, target.Def.Name)) w) w) w)
                     w
+            // what happens when the use lands: when its first hit is due, after that hit
+            let w =
+                if first < infinity && actor.Rules |> List.exists (fun r -> r.Hook = OnLand && matches r.Filter skill) then
+                    schedule first (Landed(actor.Name, skill.Name, target.Def.Name)) w
+                else w
             // Ice Crystals the use leaves behind (Grim Pillars): each stands at a random spot of the
             // skill's area (around the user, or around the target), and those whose explosion
             // reaches the target count. They appear after the use's own hits, which do not
@@ -3830,6 +3840,7 @@ module Sim =
              | EnemyAttack e -> tell t "EnemyAttack" e "" (float sq)
              | ReviveMinions _ -> tell t "ReviveMinions" "" "" (float sq)
              | MinionLeaves (a, _) -> tell t "MinionLeaves" a "" (float sq)
+             | Landed (a, s, _) -> tell t "Landed" a s (float sq)
              | PeriodicTick (a, p) -> tell t "PeriodicTick" a p (float sq)
              | WardArrives _ -> tell t "WardArrives" "" "" (float sq)
              | ManaArrives _ -> tell t "ManaArrives" "" "" (float sq)
@@ -4057,6 +4068,9 @@ module Sim =
             | MinionLeaves (name, at) ->
                 let st = Map.find name w.Actors
                 if st.Gone || st.Leaves <> at then w else { leave name w with Counts = bump "minion:left" w.Counts }
+            | Landed (name, skill, aimedAt) ->
+                let actor = actorDef env name
+                react env rng actor OnLand (skillOf actor skill) (Some aimedAt) w
             | PeriodicTick (name, periodic) -> onPeriodic env rng name periodic w
             | ManaArrives amount ->
                 match env.Fight.Player.Vitals, env.Fight.Player.ManaRemnants, w.Player with
