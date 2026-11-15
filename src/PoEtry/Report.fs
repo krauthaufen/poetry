@@ -602,6 +602,7 @@ module Report =
         | PerStack (b, every) -> (if every = 1.0 then "per " else sprintf "per %g " every) + b
         | PerEnemyStack (s, every) -> (if every = 1.0 then "per " else sprintf "per %g " every) + s + " on the enemy"
         | Not c -> "not " + condName c
+        | OfOwner c -> "the owner " + condName c
 
     /// Where the character's numbers come from: every modifier of the character, grouped by
     /// what it changes, each with its kind, value, conditions and source; and what the worn

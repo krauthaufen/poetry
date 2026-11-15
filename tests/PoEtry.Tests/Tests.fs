@@ -840,6 +840,24 @@ let main _ =
         // bites land at 1 .. 5 s: those at 1 and 2 s are within the three seconds
         near (2.0 * 150.0 + 3.0 * 100.0) o.DamageBy.["Bite (hit)"])
 
+    test "a minion's mod read off the player's buffs: 50% increased damage while the player has Rally" (fun () ->
+        // the player gives itself Rally for 3 s at 0 s; the minion's own Rally is not the player's
+        let call = { Skill.make "Call" [ Spell ] with Hits = []; Cooldown = Some 100.0 }
+        let player =
+            { Actor.make "Player" [ noIgnite ] [ call ] with
+                Rules = [ { Hook = OnUse; Filter = Called "Call"; Chance = 100.0; Reaction = GrantBuff("Rally", 3.0, 1, []) } ] }
+        let minion =
+            Actor.make "Skeleton" [ noIgnite; sure; Mod.inc (Damage AllDamage) 50.0 |> Mod.whenever (OfOwner(WhileBuff "Rally")); Mod.inc (Damage AllDamage) 1000.0 |> Mod.whenever (WhileBuff "Rally") ] [ strike "Bite" 100.0 ]
+        let f = { Fight.single (boss 1e12) player 5.5 with MaxTime = 5.5; Minions = [ minion ] }
+        let o = Sim.run f 1u
+        // bites land at 1 .. 5 s: those at 1 and 2 s are within the three seconds
+        near (2.0 * 150.0 + 3.0 * 100.0) o.DamageBy.["Bite (hit)"]
+        // per the player's power charges: 10% more per charge, 3 charges: 30% more
+        let charged = { player with Resources = [ "PowerCharge", 3 ]; MaxResources = Map.ofList [ "PowerCharge", 3 ]; Rules = [] }
+        let minion = { minion with Mods = [ noIgnite; sure; Mod.more (Damage AllDamage) 10.0 |> Mod.whenever (OfOwner(PerStack("PowerCharge", 1.0))) ] }
+        let o = Sim.run { f with Player = charged; Minions = [ minion ] } 1u
+        near (5.0 * 100.0 * 1.3) o.DamageBy.["Bite (hit)"])
+
     // ---- minions that can be killed ----
     let body life revive =
         { Life = life; EnergyShield = 0.0; Armour = 0.0; Evasion = 0.0; Resist = Map.empty; Melee = true; Size = 1.0; Reach = 12.0; Revive = revive; Power = 0.55; LifeRegen = 0.0; TakesForOwner = 0.0; Explodes = None }

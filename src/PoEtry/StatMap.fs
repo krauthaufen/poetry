@@ -964,9 +964,26 @@ module StatMap =
         | "allies_in_presence_life_regeneration_rate_per_minute" -> one (Mod.base' (ForMinions LifeRegen) (v / 60.0))
         | "allies_in_presence_life_regeneration_rate_per_minute_equal_to_your_maximum_life_%" -> one (Mod.base' (Named "AllyRegenPercentOfOwnerLife") (v / 60.0))
         // "You and Allies in your Presence have Unholy Might while you are not on Low Mana": the
-        // minions' part (the player's own is "grant_unholy_might_to_self_while_not_on_low_mana";
-        // that the player is not on low mana is not looked at for them)
-        | "allies_in_presence_have_unholy_might_while_you_not_on_low_mana" -> Some(Mods [ for t in DamageType.all -> Mod.base' (ForMinions(GainAs(t, Chaos))) 30.0 ])
+        // minions' part (the player's own is "grant_unholy_might_to_self_while_not_on_low_mana"),
+        // while the player is not on low mana
+        | "allies_in_presence_have_unholy_might_while_you_not_on_low_mana" ->
+            Some(Mods [ for t in DamageType.all -> Mod.base' (ForMinions(GainAs(t, Chaos))) 30.0 |> Mod.whenever (OfOwner(Not(WhileBuff "LowMana"))) ])
+        // what minions have while the player is in some state ("if you've Hit Recently", "while
+        // you are affected by a Herald", "while you are not on full Mana"): read off the player's
+        // buffs and states (`OfOwner`)
+        | "minion_damage_+%_if_enemy_hit_recently" -> one (Mod.inc (ForMinions(Damage AllDamage)) v |> Mod.whenever (OfOwner(WhileBuff "HitRecently")))
+        | "minion_damage_+%_while_affected_by_a_herald" -> one (Mod.inc (ForMinions(Damage AllDamage)) v |> Mod.whenever (OfOwner(WhileBuff "AffectedByAHerald")))
+        | "minion_attack_and_cast_speed_+%_while_you_are_affected_by_a_herald" -> one (Mod.inc (ForMinions Speed) v |> Mod.whenever (OfOwner(WhileBuff "AffectedByAHerald")))
+        | "support_minion_damage_spirit_cost_minion_damage_+%_while_missing_mana" -> one (Mod.inc (ForMinions(Damage AllDamage)) v |> Mod.whenever (OfOwner(Not(WhileBuff "FullMana"))))
+        | "minion_damage_+%_per_5_dex" -> one (Mod.inc (ForMinions(Damage AllDamage)) v |> Mod.whenever (OfOwner(PerStack("Dex", 5.0))))
+        | "minion_critical_strike_multiplier_+_per_stackable_unique_jewel" -> one (Mod.base' (ForMinions CritBonus) v |> Mod.whenever (OfOwner(PerStack("GrandSpectrum", 1.0))))
+        // "Companions in your Presence deal X% increased Damage / have Onslaught while you are
+        // Shapeshifted" (Onslaught: its 20% increased skill speed, not changed by the player's
+        // Onslaught effect)
+        | "companions_in_presence_damage_+%_while_you_are_shapeshifted" ->
+            one (Mod.inc (ForMinions(Damage AllDamage)) v |> Mod.whenever (SkillIs(Tag "Companion")) |> Mod.whenever (OfOwner(WhileBuff "Shapeshifted")))
+        | "companions_in_presence_have_onslaught_while_you_are_shapeshifted" ->
+            one (Mod.inc (ForMinions Speed) Constants.onslaughtSpeed |> Mod.whenever (SkillIs(Tag "Companion")) |> Mod.whenever (OfOwner(WhileBuff "Shapeshifted")) |> Mod.from "Onslaught")
         | "minion_resummon_speed_+%" -> one (Mod.inc (ForMinions(Named "MinionReviveSpeed")) v)
         | "minion_maximum_life_%_to_gain_as_maximum_energy_shield" -> one (Mod.base' (ForMinions(Named "LifeAsExtraEnergyShield")) v)
         | "minion_attack_speed_+%" -> one (Mod.inc (ForMinions Speed) v |> Mod.whenever (SkillIs Attack))
@@ -1711,12 +1728,20 @@ module StatMap =
                             | Some (Mods ms) -> Some(Mods(ms |> List.map (Mod.whenever (SkillIs(Tag "Companion")))))
                             | _ -> None
                         else None
+                    // what allies in the Presence have while "you" are in some state: the player's state
+                    let rec ofYou (c: Cond) =
+                        match c with
+                        | WhileBuff _ | PerStack _ -> OfOwner c
+                        | Not inner -> Not(ofYou inner)
+                        | c -> c
+                    let wrapAllies (m: Meaning) =
+                        wrapMinions m |> Option.map (function Mods ms -> Mods(ms |> List.map (fun x -> { x with Conds = x.Conds |> List.map ofYou })) | m -> m)
                     if minionOwn.IsSome then minionOwn
                     elif companionOwn.IsSome then companionOwn
-                    elif id.StartsWith "allies_in_presence_" then direct (id.Substring 19) value |> Option.bind wrapMinions
+                    elif id.StartsWith "allies_in_presence_" then direct (id.Substring 19) value |> Option.bind wrapAllies
                     elif id.StartsWith "you_and_allies_in_presence_" then
                         match direct (id.Substring 27) value with
-                        | Some (Mods ms as own) -> (match wrapMinions own with Some (Mods ws) -> Some(Mods(ms @ ws)) | _ -> Some own)
+                        | Some (Mods ms as own) -> (match wrapAllies own with Some (Mods ws) -> Some(Mods(ms @ ws)) | _ -> Some own)
                         | other -> other
                     else
                     // aura gems: "base_skill_buff_<stat>_to_apply" grants <stat> (Purity of Fire, Discipline)

@@ -869,6 +869,31 @@ module Sim =
 
     let private buffStacks (st: ActorState) = st.Buffs |> Map.map (fun _ e -> e.Stacks)
 
+    /// The player's buffs as the last few asked about them saw them (one hit of a minion asks
+    /// several times about the same buffs). (Put in whole, as above.)
+    let private ownerSeen : (Map<string, Effect> * Map<string, int>) option[] = Array.create 2 None
+    let mutable private ownerNext = 0
+
+    /// The buffs and charges of the player, as conditions on the owner read them (`OfOwner`).
+    let private ownerStacks (env: Env) (w: World) : Map<string, int> =
+        let buffs = (Map.find env.Fight.Player.Name w.Actors).Buffs
+        let mutable found = None
+        for i in 0 .. ownerSeen.Length - 1 do
+            match ownerSeen.[i] with
+            | Some (seen, s) when obj.ReferenceEquals(seen, buffs) -> found <- Some s
+            | _ -> ()
+        match found with
+        | Some s -> s
+        | None ->
+            let s = buffs |> Map.map (fun _ e -> e.Stacks)
+            let at = ownerNext % ownerSeen.Length
+            ownerNext <- at + 1
+            ownerSeen.[at] <- Some (buffs, s)
+            s
+
+    /// A context with the owner's buffs in it.
+    let private owned (env: Env) (w: World) (ctx: Ctx) = { ctx with Owner = ownerStacks env w }
+
     /// Buff stacks as a skill sees them: a skill that consumes charges counts as consuming
     /// "N additional" ones too ("50% more damage per Power Charge Consumed").
     let private skillStacks (actor: Actor) (skill: Skill) (st: ActorState) =
@@ -1711,7 +1736,7 @@ module Sim =
             let amount =
                 if not (ModDb.hasStat (fun s -> s = Named "EnergyGenerated") meta.EnergyMods) then amount
                 else
-                    let more = Mods.sumInc { Ctx.empty with Buffs = buffStacks st } [ Named "EnergyGenerated" ] meta.EnergyMods / 100.0
+                    let more = Mods.sumInc ({ Ctx.empty with Buffs = buffStacks st } |> owned env w) [ Named "EnergyGenerated" ] meta.EnergyMods / 100.0
                     amount * (meta.EnergyMult + more) / meta.EnergyMult
             let energy = min meta.MaxEnergy ((Map.tryFind meta.Name st.Energy |> Option.defaultValue 0.0) + amount)
             let w = updateActor actor.Name (fun st -> { st with Energy = Map.add meta.Name energy st.Energy }) w
@@ -1757,7 +1782,7 @@ module Sim =
                 let r = Rng(streamSeed w.Seed (actor.Name + "|" + skill.Name) n).Float()
                 updateActor actor.Name (fun st -> { st with Rolled = Map.add skill.Name (n + 1) st.Rolled; CritRolls = (skill :: skill.Parts) |> List.fold (fun m p -> Map.add p.Name r m) st.CritRolls }) w
             let st = Map.find actor.Name w.Actors
-            let ctx = Skill.ctx skill false (skillStacks actor skill st) (status target)
+            let ctx = Skill.ctx skill false (skillStacks actor skill st) (status target) |> owned env w
             let mods = skillDb env actor skill st
             // "does not use up its Cooldown when empowered" (by what it consumes)
             let free =
@@ -2107,11 +2132,11 @@ module Sim =
     let private useTime env (actor: Actor) (skill: Skill) (w: World) =
         let st = Map.find actor.Name w.Actors
         let target = aimed env w |> Option.map status |> Option.defaultValue Map.empty
-        let ctx = Skill.ctx skill false (buffStacks st) target
+        let ctx = Skill.ctx skill false (buffStacks st) target |> owned env w
         let db = skillDb env actor skill st
         // a chained attack takes the time of the strike that is due (its own speed)
         let own = stepSkill skill st
-        let speed = if own.Name = skill.Name then Mods.mult ctx [ Speed ] db else Mods.mult (Skill.ctx own false (buffStacks st) target) [ Speed ] (skillDb env actor own st)
+        let speed = if own.Name = skill.Name then Mods.mult ctx [ Speed ] db else Mods.mult (Skill.ctx own false (buffStacks st) target |> owned env w) [ Speed ] (skillDb env actor own st)
         // "Skills take 5% longer to perform for each time they Repeat"
         let repeats = match barraged skill st with Some b when w.Time < b.Expires -> float b.Stacks | _ -> 0.0
         // "+1 second to Total Cast Time": added after speed
@@ -2218,7 +2243,7 @@ module Sim =
                 if skill.Clip <= 0 then w, 0.0
                 else
                     let st = Map.find name w.Actors
-                    let ctx = { costCtx with Buffs = buffStacks st }
+                    let ctx = { costCtx with Buffs = buffStacks st } |> owned env w
                     let left = (Map.tryFind skill.Name st.Ammo |> Option.defaultValue skill.Clip)
                     let kept = rng.Chance(Mods.sumBase ctx [ Named "KeepAmmoChance" ] db)
                     let left = if kept then left else left - 1
@@ -2410,7 +2435,7 @@ module Sim =
                     let c, m = Constants.revealedWeaknessLifeShare, 1.0 + more / 100.0
                     if rng.Float() < (c / m) / (1.0 - c + c / m) then Map.add "OpenWeakness" 1 enemyStatus else enemyStatus
                 else enemyStatus
-            let ctx = Skill.ctx skill false (skillStacks actor skill st) enemyStatus
+            let ctx = Skill.ctx skill false (skillStacks actor skill st) enemyStatus |> owned env w
             let hitChance =
                 match Mods.override' ctx HitChance mods with
                 | Some v -> v
@@ -2576,7 +2601,7 @@ module Sim =
                             match actor.Skills |> List.tryFind (fun x -> x.Name = b.Skill) with
                             | Some sk ->
                                 let st = Map.find actor.Name w.Actors
-                                let bctx = Skill.ctx sk false (skillStacks actor sk st) Map.empty
+                                let bctx = Skill.ctx sk false (skillStacks actor sk st) Map.empty |> owned env w
                                 let bmods = skillDb env actor sk st
                                 let radius = match sk.Delivery with | AreaAtTarget r -> Geometry.radius r (Mods.mult bctx [ AreaOfEffect ] bmods) | _ -> 0.0
                                 let seconds = sk.Duration * Mods.mult bctx [ SkillDuration ] bmods
@@ -2963,7 +2988,7 @@ module Sim =
         | Some primary ->
             let st = Map.find name w.Actors
             let shape (skill: Skill) =
-                let ctx = Skill.ctx skill false (skillStacks actor skill st) Map.empty
+                let ctx = Skill.ctx skill false (skillStacks actor skill st) Map.empty |> owned env w
                 let mods = skillDb env actor skill st
                 let areaMult = Mods.mult ctx [ AreaOfEffect ] mods
                 let delivery =

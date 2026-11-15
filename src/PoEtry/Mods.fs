@@ -86,6 +86,10 @@ type Cond =
     /// Same, for a status/debuff on the enemy.
     | PerEnemyStack of status: string * every: float
     | Not of Cond
+    /// The condition read off the buffs of the actor's owner, the player: what a minion's mod
+    /// asks of "you" ("Minions deal X% increased Damage if you've Hit Recently"). For the
+    /// player itself its own buffs.
+    | OfOwner of Cond
 
 type Mod =
     { Stat: Stat
@@ -102,7 +106,9 @@ type Ctx =
       /// Buffs and charges on the actor: name -> stacks.
       Buffs: Map<string, int>
       /// Statuses on the enemy: name -> stacks.
-      EnemyStatus: Map<string, int> }
+      EnemyStatus: Map<string, int>
+      /// Buffs and charges on the actor's owner (the player), for `OfOwner`.
+      Owner: Map<string, int> }
 
 module Ctx =
     let empty =
@@ -110,7 +116,8 @@ module Ctx =
           SkillName = ""
           SkillTags = Set.empty
           Buffs = Map.empty
-          EnemyStatus = Map.empty }
+          EnemyStatus = Map.empty
+          Owner = Map.empty }
 
 /// Shorthand constructors so mod lists read like item text.
 module Mod =
@@ -146,12 +153,14 @@ module Mod =
         | PerStack _
         | PerEnemyStack _ -> true
         | Not c -> not (holds ctx c)
+        | OfOwner c -> holds { ctx with Buffs = ctx.Owner } c
 
-    let private stackFactor ctx cond =
+    let rec private stackFactor ctx cond =
         let per stacks every = floor (float stacks / every)
         match cond with
         | PerStack (b, every) -> per (Map.tryFind b ctx.Buffs |> Option.defaultValue 0) every
         | PerEnemyStack (s, every) -> per (Map.tryFind s ctx.EnemyStatus |> Option.defaultValue 0) every
+        | OfOwner c -> stackFactor { ctx with Buffs = ctx.Owner } c
         | _ -> 1.0
 
     /// The mod's value in this context, or None if a condition fails.

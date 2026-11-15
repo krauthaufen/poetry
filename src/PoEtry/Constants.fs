@@ -9,6 +9,9 @@ module Constants =
     let private byLevel (table: float[]) level =
         table.[(max 1 (min level table.Length)) - 1]
 
+    /// Onslaught: 20% increased skill speed (game keyword text).
+    let onslaughtSpeed = 20.0
+
     // ---- crit ----
     /// Rage is lost at this rate per second once none has been gained for the delay
     /// (GameConstants BaseRageLossPerMinute, BaseRageLossDelayMs).

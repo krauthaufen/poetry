@@ -1271,3 +1271,16 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         near (zombie [] * 1.5) (zombie (mods "base_minion_duration_+%" 40.0 @ mods "skill_effect_duration_+%" 10.0))
         // "Every 10 Rage also grants 5% increased Physical Damage"
         equal (box [ Mod.inc (Damage(OfType Physical)) 5.0 |> Mod.whenever (PerStack("Rage", 10.0)) ]) (box (mods "physical_damage_+%_per_10_rage" 5.0)))
+
+    test "what minions have while the player is in some state is read off the player (OfOwner)" (fun () ->
+        equal (box [ Mod.inc (ForMinions(Damage AllDamage)) 20.0 |> Mod.whenever (OfOwner(WhileBuff "HitRecently")) ]) (box (mods "minion_damage_+%_if_enemy_hit_recently" 20.0))
+        equal (box [ Mod.inc (ForMinions(Damage AllDamage)) 20.0 |> Mod.whenever (OfOwner(Not(WhileBuff "FullMana"))) ]) (box (mods "support_minion_damage_spirit_cost_minion_damage_+%_while_missing_mana" 20.0))
+        equal (box [ Mod.inc (ForMinions(Damage AllDamage)) 2.0 |> Mod.whenever (OfOwner(PerStack("Dex", 5.0))) ]) (box (mods "minion_damage_+%_per_5_dex" 2.0))
+        // "Allies in your Presence ... while you ...": the player's state
+        match mods "allies_in_presence_have_unholy_might_while_you_not_on_low_mana" 1.0 with
+        | m :: _ -> equal (box [ OfOwner(Not(WhileBuff "LowMana")) ]) (box m.Conds)
+        | [] -> failwith "nothing"
+        // a herald among the persistent gems: "while you are affected by a Herald"
+        let c = load { blank with Groups = [ group [ gem "Herald of Ash" ] ]; ExtraLines = [ "+100 to Spirit" ] } Options.defaults
+        let p = Setup.player c Options.defaults [] None
+        if not (p.Resources |> List.exists (fun (k, _) -> k = "AffectedByAHerald")) then failwith "no herald state")

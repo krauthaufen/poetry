@@ -1046,7 +1046,7 @@ module Behaviours =
         let c = Ctx.empty
         let eff stat = Mods.inc c [ Named stat ] sheetDb
         match name with
-        | "Onslaught" -> 1, [ Mod.inc Speed (20.0 * eff "OnslaughtEffect") ]
+        | "Onslaught" -> 1, [ Mod.inc Speed (Constants.onslaughtSpeed * eff "OnslaughtEffect") ]
         | "ArcaneSurge" -> 1, [ Mod.inc Speed (15.0 * eff "ArcaneSurgeEffect") |> Mod.whenever (SkillIs Spell) ]
         | "UnholyMight" -> 1, [ for t in DamageType.all -> Mod.base' (GainAs(t, Chaos)) (30.0 * eff "UnholyMightMagnitude") ]
         | "Tailwind" -> 10, [ Mod.inc Speed (2.0 * eff "TailwindEffect") ]

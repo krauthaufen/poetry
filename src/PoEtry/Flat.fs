@@ -175,6 +175,10 @@ module Flat =
         | CPerStack of int * float
         | CPerEnemy of int * float
         | CNot of CC
+        /// A buff of the player's, and per its stacks: what a minion's mod asks of its owner
+        /// (`OfOwner`).
+        | COwner of int
+        | COwnerPer of int * float
 
     /// One mod's part in an answer (`Slot` < 0), or the place where the buffs' mods of a
     /// stat go (`Slot`: which).
@@ -205,6 +209,9 @@ module Flat =
         member val BOn = false with get, set
         member val BHas : bool[] = [||] with get, set
         member val BStacks : int[] = [||] with get, set
+        /// The player's buffs, for what a minion asks of its owner (the player's own for the player).
+        member val PHas : bool[] = [||] with get, set
+        member val PStacks : int[] = [||] with get, set
         /// The charge the skill counts more stacks of, and how many more.
         member val Extra = -1 with get, set
         member val ExtraN = 0 with get, set
@@ -269,9 +276,12 @@ module Flat =
             if b = ev.Extra && n > 0 then n + ev.ExtraN else n
         else 0
 
+    let private ownerStacksOf (ev: Ev) (b: int) =
+        if ev.BOn && b >= 0 && (at ev.PHas b) then (at ev.PStacks b) else 0
+
     let rec private holds (ev: Ev) (c: CC) : bool =
         match c with
-        | CTrue | CPerStack _ | CPerEnemy _ -> true
+        | CTrue | CPerStack _ | CPerEnemy _ | COwnerPer _ -> true
         | CFalse -> false
         | CCrit -> ev.Crit
         | CTag t -> ev.Tags.Contains t
@@ -279,6 +289,7 @@ module Flat =
         | CBuff b -> ev.BOn && b >= 0 && (at ev.BHas b)
         | CStatus i -> hasStatus ev i
         | CNot c -> not (holds ev c)
+        | COwner b -> ev.BOn && b >= 0 && (at ev.PHas b)
 
     let private passes (ev: Ev) (it: Item) =
         let mutable ok = true
@@ -296,6 +307,7 @@ module Flat =
                 match c with
                 | CPerStack (b, every) -> k <- k * floor (float (buffStacksOf ev b) / every)
                 | CPerEnemy (i, every) -> k <- k * floor (float (statusStacks ev i) / every)
+                | COwnerPer (b, every) -> k <- k * floor (float (ownerStacksOf ev b) / every)
                 | _ -> ()
             it.V * k
         else it.V
@@ -446,30 +458,32 @@ module Flat =
     /// A mod's conditions with their names as numbers. `skill`: the tags and name of the
     /// skill, where it is known (its conditions are then decided here).
     let private compileConds (buffId: string -> int) (statusId: string -> int) (skill: (Set<SkillTag> * string) option) (conds: Cond list) : CC[] option * bool =
-        let rec one (c: Cond) : CC =
+        // (`owner`: inside an `OfOwner`, where the buffs are the player's)
+        let rec one (owner: bool) (c: Cond) : CC =
             match c with
             | IsCrit -> CCrit
             | SkillIs t -> (match skill with Some (tags, _) -> (if tags.Contains t then CTrue else CFalse) | None -> CTag t)
             | SkillNamed n -> (match skill with Some (_, name) -> (if name = n then CTrue else CFalse) | None -> CNamed n)
-            | WhileBuff b -> CBuff(buffId b)
+            | WhileBuff b -> if owner then COwner(buffId b) else CBuff(buffId b)
             | EnemyHas st -> CStatus(statusId st)
-            | PerStack (b, every) -> CPerStack(buffId b, every)
+            | PerStack (b, every) -> if owner then COwnerPer(buffId b, every) else CPerStack(buffId b, every)
             | PerEnemyStack (st, every) -> CPerEnemy(statusId st, every)
+            | OfOwner inner -> one true inner
             | Not inner ->
-                match one inner with
-                | CTrue | CPerStack _ | CPerEnemy _ -> CFalse
+                match one owner inner with
+                | CTrue | CPerStack _ | CPerEnemy _ | COwnerPer _ -> CFalse
                 | CFalse -> CTrue
                 | x -> CNot x
-        let all = conds |> List.map one
+        let all = conds |> List.map (one false)
         if all |> List.contains CFalse then None, false
         else
             let kept = all |> List.filter (fun c -> c <> CTrue) |> Array.ofList
-            Some kept, kept |> Array.exists (fun c -> match c with CPerStack _ | CPerEnemy _ -> true | _ -> false)
+            Some kept, kept |> Array.exists (fun c -> match c with CPerStack _ | CPerEnemy _ | COwnerPer _ -> true | _ -> false)
 
     /// A question from its items in the reference's order: what can be worked out now is.
     let private makeQuery (kind: ModKind) (items: Item[]) : Query =
         let fixed' (it: Item) = it.Slot < 0 && it.Conds.Length = 0
-        let rec onBuffs (c: CC) = match c with CBuff _ | CPerStack _ -> true | CNot inner -> onBuffs inner | _ -> false
+        let rec onBuffs (c: CC) = match c with CBuff _ | CPerStack _ | COwner _ | COwnerPer _ -> true | CNot inner -> onBuffs inner | _ -> false
         let rec onStatus (c: CC) = match c with CStatus _ | CPerEnemy _ -> true | CNot inner -> onStatus inner | _ -> false
         // (a buff's mods can have conditions on anything)
         let deps (q: Query) =
@@ -3993,6 +4007,9 @@ module Flat =
         ev.Close <- false
         ev.Open <- false
         ev.RageMore <- nan
+        (let player = at s.Agents 0
+         ev.PHas <- player.BHas
+         ev.PStacks <- player.BStacks)
         ev
 
     let private release (s: State) = s.EvDepth <- s.EvDepth - 1
@@ -4048,7 +4065,9 @@ module Flat =
     let private keepAnswers (s: State) (ev: Ev) (skill: int) (foe: int) (role: int) =
         // (the answers are kept apart for each way of asking: 0 a hit, 1 how long a use takes, 2 what it costs)
         let sid = skill * 3 + role
-        let snap = if ev.BOn then s.A.BuffsVersion else -2
+        // (a minion's answers can change with the player's buffs too: both counts only grow,
+        // so their sum is new whenever either is)
+        let snap = if ev.BOn then s.A.BuffsVersion + (if s.Cur <> 0 then (at s.Agents 0).BuffsVersion else 0) else -2
         if (at s.A.KVal sid).Length = 0 then
             // (after the answers: the damage ranges `ranges` worked out, and again for critical hits)
             let n = ev.Q.Length * 2

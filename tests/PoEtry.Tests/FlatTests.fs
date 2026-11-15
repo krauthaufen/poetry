@@ -146,7 +146,9 @@ let randomFight (case: uint32) : Fight * string =
                     EnemyHas "Ignited"; EnemyHas "Cursed"; EnemyHas "Isolated"; EnemyHas "LowLife"; PerStack("PowerCharge", 1.0); PerStack("Buffed", 1.0)
                     WhileBuff "EmpoweredAttacks"; WhileBuff "EmpoweredAttacks:Temper"; WhileBuff "EmpoweredRepeatable:Tips"; WhileBuff "EmpoweredAttacks:Cry"
                     PerEnemyStack("Poisoned", 2.0); PerEnemyStack("Marked by pain", 1.0); Not(WhileBuff "FullMana"); WhileBuff "LowMana"; WhileBuff "KilledRecently"
-                    WhileBuff "ConsumedPowerChargeRecently"; WhileBuff "TriggeredRecently"; WhileBuff "Tide"; EnemyHas "Exposed"; EnemyHas "FullyBrokenArmour" ] ]
+                    WhileBuff "ConsumedPowerChargeRecently"; WhileBuff "TriggeredRecently"; WhileBuff "Tide"; EnemyHas "Exposed"; EnemyHas "FullyBrokenArmour"
+                    // (what a minion asks of the player; the player of itself)
+                    OfOwner(WhileBuff "HitRecently"); OfOwner(WhileBuff "Buffed"); OfOwner(Not(WhileBuff "FullMana")); OfOwner(PerStack("PowerCharge", 1.0)); OfOwner(WhileBuff "CritRecently") ] ]
     let withConds (m: Mod) = { m with Conds = conds () }
     let modPool : (unit -> Mod list) list =
         [ (fun () -> [ Mod.inc (Damage AllDamage) (between 5.0 150.0) |> withConds ])
@@ -1183,6 +1185,25 @@ let run (test: string -> (unit -> unit) -> unit) =
         let o = Sim.run fight 1u
         if not (o.DamageBy.ContainsKey "Bite (hit)" && o.DamageBy.ContainsKey "Peck (hit)" && o.DamageBy.ContainsKey "Bolt (hit)") then failwith "expected every actor to hit"
         // and a fight that ends when the enemies die
+        same { fight with Enemies = [ boss 3000.0; { boss 5000.0 with Name = "other"; Position = Vec.make 25.0 10.0 } ] } minionSeeds)
+
+    test "flat: minions' mods read off the player's buffs, charges and states" (fun () ->
+        let call = { Skill.make "Call" [ Spell ] with Hits = []; Cooldown = Some 2.5 }
+        let player =
+            { Actor.make "Player" [ noIgnite; Mod.inc CritChance 100.0 ] [ call; spell "Bolt" Fire 40.0 90.0 ] with
+                Rotation = [ Actor.always "Call"; Actor.always "Bolt" ]
+                Resources = [ "PowerCharge", 2 ]
+                MaxResources = Map.ofList [ "PowerCharge", 3 ]
+                Rules =
+                    [ { Hook = OnUse; Filter = Called "Call"; Chance = 100.0; Reaction = GrantBuff("Rally", 1.2, 1, []) }
+                      { Hook = OnCrit; Filter = AnySkill; Chance = 30.0; Reaction = GainResource("PowerCharge", 1) } ] }
+        let hound =
+            { Actor.make "Hound"
+                [ sure; Mod.inc (Damage AllDamage) 50.0 |> Mod.whenever (OfOwner(WhileBuff "Rally")); Mod.inc Speed 30.0 |> Mod.whenever (OfOwner(Not(WhileBuff "CritRecently")))
+                  Mod.more (Damage AllDamage) 10.0 |> Mod.whenever (OfOwner(PerStack("PowerCharge", 1.0))); Mod.inc CritChance 200.0 |> Mod.whenever (OfOwner(WhileBuff "HitRecently")) ]
+                [ bite "Bite" 100.0 ] with Rotation = [ Actor.always "Bite" ] }
+        let fight = { Fight.single (boss 1e12) player 12.0 with Minions = [ hound ] }
+        same fight minionSeeds
         same { fight with Enemies = [ boss 3000.0; { boss 5000.0 with Name = "other"; Position = Vec.make 25.0 10.0 } ] } minionSeeds)
 
     test "flat: poisons of an actor that lets several count beside those of one that lets one count" (fun () ->

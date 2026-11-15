@@ -70,7 +70,7 @@ module Defence =
         let rec names (c: Cond) =
             match c with
             | WhileBuff b | PerStack (b, _) -> [ b ]
-            | Not inner -> names inner
+            | Not inner | OfOwner inner -> names inner
             | _ -> []
         sheet.Mods
         |> List.collect (fun m -> m.Conds |> List.collect names)

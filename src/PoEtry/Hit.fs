@@ -186,7 +186,8 @@ module Skill =
           SkillName = skill.Name
           SkillTags = skill.Tags
           Buffs = buffs
-          EnemyStatus = enemyStatus }
+          EnemyStatus = enemyStatus
+          Owner = Map.empty }
 
 /// The target, as far as a single hit is concerned.
 type Defender =

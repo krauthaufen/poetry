@@ -196,6 +196,8 @@ module Setup =
             @ (build.Groups |> List.filter (fun g -> g.Enabled)
                |> List.collect (fun g -> g.Gems |> List.filter (fun x -> x.Enabled && not x.IsSupport && Gems.isPersistentBuff db x.Name))
                |> List.map (fun x -> "AffectedBy" + (x.Name.Split(' ') |> Array.map (fun w -> if w = "" then w else string (System.Char.ToUpperInvariant w.[0]) + w.Substring 1) |> String.concat "")))
+            // "while affected by a Herald": a herald among them
+            @ (if build.Groups |> List.exists (fun g -> g.Enabled && g.Gems |> List.exists (fun x -> x.Enabled && not x.IsSupport && Gems.isPersistentBuff db x.Name && (Gems.data db x.Name |> Option.exists (fun d -> d.Types.Contains "Herald")))) then [ "AffectedByAHerald" ] else [])
             @ (if offhandWeapon then [ "DualWielding" ] else [])
             @ (if offhand.IsSome && not offhandWeapon then [ "WieldingShield" ] else [])
             @ (if not (build.Items |> List.exists (fun (slot, _) -> slot = "Weapon 1")) then [ "Unarmed" ] else [])
