@@ -18,7 +18,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
    whose description or behaviour changed.
 5. Go through the lists below; the wiki's version history of a skill says what changed.
 
-## Rules (145)
+## Rules (149)
 
 ### Hit damage
 
@@ -88,6 +88,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | Mana flask | item / data; base charges per kill and drink policy: guesses | data + guess |
 | Body armour scoped | game text | guess (order) |
 | Runic Ward | game item text | guess |
+| Total | game item text; poe.ninja's Spirit for the six corpus characters that differed (a sceptre in the other set, Spirit lines of items under "Cannot gain Spirit from Equipment", Spirit per 2 levels) | data; the other set's Spirit: guess |
 | Over budget | - | guess |
 | Minion counts | the player chooses this in game; the API doesn't say | guess |
 | Armour vs elemental | stat text; order a guess | guess |
@@ -161,6 +162,8 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | Oil Ground | gem data, buff text "Oiled Ground: inflicted with Fire Exposure"; adding the 20% to the keyword's 20% and staying in the oil are guesses | guess |
 | Ice Crystals (Grim Pillars) | gem stats (`wall_maximum_length`, `frost_wall_maximum_life`); wiki Ice Crystal ("larger enemies can walk through them and destroy them", 80% less within 0.5 s); user (no explosion on expiry); placement, one crystal per 0.8 m, and enemy life lost standing for damage to the crystal, are guesses | guess |
 | What a fight starts with | user: buffs that last may be up when the fight starts, what comes from the last kill is not, bosses have introductions far longer than 4 s | guess |
+| Darkness | stat descriptions (base_darkness, darkness_per_level, base_darkness_refresh_rate_ms) | data; that all types are reserved by one share, and that recoup counts only what got past: guess |
+| Life flasks that are never drunk | keystone text | data; that an instant share is spread like the rest: guess |
 | Weapon for a skill | - | guess |
 | Default attacks | play-style assumption | guess |
 | Charged variants | skill description; which part it replaces is read off Explosive Spear only | guess |
@@ -184,6 +187,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | Totems | - | guess |
 | Flames of Chayula | skill data; 8 s and the colours from poe2db patch notes; cap of ten from PoB; pick-up is a guess | guess |
 | Low life | user: low life must be justified by the build | guess |
+| Hollow Palm Technique | keystone text; damage by level: poe2db "Unarmed Flat Damage"; attack time and base crit: PoE1's unarmed numbers (its damage rolls, 2 to 5-8 by class, are PoE2's) | data; attack time and base crit, and that modifiers for quarterstaves apply: guess |
 | Skills an item triggers | item text, skill types | data; "with this weapon" is taken as any attack (guess) |
 | Entangle | gem stats and description; that a vine deals its hit when it attaches, that the three are counted for each enemy and not for each fissure, and that the vine's second is no skill duration: ours | data; guess |
 | Damage that starts from a Unique enemy | stat descriptions; the enemy hit for the one it starts from: ours | data; guess |
@@ -215,10 +219,11 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 |---|---|---|
 | Ward remnants | data; overflow: user | data + user + guess |
 
-## Constants (9)
+## Constants (10)
 
 | Constant | Value | What it stands for |
 |---|---|---|
+| `unarmedAttacksPerSecond` | `1.2` | Unarmed attacks per second and base critical hit chance: PoE1's numbers (its unarmed damage rolls, 2 to 5-8 by class, are PoE2's too). A guess. |
 | `crowdedWait` | `0.25` | A melee minion without room at the enemy looks again after this long. A guess. |
 | `playerLightStunDuration` | `0.35` | Seconds a light stun interrupts the player. GUESS (no player constant in the data). |
 | `orbPulseInterval` | `0.25` | Seconds between the pulses of a Frost Bomb (its exposure grows with each): not in the data; 0.25 s lets one bomb reach its cap just as it detonates. A guess. |

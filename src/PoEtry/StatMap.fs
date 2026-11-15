@@ -2001,7 +2001,14 @@ module StatMap =
           "attack_damage_+%_if_been_heavy_stunned_recently"; "cannot_be_heavy_stunned_while_sprinting"; "cannot_have_more_than_1_damaging_ailment"
           // "Hexproof": monsters here lay no curses on the player; "X% less Life / Mana / Energy
           // Shield Leeched from you": monsters do not leech
-          "hexproof"; "life_leeched_from_-permyriad"; "mana_leeched_from_-permyriad"; "energy_shield_leeched_from_-permyriad" ]
+          "hexproof"; "life_leeched_from_-permyriad"; "mana_leeched_from_-permyriad"; "energy_shield_leeched_from_-permyriad"
+          // "Unaffected by Elemental Weakness": no monster here curses the player
+          "unaffected_by_elemental_weakness"
+          // "Inflict Abyssal Wasting on Hit": Abyssal Wasting reduces Life Regeneration Rate by 50%
+          // for 6 seconds (the game's keyword), and monsters here never regenerate; its magnitude
+          // and duration likewise. What a line makes it do besides (blind, hinder, lower
+          // resistances, stop critical hits) is another stat, and stays not understood
+          "abyssal_wasting_on_hit"; "abyssal_wasting_effect_+%"; "abyssal_wasting_infinite_duration" ]
         |> List.contains id
 
     /// What decides how a character can be built, and is all there in the build as it is read:

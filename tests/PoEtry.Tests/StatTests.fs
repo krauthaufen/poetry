@@ -683,6 +683,12 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         let grant = "{\"id\": \"C\", \"stats\": {\"local_jewel_notables_in_radius_grant_critical_strike_multiplier_+%\": 10}}"
         equal (box [ radius ]) (box (parsed (item grant radius)).Coverage.UnknownText))
 
+    test "Abyssal Wasting lowers life regeneration, which monsters here never have: understood, without effect" (fun () ->
+        for id in [ "abyssal_wasting_on_hit"; "abyssal_wasting_effect_+%"; "abyssal_wasting_infinite_duration"; "unaffected_by_elemental_weakness" ] do
+            equal (box NotOffensive) (box (StatMap.meaning id 1.0))
+        // what it does besides is not swallowed with it
+        equal (box Unmapped) (box (StatMap.meaning "abyssal_wasting_also_prevents_enemies_from_dealing_critical_strikes" 1.0)))
+
     test "api: an idol with a name of its own is an idol (the property Idol): counted, and its Bonded lines apply" (fun () ->
         let idol = "{\"typeLine\": \"Carved Test\", \"properties\": [{\"name\": \"[Idol]\", \"values\": []}], \"bondedMods\": [\"[ShamanOnlyMods|Bonded]:\", \"Body Armours: 5% increased [Spirit]\"]}"
         let rune = "{\"typeLine\": \"Test Rune\", \"properties\": []}"
