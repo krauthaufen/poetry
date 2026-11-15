@@ -312,6 +312,11 @@
       // (public, PKCE), whose callback sends a state beginning "poetry." on to this page.
       // Everything stays in this browser. "__poe?op=account" says who is logged in and their
       // characters; "op=login", "op=logout" and "op=open&name=.." go where they say.
+      // The game's lists name an ascendancy by its id (its Ascendancy table: Id, Name)
+      const ascendancies = { Warrior1: "Titan", Warrior2: "Warbringer", Warrior3: "Smith of Kitava", Ranger1: "Deadeye", Ranger3: "Pathfinder", Huntress1: "Amazon", Huntress2: "Spirit Walker", Huntress3: "Ritualist",
+        Witch1: "Infernalist", Witch2: "Blood Mage", Witch3: "Lich", Witch3b: "Abyssal Lich", Sorceress1: "Stormweaver", Sorceress2: "Chronomancer", Sorceress3: "Disciple of Varashta",
+        Mercenary1: "Tactician", Mercenary2: "Witchhunter", Mercenary3: "Gemling Legionnaire", Druid1: "Oracle", Druid2: "Shaman", Monk1: "Martial Artist", Monk2: "Invoker", Monk3: "Acolyte of Chayula" };
+      const ascendancy = (id) => ascendancies[id] || id || "";
       const poe = (() => {
         const hosted = location.hostname === "poetry.awx.at";
         const CLIENT = "pobweb", REDIRECT = "https://pob.awx.at/", SCOPE = "account:profile account:characters";
@@ -399,7 +404,7 @@
           if (!t) return { can: true, name: "", characters: ordered(saved([])), error: failed || "" };
           try {
             const list = JSON.parse(await kept("characters", 600, () => api("character/poe2")));
-            const listed = (list.characters || []).map((c) => ({ name: c.name, about: "Level " + c.level + " " + c.class, url: "poe-api/character/poe2/" + c.name, league: c.league || "", level: c.level || 0 }));
+            const listed = (list.characters || []).map((c) => ({ name: c.name, about: "Level " + c.level + " " + ascendancy(c.class), url: "poe-api/character/poe2/" + c.name, league: c.league || "", level: c.level || 0 }));
             return { can: true, name: t.name, characters: ordered([...listed, ...saved(listed)]) };
           } catch (err) { return { can: true, name: t.name, characters: ordered(saved([])), error: String(err && err.message || err) }; }
         };
@@ -409,7 +414,7 @@
         const save = (url, text) => {
           try {
             const c = JSON.parse(text).character || {};
-            const entry = { url, name: c.name || url.split("/").pop(), about: "Level " + c.level + " " + c.class, league: c.league || "", level: c.level || 0, at: Date.now() };
+            const entry = { url, name: c.name || url.split("/").pop(), about: "Level " + c.level + " " + ascendancy(c.class), league: c.league || "", level: c.level || 0, at: Date.now() };
             const list = [entry, ...savedList().filter((e) => e.url !== url)];
             for (const gone of list.slice(8)) localStorage.removeItem("poe:char:" + gone.url);
             for (let keep = Math.min(8, list.length); keep > 0; keep--) {
