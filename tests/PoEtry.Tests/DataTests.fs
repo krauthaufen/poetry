@@ -787,14 +787,23 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         near 1.36 (Mods.inc spell [ Damage AllDamage ] db)
         near 1.0 (Mods.inc { spell with SkillTags = Set.ofList [ Attack ] } [ Damage AllDamage ] db))
 
-    test "spirit: flat amounts, a sceptre's own value, the better weapon set; minions from what is left" (fun () ->
+    test "spirit: flat amounts, a sceptre's own value, the weapon set in hand; minions from what is left" (fun () ->
         let sceptre slot = slot, "Rarity: Rare\nTest Sceptre\n--------\nSpirit: 120\n--------\n30% increased Spirit\n"
         let helmet = item "Helmet" [ "Armour: 100"; "--------"; "+50 to Spirit" ]
         let quest = [ "+100 to Spirit" ]
         // the sceptre's own "30% increased Spirit" is already in the 120 it shows
         near 270.0 (let b = { blank with Items = [ sceptre "Weapon 2"; helmet ]; ExtraLines = quest } in Behaviours.spiritTotal (sheetOf b) b)
-        // a sceptre in weapon set two counts when it gives more than set one's
-        near 270.0 (let b = { blank with Items = [ sceptre "Weapon 2 Swap"; helmet ]; ExtraLines = quest } in Behaviours.spiritTotal (sheetOf b) b)
+        // a sceptre in weapon set two counts only while that set is in hand
+        near 150.0 (let b = { blank with Items = [ sceptre "Weapon 2 Swap"; helmet ]; ExtraLines = quest } in Behaviours.spiritTotal (sheetOf b) b)
+        let setTwo (b: PobBuild) = let sh = sheetOf b in { sh with Mods = sh.Mods @ [ Mod.base' (Named "Sheet:SpiritSetTwo") 1.0 ] }
+        near 270.0 (let b = { blank with Items = [ sceptre "Weapon 2 Swap"; helmet ]; ExtraLines = quest } in Behaviours.spiritTotal (setTwo b) b)
+        near 150.0 (let b = { blank with Items = [ sceptre "Weapon 2"; helmet ]; ExtraLines = quest } in Behaviours.spiritTotal (setTwo b) b)
+        // "-1 to Spirit per 2 Levels" at level 91: 45 less
+        near 105.0 (let b = { blank with Level = 91; Items = [ helmet ]; ExtraLines = quest @ [ "-1 to Spirit per 2 Levels" ] } in Behaviours.spiritTotal (sheetOf b) b)
+        // "Cannot gain Spirit from Equipment": neither the sceptre's 120 nor the helmet's 50
+        near 100.0 (let b = { blank with Items = [ sceptre "Weapon 2"; helmet ]; ExtraLines = quest @ [ "Cannot gain Spirit from Equipment" ] } in Behaviours.spiritTotal (sheetOf b) b)
+        // "+3 to Spirit per Idol socketed in your Equipment" with two idols in the helmet
+        near 156.0 (let b = { blank with Items = [ item "Helmet" [ "Armour: 100"; "Idols socketed: 2"; "--------"; "+50 to Spirit" ] ]; ExtraLines = quest @ [ "+3 to Spirit per Idol socketed in your Equipment" ] } in Behaviours.spiritTotal (sheetOf b) b)
         near 150.0 (let b = { blank with Items = [ helmet ]; ExtraLines = quest } in Behaviours.spiritTotal (sheetOf b) b)
         // Skeletal Warriors: 20 Spirit each at level 20, the first two free; Herald of Thunder 30
         let gem name = { Name = name; Level = 20; Quality = 0; Enabled = true; IsSupport = false; StatSet = 1; Minion = None }
@@ -803,7 +812,12 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         let uses = Behaviours.spiritUses db.Value (sheetOf b) b
         let counts = Behaviours.minionCounts 150.0 uses
         // 150 - 30 = 120 spare: 6 paid minions and 2 free
-        equal (box 8) (box counts.["Skeletal Warrior"]))
+        equal (box 8) (box counts.["Skeletal Warrior"])
+        // "Minions have 25% increased Reservation": 25 Spirit each; 40% increased efficiency of non-Minion skills: the Herald 30 / 1.4
+        let b = { b with ExtraLines = quest @ [ "Minions have 25% increased Reservation"; "40% increased Reservation Efficiency of non-Minion Skills" ] }
+        let uses = Behaviours.spiritUses db.Value (sheetOf b) b
+        near 25.0 (uses |> List.sumBy (fun u -> u.PerMinion))
+        near (30.0 / 1.4) (uses |> List.sumBy (fun u -> u.Flat)))
 
     test "spirit reservation: granted skills are free, quality and tree efficiency, corrupted items" (fun () ->
         let gem name q = { Name = name; Level = 20; Quality = q; Enabled = true; IsSupport = false; StatSet = 1; Minion = None }

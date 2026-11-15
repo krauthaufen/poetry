@@ -189,6 +189,7 @@ module StatMap =
             | ("vs" | "against") :: "enemies" :: "on" :: "full" :: "life" :: tail -> go (EnemyHas "FullLife" :: acc) tail
             | ("when" | "while") :: "on" :: "low" :: "life" :: tail -> go (WhileBuff "LowLife" :: acc) tail
             | ("when" | "while") :: "on" :: "full" :: "life" :: tail -> go (WhileBuff "FullLife" :: acc) tail
+            | ("when" | "while") :: "on" :: "full" :: "energy" :: "shield" :: tail | "on" :: "full" :: "energy" :: "shield" :: tail -> go (WhileBuff "FullEnergyShield" :: acc) tail
             | ("when" | "while") :: "on" :: "low" :: "mana" :: tail -> go (WhileBuff "LowMana" :: acc) tail
             | ("when" | "while") :: "on" :: "full" :: "mana" :: tail -> go (WhileBuff "FullMana" :: acc) tail
             | "if" :: ("crit" | "crits") :: "recently" :: tail | "if" :: "have" :: "crit" :: "recently" :: tail ->
@@ -712,6 +713,13 @@ module StatMap =
         | "+1_spirit_per_X_energy_shield_on_body_armour" -> one (Mod.base' (Named "SpiritPerBodyES") v)
         | "+1_spirit_per_X_evasion_rating_on_body_armour" -> one (Mod.base' (Named "SpiritPerBodyEvasion") v)
         | "max_life_%_as_spirit" -> one (Mod.base' (Named "SpiritFromLife") v)
+        // Spell damage for Spirit: "increased Spell Damage while on full Energy Shield while a Supported Skill is active"
+        | "support_spell_damage_spirit_cost_spell_damage_+%_on_full_energy_shield" ->
+            one (Mod.inc (Damage AllDamage) v |> Mod.whenever (SkillIs Spell) |> Mod.whenever (WhileBuff "FullEnergyShield"))
+        | "spirit_+_per_2_levels" -> one (Mod.base' (Named "SpiritPerTwoLevels") v)
+        | "base_spirit_per_socketed_idol" -> one (Mod.base' (Named "Spirit") v |> Mod.whenever (PerStack("SocketedIdols", 1.0)))
+        | "ascendancy_shaman_+_spirit_per_empty_charm_slot" -> one (Mod.base' (Named "SpiritPerEmptyCharmSlot") v)
+        | "unique_prism_guardian_spirit_+_per_X_maximum_life" -> one (Mod.base' (Named "SpiritPerLife") v)
         | "cannot_gain_spirit_from_equipment" -> one (Mod.flag (Named "NoSpiritFromEquipment"))
         | "spirit_does_not_exist" -> one (Mod.flag (Named "NoSpirit"))
         | "base_spirit_reservation_efficiency_+%" | "base_reservation_efficiency_+%" -> one (Mod.inc (Named "ReservationEfficiency") v)
@@ -719,6 +727,20 @@ module StatMap =
         | "reservation_efficiency_+%_of_herald_skills" -> one (Mod.inc (Named "ReservationEfficiency") v |> Mod.whenever (SkillIs(Tag "Type:Herald")))
         | "reservation_efficiency_+%_of_minion_skills" -> one (Mod.inc (Named "ReservationEfficiency") v |> Mod.whenever (SkillIs(Tag "Type:Minion")))
         | "reservation_efficiency_+%_of_companion_skills" -> one (Mod.inc (Named "ReservationEfficiency") v |> Mod.whenever (SkillIs(Tag "Type:Companion")))
+        | "reservation_efficiency_+%_of_non_minion_skills" -> one (Mod.inc (Named "ReservationEfficiency") v |> Mod.whenever (Not(SkillIs(Tag "Type:Minion"))))
+        | "reservation_efficiency_+%_of_remnant_skills" -> one (Mod.inc (Named "ReservationEfficiency") v |> Mod.whenever (SkillIs(Tag "Type:GeneratesRemnants")))
+        | "reservation_efficiency_+%_of_skeleton_minion_skills" -> one (Mod.inc (Named "ReservationEfficiency") v |> Mod.whenever (SkillIs(Tag "Type:CreatesSkeletonMinion")))
+        | "reservation_efficiency_+%_of_undead_minion_skills" -> one (Mod.inc (Named "ReservationEfficiency") v |> Mod.whenever (SkillIs(Tag "Type:CreatesUndeadMinion")))
+        | "reservation_efficiency_+%_of_skills_per_socketed_idol" -> one (Mod.inc (Named "ReservationEfficiency") v |> Mod.whenever (PerStack("SocketedIdols", 1.0)))
+        | "buff_skills_spirit_reservation_efficiency_+%_per_100_maximum_life" ->
+            one (Mod.inc (Named "ReservationEfficiency") v |> Mod.whenever (SkillIs(Tag "Type:Buff")) |> Mod.whenever (PerStack("MaxLife100", 1.0)))
+        // "increased Reservation": the skill costs so much more Spirit
+        | "base_reservation_+%" -> one (Mod.inc (Named "Reservation") v)
+        | "minion_reservation_+%" -> one (Mod.inc (Named "Reservation") v |> Mod.whenever (SkillIs(Tag "Type:Minion")))
+        | "companion_reservation_+%" -> one (Mod.inc (Named "Reservation") v |> Mod.whenever (SkillIs(Tag "Type:Companion")))
+        | "demon_minion_reservation_+%" -> one (Mod.inc (Named "Reservation") v |> Mod.whenever (SkillIs(Tag "Type:CreatesDemonMinion")))
+        | "skeleton_minion_reservation_+%" -> one (Mod.inc (Named "Reservation") v |> Mod.whenever (SkillIs(Tag "Type:CreatesSkeletonMinion")))
+        | "undead_minion_reservation_+%" -> one (Mod.inc (Named "Reservation") v |> Mod.whenever (SkillIs(Tag "Type:CreatesUndeadMinion")))
         | "tactician_spirit_reservation_+%_final_for_permanent_buffs" -> one (Mod.more (Named "Reservation") v |> Mod.whenever (SkillIs(Tag "Type:Buff")))
         | "unique_spirit_reservations_are_halved" -> one (Mod.more (Named "Reservation") -50.0)
         | "base_maximum_ward" -> one (Mod.base' (Named "Ward") v)
@@ -1797,7 +1819,7 @@ module StatMap =
     let private keptStates =
         set [ "BeenHitRecently"; "HitRecently"; "CritRecently"; "KilledRecently"; "StunnedRecently"; "DodgeRolledRecently"; "StunnedEnemyRecently"
               "MeleeHitInPast8Seconds"; "WarcriesRecently"; "PoisonsRecently"; "IgnitedInLast8Seconds"; "FrozenInLast8Seconds"; "TimesHitRecently"
-              "LowLife"; "FullLife"; "LowMana"; "FullMana"; "Surrounded"; "Shapeshifted" ]
+              "LowLife"; "FullLife"; "LowMana"; "FullMana"; "Surrounded"; "Shapeshifted"; "FullEnergyShield" ]
 
     let private rules = [ perMote; accuracy; defenceScaled; areaOfEffect; buildup; scaledDamage; addedDamage; penetration; gainAs; convert; ailmentStat; crit; speed; gemLevel ]
 

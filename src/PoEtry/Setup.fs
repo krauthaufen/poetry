@@ -258,9 +258,6 @@ module Setup =
                     Gems.data db x.Name |> Option.exists (fun d ->
                         d.StatSets |> List.exists (fun st -> st.Stats |> List.exists (fun id -> id.Contains "on_low_life" && not (id.Contains "enem")))))
             if lowLifeGem then Map.add "LowLifeIntent" 1 startResources else startResources
-        // total Spirit as a stack count, for "per 1 Spirit"
-        let spirit = int (Behaviours.spiritTotal sheet build)
-        let maxResources, startResources = Map.add "Spirit" spirit maxResources, Map.add "Spirit" spirit startResources
         // The character sheet is the one of the weapon set the character fights with: set two when
         // its weapon is the stronger one (the API does not say which set is in hand).
         let sheetSetTwo =
@@ -271,6 +268,21 @@ module Setup =
                 let one = sheet.Weapons |> List.filter (fun w -> not (List.contains (Tag "WeaponSet2") w.Tags)) |> List.sumBy strength
                 let two = sheet.Weapons |> List.filter (fun w -> List.contains (Tag "WeaponSet2") w.Tags) |> List.sumBy strength
                 two > one)
+        // Spirit is that of the weapon set in hand (a sceptre in the other set gives none). Where the
+        // set was not chosen and the persistent gems cost more than that set pays for, the other
+        // set's Spirit is taken: the character could not keep them up otherwise.
+        let sheet =
+            let withSet two = if two then { sheet with Mods = sheet.Mods @ [ Mod.base' (Named "Sheet:SpiritSetTwo") 1.0 |> Mod.from "sheet" ] } else sheet
+            let inHand = withSet sheetSetTwo
+            if o.SheetSetTwo.IsSome then inHand
+            else
+                let other = withSet (not sheetSetTwo)
+                let cost (sh: CharacterSheet) = Behaviours.spiritUses db sh build |> List.sumBy (fun u -> u.Flat)
+                let mine, theirs = Behaviours.spiritTotal inHand build, Behaviours.spiritTotal other build
+                if theirs > mine && cost inHand > mine then other else inHand
+        // total Spirit as a stack count, for "per 1 Spirit"
+        let spirit = int (Behaviours.spiritTotal sheet build)
+        let maxResources, startResources = Map.add "Spirit" spirit maxResources, Map.add "Spirit" spirit startResources
         // Wind Dancer's stages build up by themselves: full on the sheet and when a fight starts
         let maxResources, startResources =
             match Behaviours.windDancerStages db sheet build with

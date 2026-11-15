@@ -39,12 +39,17 @@ module Api =
         |> List.map (fun l -> match l.IndexOf(": ") with | -1 -> l | k -> l.Substring(k + 2))
         |> List.map shape
 
+    /// An idol among the socketed items: its name says so, or it carries the property "Idol"
+    /// (a unique idol such as Carved Majesty has a name of its own).
+    let private isIdol (s: Json) =
+        (Json.strField "typeLine" s |> Option.defaultValue "").Contains "Idol"
+        || Json.list (Json.field "properties" s) |> List.exists (fun p -> Json.strField "name" p |> Option.map stripMarkup = Some "Idol")
+
     /// "Bonded:" lines on the host count only if they come from an idol and the item
     /// says "Idols socketed in this item gain the benefits of their Bonded modifiers".
     /// Those lines lose their prefix; all other Bonded lines keep it (Shaman only).
     let private resolveBonded (item: Json) (lines: string list) =
         let socketed = Json.list (Json.field "socketedItems" item)
-        let isIdol (s: Json) = (Json.strField "typeLine" s |> Option.defaultValue "").Contains "Idol"
         // The enabling line is a "Body Armours:" idol line: it needs a body armour, or an
         // item that gains bonuses from socketed items as though it were one.
         let countsAsBodyArmour =
@@ -146,7 +151,7 @@ module Api =
                 Json.field "support" s <> Some(JBool true) && not (props |> List.exists (fun n -> n = "Level" || n = "Cost" || n.Contains "Support")))
             |> List.length
         // of those, the idols ("per Idol in your Equipment", "per non-Idol Augment")
-        let idols = Json.list (Json.field "socketedItems" item) |> List.filter (fun s -> (Json.strField "typeLine" s |> Option.defaultValue "").Contains "Idol") |> List.length
+        let idols = Json.list (Json.field "socketedItems" item) |> List.filter isIdol |> List.length
         let sockets =
             (if filled > 0 then [ sprintf "Sockets filled: %d" filled ] else []) @ (if idols > 0 then [ sprintf "Idols socketed: %d" idols ] else [])
             @ (if Json.field "corrupted" item = Some(JBool true) then [ "Corrupted" ] else [])

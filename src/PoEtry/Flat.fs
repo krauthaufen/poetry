@@ -1351,7 +1351,7 @@ module Flat =
                 yield "AtMaximum" + kind + "Charges"
                 yield "No" + kind + "Charges"
                 yield "YouHaveNo" + kind + "Charges" ]
-        @ [ "Ignited"; "DamagingAilment"; "LowEnergyShield"; "ESRechargeStartedRecently" ]
+        @ [ "Ignited"; "DamagingAilment"; "LowEnergyShield"; "ESRechargeStartedRecently"; "FullEnergyShield" ]
 
     let private derivedStatuses =
         [ "Moving"; "Cullable"; "AnyAilment"; "Cursed"; "Marked"; "Immobilised"; "ElementalAilments"; "Exposed"; "RareOrUnique"; "LowLife"; "FullLife"; "Unique"; "Magic" ]
@@ -6877,6 +6877,7 @@ module Flat =
         setState s 19 ignited
         setState s 20 ignited
         setState s 21 (v.EnergyShield > 0.0 && s.Shield <= Constants.lowStatusShare * v.EnergyShield)
+        setState s 23 (v.EnergyShield > 0.0 && s.Shield >= v.EnergyShield)
         setState s 22 (p.AsksESRecharge && v.EnergyShield > 0.0 && s.Time - s.LastHit >= v.ESRechargeDelay && s.Time - s.LastHit < v.ESRechargeDelay + Constants.esRechargeStartedRecently)
 
     /// What is planted in or beside the enemies (`Sim.step`): seeds set off by the damage

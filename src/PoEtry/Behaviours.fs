@@ -1661,17 +1661,40 @@ module Behaviours =
         |> List.filter (fun (slot, text) -> not (slot.StartsWith "Flask" || slot.StartsWith "Charm" || slot.StartsWith "Jewel" || slot.Contains "Swap") && text.Split('\n') |> Array.exists (fun l -> l.Trim() = "Corrupted"))
         |> List.length
 
-    let spiritTotal (sheet: CharacterSheet) (build: PobBuild) =
+    /// What Spirit and reservations count on the character: corrupted items, Grand Spectrums,
+    /// idols in the sockets, hundreds of maximum life, and the weapon set whose Spirit counts.
+    let spiritCtx (sheet: CharacterSheet) (build: PobBuild) =
         let db = ModDb.ofList sheet.Mods
         let spectrums = build.Items |> List.filter (fun (slot, text) -> slot.StartsWith "Jewel" && text.Contains "Grand Spectrum") |> List.length
-        let c = { Ctx.empty with Buffs = Map.ofList [ "CorruptedItems", corruptedItems build; "GrandSpectrum", spectrums ] }
+        let idols =
+            build.Items |> List.sumBy (fun (_, text) ->
+                text.Split('\n') |> Array.sumBy (fun l ->
+                    let l = l.Trim()
+                    if l.StartsWith "Idols socketed:" then (match System.Int32.TryParse(l.Substring(15).Trim()) with | true, n -> n | _ -> 0) else 0))
+        let life = Mods.sumBase Ctx.empty [ Named "Sheet:Life" ] db
+        let setTwo = Mods.sumBase Ctx.empty [ Named "Sheet:SpiritSetTwo" ] db > 0.0
+        { Ctx.empty with
+            Buffs = Map.ofList [ "CorruptedItems", corruptedItems build; "GrandSpectrum", spectrums; "SocketedIdols", idols; "MaxLife100", int (life / 100.0) ]
+            SkillTags = if setTwo then Set.singleton (Tag "WeaponSet2") else Set.empty }
+
+    let spiritTotal (sheet: CharacterSheet) (build: PobBuild) =
+        let c = spiritCtx sheet build
+        let setTwoInHand = c.SkillTags.Contains(Tag "WeaponSet2")
+        let all = ModDb.ofList sheet.Mods
+        let noEquipment = Mods.flag c (Named "NoSpiritFromEquipment") all
+        // "Cannot gain Spirit from Equipment": neither an item's own Spirit nor its lines
+        let db =
+            if not noEquipment then all
+            else
+                let slots = build.Items |> List.map (fun (slot, _) -> slot + ":")
+                sheet.Mods |> List.filter (fun m -> not (m.Stat = Named "Spirit" && slots |> List.exists (fun s -> m.Source.StartsWith s))) |> ModDb.ofList
         let sheet = { sheet with ItemDefences = sheet.ItemDefences |> List.filter (fun (s, _, _) -> not (s.Contains "Swap")) }
         let item stat slot = sheet.ItemDefences |> List.sumBy (fun (s, st, v) -> if st = stat && (slot = "" || s = slot) then v else 0.0)
         let per name stat = match Mods.sumBase c [ Named name ] db with | n when n > 0.0 -> floor (item stat "Body Armour" / n) | _ -> 0.0
-        // a sceptre's Spirit counts for the weapon set it is in: the set that gives more is taken
+        // a sceptre's Spirit counts while its weapon set is in hand
         let setOne = sheet.ItemDefences |> List.sumBy (fun (s, st, v) -> if st = Named "Spirit" && s.StartsWith "Weapon" then v else 0.0)
         let setTwo = Mods.sumBase c [ Named "SpiritOnSetTwo" ] db
-        let fromItems = if Mods.flag c (Named "NoSpiritFromEquipment") db then 0.0 else item (Named "Spirit") "" - setOne + max setOne setTwo
+        let fromItems = if noEquipment then 0.0 else item (Named "Spirit") "" - setOne + (if setTwoInHand then setTwo else setOne)
         // "+40 to Spirit for each of your empty Charm slots": slots from the belt ("Has 2 Charm
         // Slots") and "+1 Charm Slot" lines, three at most, less the charms worn
         let emptyCharmSlots =
@@ -1694,6 +1717,9 @@ module Behaviours =
             + (match Mods.sumBase c [ Named "SpiritPerLife" ] db with
                | per when per > 0.0 -> floor (own "Life" / per)
                | _ -> 0.0)
+            // "Gain N% of maximum Life as Extra maximum Spirit", "-1 to Spirit per 2 Levels"
+            + floor (own "Life" * Mods.sumBase c [ Named "SpiritFromLife" ] db / 100.0)
+            + Mods.sumBase c [ Named "SpiritPerTwoLevels" ] db * float (build.Level / 2)
         if Mods.flag c (Named "NoSpirit") db then 0.0 else
         (Mods.sumBase c [ Named "Spirit" ] db + Mods.sumBase c [ Named "SpiritPerEmptyCharmSlot" ] db * emptyCharmSlots + fromSheet + fromItems + per "SpiritPerBodyES" MaxEnergyShield + per "SpiritPerBodyEvasion" Evasion)
         * Mods.mult c [ Named "Spirit" ] db
@@ -1750,10 +1776,11 @@ module Behaviours =
                     // from its stats here, never from the buff it gives the character
                     let forGem = sheet.Mods |> List.filter (fun m -> not (m.Source.StartsWith "buff:")) |> ModDb.ofList
                     let ownEff = stat "base_reservation_efficiency_+%" + stat "base_spirit_reservation_efficiency_+%"
-                    let ctx = { Ctx.empty with SkillTags = tags; SkillName = d.Name }
+                    let ctx = { spiritCtx sheet build with SkillTags = tags; SkillName = d.Name }
+                    // "increased Reservation" (of minions, companions, spectres; a gem's own) makes it cost more
                     let eff =
                         (Mods.inc ctx [ Named "ReservationEfficiency" ] forGem + ownEff / 100.0) * Mods.more ctx [ Named "ReservationEfficiency" ] forGem
-                        / (Mods.more ctx [ Named "Reservation" ] forGem * supportMult)
+                        / (max 0.01 (Mods.inc ctx [ Named "Reservation" ] forGem + stat "base_reservation_+%" / 100.0) * Mods.more ctx [ Named "Reservation" ] forGem * supportMult)
                         |> max 0.01
                     // Blasphemy: per curse socketed with it
                     let curses = enabled |> List.filter (fun x -> not x.IsSupport && x.Name <> gem.Name) |> List.length

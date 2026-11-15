@@ -683,6 +683,15 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         let grant = "{\"id\": \"C\", \"stats\": {\"local_jewel_notables_in_radius_grant_critical_strike_multiplier_+%\": 10}}"
         equal (box [ radius ]) (box (parsed (item grant radius)).Coverage.UnknownText))
 
+    test "api: an idol with a name of its own is an idol (the property Idol): counted, and its Bonded lines apply" (fun () ->
+        let idol = "{\"typeLine\": \"Carved Test\", \"properties\": [{\"name\": \"[Idol]\", \"values\": []}], \"bondedMods\": [\"[ShamanOnlyMods|Bonded]:\", \"Body Armours: 5% increased [Spirit]\"]}"
+        let rune = "{\"typeLine\": \"Test Rune\", \"properties\": []}"
+        let body =
+            Json.parse (sprintf "{\"rarity\": \"Rare\", \"name\": \"Test Robe\", \"typeLine\": \"Silk Robe\", \"inventoryId\": \"BodyArmour\", \"runeMods\": [\"[Idol|Idols] socketed in this item gain the benefits of their [ShamanOnlyMods|Bonded] modifiers\", \"[ShamanOnlyMods|Bonded]: 5%% increased [Spirit]\"], \"socketedItems\": [%s, %s]}" idol rune)
+        let text = Api.itemText body
+        equal (box true) (box (text.Contains "Idols socketed: 1"))
+        equal (box true) (box (text.Split('\n') |> Array.exists (fun l -> l.Trim() = "5% increased Spirit"))))
+
     // ---- mana lost, Glory gained ----
 
     test "mana degeneration lowers mana regeneration, and mana never falls below nothing" (fun () ->

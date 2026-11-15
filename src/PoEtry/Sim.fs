@@ -4035,6 +4035,7 @@ module Sim =
                           "FullMana", p.Mana >= v.Mana
                           "LowMana", p.Mana <= 0.35 * v.Mana
                           "HasEnergyShield", p.EnergyShield > 0.0
+                          "FullEnergyShield", v.EnergyShield > 0.0 && p.EnergyShield >= v.EnergyShield
                           // a flask drunk and still working (a constant one is a resource the fight starts with)
                           "ManaFlaskEffect", (w.Time < p.FlaskUntil || stacksOf (Map.find env.Fight.Player.Name w.Actors) "ConstantManaFlask" > 0)
                           "LifeFlaskEffect", (w.Time < p.LifeFlaskUntil || stacksOf (Map.find env.Fight.Player.Name w.Actors) "ConstantLifeFlask" > 0)
