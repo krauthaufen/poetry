@@ -1153,7 +1153,10 @@ module Sim =
                                 LifeFlaskCharges = p.LifeFlaskCharges - f.ChargesPerUse
                                 LifeFlaskUntil = w.Time + f.Duration
                                 LifeFlaskRate = f.Amount * (1.0 - f.Instant) * pools.LifeRecoveryRate / f.Duration
-                                Life = min (max p.Life pools.Life) (p.Life + f.Amount * f.Instant * pools.LifeRecoveryRate) }
+                                Life = min (max p.Life pools.Life) (p.Life + f.Amount * f.Instant * pools.LifeRecoveryRate)
+                                EnergyShield =
+                                    if pools.LifeFlaskAlsoES then min (max p.EnergyShield (min pools.EnergyShield pools.ESRecoverCap)) (p.EnergyShield + f.Amount * f.Instant * pools.LifeRecoveryRate)
+                                    else p.EnergyShield }
                     Counts = bump "flask:life" w.Counts }
             | _ -> { w with Player = Some p }
         | _ -> w
@@ -1194,6 +1197,7 @@ module Sim =
             let es =
                 (if w.Time - p.LastHit >= r.ESRechargeDelay then p.EnergyShield + r.EnergyShieldRecharge * dt else p.EnergyShield)
                 + r.ESRegen * dt + stream "ES" + stream "ShroudES"
+                + (if v.LifeFlaskAlsoES then p.LifeFlaskRate * overlap p.LifeFlaskUntil else 0.0)
                 |> min (max p.EnergyShield (min v.EnergyShield v.ESRecoverCap))
             let flask = p.FlaskRate * overlap p.FlaskUntil
             let recouped = stream "Mana"

@@ -1437,6 +1437,53 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         near (150.0 + float (count bare "hits:Swing" - 2) * 100.0) bare.DamageBy.["Swing (hit)"]
         same (fight [ "MonsterPhysicalDamageAura1"; "MonsterIncreasedSpeed1"; "MonsterFireResistance1" ]) seeds)
 
+    test "Affinity: Power Charges for Frenzy, Frenzy for Endurance, Endurance for Power; what spends them is as it was" (fun () ->
+        equal (box [ Mod.flag (Named "ChargeCycle") ]) (box (mods "keystone_charge_cycle" 1.0))
+        let sheet = { (load blank Options.defaults).Sheet with Mods = mods "keystone_charge_cycle" 1.0 }
+        let rule r = { Hook = OnCrit; Filter = AnySkill; Chance = 100.0; Reaction = r }
+        let rules =
+            [ rule (GainResource("FrenzyCharge", 1)); rule (GainResource("EnduranceCharge", 2)); rule (GrantBuff("PowerCharge", 10.0, 3, []))
+              rule (SpendStack("PowerCharge", GainResource("FrenzyCharge", 1))); rule (GainResource("Rage", 5)) ]
+        let periodics = [ { Name = "dynamism"; Every = 2.0; Action = GainRandom [ "PowerCharge"; "FrenzyCharge"; "EnduranceCharge" ] } ]
+        let rules', periodics' = Behaviours.affinity sheet rules periodics
+        equal
+            (box [ GainResource("PowerCharge", 1); GainResource("FrenzyCharge", 2); GrantBuff("EnduranceCharge", 10.0, 3, [])
+                   SpendStack("PowerCharge", GainResource("PowerCharge", 1)); GainResource("Rage", 5) ])
+            (box (rules' |> List.map (fun r -> r.Reaction)))
+        equal (box (GainRandom [ "EnduranceCharge"; "PowerCharge"; "FrenzyCharge" ])) (box periodics'.Head.Action)
+        // without the keystone nothing changes
+        equal (box rules) (box (fst (Behaviours.affinity (load blank Options.defaults).Sheet rules periodics)))
+        // the keystone's line on a character
+        let c = load { blank with ExtraLines = [ "Affinity" ] } Options.defaults
+        equal true (Mods.flag Ctx.empty (Named "ChargeCycle") (ModDb.ofList c.Sheet.Mods)))
+
+    test "life recovery from flasks also applies to energy shield" (fun () ->
+        equal (box [ Mod.flag (Named "LifeFlaskAlsoES") ]) (box (mods "life_recovery_from_flasks_also_recovers_energy_shield" 1.0))
+        let c = load { blank with ExtraLines = [ "Life Recovery from Flasks also applies to Energy Shield" ] } Options.defaults
+        equal true c.Vitals.LifeFlaskAlsoES
+        equal false (load blank Options.defaults).Vitals.LifeFlaskAlsoES
+        // one hit of 1200 takes the 500 energy shield and leaves 300 of 1000 life: the flask is
+        // drunk (150 at once, 150 over 3 s). With the line the shield gets as much, so it is
+        // never empty again, and a mod of the player's that holds while it has energy shield
+        // holds for every bolt
+        let bolt = { Skill.make "Bolt" [ Spell ] with BaseDamage = Map.ofList [ Chaos, { Min = 100.0; Max = 100.0 } ]; BaseTime = 0.5; BaseCrit = 0.0 }
+        let flask = { Amount = 300.0; Duration = 3.0; ChargesPerUse = 10.0; MaxCharges = 60.0; ChargesPerSecond = 0.0; ChargeGainMult = 1.0; Instant = 0.5 }
+        let vitals also = { PlayerStats.basic 1000.0 0.0 with EnergyShield = 500.0; LifeFlask = Some flask; LifeFlaskAlsoES = also }
+        let brute =
+            { EnemyDef.atLevel 83 1e12 with
+                Position = Vec.make 5.0 0.0; Mods = []
+                Attack = Some { Interval = 9.0; Damage = Map.ofList [ Physical, 1200.0 ]; Accuracy = 1e9; Range = 10.0; CritChance = 0.0; Melee = false } }
+        let fight also =
+            let player = { Actor.make "Player" [ Mod.more (Damage AllDamage) 100.0 |> Mod.whenever (WhileBuff "HasEnergyShield") ] [ bolt ] with Vitals = Some(vitals also) }
+            Fight.single brute player 9.0
+        let o = Sim.run (fight true) 1u
+        equal 1 (count o "enemy:hit")
+        equal 1 (count o "flask:life")
+        near (200.0 * float (count o "hits:Bolt")) o.DamageBy.["Bolt (hit)"]
+        let without = Sim.run (fight false) 1u
+        if without.DamageBy.["Bolt (hit)"] >= 200.0 * float (count without "hits:Bolt") then failwith "the shield stayed up without the line"
+        same (fight true) seeds)
+
     test "slow magnitude: the Maim and Hinder the character inflicts slow that much more" (fun () ->
         equal (box [ Mod.inc (Named "SlowMagnitude") 100.0 ]) (box (mods "base_debuff_slow_magnitude_+%" 100.0))
         // the walker of the Presence test (10 m away, 2 m a second), Hindered by every bolt from

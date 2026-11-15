@@ -336,6 +336,7 @@ module Defence =
           ESRecoverCap = (if flag "ESRecoveryCappedAtArmour" then armour else infinity)
           RecoupPreventedPerPower = named "RecoupPreventedPhysicalAsESPerPower"
           RecoupPreventedLife = named "RecoupPreventedPhysicalAsLife"
+          LifeFlaskAlsoES = flag "LifeFlaskAlsoES"
           RatesVary =
             let rates =
                 set [ "LifeRecoveryRate"; "ManaRecoveryRate"; "ESRecoveryRate"; "ESRechargeRate"; "ESRechargeFaster"; "ESRechargeDelayFlat"

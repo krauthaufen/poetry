@@ -766,6 +766,13 @@ let randomFight (case: uint32) : Fight * string =
                     fight.Enemies |> List.map (fun e ->
                         let e = if e.Rarity <> Unique && chance 0.6 then { e with Rarity = Rare; Life = min e.Life (between 40.0 3000.0) } else e
                         if e.Rarity = Rare then { e with Affixes = RareMods.roll affixRng e.Level } else e) }
+    // life flasks that recover energy shield too
+    let fight =
+        match fight.Player.Vitals with
+        | Some v when v.LifeFlask.IsSome && chance 0.4 ->
+            note "flask to shield"
+            { fight with Player = { fight.Player with Vitals = Some { v with LifeFlaskAlsoES = true; EnergyShield = max v.EnergyShield 200.0 } } }
+        | _ -> fight
     let described =
         sprintf "case %d: %d skills (%s), %d rules (%s), %d mods, %d enemies, vitals %b, %.2f s%s"
             case fight.Player.Skills.Length

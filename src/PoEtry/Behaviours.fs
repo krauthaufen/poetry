@@ -1144,6 +1144,41 @@ module Behaviours =
         let percent = Mods.sumBase Ctx.empty [ Named "IgniteSelfOnCrit" ] (ModDb.ofList sheet.Mods)
         if percent > 0.0 then [ { Hook = OnCrit; Filter = AnySkill; Chance = 100.0; Reaction = IgniteSelf percent } ] else []
 
+    /// Affinity: "Gain Power Charges instead of Frenzy Charges, Frenzy Charges instead of
+    /// Endurance Charges, Endurance Charges instead of Power Charges". The charge a gain names.
+    let affinityCharge (r: string) =
+        match r with
+        | "FrenzyCharge" -> "PowerCharge"
+        | "EnduranceCharge" -> "FrenzyCharge"
+        | "PowerCharge" -> "EnduranceCharge"
+        | r -> r
+
+    /// What the character's rules and periodic effects gain, with Affinity: the other charge.
+    /// What spends a charge, and the maxima, are as they were.
+    let affinity (sheet: CharacterSheet) (rules: Rule list) (periodics: Periodic list) : Rule list * Periodic list =
+        if not (Mods.flag Ctx.empty (Named "ChargeCycle") (ModDb.ofList sheet.Mods)) then rules, periodics
+        else
+            let c = affinityCharge
+            let rec reaction (r: Reaction) =
+                match r with
+                | GrantBuff (name, d, n, ms) -> GrantBuff(c name, d, n, ms)
+                | GainResource (name, n) -> GainResource(c name, n)
+                | DropRemnant (name, d, x) -> DropRemnant(c name, d, x)
+                | SpendStack (b, next) -> SpendStack(b, reaction next)
+                | IfBuff (b, next) -> IfBuff(b, reaction next)
+                | IfEnemyHas (st, next) -> IfEnemyHas(st, reaction next)
+                | WithCorpse (next, otherwise) -> WithCorpse(reaction next, reaction otherwise)
+                | other -> other
+            let action (a: PeriodicAction) =
+                match a with
+                | GainRandom rs -> GainRandom(rs |> List.map c)
+                | GainAnyRandom rs -> GainAnyRandom(rs |> List.map c)
+                | GainWeighted ws -> GainWeighted(ws |> List.map (fun (r, w) -> c r, w))
+                | GainTimedBuff (b, chance, d, n, ms) -> GainTimedBuff(c b, chance, d, n, ms)
+                | other -> other
+            rules |> List.map (fun r -> { r with Reaction = reaction r.Reaction }),
+            periodics |> List.map (fun p -> { p with Action = action p.Action })
+
     /// "When you kill a Rare monster, you gain its Modifiers for 60 seconds" (Headhunter): a
     /// kill of the character's own (not its minions') of an enemy that carries modifiers gives
     /// it one buff for each, which the sheet's mods for that modifier hold on to (StatMap).

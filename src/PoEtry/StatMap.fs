@@ -886,6 +886,8 @@ module StatMap =
         // "Debuffs you inflict have X% increased Slow Magnitude": the Maim and Hinder the
         // character's hits leave slow the monsters that much more (Sim.Env.SlowMagnitude)
         | "base_debuff_slow_magnitude_+%" -> one (Mod.inc (Named "SlowMagnitude") v)
+        // "Life Recovery from Flasks also applies to Energy Shield" (PlayerStats.LifeFlaskAlsoES)
+        | "life_recovery_from_flasks_also_recovers_energy_shield" -> one (Mod.flag (Named "LifeFlaskAlsoES"))
         | "shocked_effect_on_self_+%" -> one (Mod.inc (Named "SelfEffect:Shock") v)
         | "chill_effectiveness_on_self_+%" -> one (Mod.inc (Named "SelfEffect:Chill") v)
         | "ignite_effect_on_self_+%" -> one (Mod.inc (Named "SelfEffect:Ignite") v)
@@ -1179,6 +1181,9 @@ module StatMap =
         | "pain_attunement_keystone_critical_strike_multiplier_+%_final" -> one (Mod.more CritBonus v)
         | "keystone_zealots_oath" -> Some(Mods [ Mod.flag (Named "RegenESInsteadOfLife"); Mod.flag (Named "NoESRecharge") ])
         | "keystone_iron_reflexes" -> one (Mod.flag (Named "EvasionToArmour"))
+        // Affinity: "Gain Power Charges instead of Frenzy Charges, Frenzy Charges instead of
+        // Endurance Charges, Endurance Charges instead of Power Charges" (Behaviours.affinity)
+        | "keystone_charge_cycle" -> one (Mod.flag (Named "ChargeCycle"))
         // "75% of Damage Converted to Fire Damage; Deal no Non-Fire Damage"
         | "keystone_avatar_of_fire" ->
             Some(Mods((DamageType.all |> List.filter ((<>) Fire) |> List.map (fun t -> Mod.base' (Convert(t, Fire)) v)) @ [ Mod.flag (Named "DealNoNonFire") ]))
@@ -1723,6 +1728,15 @@ module StatMap =
               "slows_have_no_potency_on_you_while_sprinting"; "unique_boots_secondary_ground_shock_while_moving"
               "unique_boots_secondary_ground_ignite_while_moving_base_fire_damage_%_of_life" ]
 
+    /// How fast minions get where they fight, and how far off a totem can be put down: melee
+    /// minions fight at the monster from the start and the others stand where the player
+    /// does, totems all stand after one placement (RULES.md, "Who a monster attacks",
+    /// "Totems"). Nothing in a fight walks to its place, so these change nothing.
+    let private alliesInPlace (id: string) =
+        List.contains id
+            [ "minion_movement_speed_+%"; "companion_movement_speed_%"; "companion_movement_speed_+%"; "tame_beasts_unique_movement_velocity_+%"
+              "totem_placement_range_+%" ]
+
     /// What monsters never do in a fight as it is simulated: they hit, with their damage and
     /// their accuracy, and nothing else (RULES.md, "Monster hits", "Not modelled: monster
     /// skills"). They put no curse on the player, break none of its armour, leave no Maim and
@@ -1771,7 +1785,7 @@ module StatMap =
     let private isNonOffensive (id: string) =
         let words = split id
         // A penetration / enemy debuff line mentions resistance but is offensive.
-        words |> List.exists noCombatWords.Contains || ownMovement id || monstersNeverDo id || shownOnTheItem id || howItIsBuilt id
+        words |> List.exists noCombatWords.Contains || ownMovement id || alliesInPlace id || monstersNeverDo id || shownOnTheItem id || howItIsBuilt id
 
     let rec private direct (id: string) value =
         match explicit id value with

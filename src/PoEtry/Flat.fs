@@ -3629,6 +3629,8 @@ module Flat =
                     s.LifeFlaskUntil <- s.Time + f.Duration
                     s.LifeFlaskRate <- f.Amount * (1.0 - f.Instant) * pools.LifeRecoveryRate / f.Duration
                     s.Life <- min (max s.Life pools.Life) (s.Life + f.Amount * f.Instant * pools.LifeRecoveryRate)
+                    if pools.LifeFlaskAlsoES then
+                        s.Shield <- min (max s.Shield (min pools.EnergyShield pools.ESRecoverCap)) (s.Shield + f.Amount * f.Instant * pools.LifeRecoveryRate)
                     bump s s.P.CFlaskLife
                 | _ -> ()
 
@@ -3708,6 +3710,7 @@ module Flat =
             let es =
                 (if s.Time - s.LastHit >= r.ESRechargeDelay then s.Shield + r.EnergyShieldRecharge * dt else s.Shield)
                 + r.ESRegen * dt + (at streams PES) + (at streams PShroudES)
+                + (if v.LifeFlaskAlsoES then s.LifeFlaskRate * max 0.0 (min s.Time s.LifeFlaskUntil - t0) else 0.0)
                 |> min (max s.Shield (min v.EnergyShield v.ESRecoverCap))
             let flask = s.FlaskRate * max 0.0 (min s.Time s.FlaskUntil - t0)
             let recouped = at streams PMana

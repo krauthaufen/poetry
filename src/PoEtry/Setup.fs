@@ -801,6 +801,10 @@ module Setup =
                 if o.Immortal || o.NoFlask then None
                 else
                     Defence.flask "Mana" (ModDb.ofList sheet.Mods) sheet.ManaFlask }
+        // Affinity: what the rules and periodic effects gain is the other charge
+        |> fun (a: Actor) ->
+            let rules, periodics = Behaviours.affinity sheet a.Rules a.Periodics
+            { a with Rules = rules; Periodics = periodics }
 
     /// A fight against these enemies.
     and fight (c: Loaded) (o: Options) (player: Actor) (enemies: EnemyDef list) : Fight =
@@ -824,6 +828,10 @@ module Setup =
         let player =
             let lone = enemies.Length <= 1
             let sources = Behaviours.chargeSources c.Db c.Sheet c.Build
+            // (with Affinity a source of one charge is a source of the one it becomes)
+            let sources =
+                if Mods.flag Ctx.empty (Named "ChargeCycle") db then sources |> Map.toList |> List.map (fun (k, v) -> Behaviours.affinityCharge k, v) |> Map.ofList
+                else sources
             let rageRegen = Mods.sumBase Ctx.empty [ Named "RageRegen" ] db > 0.0
             { player with
                 Resources =

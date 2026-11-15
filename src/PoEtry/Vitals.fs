@@ -152,7 +152,10 @@ type PlayerStats =
       RegenOnStun: float
       /// Whether how fast the pools recover can change with the buffs and states (a modifier
       /// of a recovery rate has a condition on them): if not, the sheet's rates are the moment's.
-      RatesVary: bool }
+      RatesVary: bool
+      /// "Life Recovery from Flasks also applies to Energy Shield": what a life flask recovers
+      /// (at once and over its time) the energy shield recovers too.
+      LifeFlaskAlsoES: bool }
 
 module PlayerStats =
     /// Bare pools with no defences or recovery: a starting point for hand-built players.
@@ -167,7 +170,7 @@ module PlayerStats =
           SelfEffect = Map.empty; SelfDuration = Map.empty; LifeOnKill = 0.0; LifePerEnduranceConsumed = 0.0; ESOnKill = 0.0; LifeOnBlock = 0.0
           ManaOnBlock = 0.0; Recoup = []; RecoupSeconds = 4.0; LifeRecoveryRate = 1.0; ManaRecoveryRate = 1.0
           ESRecoveryRate = 1.0; LifeFlask = None; CostsLife = false; LifeRecharge = 0.0; UnluckyEvade = false
-          LuckyDeflect = false; LifeLeechRate = 1.0; DeflectEffect = 40.0; StartLife = 1.0; LifeReserved = 0.0; LifeFrozenWithES = false; SurroundedAt = 5; SurroundedRadius = Constants.surroundedRadius; StunRecovery = 1.0; ESRecoverCap = infinity; RecoupPreventedPerPower = 0.0; RecoupPreventedLife = 0.0; RegenOnStun = 0.0; RatesVary = true }
+          LuckyDeflect = false; LifeLeechRate = 1.0; DeflectEffect = 40.0; StartLife = 1.0; LifeReserved = 0.0; LifeFrozenWithES = false; SurroundedAt = 5; SurroundedRadius = Constants.surroundedRadius; StunRecovery = 1.0; ESRecoverCap = infinity; RecoupPreventedPerPower = 0.0; RecoupPreventedLife = 0.0; RegenOnStun = 0.0; RatesVary = true; LifeFlaskAlsoES = false }
 
 /// Hit resolution against the player (formulas: PoB CalcDefence, constants: game data).
 module Vitals =
