@@ -1766,6 +1766,59 @@ module Behaviours =
                     IgniteSeconds = Ailments.duration ctx mods Ignite }
             [ { Hook = (if skill.Tags.Contains(Tag "Grenade") then OnLand else OnHit); Filter = Called skill.Name; Chance = 100.0; Reaction = LayGround ground } ]
 
+    /// Tornado: "Create a storm that sucks in enemies and deals Physical damage over time. A
+    /// Tornado that overlaps an Elemental Ground Surface absorbs that surface's Debuff, applying
+    /// it to enemies inside the Tornado and causing the Tornado to deal extra damage of that
+    /// element." The storm stands where it was cast for the skill's duration, with its radius;
+    /// "Limit N Tornadoes". What it does once it overlaps Ignited Ground: `Sim.syncGround`.
+    /// "Deals X damage per second of each absorbed Elemental Damage type": scaled as the
+    /// skill's own damage over time is, by what the character has when the fight is prepared.
+    /// With Advancing Storm ("originate from the player and move towards the target location")
+    /// it starts where the player stands and goes to where it was aimed.
+    let storm (db: GameDb) (charMods: ModDb) (setup: GemSetup) (skill: Skill) : Rule list =
+        let raw = Gems.rawStats db charMods setup
+        let sum id = raw |> List.filter (fun (k, _) -> k = id) |> List.sumBy snd
+        let limit = sum "number_of_tornados_allowed"
+        // (a storm that takes up ground: Elemental Storm has the limit, but nothing it absorbs)
+        if limit <= 0.0 || sum "active_skill_base_elemental_damage_to_deal_per_minute" <= 0.0 then []
+        else
+            let ctx = { Ctx.empty with SkillTags = skill.Tags; SkillName = skill.Name }
+            let mods = ModDb.ofList (ModDb.toList charMods @ skill.Mods)
+            let seconds = (if skill.Duration > 0.0 then skill.Duration else sum "base_skill_effect_duration" / 1000.0) * Mods.mult ctx [ SkillDuration ] mods
+            let radius =
+                let r = match skill.Delivery with | AreaAtTarget r | AreaAroundSelf r -> r | _ -> sum "active_skill_base_area_of_effect_radius"
+                Geometry.radius r (Mods.mult ctx [ AreaOfEffect ] mods)
+            let perSecond = sum "active_skill_base_elemental_damage_to_deal_per_minute" / 60.0
+            let dotCtx = if skill.Tags.Contains(Tag "SpellDot") then ctx else { ctx with SkillTags = ctx.SkillTags |> Set.remove Spell |> Set.remove Attack }
+            let ground =
+                { Ground.make skill.Name Storm radius seconds with
+                    Limit = int limit + int (Mods.sumBase ctx [ Named "SkillLimit" ] mods)
+                    Absorbs = [ for t in [ Fire; Cold; Lightning ] -> t, perSecond * Hit.damageMult dotCtx mods t * Mods.mult dotCtx [ Named "DotDamage" ] mods ]
+                    IgniteSeconds = Ailments.duration ctx mods Ignite
+                    Speed =
+                        (if sum "storm_skills_spawn_at_initiator_location" > 0.0 then sum "support_storm_base_movement_speed" * (1.0 + sum "tornado_movement_speed_+%_final" / 100.0)
+                         else 0.0) }
+            [ { Hook = OnLand; Filter = Called skill.Name; Chance = 100.0; Reaction = LayGround ground } ]
+
+    /// The same for a spell a meta gem triggers (a Tornado behind Cast on Dodge): the storm is
+    /// the triggered skill's own.
+    let triggeredGrounds (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) : Rule list =
+        let charMods = ModDb.ofList sheet.Mods
+        build.Groups |> List.filter (fun g -> g.Enabled) |> List.indexed
+        |> List.collect (fun (gi, g) ->
+            let enabled = g.Gems |> List.filter (fun x -> x.Enabled)
+            match enabled |> List.tryFind (fun x -> not x.IsSupport && Gems.isMeta db x.Name) with
+            | Some metaGem when not (Gems.data db metaGem.Name |> Option.exists (fun d -> d.Types.Contains "IsBlasphemy")) ->
+                let supports = enabled |> List.filter (fun x -> x.IsSupport) |> List.map (fun x -> x.Name, x.Level)
+                let name = sprintf "%s #%d" metaGem.Name (gi + 1)
+                enabled |> List.filter (fun x -> not x.IsSupport && x.Name <> metaGem.Name)
+                |> List.collect (fun sp ->
+                    let setup = { Gem = sp.Name; Level = sp.Level; Quality = sp.Quality; StatSet = 1; Supports = supports }
+                    match Gems.skill db charMods (Gems.chooseWeapon db sp.Name sheet.Weapons) setup with
+                    | Ok (skill, _) -> storm db charMods setup { skill with Name = sprintf "%s (%s)" skill.Name name; Tags = skill.Tags.Add Triggered }
+                    | Error _ -> [])
+            | _ -> [])
+
     /// Shocked Ground: "X% chance on Shocking Enemies to create Shocked Ground"; "Shocked Ground
     /// Shocks those standing in it, and lasts 6 seconds by default" (keyword text). The shocked
     /// enemy stands in it: it is Shocked for the ground's time, with the Shock's base magnitude x

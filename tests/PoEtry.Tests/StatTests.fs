@@ -933,6 +933,25 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         equal (box (Named "MovementSpeed", -20.0)) (box (b.Mods.Head.Stat, b.Mods.Head.Value))
         equal (box ([]: string list)) (box ([ "Oil Barrage"; "Oil Grenade" ] |> List.collect (Gems.unmodelledTypes db.Value) |> List.filter ((=) "CreatesGroundEffect"))))
 
+    test "Tornado: the storm of the gem's numbers, its Limit, what it deals of an element it took up; with Advancing Storm it comes from the player" (fun () ->
+        // level 20: radius 3 m, 8 s, Limit 1, 292.2 a second (17530 a minute) of an element it took up
+        let storm (supports: string list) =
+            let setup = { Gem = "Tornado"; Level = 20; Quality = 0; StatSet = 1; Supports = supports |> List.map (fun n -> n, 1) }
+            match Gems.skill db.Value ModDb.empty None setup with
+            | Ok (skill, _) ->
+                match Behaviours.storm db.Value ModDb.empty setup skill with
+                | [ { Hook = OnLand; Reaction = LayGround g } ] -> g
+                | other -> failwithf "%A" other
+            | Error e -> failwith e
+        let t = storm []
+        equal (box (Storm, 30.0, 8.0, 1, 0.0)) (box (t.Kind, t.Radius, t.Seconds, t.Limit, t.Speed))
+        equal (box [ Fire; Cold; Lightning ]) (box (t.Absorbs |> List.map fst))
+        for (_, dps) in t.Absorbs do
+            near (17530.0 / 60.0) dps
+        // Advancing Storm: from the player towards where it was aimed, 2.5 m a second x the Tornado's 50% less
+        near 12.5 (storm [ "Advancing Storm" ]).Speed
+        equal (box ([]: string list)) (box (Gems.unmodelledTypes db.Value "Tornado" |> List.filter ((=) "InteractsWithElementalGround"))))
+
     test "Combat Frenzy: a Frenzy Charge for a freeze, electrocute or pin, at most once every few seconds" (fun () ->
         let c = load { blank with Groups = [ group [ gem "Combat Frenzy" ] ]; ExtraLines = [ "+100 to Spirit" ] } Options.defaults
         let player = Setup.player c Options.defaults [] None

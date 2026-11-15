@@ -400,7 +400,9 @@ module Gems =
               "MinionsCanExplode", []
               // what a support can be socketed with, what a line can name, where a projectile
               // starts and what the skill can be used with: nothing a fight plays
-              "CanBecomeArrowRain", []; "CreatesDemonMinion", []; "NoDualWield", []; "ProjectilesNotFromUser", [] ]
+              "CanBecomeArrowRain", []; "CreatesDemonMinion", []; "NoDualWield", []; "ProjectilesNotFromUser", []
+              // "Tornado": it takes up the Ignited Ground it overlaps
+              "InteractsWithElementalGround", [ "Tornado" ] ]
 
     /// What a gem's skill does that the simulator has no model for: its skill types that are
     /// neither descriptive nor modelled ("Channel", "GainsStages", "Shapeshift", "Rain"...).
