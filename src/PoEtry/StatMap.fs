@@ -1595,6 +1595,16 @@ module StatMap =
           "dodge_roll_speed_+%"; "dodge_roll_travel_distance_+" ]
         |> List.exists id.StartsWith
         || id.EndsWith "movement_speed_penalty_+%_final_while_performing_action"
+        // what holds only while the player moves or sprints, which it never does: "X% chance for
+        // Projectile Attacks to fire 2 additional Projectiles while moving", "increased Evasion /
+        // Deflection Rating while moving / Sprinting", "Life Regeneration while moving", "Lose Life
+        // while Sprinting", "Slows have no Potency on you while Sprinting", the ground a pair of
+        // boots leaves while moving
+        || List.contains id
+            [ "projectile_attacks_%_chance_to_fire_2_additional_projectiles_while_moving"; "evasion_rating_+%_if_sprinting"
+              "deflection_rating_+%_while_moving"; "life_regeneration_rate_+%_while_moving"; "life_loss_%_per_minute_while_sprinting"
+              "slows_have_no_potency_on_you_while_sprinting"; "unique_boots_secondary_ground_shock_while_moving"
+              "unique_boots_secondary_ground_ignite_while_moving_base_fire_damage_%_of_life" ]
 
     /// What monsters never do in a fight as it is simulated: they hit, with their damage and
     /// their accuracy, and nothing else (RULES.md, "Monster hits", "Not modelled: monster

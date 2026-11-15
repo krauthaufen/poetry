@@ -574,7 +574,10 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         same (fight 100.0 [ Spell ]) seeds
         same (fight 40.0 [ Spell ]) seeds
         for id in [ "curse_effect_on_self_+%"; "damage_+%_per_active_curse_on_self"; "armour_break_taken_+%"; "deflected_hits_cannot_inflict_bleeding_on_self"
-                    "enemies_in_presence_life_regeneration_+%"; "enemies_in_presence_cooldown_recovery_+%"; "heist_enchantment_resistance_mod_effect_+%" ] do
+                    "enemies_in_presence_life_regeneration_+%"; "enemies_in_presence_cooldown_recovery_+%"; "heist_enchantment_resistance_mod_effect_+%"
+                    // (the player stands: what holds while it moves or sprints never does)
+                    "projectile_attacks_%_chance_to_fire_2_additional_projectiles_while_moving"; "evasion_rating_+%_if_sprinting"
+                    "deflection_rating_+%_while_moving"; "life_loss_%_per_minute_while_sprinting" ] do
             equal (box NotOffensive) (box (StatMap.meaning id 10.0)))
 
     // ---- the weapon set in hand ----
