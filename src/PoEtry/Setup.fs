@@ -836,6 +836,10 @@ module Setup =
                 let sheet = { c.Sheet with Mods = c.Sheet.Mods |> List.filter (waits >> not) }
                 { player with
                     Mods = player.Mods |> List.filter (waits >> not)
+                    // (whether the recovery rates vary in the fight is asked of the modifiers that are left:
+                    // with those that wait on a rare's modifiers, both engines would work the defences out
+                    // anew at every recovery)
+                    Vitals = player.Vitals |> Option.map (fun v -> { v with RatesVary = (Defence.computeWith (if c.SheetSetTwo then Map.ofList [ "WeaponSetTwo", 1 ] else Map.empty) c.Bases sheet).RatesVary })
                     VitalsAt = player.VitalsAt |> Option.map (fun _ -> fun current -> Defence.computeWith (if c.SheetSetTwo then Map.add "WeaponSetTwo" 1 current else current) c.Bases sheet)
                     VitalsReads = player.VitalsReads |> Option.map (fun _ -> Defence.reads sheet) }
         // What the character brings into the fight. Charges: only those the build can generate,
