@@ -575,8 +575,9 @@ let private warming (m : Model) : string =
 
 // ---- the fight's picture ----
 
-/// How much of the fight a second of showing covers: a short fight is shown slowly.
-let private pace (m : Model) = max 0.1 (min 1.0 (m.Lasts / 8.0))
+/// How much of the fight a second of showing covers: a short fight is shown slowly, over
+/// four seconds (not more: a fight that is one hit is mostly the wait for it).
+let private pace (m : Model) = max 0.1 (min 1.0 (m.Lasts / 4.0))
 
 let private disc (c : V2d) (r : float) (z : float) : V3f list =
     let n = 20
@@ -1669,7 +1670,7 @@ let rec private step (msg : Msg) (m : Model) : Model =
         else
             let began = if m.Began < 0.0 then t else m.Began
             // the fight, a breath, and again
-            let whole = m.Lasts / pace m + 1.2
+            let whole = m.Lasts / pace m + 2.0
             let shown = t - began
             let c = (shown - whole * floor (shown / whole)) * pace m
             let layers, stands = stage m c

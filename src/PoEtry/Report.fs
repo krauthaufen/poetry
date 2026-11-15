@@ -388,8 +388,7 @@ module Report =
                 let before = chosen |> List.take (chosen.Length - tail.Length)
                 (before |> List.map (fun (g, code) -> (said (g, code) |> Option.orElse (special g) |> Option.defaultValue (OnCooldown g)), (if (said (g, code)).IsSome then code else "")))
                 @ [ (match tail with [ (one, _) ] -> Spam one | many -> Cycle(many |> List.map fst)), "" ]
-        let play = steps |> List.map fst
-        let player = Setup.player c o play None
+        let player = Setup.player c o (steps |> List.map fst) None
         // where the enemies begin: in a melee player's face; one who presses something else (or
         // lets minions fight) stands back twice as far (the distances are this page's choice)
         let melee = player.Skills |> List.exists (fun sk -> sk.Name = gem && sk.Tags.Contains Melee)
@@ -399,6 +398,27 @@ module Report =
             | "pack" | "surrounded" -> Encounter.pack level profile [ Normal, 8; Magic, 3; Rare, 1 ] distance 25.0 (scenario = "surrounded") 1u
             | _ -> Encounter.boss level profile distance
         let enemies = match n "life" 0.0 with l when l > 0.0 -> enemies |> List.map (fun e -> { e with Life = l }) | _ -> enemies
+        // What is pressed "when ready" need not open the fight: against enemies that are dead
+        // in a hit or two, a bomb with a fuse or a cry only puts off the hit that kills. So,
+        // where nobody chose the order, the fight is fought both ways (five fights each, with
+        // the enemies as the game has them): as the skill types say, and with those skills
+        // held back until something else has been used. The second stays if the enemies are
+        // dead sooner with it (or, where they do not die, more is dealt).
+        let steps, player =
+            let held = steps |> List.map (fun (p, code) -> match p with | OnCooldown g -> When((fun (v: View) -> v.LastUsed <> ""), g), "held" | _ -> p, code)
+            if not chosen.IsEmpty || not (steps |> List.exists (fun (p, _) -> match p with OnCooldown _ -> true | _ -> false)) then steps, player
+            else
+                let heldPlayer = Setup.player c o (held |> List.map fst) None
+                let fights (pl: Actor) =
+                    let f = Setup.fight c o pl enemies
+                    let run = match Flat.compile f with | Ok program -> Flat.runner program | Error _ -> Sim.run f
+                    [ 7001u .. 7005u ] |> List.map run
+                let dealt (os: Outcome list) = os |> List.sumBy (fun o -> o.DamageBy |> Map.fold (fun a _ v -> a + v) 0.0)
+                let time (os: Outcome list) = os |> List.sumBy (fun o -> o.Duration)
+                let a, b = fights player, fights heldPlayer
+                let dead (os: Outcome list) = os |> List.forall (fun o -> o.Ttk.IsSome)
+                let better = if dead a && dead b then time b < 0.99 * time a elif dead a || dead b then dead b else dealt b > 1.01 * dealt a
+                if better then held, heldPlayer else steps, player
         // ("engine": "reference" asks for the reference engine whatever the fight)
         let made (k: float) =
             let f = Setup.fight c o player (if k = 1.0 then enemies else enemies |> List.map (fun e -> { e with Life = e.Life * k }))
@@ -454,6 +474,7 @@ module Report =
                       match p with
                       | Spam _ -> "always" | Cycle _ -> "in turn" | OnCooldown _ -> "when ready" | KeepBuff _ -> "kept up" | KeepCurse _ -> "kept on the enemy"
                       | WhileBelow (r, n, _) -> (if n <= 1 then "when out of " else sprintf "while below %d " n) + r
+                      | When _ when code = "held" -> "when ready, not first"
                       | When _ -> "when it fits"
                   Setup.gemOf p |> List.map (fun g -> obj [ "gem", JStr g; "how", JStr how; "cond", JStr code ])))
               "scenario", JStr scenario
