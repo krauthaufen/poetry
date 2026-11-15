@@ -447,6 +447,9 @@ module StatMap =
         // faces what it aims at
         | "active_skill_override_turn_duration_ms" -> Some Structural
         | "never_freeze" -> one (Mod.more (Buildup Freeze) -100.0)
+        // "Deal no Elemental Damage", "Deal no Chaos Damage"
+        | "deal_no_elemental_damage" -> Some(Mods(DamageType.elemental |> List.map (fun t -> Mod.flag (Named("DealNo:" + DamageType.name t)))))
+        | "base_deal_no_chaos_damage" -> one (Mod.flag (Named "DealNo:Chaos"))
         | "cannot_inflict_elemental_ailments" ->
             Some(Mods [ Mod.more (AilmentChance Ignite) -100.0; Mod.more (AilmentChance Shock) -100.0; Mod.more (AilmentMagnitude(Some Chill)) -100.0; Mod.more (Buildup Freeze) -100.0; Mod.more (Buildup Electrocute) -100.0 ])
         | "ailment_chance_+%_vs_rare_or_unique_enemy" ->

@@ -274,7 +274,9 @@ module Hit =
             if Constants.gainBeforeConversion then baseDamage ctx mods skill |> gain ctx mods |> convert ctx mods
             else baseDamage ctx mods skill |> convert ctx mods |> gain ctx mods
         // Avatar of Fire: "Deal no Non-Fire Damage"
-        if Mods.flag ctx (Named "DealNoNonFire") mods then r |> Map.filter (fun t _ -> t = Fire) else r
+        let r = if Mods.flag ctx (Named "DealNoNonFire") mods then r |> Map.filter (fun t _ -> t = Fire) else r
+        // "Deal no Elemental / Chaos Damage": what is left of that type after conversion is dropped
+        r |> Map.filter (fun t _ -> not (Mods.flag ctx (Named("DealNo:" + DamageType.name t)) mods))
 
     /// Chance (%) an attack hits: 1.25 A / (A + 0.3 E), between 5 and 100 (PoB calcs.hitChance).
     let accuracyHitChance (evasion: float) (accuracy: float) =

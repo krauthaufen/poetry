@@ -1095,6 +1095,14 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         let at rage = (p.VitalsAt.Value (Map.ofList [ "Rage", rage ])).StunThreshold
         near (at 0 * 1.2) (at 10))
 
+    test "Deal no Elemental Damage, Deal no Chaos Damage: that part of a hit is dropped" (fun () ->
+        let strike ms = { Skill.make "Strike" [ Attack ] with BaseDamage = Map.ofList [ Physical, { Min = 50.0; Max = 50.0 }; Fire, { Min = 100.0; Max = 100.0 }; Chaos, { Min = 30.0; Max = 30.0 } ]; BaseTime = 1.0; BaseCrit = 0.0; Mods = ms }
+        let types ms = (let s = strike ms in Hit.ranges (Skill.ctx s false Map.empty Map.empty) (ModDb.ofList s.Mods) s) |> Map.toList |> List.map fst
+        equal (box [ Physical; Chaos ]) (box (types (mods "deal_no_elemental_damage" 1.0)))
+        equal (box [ Physical; Fire ]) (box (types (mods "base_deal_no_chaos_damage" 1.0)))
+        let player = { Actor.make "Player" [] [ strike (mods "deal_no_elemental_damage" 1.0) ] with Rotation = [ { Use = "Strike"; When = fun _ -> true } ] }
+        same (Fight.single { EnemyDef.atLevel 83 1e9 with Mods = []; Attack = None } player 5.0) seeds)
+
     // ---- Flame Breath ----
 
     test "Empowered Flame Breath: a use with a Power Charge to consume gains 50% of its damage as lightning" (fun () ->

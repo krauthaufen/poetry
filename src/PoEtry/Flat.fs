@@ -552,6 +552,7 @@ module Flat =
     let private qSkillConvert = pairs SkillConvert
     let private qConvert = pairs Convert
     let private qNoNonFire = site MSkill Flag (named "DealNoNonFire")
+    let private qDealNo = perType MSkill Flag (fun t -> named ("DealNo:" + DamageType.name t))
     let private qDamage = DamageType.all |> List.map (fun t -> siteMult MSkill (scopes t)) |> Array.ofList
     let private qNegate = site MSkill Base (named "NegateEnemyResistChance")
     let private qEnemyResist = perType MSkill Base (fun t -> named ("EnemyResist:" + DamageType.name t))
@@ -657,7 +658,7 @@ module Flat =
 
     /// The questions the damage ranges of a hit are made of (`rangesAnew`).
     let private rangeSites =
-        Array.concat [ [| qAddedEffect; qAddedEffect + 1; qNoNonFire |]; qAddedMin; qAddedMax; qGain; qSkillConvert; qConvert ]
+        Array.concat [ [| qAddedEffect; qAddedEffect + 1; qNoNonFire |]; qDealNo; qAddedMin; qAddedMax; qGain; qSkillConvert; qConvert ]
 
     // ---- a program ----
 
@@ -5201,6 +5202,8 @@ module Flat =
         if flagQ ev qNoNonFire then
             for t in 0 .. 4 do
                 if t <> 3 then rHas.[t] <- false
+        for t in 0 .. 4 do
+            if flagQ ev (at qDealNo t) then rHas.[t] <- false
 
     /// The same, kept like the answers it is made of: good while the buffs and the enemy's
     /// statuses are what they were, where any of those answers can change with them (see
