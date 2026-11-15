@@ -444,7 +444,7 @@ module Setup =
                         match Behaviours.demonForm db charMods setup s with
                         | Some (s', rs, ms) -> s', cryRules @ rs, cryGrants @ ms
                         | None -> s, cryRules, cryGrants
-                    let cryRules = cryRules @ Behaviours.sigilOfPower db charMods setup s @ Behaviours.markBuff db charMods setup s @ Behaviours.offering db charMods setup s @ Behaviours.summoner db charMods setup s @ Behaviours.triskelion db charMods setup s @ Behaviours.toxicDomain db charMods setup s
+                    let cryRules = cryRules @ Behaviours.sigilOfPower db charMods setup s @ Behaviours.markBuff db charMods setup s @ Behaviours.offering db charMods setup s @ Behaviours.cullRules db charMods setup s @ Behaviours.summoner db charMods setup s @ Behaviours.triskelion db charMods setup s @ Behaviours.toxicDomain db charMods setup s
                     // parts that happen when the skill kills (Crushing Fear's shockwave)
                     let cryRules =
                         cryRules

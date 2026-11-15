@@ -860,6 +860,9 @@ module Gems =
                 | Some r when data.Types.Contains "Nova" && flagAny "nova_skills_cast_at_target_location" -> AreaAtTarget r
                 | Some r when data.Types.Contains "Nova" -> AreaAroundSelf r
                 | Some r -> AreaAtTarget r
+                // "Supported Skills deal Splash Damage to surrounding targets", "Supported Minions'
+                // Strikes have Melee Splash": the strike also hits the other enemies around the one it hit
+                | _ when (flagAny "melee_splash" || flagAny "minion_melee_splash") && data.Types.Contains "Melee" -> AreaAtTarget Constants.splashRadius
                 | _ -> Single
         { Name = name
           Tags = tags

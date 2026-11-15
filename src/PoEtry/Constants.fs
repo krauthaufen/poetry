@@ -282,6 +282,9 @@ module Constants =
     /// The player's Presence: "By default this has a 4 metre radius" (keyword text, poe2db).
     let presenceRadius = 40.0
 
+    /// "The base radius of Splash damage is 1.5 metres" (poe2db, Splash Damage), game units.
+    let splashRadius = 15.0
+
     /// Exposure where nothing names its size: "By default it lowers Resistances by -20%"
     /// (keyword text, poe2db).
     let exposureMagnitude = 20.0

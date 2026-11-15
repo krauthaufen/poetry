@@ -1006,6 +1006,20 @@ module StatMap =
         | id when readWhereBuilt.Contains id -> Some Structural
         // (a support's "more / less life" for the minions of its gem: Behaviours.minions)
         | id when id.StartsWith "support_" && id.EndsWith "minion_life_+%_final" -> Some Structural
+        // the gem's own "Minions have X% more Maximum Life", and a support's "Minions take X%
+        // more / less Damage" (Feeding Frenzy, Meat Shield): Behaviours.minions
+        | "active_skill_minion_life_+%_final" | "feeding_frenzy_minion_damage_taken_+%_final"
+        | "support_minion_defensive_stance_minion_damage_taken_+%_final" -> Some Structural
+        // Splash: read into what the strike hits (Gems.buildSet)
+        | "melee_splash" | "minion_melee_splash" -> Some Structural
+        // what culling with the skill gives (Behaviours.cullRules)
+        | "support_thrill_of_the_kill_buff_grant_%_added_lightning_attack_damage" | "support_thrill_of_the_kill_buff_base_duration_ms"
+        | "support_thrill_of_the_kill_buff_shock_chance_+%" | "support_culling_strike_threshold_+%_on_cull_for_seconds_from_code"
+        | "skill_grant_X_frenzy_charges_against_normal_and_magic_monsters" | "skill_grant_X_frenzy_charges_against_rare_monsters"
+        | "skill_grant_X_frenzy_charges_against_unique_monsters" | "skill_grant_X_power_charges_against_normal_and_magic_monsters"
+        | "skill_grant_X_power_charges_against_rare_monsters" | "skill_grant_X_power_charges_against_unique_monsters" -> Some Structural
+        // "Minions have X% additional Physical Damage Reduction" (Behaviours.minionBody)
+        | "minion_additional_physical_damage_reduction_%" -> one (Mod.base' (ForMinions(Named "AdditionalPhysicalReduction")) v)
         // where a Flame of Chayula appears and from how far it is seen: every flame is taken
         // to be picked up at once (RULES.md, Flames of Chayula)
         | "breach_flame_spawn_radius" | "breach_walk_base_visibility_range" -> Some Structural

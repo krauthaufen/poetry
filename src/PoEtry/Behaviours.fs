@@ -789,6 +789,53 @@ module Behaviours =
                     IfBuff(buff, AttachPustule(part, stat "base_skill_detonation_time" / 1000.0, stat "toxic_pustule_burst_1%_more_damage_per_x_stored_poison",
                                                stat "toxic_pustule_max_burst_damage_+%_final_from_stored_poison")) } ]
 
+    /// What culling an enemy with the skill gives. A kill by a hit of the skill of an enemy that
+    /// was within Culling Strike's reach for its rarity is a cull (the skills these lines are on
+    /// have Culling Strike, or it comes with the support):
+    /// - Thrill of the Kill: "Attacks Gain X% of Damage as Lightning Damage for N seconds on
+    ///   Culling an enemy with Supported Skills", "also grants X% increased Shock chance";
+    /// - "Culling a monster grants N Frenzy / Power Charges" (Cull the Weak, Killing Palm: 1
+    ///   against normal and magic monsters, 2 against rare, 3 against unique ones);
+    /// - Culling Strike II: "Gain X% increased Culling Strike Threshold for 20 seconds on
+    ///   Culling with Supported Skills".
+    /// How rare the culled monster was is asked after the cull, when the monster is dead: the
+    /// cull leaves a mark on the player for an instant (taken away by the next kill), and the
+    /// rules for a rare or unique monster killed go by it.
+    let cullRules (db: GameDb) (charMods: ModDb) (setup: GemSetup) (skill: Skill) : Rule list =
+        let raw = Gems.rawStats db charMods setup
+        let sum id = raw |> List.filter (fun (k, _) -> k = id) |> List.sumBy snd
+        let onCull reaction = { Hook = OnKillOf "Cullable"; Filter = Called skill.Name; Chance = 100.0; Reaction = reaction }
+        let thrill =
+            let gain, seconds = sum "support_thrill_of_the_kill_buff_grant_%_added_lightning_attack_damage", sum "support_thrill_of_the_kill_buff_base_duration_ms" / 1000.0
+            if gain <= 0.0 || seconds <= 0.0 then []
+            else
+                let shock = sum "support_thrill_of_the_kill_buff_shock_chance_+%"
+                let mods =
+                    [ for t in DamageType.all -> Mod.base' (GainAs(t, Lightning)) gain |> Mod.whenever (SkillIs Attack) |> Mod.from "Thrill of the Kill" ]
+                    @ (if shock <> 0.0 then [ Mod.inc (AilmentChance Shock) shock |> Mod.from "Thrill of the Kill" ] else [])
+                [ onCull (GrantBuff("Thrill of the Kill", seconds, 1, mods)) ]
+        let threshold =
+            match sum "support_culling_strike_threshold_+%_on_cull_for_seconds_from_code" with
+            | v when v > 0.0 -> [ onCull (GrantBuff("Culling Strike II", 20.0, 1, [ Mod.inc (Named "CullingThreshold") v |> Mod.from "Culling Strike II" ])) ]
+            | _ -> []
+        let charges =
+            [ "frenzy", "FrenzyCharge"; "power", "PowerCharge" ]
+            |> List.collect (fun (word, charge) ->
+                let n kind = int (sum (sprintf "skill_grant_X_%s_charges_against_%s_monsters" word kind))
+                let low, rare, unique = n "normal_and_magic", n "rare", n "unique"
+                if low <= 0 && rare <= 0 && unique <= 0 then []
+                else
+                    let mark = "Culled with " + skill.Name
+                    let whenKilled status count =
+                        if count <= 0 then [] else [ { Hook = OnKillOf status; Filter = Called skill.Name; Chance = 100.0; Reaction = IfBuff(mark, GainResource(charge, count)) } ]
+                    [ { Hook = OnKill; Filter = Called skill.Name; Chance = 100.0; Reaction = RemoveBuff mark }
+                      onCull (GrantBuff(mark, 0.01, 1, [])) ]
+                    @ (if low > 0 then [ onCull (GainResource(charge, low)) ] else [])
+                    // (the statuses of the killed enemy are gone through in the order of their names:
+                    // "Cullable" comes before "RareOrUnique" and "Unique")
+                    @ whenKilled "RareOrUnique" (rare - low) @ whenKilled "Unique" (unique - rare))
+        thrill @ threshold @ charges
+
     /// Triskelion Cascade: "Empower the next Cascadable Spell you cast. The Empowered Spell
     /// becomes centred on your location, and Cascades to six areas around you": a buff for the
     /// gem's duration that the next such spell uses up (see the engine), with the gem's less
@@ -1872,7 +1919,10 @@ module Behaviours =
           Power = m.Life
           LifeRegen = life * Mods.sumBase ctx [ LifeRegenPercent ] db / 100.0 + Mods.sumBase ctx [ LifeRegen ] db
           TakesForOwner = 0.0
-          Explodes = None }
+          Explodes = None
+          Taken = 1.0
+          // "Minions have X% additional Physical Damage Reduction"
+          PhysicalReduction = Mods.sumBase ctx [ Named "AdditionalPhysicalReduction" ] db }
 
     /// How many of a gem's temporary minions can be out at once (its limit stat).
     let summonLimit (raw: (string * float) list) : int option =
@@ -2031,7 +2081,13 @@ module Behaviours =
                         Gems.rawStats db charMods { Gem = gem.Name; Level = gem.Level; Quality = gem.Quality; StatSet = 1; Supports = supports }
                         |> List.filter (fun kv -> not (List.contains kv raw))
                     let supportStat (ending: string) = supportRaw |> List.filter (fun (k, _) -> k.EndsWith ending) |> List.sumBy snd
-                    let lifeMore = supportRaw |> List.filter (fun (k, _) -> k.EndsWith "minion_life_+%_final") |> List.fold (fun acc (_, v) -> acc * (1.0 + v / 100.0)) 1.0
+                    // (the gem's own "Minions have X% more Maximum Life", from its quality, too)
+                    let lifeMore =
+                        supportRaw @ (raw |> List.filter (fun (k, _) -> k = "active_skill_minion_life_+%_final"))
+                        |> List.filter (fun (k, _) -> k.EndsWith "minion_life_+%_final") |> List.fold (fun acc (_, v) -> acc * (1.0 + v / 100.0)) 1.0
+                    // "Minions from Supported Skills take X% more Damage" (Feeding Frenzy), "Minions take
+                    // X% less Damage" (Meat Shield)
+                    let takenMore = supportRaw |> List.filter (fun (k, _) -> k.EndsWith "minion_damage_taken_+%_final") |> List.fold (fun acc (_, v) -> acc * (1.0 + v / 100.0)) 1.0
                     let takes =
                         supportStat "companion_takes_%_damage_before_you_from_support"
                         + (if companion then Mods.sumBase Ctx.empty [ Named "CompanionTakesDamage" ] charMods else 0.0)
@@ -2045,7 +2101,7 @@ module Behaviours =
                         + (Mods.sumBase Ctx.empty [ LifeRegen ] charMods + Mods.sumBase Ctx.empty [ Named "Sheet:Life" ] charMods * Mods.sumBase Ctx.empty [ LifeRegenPercent ] charMods / 100.0)
                           * Mods.sumBase Ctx.empty [ Named "AllyRegenPercentOfOwnerRegen" ] charMods / 100.0
                     let withSupports (b: MinionBody) =
-                        let b = { b with Life = b.Life * lifeMore; TakesForOwner = takes; LifeRegen = b.LifeRegen + ownerRegen }
+                        let b = { b with Life = b.Life * lifeMore; TakesForOwner = takes; LifeRegen = b.LifeRegen + ownerRegen; Taken = b.Taken * takenMore }
                         if explodePct > 0.0 then { b with Explodes = Some(m.Name + ": Minion Instability") } else b
                     // the explosion: that share of its maximum life as fire damage around it (the
                     // radius is not in the support's stats: 2 m, a guess)

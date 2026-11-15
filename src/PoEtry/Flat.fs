@@ -6463,8 +6463,8 @@ module Flat =
                     |> Map.map (fun t d ->
                         let d = d * dealt * critMult
                         match t with
-                        | Physical -> d * (1.0 - Vitals.armourReduction body.Armour d / 100.0)
-                        | t -> d * (1.0 - (Map.tryFind t body.Resist |> Option.defaultValue 0.0) / 100.0))
+                        | Physical -> d * body.Taken * (1.0 - (if body.PhysicalReduction = 0.0 then Vitals.armourReduction body.Armour d else min 90.0 (Vitals.armourReduction body.Armour d + body.PhysicalReduction)) / 100.0)
+                        | t -> d * body.Taken * (1.0 - (Map.tryFind t body.Resist |> Option.defaultValue 0.0) / 100.0))
                 bump s p.CMinionHit
                 hurtMinion s rng who taken
 

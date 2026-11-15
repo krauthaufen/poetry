@@ -1954,3 +1954,72 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         match Behaviours.minionIncreasesOnYou wand with
         | [ m ] -> equal (box (Damage AllDamage, Inc, 30.0, [ SkillIs Attack ])) (box (m.Stat, m.Kind, m.Value, m.Conds))
         | other -> failwithf "unexpected %A" other)
+
+    test "minions: a support's more or less damage taken, additional physical damage reduction; Splash" (fun () ->
+        let bodies gems lines =
+            let c = load { blank with Groups = [ group gems ]; ExtraLines = lines } Options.defaults
+            c.Minions |> List.choose (fun m -> m.Body)
+        let plain = (bodies [ gem "Skeletal Warrior Minion" ] []).Head
+        near 1.0 plain.Taken
+        near 0.0 plain.PhysicalReduction
+        // Feeding Frenzy I: "Minions from Supported Skills take 20% more Damage"; Meat Shield I: 35% less
+        near 1.2 (bodies [ gem "Skeletal Warrior Minion"; support "Feeding Frenzy I" ] []).Head.Taken
+        near 0.65 (bodies [ gem "Skeletal Warrior Minion"; support "Meat Shield I" ] []).Head.Taken
+        let reduced = mods "minion_additional_physical_damage_reduction_%" 15.0
+        equal (box (ForMinions(Named "AdditionalPhysicalReduction"))) (box reduced.Head.Stat)
+        // a monster's hit of 100 physical and 100 fire on a minion without armour or resistances:
+        // 200 as it is; 240 with 20% more taken; 100 x 0.85 + 100 with 15% physical reduction
+        let body taken reduction : MinionBody =
+            { Life = 1e6; EnergyShield = 0.0; Armour = 0.0; Evasion = 0.0; Resist = Map.empty; Melee = true; Size = 1.0; Reach = 12.0; Revive = None; Power = 1.0
+              LifeRegen = 0.0; TakesForOwner = 0.0; Explodes = None; Taken = taken; PhysicalReduction = reduction }
+        let bite = { Skill.make "Bite" [ Attack; Melee ] with BaseDamage = Map.ofList [ Physical, Range.fixedAt 1.0 ]; BaseCrit = 0.0 }
+        let fight (b: MinionBody) =
+            let wolf = { Actor.make "Wolf" [ Mod.base' (Named "Accuracy") 1e9 ] [ bite ] with Rotation = [ Actor.always "Bite" ]; Body = Some b }
+            let enemy = { EnemyDef.atLevel 83 1e9 with Mods = []; Attack = Some { Interval = 1.0; Damage = Map.ofList [ Physical, 100.0; Fire, 100.0 ]; Accuracy = 1e9; Range = 20.0; CritChance = 0.0; Melee = true } }
+            { Fight.single enemy (Actor.make "Player" [] []) 5.5 with Minions = [ wolf ] }
+        same (fight (body 1.0 0.0)) seeds
+        same (fight (body 1.2 0.0)) seeds
+        same (fight (body 1.0 15.0)) seeds
+        // Splash: the strike hits the enemies within 1.5 m of the one it hit; a support's flag
+        equal (box Structural) (box (StatMap.meaning "melee_splash" 1.0))
+        near 15.0 Constants.splashRadius)
+
+    test "culling: Thrill of the Kill, charges for the culled monster's rarity, a wider threshold after a cull" (fun () ->
+        let swing = { Skill.make "Swing" [ Attack; Melee ] with BaseDamage = Map.ofList [ Physical, Range.fixedAt 100.0 ]; BaseCrit = 0.0; Mods = [ Mod.flag (Named "CullingStrike") ] }
+        let rulesOf gemName supports = Behaviours.cullRules db.Value ModDb.empty { Gem = gemName; Level = 20; Quality = 0; StatSet = 1; Supports = supports } swing
+        // Thrill of the Kill II: 25% of damage as lightning for attacks for 8 s, 40% increased shock chance
+        match rulesOf "Cull the Weak" [ "Thrill of the Kill II", 1 ] |> List.choose (fun r -> match r.Hook, r.Reaction with OnKillOf "Cullable", GrantBuff ("Thrill of the Kill", s, 1, ms) -> Some(s, ms) | _ -> None) with
+        | [ seconds, ms ] ->
+            near 8.0 seconds
+            equal (box true) (box (ms |> List.exists (fun m -> m.Stat = GainAs(Physical, Lightning) && m.Value = 25.0 && m.Conds = [ SkillIs Attack ])))
+            equal (box true) (box (ms |> List.exists (fun m -> m.Stat = AilmentChance Shock && m.Kind = Inc && m.Value = 40.0)))
+        | other -> failwithf "unexpected %A" other
+        // Culling Strike II: 20% increased threshold for 20 s
+        equal (box true)
+            (box (rulesOf "Cull the Weak" [ "Culling Strike II", 1 ] |> List.exists (fun r -> match r.Reaction with GrantBuff (_, 20.0, 1, [ m ]) -> m.Stat = Named "CullingThreshold" && m.Value = 20.0 | _ -> false)))
+        // Cull the Weak: 1 Frenzy Charge for a normal or magic monster, 2 for a rare, 3 for a unique one
+        let rules = rulesOf "Cull the Weak" [ "Thrill of the Kill II", 1 ]
+        let charges status = rules |> List.sumBy (fun r -> match r.Hook, r.Reaction with OnKillOf s, (GainResource("FrenzyCharge", n) | IfBuff (_, GainResource("FrenzyCharge", n))) when s = status -> n | _ -> 0)
+        equal (box (1, 1, 1)) (box (charges "Cullable", charges "RareOrUnique", charges "Unique"))
+        // in a fight: a rare of 101 life has 1 left after the first swing and is culled by the
+        // second: 2 Frenzy Charges (each 100% increased damage here) and the Thrill, so every
+        // swing after deals (100 + 25) x 3 to the tough one. A rare killed outright gives nothing
+        let perCharge = Mod.inc (Damage AllDamage) 100.0 |> Mod.whenever (PerStack("FrenzyCharge", 1.0))
+        let player (rs: Rule list) =
+            { Actor.make "Player" [ Mod.base' (Named "Accuracy") 1e9; perCharge ] [ swing ] with
+                Rotation = [ Actor.always "Swing" ]; Rules = rs; MaxResources = Map.ofList [ "FrenzyCharge", 3 ] }
+        let target name x life = { EnemyDef.atLevel 83 life with Name = name; Position = Vec.make x 0.0; Size = 4.0; Mods = []; Attack = None }
+        let fight rs rareLife =
+            { Fight.single (target "tough" 12.0 1e9) (player rs) 6.5 with
+                Enemies = [ { target "rare" 10.0 rareLife with Rarity = Rare }; target "tough" 12.0 1e9 ]
+                Targeting = Nearest }
+        let onTough (o: Outcome) kills = (count o "hits:Swing" - kills, o.DamageBy.["Swing (hit)"])
+        let bareHits, bareTotal = onTough (Sim.run (fight [] 101.0) 1u) 2
+        let onRare = bareTotal - float bareHits * 100.0
+        let hits, total = onTough (Sim.run (fight rules 101.0) 1u) 2
+        near (onRare + float hits * 375.0) total
+        // killed by the swing itself, from above the threshold: no cull
+        let hits, total = onTough (Sim.run (fight rules 90.0) 1u) 1
+        near (90.0 + float hits * 100.0) total
+        same (fight rules 101.0) seeds
+        same (fight rules 90.0) seeds)

@@ -328,7 +328,13 @@ type MinionBody =
       /// Percent of the damage of hits on its owner it takes in the owner's place.
       TakesForOwner: float
       /// It explodes when reduced to low life, with this skill of its own (Minion Instability).
-      Explodes: string option }
+      Explodes: string option
+      /// What it takes of a hit's damage after its armour and resistances ("Minions take X%
+      /// more / less Damage"): a multiplier, 1 where nothing says so.
+      Taken: float
+      /// "Minions have X% additional Physical Damage Reduction": percent, added to its armour's
+      /// (up to 90% together).
+      PhysicalReduction: float }
 
 /// The player or a minion.
 type Actor =
@@ -3675,8 +3681,8 @@ module Sim =
                     |> Map.map (fun t d ->
                         let d = d * dealt * critMult
                         match t with
-                        | Physical -> d * (1.0 - Vitals.armourReduction body.Armour d / 100.0)
-                        | t -> d * (1.0 - (Map.tryFind t body.Resist |> Option.defaultValue 0.0) / 100.0))
+                        | Physical -> d * body.Taken * (1.0 - (if body.PhysicalReduction = 0.0 then Vitals.armourReduction body.Armour d else min 90.0 (Vitals.armourReduction body.Armour d + body.PhysicalReduction)) / 100.0)
+                        | t -> d * body.Taken * (1.0 - (Map.tryFind t body.Resist |> Option.defaultValue 0.0) / 100.0))
                 hurtMinion env rng minion taken { w with Counts = bump "minion:hit" w.Counts }
 
     /// A monster's attack goes at the player or at one of the minions in its reach, each as
