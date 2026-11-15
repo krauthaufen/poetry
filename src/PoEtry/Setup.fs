@@ -277,9 +277,11 @@ module Setup =
             if o.SheetSetTwo.IsSome then inHand
             else
                 let other = withSet (not sheetSetTwo)
-                let cost (sh: CharacterSheet) = Behaviours.spiritUses db sh build |> List.sumBy (fun u -> u.Flat)
+                // (minions take whatever Spirit there is: a character with minion gems keeps the sceptre in hand)
+                let uses = Behaviours.spiritUses db inHand build
+                let short (sh: CharacterSheet) = uses |> List.exists (fun u -> u.PerMinion > 0.0) || (Behaviours.spiritUses db sh build |> List.sumBy (fun u -> u.Flat)) > Behaviours.spiritTotal sh build
                 let mine, theirs = Behaviours.spiritTotal inHand build, Behaviours.spiritTotal other build
-                if theirs > mine && cost inHand > mine then other else inHand
+                if theirs > mine && short inHand then other else inHand
         // total Spirit as a stack count, for "per 1 Spirit"
         let spirit = int (Behaviours.spiritTotal sheet build)
         let maxResources, startResources = Map.add "Spirit" spirit maxResources, Map.add "Spirit" spirit startResources
