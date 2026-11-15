@@ -821,6 +821,23 @@ module Setup =
             asks player.Mods || player.Skills |> List.exists (fun s -> asks s.Mods)
         let curses, curseGrants = Behaviours.curseAuras c.Db c.Sheet c.Build
         let player = if curseGrants.IsEmpty then player else { player with Mods = player.Mods @ curseGrants }
+        // what a killed rare's modifiers give (Headhunter): nothing in a fight where no enemy
+        // carries any, so the modifiers that wait on their buffs are left out there (they
+        // would only be asked about at every turn)
+        let player =
+            let rec rare (c: Cond) =
+                match c with
+                | WhileBuff b -> b.StartsWith(RareMods.buffName "")
+                | Not inner | OfOwner inner -> rare inner
+                | _ -> false
+            let waits (m: Mod) = m.Conds |> List.exists rare
+            if enemies |> List.exists (fun e -> not e.Affixes.IsEmpty) || not (player.Mods |> List.exists waits) then player
+            else
+                let sheet = { c.Sheet with Mods = c.Sheet.Mods |> List.filter (waits >> not) }
+                { player with
+                    Mods = player.Mods |> List.filter (waits >> not)
+                    VitalsAt = player.VitalsAt |> Option.map (fun _ -> fun current -> Defence.computeWith (if c.SheetSetTwo then Map.add "WeaponSetTwo" 1 current else current) c.Bases sheet)
+                    VitalsReads = player.VitalsReads |> Option.map (fun _ -> Defence.reads sheet) }
         // What the character brings into the fight. Charges: only those the build can generate,
         // and against a lone boss (its introduction outlasts anything gained from the last kill)
         // only those that need no kill. Rage runs out during such an introduction unless it
