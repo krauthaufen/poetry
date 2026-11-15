@@ -920,6 +920,24 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         near 0.0 (window (bell []))
         near 4.0 (window (bell [ "Skills lose Combo 100% faster" ])))
 
+    // ---- Shocked Ground ----
+
+    test "Shocked Ground: shocking an enemy may create it; the enemy in it is Shocked for 6 s, at the base magnitude" (fun () ->
+        let c = load { blank with ExtraLines = [ "50% chance on Shocking Enemies to created Shocked Ground"; "20% increased Magnitude of Shock you inflict" ] } Options.defaults
+        let rules = Behaviours.shockedGround c.Sheet
+        equal (box [ OnInflict Shock, 50.0, InflictStatus(Shock, Constants.baseShockMagnitude * 1.2, 6.0) ]) (box (rules |> List.map (fun r -> r.Hook, r.Chance, r.Reaction)))
+        // one hit that shocks nothing itself, its rule standing for the ground: Shocked for 6 s of the 10
+        let bolt = { Skill.make "Bolt" [ Spell ] with BaseDamage = Map.ofList [ Chaos, { Min = 1.0; Max = 1.0 } ]; BaseTime = 0.25; BaseCrit = 0.0 }
+        let fight =
+            let player =
+                { Actor.make "Player" [] [ bolt ] with
+                    Rules = [ { Hook = OnHit; Filter = AnySkill; Chance = 100.0; Reaction = InflictStatus(Shock, 20.0, 6.0) } ]
+                    Rotation = [ { Use = "Bolt"; When = fun v -> v.Time < 0.1 } ] }
+            Fight.single { EnemyDef.atLevel 83 1e9 with Mods = [] } player 10.0
+        let out = Sim.run fight 1u
+        near 6.0 (Map.tryFind "Shocked" out.Uptime |> Option.defaultValue 0.0)
+        same fight seeds)
+
     // ---- Scarred Faith ----
 
     test "Scarred Faith: prevented physical damage recouped as energy shield per enemy power; no regeneration; none above armour" (fun () ->

@@ -675,6 +675,7 @@ module Flat =
         | RTrigger of skill: int
         | RRemoveBuff of buff: int
         | RRemoveDebuff of status: int
+        | RInflictStatus of inflict: Inflict
         | RGainResource of buff: int * count: int
         | RDropRemnant of buff: int * delay: float * extraChance: float * count: int
         /// A buff scaled by the charges held (see `Reaction.ChargeBuff`).
@@ -1336,6 +1337,7 @@ module Flat =
         | AttachPustule _ -> "AttachPustule"
         | NoReaction -> "NoReaction"
         | RemoveDebuff _ -> "RemoveDebuff"
+        | InflictStatus _ -> "InflictStatus"
         | GainResource _ -> "GainResource"
         | DropRemnant _ -> "DropRemnant"
         | ChargeBuff _ -> "ChargeBuff"
@@ -1572,6 +1574,7 @@ module Flat =
                 | TriggerSkill name -> RTrigger(skillId name)
                 | RemoveBuff name -> RRemoveBuff(buffs.Id name)
                 | RemoveDebuff name -> RRemoveDebuff(statuses.Id name)
+                | InflictStatus (a, magnitude, duration) -> RInflictStatus(Status(a, magnitude, duration))
                 | GainResource (r, n) -> RGainResource(buff r, n)
                 | DropRemnant (r, delay, extra) -> RDropRemnant(buff r, delay, extra, counts.Id("remnant:" + r))
                 | ChargeBuff (name, charge, perStack, seconds, doubleChance) ->
@@ -4236,6 +4239,7 @@ module Flat =
                 for k in 1 .. pulses do
                     schedule s (s.Time + every * float k) EExpose target (typeIndex dt) (min cap (start + perPulse * float k)) duration
         | RRemoveDebuff id -> if onTarget () then removeDebuff (at s.Foes target) id
+        | RInflictStatus i -> if onTarget () then inflict s (at s.Foes target) i
         | RTrigger skill -> trigger s rng skill
         | RGainResource (b, n) -> schedule s s.Time EGainStacks b n 0.0 0.0
         | RDropRemnant (b, delay, extra, count) ->

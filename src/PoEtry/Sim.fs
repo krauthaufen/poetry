@@ -109,6 +109,9 @@ type Reaction =
     /// second as fire damage, for an Ignite's time ("Become Ignited when you deal a Critical
     /// Hit"). The player's fire resistance and what it has against being Ignited apply.
     | IgniteSelf of percentPerSecond: float
+    /// An ailment's status on the enemy concerned, as a hit would inflict it (a Shock only
+    /// where it is stronger than the one there): what standing in Shocked Ground does.
+    | InflictStatus of ailment: Ailment * magnitude: float * duration: float
 
 /// "Enemies you sufficiently Overkill ... cause an explosion that Ignites nearby enemies
 /// based on the Overkill damage dealt" (Herald of Ash). `Skill` is the explosion among the
@@ -1646,6 +1649,7 @@ module Sim =
                              [ 1 .. pulses ] |> List.fold (fun w k ->
                                  schedule (w.Time + every * float k) (Expose(actor.Name, t, dt, min cap (start + perPulse * float k), duration)) w) w)
                      | RemoveDebuff name -> onTarget (fun t -> updateEnemy t (fun en -> { en with Debuffs = Map.remove name en.Debuffs }) w)
+                     | InflictStatus (a, magnitude, duration) -> onTarget (fun t -> inflict t actor.Name (Status(a, magnitude, duration)) w)
                      | TriggerSkill name -> trigger env rng actor name w
                      | GainEnergy (meta, amount) -> gainEnergy env rng actor meta amount w
                      | GainResource (r, n) -> schedule w.Time (GainStacks(actor.Name, r, n)) w

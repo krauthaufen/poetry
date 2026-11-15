@@ -1210,6 +1210,8 @@ module StatMap =
         | "minions_get_amulet_stats_instead_of_you" | "keystone_ancestral_bond" ->
             Some(Unsimulated "minions / allies")
         | "keystone_bulwark" -> Some(Unsimulated "movement")
+        // "X% chance on Shocking Enemies to create Shocked Ground" (Behaviours.shockedGround)
+        | "chance_%_to_create_shocking_ground_on_shock" -> one (Mod.base' (Named "ShockedGroundOnShock") v)
         // Herald of Blood's explosion: "partially based on their accumulated Blood Loss", "has a
         // chance to Aggravate Bleeding" (the explosion itself is played, Behaviours.heralds)
         | "skill_herald_bleeding_enemies_explode_for_%_blood_loss_as_unscalable_physical_damage" -> Some(Unsimulated "blood loss")

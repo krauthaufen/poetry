@@ -714,6 +714,7 @@ module Setup =
                 // ("Buffs on you expire X% faster": the buffs these give the character)
                 Behaviours.buffsExpire sheet (grantRules @ (used |> List.collect (fun (_, p) -> p.Rules)) @ heraldRules @ Behaviours.keywordRules sheet pressedSkills)
                 @ Behaviours.selfIgnite sheet
+                @ Behaviours.shockedGround sheet
                 @ fst (Behaviours.summons db sheet c.Build pressedSkills)
                 @ snd (Behaviours.ancestralSpirits db sheet c.Build c.Vitals.Str c.Vitals.Dex (c.Minions |> List.filter (fun m -> m.ActiveWhile |> Option.exists (fun b -> b.EndsWith " buff"))))
                 @ (match Behaviours.ghostDance db sheet c.Build with

@@ -238,6 +238,9 @@ module Constants =
     /// the line each. Not in the data of this game. A guess.
     let forkAngle = 60.0
 
+    /// "Shocked Ground ... lasts 6 seconds by default" (keyword text, poe2db).
+    let shockedGroundSeconds = 6.0
+
     /// Combo: what was built "in the last 8 seconds" (keyword text, poe2db).
     let comboWindow = 8.0
 

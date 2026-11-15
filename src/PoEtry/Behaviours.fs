@@ -1334,6 +1334,19 @@ module Behaviours =
               if slow < 0.0 then
                   yield { Hook = OnHit; Filter = Called skill.Name; Chance = 100.0; Reaction = ApplyDebuff("Oil Ground", seconds, 1, [ Mod.more (Named "MovementSpeed") slow ]) } ]
 
+    /// Shocked Ground: "X% chance on Shocking Enemies to create Shocked Ground"; "Shocked Ground
+    /// Shocks those standing in it, and lasts 6 seconds by default" (keyword text). The shocked
+    /// enemy stands in it: it is Shocked for the ground's time, with the Shock's base magnitude x
+    /// the character's Shock magnitude modifiers (a Shock of its own stays where it is stronger).
+    /// Other enemies standing in the ground are not looked at.
+    let shockedGround (sheet: CharacterSheet) : Rule list =
+        let db = ModDb.ofList sheet.Mods
+        let chance = Mods.sumBase Ctx.empty [ Named "ShockedGroundOnShock" ] db
+        if chance <= 0.0 then []
+        else
+            let magnitude = Constants.baseShockMagnitude * Mods.mult Ctx.empty [ AilmentMagnitude(Some Shock) ] db
+            [ { Hook = OnInflict Shock; Filter = AnySkill; Chance = min 100.0 chance; Reaction = InflictStatus(Shock, magnitude, Constants.shockedGroundSeconds) } ]
+
     /// Whirling Slash: "kicks up a Whirlwind around you"; using it again while the whirlwind is
     /// there adds a stage, up to the most (`sandstorm_swipe_max_stages`, 3). The whirlwind is a
     /// stack count on the character ("Whirlwind"), until a twister consumes it: the character
