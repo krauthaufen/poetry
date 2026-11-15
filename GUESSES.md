@@ -18,7 +18,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
    whose description or behaviour changed.
 5. Go through the lists below; the wiki's version history of a skill says what changed.
 
-## Rules (122)
+## Rules (123)
 
 ### Hit damage
 
@@ -73,6 +73,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | Monster hits | PoB enemy presets; rarity mod from Mods.dat | pob heuristic + guess |
 | Monster movement | maim −30% from BuffTemplates; hinder 30%: wiki Hinder; speed and range: guesses | guess |
 | Stun recovery | stat description; the stun's own length is a guess (see "Light stun on the player") | guess |
+| Flask effect duration | stat description; same amount, longer time as in PoE1's flask rules | guess |
 | Mana flask | item / data; base charges per kill and drink policy: guesses | data + guess |
 | Body armour scoped | game text | guess (order) |
 | Runic Ward | game item text | guess |
@@ -113,7 +114,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | Additional Remnants | stat descriptions; adding the two up is a guess | guess |
 | Using them up | game rule | guess |
 | Herald of Plague | gem description, `herald_of_agony_poison_spread_on_kill_radius_base_magnitude_to_grant` (its description: a radius in tenths of a metre) | data / guess |
-| Kills by damage over time | game: "on kill" effects are not limited to hits unless they say so; what is left out is a simplification | guess |
+| Kills by damage over time | game: "on kill" effects are not limited to hits unless they say so; the owner rule and Agony left out are simplifications | guess |
 | Chains | game rule (recollection) | guess |
 | Herald of Ash | gem description + data | data; the ignite takes no further modifiers (guess); in the damage shares it is the herald's, not "Ignite" |
 | Item modifier magnitudes | item text as the API gives it | guess |
