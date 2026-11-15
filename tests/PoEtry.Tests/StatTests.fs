@@ -2239,3 +2239,33 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         equal (box (Named "CurseDelay", More, 50.0)) (box (let m = (mods "support_ritual_curse_curse_delay_+%_final" 50.0).Head in m.Stat, m.Kind, m.Value))
         equal (box Structural) (box (StatMap.meaning "supported_active_skill_gem_level_+_if_two_other_supports" 1.0))
         equal (box NotOffensive) (box (StatMap.meaning "hazard_damage_+%_final_for_first_500_ms_when_not_killed_by_self" -50.0)))
+
+    test "Life Remnants: one from a hit every few seconds and by chance from a kill; its life comes in while it is collected" (fun () ->
+        // the gem at level 20: 410 life a remnant, one from a hit every 3 s, 25% from a kill
+        let c = load { blank with Groups = [ group [ gem "Life Remnants" ] ]; ExtraLines = [ "+500 to Spirit" ] } Options.defaults
+        match Behaviours.lifeRemnants db.Value c.Sheet c.Build 0.5 with
+        | Some r ->
+            near 410.0 r.LifePerRemnant
+            near 3.0 r.HitCooldown
+            near 25.0 r.OnKillChance
+            near 0.5 r.Delay
+        | None -> failwith "no Life Remnants"
+        equal (box None) (box (Behaviours.lifeRemnants db.Value (load blank Options.defaults).Sheet blank 0.5))
+        // "Recover 2% of Maximum Life when you collect a Remnant": with each Life Remnant
+        equal (box (Named "RemnantRecoverLifePercent")) (box (mods "remnant_recover_%_life_on_pickup" 2.0).Head.Stat)
+        // in a fight: a bolt every 0.5 s, a monster's hits of 150 every second on 2000 life. A
+        // remnant every 2 s gives 200 life over half a second: the life sinks by 100 in 2 s
+        // where it sank by 300
+        let bolt = { Skill.make "Bolt" [ Spell ] with BaseDamage = Map.ofList [ Fire, Range.fixedAt 100.0 ]; BaseTime = 0.5; BaseCrit = 0.0 }
+        let foe = { EnemyDef.atLevel 83 1e9 with Mods = []; Attack = Some { Interval = 1.0; Damage = Map.ofList [ Physical, 150.0 ]; Accuracy = 1e9; Range = 40.0; CritChance = 0.0; Melee = false } }
+        let fight (remnants: LifeRemnants option) =
+            let player = { Actor.make "Player" [] [ bolt ] with Rotation = [ Actor.always "Bolt" ]; Vitals = Some(PlayerStats.basic 2000.0 0.0); LifeRemnants = remnants }
+            Fight.single foe player 10.2
+        let every2 = Some { LifeRemnants.OnKillChance = 0.0; HitCooldown = 2.0; LifePerRemnant = 200.0; PercentOfMaxLife = 0.0; ExtraChance = 0.0; Delay = 0.5 }
+        let bare, fed = Sim.run (fight None) 1u, Sim.run (fight every2) 1u
+        near (1.0 - bare.DamageTaken / 2000.0) bare.MinLife
+        equal (box true) (box (count fed "life remnant" >= 5))
+        // every remnant's 200 life has come in by the end, but for the last one's rest
+        equal (box true) (box (fed.MinLife > bare.MinLife + 0.3))
+        same (fight every2) seeds
+        same (fight (Some { every2.Value with PercentOfMaxLife = 2.0; ExtraChance = 30.0; OnKillChance = 50.0 })) seeds)

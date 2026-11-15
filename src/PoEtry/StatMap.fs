@@ -334,6 +334,10 @@ module StatMap =
         // "You require N fewer enemies to be Surrounded" (the value is negative)
         | "required_enemies_to_be_considered_surrounded_offset" -> one (Mod.base' (Named "SurroundedOffset") v)
         | "remnant_recover_%_mana_on_pickup" -> one (Mod.base' (Named "RemnantRecoverManaPercent") v)
+        // "Recover X% of Maximum Life when you collect a Remnant": with a Life Remnant (Behaviours.lifeRemnants)
+        | "remnant_recover_%_life_on_pickup" -> one (Mod.base' (Named "RemnantRecoverLifePercent") v)
+        // Life Remnants' own numbers (Behaviours.lifeRemnants)
+        | "life_remnants_gain_per_globe" | "life_remnants_chance_to_spawn_orb_on_killing_enemy_%" | "life_remnants_spawn_remnant_on_hit_vs_enemy_every_X_ms" -> Some Structural
         // Mana Remnants' own numbers: read by Behaviours.manaRemnants
         | "mana_remnants_mana_gain_per_globe" | "mana_remnants_spawn_remnant_on_crit_vs_elemental_ailment_enemy_every_X_ms"
         | "mana_remnants_chance_to_spawn_orb_on_killing_enemy_with_elemental_ailment_%" -> Some Structural

@@ -1144,6 +1144,8 @@ module Flat =
               /// Runic Ward and mana remnants (the player's).
               WardRemnants: WardRemnants option
               ManaRemnants: ManaRemnants option
+              LifeRemnants: LifeRemnants option
+              CLifeRemnant: int
               CWardRemnant: int
               CManaRemnant: int
               BMinionDied: int
@@ -2222,6 +2224,8 @@ module Flat =
                       CInfernalBurn = count "infernal flame burn"
                       WardRemnants = actor.WardRemnants
                       ManaRemnants = actor.ManaRemnants
+                      LifeRemnants = actor.LifeRemnants
+                      CLifeRemnant = count "life remnant"
                       CWardRemnant = count "ward remnant"
                       CManaRemnant = count "mana remnant"
                       BMinionDied = buffs.Id "MinionDiedRecently"
@@ -2901,6 +2905,7 @@ module Flat =
           /// When a stun last made a Runic Ward remnant, and a critical hit a mana remnant.
           mutable LastStunRemnant: float
           mutable LastManaRemnant: float
+          mutable LastLifeRemnant: float
           /// Damage over time on the player: (until, per second, type).
           mutable Burning: (float * float * DamageType) list
           /// Charges per charm, by its buff.
@@ -6145,6 +6150,18 @@ module Flat =
                         let most = match p.Vitals with Some v -> v.Mana | None -> 0.0
                         schedule s (s.Time + r.Delay) EMana 0 0 ((r.ManaPerRemnant + r.PercentOfMaxMana / 100.0 * most) * count) 0.0
                  | _ -> ())
+                // Life Remnants (`Sim.hitOne`)
+                (match p.LifeRemnants, p.Vitals with
+                 | Some r, Some v when s.Main.Vitals.IsSome ->
+                    let fromKill = dead && rng.Chance r.OnKillChance
+                    let fromHit = s.Time - s.LastLifeRemnant >= r.HitCooldown
+                    if fromKill || fromHit then
+                        let count = if rng.Chance r.ExtraChance then 2.0 else 1.0
+                        let rate = (r.LifePerRemnant + r.PercentOfMaxLife / 100.0 * v.Life) * count * v.LifeRecoveryRate / r.Delay
+                        if fromHit then s.LastLifeRemnant <- s.Time
+                        s.Recoups <- (s.Time + r.Delay, rate, PLife) :: s.Recoups
+                        bump s p.CLifeRemnant
+                 | _ -> ())
                 // Trinity: the hit's strongest element gains resonance (up to 100), the others lose some
                 if p.IsPlayer then
                     ev.Crit <- false
@@ -7089,6 +7106,14 @@ module Flat =
                 let most = match p.Vitals with Some v -> v.Mana | None -> 0.0
                 schedule s (s.Time + r.Delay) EMana 0 0 ((r.ManaPerRemnant + r.PercentOfMaxMana / 100.0 * most) * count) 0.0
          | _ -> ())
+        (match p.LifeRemnants, p.Vitals with
+         | Some r, Some v when mine && s.Main.Vitals.IsSome ->
+            if rng.Chance r.OnKillChance then
+                let count = if rng.Chance r.ExtraChance then 2.0 else 1.0
+                let rate = (r.LifePerRemnant + r.PercentOfMaxLife / 100.0 * v.Life) * count * v.LifeRecoveryRate / r.Delay
+                s.Recoups <- (s.Time + r.Delay, rate, PLife) :: s.Recoups
+                bump s p.CLifeRemnant
+         | _ -> ())
         if s.Main.Charms.Length > 0 then
             if s.Main.Vitals.IsSome then
                 for place in 0 .. s.Main.Charms.Length - 1 do
@@ -7571,6 +7596,7 @@ module Flat =
               InfernalFlame = 0.0
               LastStunRemnant = -1e9
               LastManaRemnant = -1e9
+              LastLifeRemnant = -1e9
               Burning = []
               CharmCharges = Array.zeroCreate nb
               PEntropy = entropyOf shared "Player"

@@ -271,6 +271,20 @@ type PeriodicAction =
 /// Mana Remnants: a remnant on a critical hit against an enemy with an elemental ailment (at
 /// most one per `CritCooldown` seconds) and by chance on killing one; collected, each gives
 /// mana, which can overflow the maximum.
+/// Life Remnants: "enemies you kill have a chance to spawn a Life Remnant, and Hitting a
+/// target spawns a Life Remnant every few seconds. Picking up a Life Remnant grants you Life".
+/// The life of one comes in evenly over the time it takes to collect it.
+type LifeRemnants =
+    { OnKillChance: float
+      /// Seconds between two remnants from hits.
+      HitCooldown: float
+      LifePerRemnant: float
+      /// "Recover N% of Maximum Life when you collect a Remnant".
+      PercentOfMaxLife: float
+      ExtraChance: float
+      /// Seconds from creation until it is collected.
+      Delay: float }
+
 type ManaRemnants =
     { OnKillChance: float
       CritCooldown: float
@@ -375,6 +389,7 @@ type Actor =
       ParallelUses: bool
       WardRemnants: WardRemnants option
       ManaRemnants: ManaRemnants option
+      LifeRemnants: LifeRemnants option
       Banners: Banner list
       /// The actor only acts while the player has this buff (a totem while it stands).
       ActiveWhile: string option
@@ -410,6 +425,7 @@ module Actor =
           ParallelUses = false
           WardRemnants = None
           ManaRemnants = None
+          LifeRemnants = None
           Banners = []
           ActiveWhile = None
           Body = None
@@ -656,6 +672,7 @@ module Sim =
           InfernalFlame: float
           LastStunRemnant: float
           LastManaRemnant: float
+          LastLifeRemnant: float
           /// Life still to be recovered from leech.
           LifeLeechPool: float
           StrikeLifeLeech: float
@@ -3128,6 +3145,20 @@ module Sim =
                             { w with Counts = bump "mana remnant" w.Counts } |> schedule (w.Time + r.Delay) (ManaArrives((r.ManaPerRemnant + r.PercentOfMaxMana / 100.0 * (actor.Vitals |> Option.map (fun v -> v.Mana) |> Option.defaultValue 0.0)) * count))
                         else w
                     | _ -> w
+                // Life Remnants: from a kill, or from a hit no more than once every so often
+                let w =
+                    match actor.LifeRemnants, actor.Vitals, w.Player with
+                    | Some r, Some v, Some p ->
+                        let fromKill = dead && rng.Chance r.OnKillChance
+                        let fromHit = w.Time - p.LastLifeRemnant >= r.HitCooldown
+                        if fromKill || fromHit then
+                            let count = if rng.Chance r.ExtraChance then 2.0 else 1.0
+                            let rate = (r.LifePerRemnant + r.PercentOfMaxLife / 100.0 * v.Life) * count * v.LifeRecoveryRate / r.Delay
+                            { w with
+                                Player = Some { p with LastLifeRemnant = (if fromHit then w.Time else p.LastLifeRemnant); Recoups = (w.Time + r.Delay, rate, "Life") :: p.Recoups }
+                                Counts = bump "life remnant" w.Counts }
+                        else w
+                    | _ -> w
                 // Trinity: the hit's strongest element gains resonance (up to 100), the others lose some
                 let w =
                     let gain = Mods.sumBase ctx [ Named "TrinityGain" ] mods
@@ -3901,6 +3932,15 @@ module Sim =
                 else w
             | _ -> w
         let w =
+            match player.LifeRemnants, player.Vitals, w.Player with
+            | Some r, Some v, Some p when mine ->
+                if rng.Chance r.OnKillChance then
+                    let count = if rng.Chance r.ExtraChance then 2.0 else 1.0
+                    let rate = (r.LifePerRemnant + r.PercentOfMaxLife / 100.0 * v.Life) * count * v.LifeRecoveryRate / r.Delay
+                    { w with Player = Some { p with Recoups = (w.Time + r.Delay, rate, "Life") :: p.Recoups }; Counts = bump "life remnant" w.Counts }
+                else w
+            | _ -> w
+        let w =
             if player.Charms.IsEmpty then w
             else
                 let w =
@@ -4393,6 +4433,7 @@ module Sim =
                       InfernalFlame = 0.0
                       LastStunRemnant = -1e9
                       LastManaRemnant = -1e9
+                      LastLifeRemnant = -1e9
                       LifeLeechPool = 0.0
                       StrikeLifeLeech = 0.0
                       LifeFlaskCharges = v.LifeFlask |> Option.map (fun f -> f.MaxCharges) |> Option.defaultValue 0.0

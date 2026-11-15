@@ -479,6 +479,31 @@ module Behaviours =
                               Delay = pickupSeconds + sum "remnant_delay_X_ms" / 1000.0
                               Overflow = 2.0 }))
 
+    /// Life Remnants (the persistent gem with `life_remnants_gain_per_globe`), with its group's
+    /// supports. Collecting takes `pickupSeconds` (guess), and the life comes in over that time.
+    let lifeRemnants (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) (pickupSeconds: float) : LifeRemnants option =
+        let charMods = ModDb.ofList sheet.Mods
+        build.Groups
+        |> List.filter (fun g -> g.Enabled)
+        |> List.tryPick (fun g ->
+            let enabled = g.Gems |> List.filter (fun x -> x.Enabled)
+            enabled
+            |> List.tryPick (fun gem ->
+                if gem.IsSupport then None
+                else
+                    let supports = enabled |> List.filter (fun x -> x.IsSupport) |> List.map (fun x -> x.Name, x.Level)
+                    let raw = Gems.rawStats db charMods { Gem = gem.Name; Level = gem.Level; Quality = gem.Quality; StatSet = 1; Supports = supports }
+                    let sum id = raw |> List.filter (fun (k, _) -> k = id) |> List.sumBy snd
+                    if sum "life_remnants_gain_per_globe" <= 0.0 then None
+                    else
+                        Some
+                            { LifeRemnants.OnKillChance = sum "life_remnants_chance_to_spawn_orb_on_killing_enemy_%"
+                              HitCooldown = sum "life_remnants_spawn_remnant_on_hit_vs_enemy_every_X_ms" / 1000.0
+                              LifePerRemnant = sum "life_remnants_gain_per_globe" * (1.0 + (sum "remnant_effect_+%" + Mods.sumInc Ctx.empty [ Named "RemnantEffect" ] charMods) / 100.0)
+                              PercentOfMaxLife = Mods.sumBase Ctx.empty [ Named "RemnantRecoverLifePercent" ] charMods
+                              ExtraChance = (sum "chance_%_to_create_additional_remnant" + Mods.sumBase Ctx.empty [ Named "ExtraRemnantChance" ] charMods)
+                              Delay = max 0.05 (pickupSeconds + sum "remnant_delay_X_ms" / 1000.0) }))
+
     /// Banners (War, Defiance, Dread): the gem reserves Spirit and grants the banner skill, which
     /// needs Glory from attack hits and then gives its aura for a duration. Only what the engine
     /// uses of the aura is taken: attack damage, attack speed, accuracy.

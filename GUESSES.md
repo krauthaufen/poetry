@@ -18,7 +18,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
    whose description or behaviour changed.
 5. Go through the lists below; the wiki's version history of a skill says what changed.
 
-## Rules (153)
+## Rules (154)
 
 ### Hit damage
 
@@ -167,6 +167,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | What a fight starts with | user: buffs that last may be up when the fight starts, what comes from the last kill is not, bosses have introductions far longer than 4 s | guess |
 | Darkness | stat descriptions (base_darkness, darkness_per_level, base_darkness_refresh_rate_ms) | data; that all types are reserved by one share, and that recoup counts only what got past: guess |
 | Life flasks that are never drunk | keystone text | data; that an instant share is spread like the rest: guess |
+| Life Remnants | gem data; the pickup time and the even recovery | data; pickup: guess; overflow: missing |
 | Weapon for a skill | - | guess |
 | Default attacks | play-style assumption | guess |
 | Charged variants | skill description; which part it replaces is read off Explosive Spear only | guess |

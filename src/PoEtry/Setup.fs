@@ -531,7 +531,7 @@ module Setup =
                     let skip = isDefaultAttack || (not offering && ([ "Travel"; "Minion"; "ModifiesNextSkill"; "Persistent" ] |> List.exists d.Types.Contains))
                     let empowers = p.Rules |> List.exists (fun r -> match r.Reaction with Empower _ -> true | _ -> false)
                     // (a buff the skill's use gives: not one that comes of what its hits inflict, like Ice Bite's)
-                    let grantsBuff = p.Rules |> List.exists (fun r -> match r.Hook, r.Reaction with (OnInflict _ | OnCrit | OnFullBreak), _ -> false | _, (ChargeBuff _ | GrantBuff _) -> true | _ -> false)
+                    let grantsBuff = p.Rules |> List.exists (fun r -> match r.Hook, r.Reaction with (OnInflict _ | OnCrit | OnFullBreak | OnKill | OnKillOf _), _ -> false | _, (ChargeBuff _ | GrantBuff _) -> true | _ -> false)
                     let cooldown = p.Skill.Cooldown |> Option.defaultValue 0.0
                     let needsBuilding = p.Skill.Mods |> List.exists (fun m -> match m.Stat with Named n -> (n.StartsWith "Requires:" || n.StartsWith "NeedsEnemyStacks:") && m.Value > 0.0 | _ -> false)
                     // Barrage is readied whenever it can be, for a main skill it can repeat
@@ -585,7 +585,7 @@ module Setup =
         // a main "skill" that only places a totem or grants a buff is kept up, not spammed
         let main =
             match pressed c o mainGem with
-            | Some p when (p.Skill.Hits.IsEmpty || p.Pattern.IsSome) && p.Rules |> List.exists (fun r -> match r.Hook, r.Reaction with (OnInflict _ | OnCrit | OnFullBreak), _ -> false | _, (ChargeBuff _ | GrantBuff _) -> true | _ -> false) -> KeepBuff mainGem
+            | Some p when (p.Skill.Hits.IsEmpty || p.Pattern.IsSome) && p.Rules |> List.exists (fun r -> match r.Hook, r.Reaction with (OnInflict _ | OnCrit | OnFullBreak | OnKill | OnKillOf _), _ -> false | _, (ChargeBuff _ | GrantBuff _) -> true | _ -> false) -> KeepBuff mainGem
             | _ -> Spam mainGem
         let plain =
             // a main skill with a cooldown of its own goes first whenever it is ready: otherwise the
@@ -861,6 +861,7 @@ module Setup =
             ParallelUses = not o.SequentialUses
             WardRemnants = Behaviours.wardRemnants db sheet c.Build o.Pickup
             ManaRemnants = Behaviours.manaRemnants db sheet c.Build o.Pickup
+            LifeRemnants = Behaviours.lifeRemnants db sheet c.Build o.Pickup
             Banners = Behaviours.banners db sheet c.Build
             Archons = [ (let a = Behaviours.elementalArchon sheet in { a with Duration = a.Duration / Behaviours.buffExpiry sheet }) ]
             Charms = (if o.Immortal || o.NoFlask then [] else c.Charms)
