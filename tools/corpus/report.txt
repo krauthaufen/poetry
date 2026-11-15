@@ -735,18 +735,18 @@
 076-pathfinder-azmerian-wolf                         Azmerian Wolf                                    6535 dps (theirs       4293)  0 unknown, 1 unmapped, 5 unsimulated
 077-ritualist-wild-protector                         Wild Protector                                   3746 dps (theirs       3394)  0 unknown, 0 unmapped, 5 unsimulated
 078-shaman-tornado                                   Tornado                                        117221 dps (theirs      35853)  0 unknown, 5 unmapped, 9 unsimulated  energy shield 1423/1660  armour 11987/13736
-079-smith-of-kitava-whirling-assault                 Whirling Assault                                56922 dps (theirs      77533)  0 unknown, 0 unmapped, 4 unsimulated  armour 22981/29882  evasion 266/453  deflection 32/59
+079-smith-of-kitava-whirling-assault                 Whirling Assault                                57884 dps (theirs      77533)  0 unknown, 0 unmapped, 4 unsimulated  armour 22981/29882  evasion 266/453  deflection 32/59
 080-spirit-walker-companion-xilozoma-the-maw-beast   Mace Strike                                   3188008 dps (theirs          0)  0 unknown, 1 unmapped, 2 unsimulated  energy shield 1563/1206  chaos res 42/34
 081-stormweaver-firestorm                            Firestorm                                       32007 dps (theirs       9164)  0 unknown, 4 unmapped, 5 unsimulated
 082-tactician-galvanic-shards                        Galvanic Shards                              12135695 dps (theirs     738236)  0 unknown, 3 unmapped, 6 unsimulated  energy shield 553/530  armour 2333/2246  evasion 6880/7038  deflection 467/449
 083-titan-his-scattering-calamity                    His Scattering Calamity                      10503285 dps (theirs    3712898)  0 unknown, 5 unmapped, 1 unsimulated
-084-warbringer-supercharged-slam                     Supercharged Slam                             2742187 dps (theirs    1267572)  0 unknown, 5 unmapped, 9 unsimulated  armour 19752/20990
+084-warbringer-supercharged-slam                     Supercharged Slam                             2640660 dps (theirs    1267572)  0 unknown, 5 unmapped, 9 unsimulated  armour 19752/20990
 085-witchhunter-plasma-blast                         Plasma Blast                                   469081 dps (theirs     328579)  0 unknown, 6 unmapped, 3 unsimulated  evasion 41308/59706  deflection 5453/7881
 086-abyssal-lich-bone-cage                           Bone Cage (pressed Entangle)                   322764 dps (theirs     338343)  0 unknown, 1 unmapped, 5 unsimulated  energy shield 9610/10473
 087-acolyte-of-chayula-hand-of-chayula               Hand of Chayula (pressed Poisonburst Arrow)        30316 dps (theirs      13205)  0 unknown, 1 unmapped, 8 unsimulated  chaos res 112/108
 088-amazon-primal-strikes                            Primal Strikes                                 467238 dps (theirs     358467)  0 unknown, 6 unmapped, 5 unsimulated
 089-blood-mage-living-bomb                           Living Bomb (pressed Coiling Bolts)           4524821 dps (theirs    6997622)  0 unknown, 3 unmapped, 7 unsimulated
-090-chronomancer-hammer-of-the-gods                  Hammer of the Gods                              19122 dps (theirs     168525)  0 unknown, 8 unmapped, 8 unsimulated
+090-chronomancer-hammer-of-the-gods                  Hammer of the Gods                              18869 dps (theirs     168525)  0 unknown, 8 unmapped, 8 unsimulated
 091-deadeye-lightning-spear                          Lightning Spear                               8282236 dps (theirs    4004076)  0 unknown, 3 unmapped, 2 unsimulated  strength 172/176  spirit 297/265  fire res 72/70  cold res 95/71  lightning res 84/72
 092-disciple-of-varashta-spiraling-conspiracy        Spiraling Conspiracy                           517580 dps (theirs     135574)  0 unknown, 2 unmapped, 2 unsimulated  energy shield 15551/14649  fire res 113/91  cold res 120/105
 093-gemling-legionnaire-falling-thunder              Falling Thunder                            1016645357 dps (theirs    1365072)  5 unknown, 1 unmapped, 5 unsimulated  dexterity 115/119  spirit 232/212
@@ -758,7 +758,7 @@
 099-pathfinder-decompose                             Decompose                                        1168 dps (theirs     104539)  0 unknown, 9 unmapped, 13 unsimulated
 100-ritualist-profane-ritual                         Profane Ritual                                      0 dps (theirs        264)  0 unknown, 1 unmapped, 4 unsimulated
 101-shaman-grim-pillars                              Grim Pillars (pressed Entangle)               5169451 dps (theirs    2526742)  0 unknown, 5 unmapped, 8 unsimulated
-102-smith-of-kitava-molten-crash                     Molten Crash                                   193934 dps (theirs      75177)  0 unknown, 4 unmapped, 11 unsimulated  chaos res 78/70
+102-smith-of-kitava-molten-crash                     Molten Crash                                   191098 dps (theirs      75177)  0 unknown, 4 unmapped, 11 unsimulated  chaos res 78/70
 103-spirit-walker-companion-mighty-silverfist        Mace Strike                                  18676732 dps (theirs          0)  0 unknown, 1 unmapped, 2 unsimulated  energy shield 1168/1088  fire res 57/61  cold res 62/66  lightning res 72/64
 104-stormweaver-arc                                  Arc (pressed Spark)                           3850117 dps (theirs     199048)  0 unknown, 3 unmapped, 4 unsimulated
 105-tactician-soaring-midnight                       Soaring Midnight                                  924 dps (theirs        972)  0 unknown, 2 unmapped, 8 unsimulated  armour 156210/215635  deflection 31242/43127
