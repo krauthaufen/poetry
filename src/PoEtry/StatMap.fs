@@ -764,6 +764,9 @@ module StatMap =
             one (Mod.inc (Damage AllDamage) v |> Mod.whenever (SkillIs Spell) |> Mod.whenever (WhileBuff "FullEnergyShield"))
         // Darkness (see Defence, takeDamage)
         | "darkness_per_level" -> one (Mod.base' (Named "DarknessPerLevel") v)
+        // "Gain X% of Damage as Extra Chaos Damage per 20 Unreserved Darkness" (Sim.syncDarkness)
+        | "gain_%_damage_as_chaos_from_unreserved_darkness" ->
+            Some(Mods [ for t in DamageType.all -> Mod.base' (GainAs(t, Chaos)) v |> Mod.whenever (PerStack("UnreservedDarkness", 20.0)) ])
         | "maximum_darkness_+%" -> one (Mod.inc (Named "Darkness") v)
         | "base_darkness_refresh_rate_ms" -> one (Mod.base' (Named "DarknessSeconds") (v / 1000.0))
         | "darkness_refresh_rate_+%" -> one (Mod.inc (Named "DarknessSeconds") v)
@@ -1419,6 +1422,19 @@ module StatMap =
             Some(Mods [ for t in DamageType.all -> Mod.base' (GainAs(t, Physical)) v |> Mod.whenever (SkillIs Spell) |> Mod.whenever (SkillIs(Tag "CostsLife")) ])
         | "spell_damage_+%_with_spells_that_cost_life" -> one (Mod.inc (Damage AllDamage) v |> Mod.whenever (SkillIs Spell) |> Mod.whenever (SkillIs(Tag "CostsLife")))
         | "gain_%_of_damage_as_physical_per_20_life_cost_up_to_40_%" -> one (Mod.base' (Named "GainPhysicalPer20LifeCost") v)
+        | "hazard_area_of_effect_+%" -> one (Mod.inc AreaOfEffect v |> Mod.whenever (SkillIs(Tag "Type:Hazard")))
+        | "hazard_duration_+%" -> one (Mod.inc SkillDuration v |> Mod.whenever (SkillIs(Tag "Type:Hazard")))
+        // "Projectile Damage builds Pin"
+        | "all_projectile_damage_can_pin" -> one (Mod.flag (Named "CanPin") |> Mod.whenever (SkillIs Projectile))
+        // "Break Armour on Critical Hit with Spells equal to X% of Physical Damage dealt"
+        | "armour_break_equal_to_%_physical_damage_dealt_on_critical_strike_with_spells" ->
+            one (Mod.base' (Named "ArmourBreakOfPhysical") v |> Mod.whenever (SkillIs Spell) |> Mod.whenever IsCrit)
+        // "Gain 1 Fear Incarnate when you Cull a target" (Behaviours.fearIncarnate)
+        | "grant_fear_incarnate_stack_on_culling_enemies" -> one (Mod.flag (Named "FearIncarnateOnCull"))
+        // "X% increased Attack Damage for each Minion in your Presence, up to a maximum of 80%":
+        // per persistent minion, counted up to as many as make 80% (Setup)
+        | "gain_attack_damage_+%_for_each_your_minion_in_presence_capped" when v > 0.0 ->
+            one (Mod.inc (Damage AllDamage) v |> Mod.whenever (SkillIs Attack) |> Mod.whenever (PerStack(sprintf "ActiveMinionsUpTo:%d" (int (floor (80.0 / v + 1e-9))), 1.0)))
         // "Culling Strike" under its other id
         | "kill_enemy_on_hit_if_under_10%_life" -> one (Mod.flag (Named "CullingStrike"))
         | "cannot_break_armour" -> one (Mod.more (Named "ArmourBreakAmount") -100.0)
@@ -2124,6 +2140,8 @@ module StatMap =
             [ "projectile_attacks_%_chance_to_fire_2_additional_projectiles_while_moving"; "evasion_rating_+%_if_sprinting"
               "deflection_rating_+%_while_moving"; "life_regeneration_rate_+%_while_moving"; "life_loss_%_per_minute_while_sprinting"
               "slows_have_no_potency_on_you_while_sprinting"; "unique_boots_secondary_ground_shock_while_moving"
+              // an abyssal augment's movement speed per 15 Spirit
+              "abyss_socketable_movement_speed_is_only_base_+%_per_15_spirit_up_to_+40%"
               "unique_boots_secondary_ground_ignite_while_moving_base_fire_damage_%_of_life" ]
 
     /// How fast minions get where they fight, and how far off a totem can be put down: melee
@@ -2135,7 +2153,11 @@ module StatMap =
             [ "minion_movement_speed_+%"; "companion_movement_speed_%"; "companion_movement_speed_+%"; "tame_beasts_unique_movement_velocity_+%"
               "totem_placement_range_+%"
               // the time between the wolves of a pack as they are summoned: they are all there
-              "skill_minion_summon_delay_interval_ms" ]
+              "skill_minion_summon_delay_interval_ms"
+              "allies_in_presence_movement_speed_+%"; "power_charged_zombie_movement_speed_+%_final"
+              // how far a banner's aura and an offering's reach: the player stands in its banner
+              // and the minions have the offering's buff (RULES.md, "Banners", "Offerings")
+              "banner_area_of_effect_+%"; "offering_area_of_effect_+%" ]
 
     /// What holds against monsters of one kind (Undead, Demons, Beasts, Humanoids,
     /// Constructs): the monsters of a fight are made of their level and rarity alone
@@ -2204,6 +2226,8 @@ module StatMap =
           "unaffected_by_elemental_weakness"
           // "Remove a Curse when you use a Mana Flask / after Channelling for 2 seconds": there is none
           "remove_curse_on_mana_flask_use"; "remove_x_curses_after_channelling_for_2_seconds"
+          // "Enemies you Curse cannot Recharge Energy Shield": no monster here has an energy shield
+          "enemies_you_curse_cannot_recharge_energy_shield"
           // "Immune to Bleeding / Maim / Poison / Exposure", "Cannot be Blinded", "increased effect
           // of Withered on you": monsters here leave no Bleeding, Maim, Poison, Exposure, Blind or
           // Withered on the player
@@ -2227,7 +2251,9 @@ module StatMap =
         [ "enable_ring_slot_3"; "titan_additional_inventory"; "can_have_2_companions"; "can_have_unlimited_companions"
           "ascendancy_disconnected_passives_can_be_allocated_around_allocated_keystones"; "local_unique_jewel_nearby_disconnected_passives_can_be_allocated"
           "unique_jewel_nearby_disconnected_passives_can_be_allocated"
-          "tame_beast_can_target_unique_beasts"; "ascendancy_shaman_gain_additional_socketable_mods" ]
+          "tame_beast_can_target_unique_beasts"; "ascendancy_shaman_gain_additional_socketable_mods"
+          // "Can only use a Normal Body Armour": the one that is worn is among the items
+          "cannot_use_non_normal_body_armour" ]
         |> List.contains id
 
     /// "X% increased Explicit Resistance Modifier magnitudes" and the like on an item: the

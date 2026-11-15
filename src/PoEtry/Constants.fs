@@ -289,6 +289,11 @@ module Constants =
     /// "Debilitate inflicts 20% reduced movement speed and 10% reduced damage dealt" (poe2db Keywords).
     let debilitateSlow = 20.0
     let debilitateDealt = 10.0
+    /// "Each Fear Incarnate grants 10% increased Culling Strike Threshold and lasts 10 seconds",
+    /// "You can have up to a maximum of 20 Fear Incarnate" (poe2db Keywords).
+    let fearIncarnateThreshold = 10.0
+    let fearIncarnateSeconds = 10.0
+    let fearIncarnateStacks = 20
     /// "Maximum of 10 Jade stacks" (poe2db Keywords).
     let jadeStacks = 10
 

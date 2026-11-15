@@ -325,6 +325,11 @@ module Setup =
         // Jade builds up to its 10 stacks (none at the start)
         let maxResources =
             if Mods.sumBase Ctx.empty [ Named "JadeEveryMs" ] (ModDb.ofList sheet.Mods) > 0.0 then Map.add "Jade" Constants.jadeStacks maxResources else maxResources
+        // "per 20 Unreserved Darkness": the engines keep what is not reserved as a buff's stacks
+        // where a line asks for it
+        let maxResources =
+            if sheet.Mods |> List.exists (fun m -> m.Conds |> List.exists (function PerStack ("UnreservedDarkness", _) -> true | _ -> false))
+            then Map.add "UnreservedDarkness" (int vitals.Darkness) maxResources else maxResources
         // bolts that build up by themselves: full at the start
         let maxResources, startResources =
             match Behaviours.storedBolts db sheet build with
@@ -779,7 +784,7 @@ module Setup =
                 @ Behaviours.selfIgnite sheet
                 @ Behaviours.rareModsOnKill sheet
                 @ Behaviours.totemRecently sheet pressedSkills
-                @ Behaviours.recentStates sheet pressedSkills @ Behaviours.intimidateOnImmobilise sheet @ Behaviours.debilitateOnWarcry sheet
+                @ Behaviours.recentStates sheet pressedSkills @ Behaviours.intimidateOnImmobilise sheet @ Behaviours.debilitateOnWarcry sheet @ Behaviours.fearIncarnate sheet pressedSkills
                 @ (thorns |> Option.map snd |> Option.toList)
                 @ (match arctic with Some (_, r, _, _) -> r | None -> [])
                 @ Behaviours.scavengedPlating db sheet c.Build
@@ -933,6 +938,10 @@ module Setup =
             [ "ActiveMinions", persistent.Length
               "PersistentMinionTypes", persistent |> List.map kind |> List.distinct |> List.length
               "CompanionTypes", persistent |> List.filter isCompanion |> List.map kind |> List.distinct |> List.length ]
+            // ("for each Minion in your Presence, up to ...": counted up to what the line names)
+            @ (player.Mods |> List.collect (fun m -> m.Conds) |> List.choose (function
+                | PerStack (name, _) when name.StartsWith "ActiveMinionsUpTo:" -> Some(name, min persistent.Length (int (name.Substring 18)))
+                | _ -> None) |> List.distinct)
             |> List.filter (fun (_, n) -> n > 0)
         let counted (a: Actor) =
             { a with Resources = a.Resources @ minionCounts; MaxResources = minionCounts |> List.fold (fun acc (k, n) -> Map.add k n acc) a.MaxResources }

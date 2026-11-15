@@ -3197,9 +3197,24 @@ module Sim =
                 let w = react env rng actor OnHit skill (Some target) w
                 if hit.Crit then react env rng actor OnCrit skill (Some target) w else w
 
+    /// "Gain X% of Damage as Extra Chaos Damage per 20 Unreserved Darkness": the Darkness that
+    /// is not reserved now, as the stacks of a buff the player's hits ask about. Looked at when
+    /// a strike of the player's is due (a reservation ends by itself, at no event), where the
+    /// character has the line (the resource "UnreservedDarkness" is among its maxima then).
+    let private syncDarkness (env: Env) (actor: Actor) (w: World) =
+        match actor.Vitals, w.Player with
+        | Some pools, Some p when pools.Darkness > 0.0 && actor.MaxResources.ContainsKey "UnreservedDarkness" ->
+            let live = p.Darkness |> List.filter (fun (until, _) -> until > w.Time)
+            let n = int (floor (max 0.0 (pools.Darkness - (live |> List.sumBy snd))))
+            match Map.tryFind "UnreservedDarkness" (Map.find actor.Name w.Actors).Buffs with
+            | Some e when e.Stacks = n -> w
+            | _ -> updateActor actor.Name (fun st -> { st with Buffs = Map.add "UnreservedDarkness" { Name = "UnreservedDarkness"; Mods = []; Stacks = n; Expires = infinity } st.Buffs }) w
+        | _ -> w
+
     let private onStrike env (rng: Rng) name skillName mult aimedAt (elapsed: float option) (direct: bool) (w: World) =
         let actor = actorDef env name
         let skill = skillOf actor skillName
+        let w = syncDarkness env actor w
         let living = alive w |> List.map (fun e -> e.Def)
         // Aim where the use was aimed; if that enemy died meanwhile, at the next one.
         let primary =

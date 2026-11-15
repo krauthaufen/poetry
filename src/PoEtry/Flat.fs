@@ -1134,6 +1134,8 @@ module Flat =
               LifeCosts: bool
               /// Whether anything of the actor's makes life leech go by more than physical damage.
               LeechTypes: bool
+              /// The buff whose stacks are the Darkness not reserved (-1: nothing asks, `Sim.syncDarkness`).
+              BUnreservedDarkness: int
               /// Whether any meta gem gains energy from hits.
               MetaHits: bool
               /// What a full Infernal Flame burns, percent of maximum life and energy shield.
@@ -2204,6 +2206,10 @@ module Flat =
                       Builders = builders
                       Banners = banners
                       HasSigil = sigils.Count > 0
+                      BUnreservedDarkness =
+                        (match actor.Vitals with
+                         | Some pools when pools.Darkness > 0.0 && actor.MaxResources.ContainsKey "UnreservedDarkness" -> buffs.Id "UnreservedDarkness"
+                         | _ -> -1)
                       LeechTypes =
                         (let named (m: Mod) = match m.Stat with Named n -> n.StartsWith "LeechFrom:" || n = "LeechNotFromPhysical" | _ -> false
                          actor.Mods |> List.exists named || actor.Skills |> List.exists (fun sk -> sk.Mods |> List.exists named))
@@ -6209,8 +6215,21 @@ module Flat =
             release s
 
     /// A strike lands: who is hit, and each hit (`Sim.onStrike`).
+    /// The Darkness that is not reserved now, as the stacks of a buff (`Sim.syncDarkness`).
+    let private syncDarkness (s: State) =
+        let id = s.P.BUnreservedDarkness
+        match s.P.Vitals with
+        | Some pools ->
+            let mutable reserved = 0.0
+            for (until, amount) in s.Darkness do
+                if until > s.Time then reserved <- reserved + amount
+            let n = int (floor (max 0.0 (pools.Darkness - reserved)))
+            if not (at s.A.BHas id) || (at s.A.BStacks id) <> n then setBuff s id n infinity []
+        | None -> ()
+
     let private onStrike (s: State) (rng: Rng) (sid: int) (mult: float) (aimedAt: int) (elapsed: float) (passing: bool) (direct: bool) =
         let p = s.P
+        if p.BUnreservedDarkness >= 0 then syncDarkness s
         let alive = living s
         // Aim where the use was aimed; if that enemy died meanwhile, at the next one.
         let primary = if (at s.Foes aimedAt).Life > 0.0 then aimedAt else s.Aimed

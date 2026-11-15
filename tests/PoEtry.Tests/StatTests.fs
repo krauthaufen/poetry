@@ -2183,3 +2183,40 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         equal (box true) (box (float shared.["Shockwave Totem"] * 75.0 + float (shared.["Skeletal Warrior Minion"] - per.FreeMinions) * per.PerMinion <= spirit))
         // build 017 of the corpus has the keystone and no totem gem: nothing to place
         equal 0 (Behaviours.totems db.Value { c.Sheet with Mods = bonded.Mods } { b with Groups = [ group [ gem "Spark" ] ] } |> fst).Length)
+
+    test "Darkness: damage gained as chaos per 20 Unreserved Darkness; Fear Incarnate; minions in the Presence counted up to a cap" (fun () ->
+        let gain = mods "gain_%_damage_as_chaos_from_unreserved_darkness" 10.0
+        equal (box [ PerStack("UnreservedDarkness", 20.0) ]) (box gain.Head.Conds)
+        // 100 Darkness, none reserved: 5 x 10% of a bolt's 100 fire as chaos, 150 a bolt
+        let bolt = { Skill.make "Bolt" [ Spell ] with BaseDamage = Map.ofList [ Fire, Range.fixedAt 100.0 ]; BaseTime = 0.5; BaseCrit = 0.0 }
+        let fight attack =
+            let player =
+                { Actor.make "Player" gain [ bolt ] with
+                    Rotation = [ Actor.always "Bolt" ]
+                    Vitals = Some { PlayerStats.basic 10000.0 0.0 with Darkness = 100.0; DarknessSeconds = 3.0 }
+                    MaxResources = Map.ofList [ "UnreservedDarkness", 100 ] }
+            Fight.single { EnemyDef.atLevel 83 1e9 with Mods = []; Attack = attack } player 10.2
+        let o = Sim.run (fight None) 1u
+        near (150.0 * float (count o "hits:Bolt")) (o.DamageBy |> Map.toList |> List.sumBy snd)
+        // a monster's hits of 45 every 0.8 s: each reserves 45 for 3 s, so between 0 and 4
+        // twenties are unreserved and the bolts deal less; the same in both engines
+        let hits = Some { Interval = 0.8; Damage = Map.ofList [ Physical, 45.0 ]; Accuracy = 1e9; Range = 40.0; CritChance = 0.0; Melee = false }
+        let o' = Sim.run (fight hits) 1u
+        let total = o'.DamageBy |> Map.toList |> List.sumBy snd
+        equal (box true) (box (total < 150.0 * float (count o' "hits:Bolt") - 100.0 && total >= 100.0 * float (count o' "hits:Bolt")))
+        same (fight None) seeds
+        same (fight hits) seeds
+        // Fear Incarnate: 10% increased Culling Strike Threshold a stack, 10 s, up to 20, on a
+        // cull by a skill that has Culling Strike
+        let c = load blank Options.defaults
+        let sheet = { c.Sheet with Mods = c.Sheet.Mods @ mods "grant_fear_incarnate_stack_on_culling_enemies" 1.0 }
+        let culling = { bolt with Name = "Reap"; Mods = [ Mod.flag (Named "CullingStrike") ] }
+        match Behaviours.fearIncarnate sheet [ bolt; culling ] with
+        | [ { Hook = OnKillOf "Cullable"; Filter = Called "Reap"; Reaction = GrantBuff ("Fear Incarnate", 10.0, 20, [ m ]) } ] ->
+            equal (box (Named "CullingThreshold", Inc, 10.0)) (box (m.Stat, m.Kind, m.Value))
+        | other -> failwithf "unexpected %A" other
+        // "4% increased Attack Damage for each Minion in your Presence, up to a maximum of 80%": up to 20 minions
+        let per = (mods "gain_attack_damage_+%_for_each_your_minion_in_presence_capped" 4.0).Head
+        equal (box (Damage AllDamage, Inc, 4.0)) (box (per.Stat, per.Kind, per.Value))
+        equal (box true) (box (List.contains (PerStack("ActiveMinionsUpTo:20", 1.0)) per.Conds))
+        equal (box (Mods [ Mod.inc AreaOfEffect 20.0 |> Mod.whenever (SkillIs(Tag "Type:Hazard")) ])) (box (StatMap.meaning "hazard_area_of_effect_+%" 20.0)))

@@ -1449,6 +1449,19 @@ module Behaviours =
         | seconds when seconds > 0.0 -> [ "Withered", 1, snd (keywordEffect db "Withered"), seconds ]
         | _ -> []
 
+    /// "Gain 1 Fear Incarnate when you Cull a target": "Each Fear Incarnate grants 10% increased
+    /// Culling Strike Threshold and lasts 10 seconds", "up to a maximum of 20" (the game's
+    /// keyword text). A cull is a kill, by a skill that has Culling Strike whatever the enemy,
+    /// of an enemy that was within its reach (see `cullRules`).
+    let fearIncarnate (sheet: CharacterSheet) (skills: Skill list) : Rule list =
+        let db = ModDb.ofList sheet.Mods
+        if not (Mods.flag Ctx.empty (Named "FearIncarnateOnCull") db) then []
+        else
+            let buff = GrantBuff("Fear Incarnate", Constants.fearIncarnateSeconds, Constants.fearIncarnateStacks, [ Mod.inc (Named "CullingThreshold") Constants.fearIncarnateThreshold |> Mod.from "Fear Incarnate" ])
+            skills
+            |> List.filter (fun s -> Mods.flag { Ctx.empty with SkillTags = s.Tags; SkillName = s.Name } (Named "CullingStrike") (ModDb.ofList (sheet.Mods @ s.Mods)))
+            |> List.map (fun s -> { Hook = OnKillOf "Cullable"; Filter = Called s.Name; Chance = 100.0; Reaction = buff })
+
     /// "Warcries Debilitate Enemies": "Debilitate inflicts 20% reduced movement speed and 10%
     /// reduced damage dealt" (the game's keyword text), for the stat's second, on the enemy the
     /// warcry is aimed at (the others in its area are not looked at).
