@@ -1203,9 +1203,13 @@ module StatMap =
         | "trinity_resonance_to_grant" -> one (Mod.base' (Named "TrinityGain") v)
         | "trinity_loss_per_hit" -> one (Mod.base' (Named "TrinityLoss") v)
         | "trinity_resonance_decay_delay_ms" | "trinity_resonance_loss_per_second" -> Some Structural
-        // Wind Dancer: more evasion per stage; taken at full stages (they return within seconds)
-        | "wind_dancer_evasion_rating_+%_final_per_stage" -> one (Mod.more Evasion (v * 3.0))
-        | "wind_dancer_stages_gained_every_x_ms" | "wind_dancer_maximum_number_of_stages" -> Some Structural
+        // Wind Dancer: more evasion per stage held (Behaviours.windDancer: stages build up, a hit
+        // on the player takes them)
+        | "wind_dancer_evasion_rating_+%_final_per_stage" -> one (Mod.more Evasion v |> Mod.whenever (PerStack("WindDancerStage", 1.0)))
+        // (read where Gale Force is built: Behaviours.windDancer)
+        | "wind_dancer_stages_gained_every_x_ms" | "wind_dancer_maximum_number_of_stages" | "chance_to_trigger_wind_dancer_on_taken_hit_%"
+        | "wind_dancer_damage_+%_final_per_stage" | "wind_dancer_area_of_effect_+%_final_per_stage" -> Some Structural
+        | "wind_dancer_knockback_+%_final_per_stage" -> one (Mod.more (Named "KnockbackDistance") v |> Mod.whenever (PerStack("WindDancerStage", 1.0)))
         // Overwhelming Presence: monsters near you are easier to stun and to inflict ailments on
         | "skill_overwhelming_pressure_aura_enemy_ailment_threshold_+%" -> one (Mod.more (Named "EnemyAura:AilmentThreshold") v)
         | "skill_overwhelming_pressure_aura_enemy_stun_threshold_+%" -> one (Mod.more (Named "EnemyAura:PoiseThreshold") v)

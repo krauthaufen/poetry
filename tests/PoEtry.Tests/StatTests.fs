@@ -1118,6 +1118,35 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         same (fight (mods "cannot_inflict_blind" 1.0)) seeds
         equal (box Structural) (box (StatMap.meaning "projectiles_cannot_split" 1.0)))
 
+    // ---- Wind Dancer ----
+
+    test "Wind Dancer: stages build up, a hit on the player with one held sets off Gale Force with the group's supports, which takes them" (fun () ->
+        let mace = "Weapon 1", "Rarity: Normal\nPlated Mace\n--------\n"
+        let c = load { blank with Items = [ mace ]; Groups = [ group [ gem "Wind Dancer"; support "Blind II" ] ]; ExtraLines = [ "+100 to Spirit" ] } Options.defaults
+        match Behaviours.windDancer db.Value c.Sheet c.Build with
+        | Some ([ gale ], [ rule ], [ periodic ], most) ->
+            equal (box 3) (box most)
+            equal (box (Some "WindDancerStage")) (box gale.Consumes)
+            if not (gale.Mods |> List.exists (fun m -> m.Stat = AilmentChance Blind && m.Value > 0.0)) then failwith "Blind II does not support Gale Force"
+            equal (box WhenHit) (box rule.Hook)
+            near 1.12 periodic.Every
+        | other -> failwithf "%A" other
+        // in a fight against a brute that hits once a second: Gale Force goes off, the brute is Blinded
+        let player = Setup.player c Options.defaults [] None
+        let brute =
+            { EnemyDef.make Rarity.defaults 70 Magic "brute" (Vec.make 5.0 0.0) with
+                Life = 1e9
+                Attack = Some { Interval = 1.0; Damage = Map.ofList [ Physical, 10.0 ]; Accuracy = 1e9; Range = 20.0; CritChance = 0.0; Melee = true } }
+        let player = { player with Vitals = player.Vitals |> Option.map (fun v -> { v with Evasion = 0.0; Deflection = 0.0; StunThreshold = 1e9; AilmentThreshold = 1e9 }); VitalsAt = None }
+        let fight = Fight.single brute player 10.0
+        let out = Sim.run fight 1u
+        let gale = "Wind Dancer: Gale Force"
+        if count out ("uses:" + gale) < 3 then failwithf "%d uses" (count out ("uses:" + gale))
+        if (Map.tryFind "Blinded" out.Uptime |> Option.defaultValue 0.0) <= 0.0 then failwith "never blinded"
+        // each use takes all stages: never more uses than stages could build (3 at the start, one every 1.12 s)
+        if count out ("uses:" + gale) > 3 + int (10.0 / 1.12) then failwith "stages not taken"
+        same fight seeds)
+
     // ---- Flame Breath ----
 
     test "Empowered Flame Breath: a use with a Power Charge to consume gains 50% of its damage as lightning" (fun () ->

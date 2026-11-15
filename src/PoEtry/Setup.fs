@@ -641,6 +641,8 @@ module Setup =
         let heraldSkills = heraldSkills @ starSkills
         let ashSkills, overkillBurns = Behaviours.heraldOfAsh db sheet c.Build
         let heraldSkills = heraldSkills @ ashSkills
+        let windDancer = Behaviours.windDancer db sheet c.Build
+        let heraldSkills = heraldSkills @ (match windDancer with Some (s, _, _, _) -> s | None -> [])
         // skills an item triggers on hit: built like a pressed gem, used only by their rule
         let itemTriggered =
             Behaviours.itemTriggers sheet (c.Vitals.Str, c.Vitals.Dex, c.Vitals.Int)
@@ -714,6 +716,7 @@ module Setup =
                 // ("Buffs on you expire X% faster": the buffs these give the character)
                 Behaviours.buffsExpire sheet (grantRules @ (used |> List.collect (fun (_, p) -> p.Rules)) @ heraldRules @ Behaviours.keywordRules sheet pressedSkills)
                 @ Behaviours.selfIgnite sheet
+                @ (match windDancer with Some (_, r, _, _) -> r | None -> [])
                 @ Behaviours.shockedGround sheet
                 @ fst (Behaviours.summons db sheet c.Build pressedSkills)
                 @ snd (Behaviours.ancestralSpirits db sheet c.Build c.Vitals.Str c.Vitals.Dex (c.Minions |> List.filter (fun m -> m.ActiveWhile |> Option.exists (fun b -> b.EndsWith " buff"))))
@@ -741,6 +744,8 @@ module Setup =
                    if not spammed.IsEmpty && spammed |> List.forall onTheMove && (gains sheet.Mods || used |> List.exists (fun (_, p) -> gains p.Skill.Mods)) then [ "Moving", 1 ]
                    else [])
                 @ (if frenzy.IsSome then [ "CombatFrenzyReady", 1 ] else [])
+                // Wind Dancer's stages build up before the fight, by themselves
+                @ (match windDancer with Some (_, _, _, most) when not o.StartEmpty -> [ "WindDancerStage", most ] | _ -> [])
                 // a Whirlwind the character builds is built up before the fight (it lasts while
                 // the character stands in it), like a charge that needs no kill
                 @ (let stages = Behaviours.whirlwindStages db c.Build
@@ -760,11 +765,12 @@ module Setup =
             // (with the weapon set in hand: the buffs of the moment don't say which it is)
             VitalsAt = Some(fun current -> Defence.computeWith (if c.SheetSetTwo then Map.add "WeaponSetTwo" 1 current else current) c.Bases sheet)
             VitalsReads = Some(Defence.reads sheet)
-            Periodics = c.Periodics @ snd (Behaviours.summons db sheet c.Build pressedSkills) @ starPeriodics @ (frenzy |> Option.map fst |> Option.toList)
+            Periodics = c.Periodics @ snd (Behaviours.summons db sheet c.Build pressedSkills) @ starPeriodics @ (frenzy |> Option.map fst |> Option.toList) @ (match windDancer with Some (_, _, p, _) -> p | None -> [])
             MaxResources =
                 Map.fold (fun m k v -> Map.add k v m) c.MaxResources infusionMaxima |> (if frenzy.IsSome then Map.add "CombatFrenzyReady" 1 else id)
                 |> (let stages = Behaviours.whirlwindStages db c.Build
                     if stages > 0 then Map.add "Whirlwind" stages else id)
+                |> (match windDancer with Some (_, _, _, most) -> Map.add "WindDancerStage" most | None -> id)
             ResourceDurations = Map.fold (fun m k v -> Map.add k v m) (Behaviours.chargeDurations sheet) (Behaviours.infusionDurations db sheet c.Build)
             KeptChargesPause = o.KeptChargesPause
             // user: stored uses are "just two cooldowns"

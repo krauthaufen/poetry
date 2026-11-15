@@ -87,6 +87,54 @@ module Behaviours =
                 Some(int shrouds, stat "skill_base_ghost_dance_grants_%_evasion_as_es_regeneration_per_minute_if_have_lost_ghost_dance_shroud_recently" / 60.0)
             else None)
 
+    /// Wind Dancer: "periodically grants stages of a buff ... Being Hit by an Enemy while you
+    /// have this buff consumes all stages to damage and Knock Back enemies around you". A stage
+    /// every `wind_dancer_stages_gained_every_x_ms`, up to `wind_dancer_maximum_number_of_stages`;
+    /// a hit on the player with a stage held triggers the gem's second skill, Gale Force (an
+    /// attack with the group's supports, `chance_to_trigger_wind_dancer_on_taken_hit_%`), which
+    /// deals `wind_dancer_damage_+%_final_per_stage` more and has
+    /// `wind_dancer_area_of_effect_+%_final_per_stage` more area per stage, and takes them all.
+    /// Returns the skill, its rules, the periodic that grants stages, and the most stages.
+    let windDancer (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) : (Skill list * Rule list * Periodic list * int) option =
+        let mods = ModDb.ofList sheet.Mods
+        build.Groups |> List.filter (fun g -> g.Enabled)
+        |> List.tryPick (fun g ->
+            let enabled = g.Gems |> List.filter (fun x -> x.Enabled)
+            let supports = enabled |> List.filter (fun x -> x.IsSupport) |> List.map (fun x -> x.Name, x.Level)
+            enabled
+            |> List.filter (fun x -> not x.IsSupport)
+            |> List.tryPick (fun gem ->
+                let gale = Map.tryFind gem.Name db.Gems |> Option.bind (fun gd -> gd.AdditionalEffects |> List.tryFind (fun id -> id = "TriggeredWindDancerPlayer"))
+                match gale with
+                | None -> None
+                | Some id ->
+                    let raw = Gems.rawStats db mods { Gem = gem.Name; Level = gem.Level; Quality = gem.Quality; StatSet = 1; Supports = [] }
+                    let stat (raw: (string * float) list) k = raw |> List.filter (fun (s, _) -> s = k) |> List.sumBy snd
+                    let every = stat raw "wind_dancer_stages_gained_every_x_ms" / 1000.0
+                    let most = int (stat raw "wind_dancer_maximum_number_of_stages")
+                    match Gems.skill db mods (Gems.chooseWeapon db gem.Name sheet.Weapons) { Gem = id; Level = gem.Level; Quality = gem.Quality; StatSet = 1; Supports = supports } with
+                    | Ok (s, _) when every > 0.0 && most > 0 ->
+                        let own = Gems.rawStats db mods { Gem = id; Level = gem.Level; Quality = gem.Quality; StatSet = 1; Supports = [] }
+                        let perStage m = m |> Mod.whenever (PerStack("WindDancerStage", 1.0)) |> Mod.from "Wind Dancer stages"
+                        let name = gem.Name + ": " + s.Name
+                        let skill =
+                            { s with
+                                Name = name
+                                Tags = s.Tags.Add Triggered
+                                Cost = 0.0
+                                Consumes = Some "WindDancerStage"
+                                Mods =
+                                    s.Mods
+                                    @ [ perStage (Mod.more (Damage AllDamage) (stat own "wind_dancer_damage_+%_final_per_stage"))
+                                        perStage (Mod.more AreaOfEffect (stat own "wind_dancer_area_of_effect_+%_final_per_stage")) ] }
+                        let chance = match stat own "chance_to_trigger_wind_dancer_on_taken_hit_%" with 0.0 -> 100.0 | c -> c
+                        Some(
+                            [ skill ],
+                            [ { Hook = WhenHit; Filter = AnySkill; Chance = chance; Reaction = IfBuff("WindDancerStage", TriggerSkill name) } ],
+                            [ { Name = "wind dancer stages"; Every = every; Action = GainRandom [ "WindDancerStage" ] } ],
+                            most)
+                    | _ -> None))
+
     /// Bolts that build up by themselves (Hailstorm Rounds: "Passively generate bolts of ice at
     /// a frequency equal to reload time, up to a cap"): the most that are kept, and the seconds
     /// one takes (the weapon's reload time over reload and attack speed, as a reload would be).
