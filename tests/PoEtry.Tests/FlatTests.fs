@@ -1488,10 +1488,36 @@ let run (test: string -> (unit -> unit) -> unit) =
             | Ok _ -> failwithf "compiled, but has %s" reason
             | Error why -> if not (why.Contains reason) then failwithf "refused for '%s', expected '%s'" why reason
         if not (Flat.unsupported fine).IsEmpty then failwithf "a plain fight is refused: %A" (Flat.unsupported fine)
-        refused { fine with Minions = [ Actor.make "Player" [] [ strike "Bite" 1.0 2.0 ] ] } "actors of the same name"
-        // both reasons of a fight with two
-        if (Flat.unsupported { fine with Minions = [ Actor.make "Hound" [] [ strike "Bite" 1.0 2.0 ]; Actor.make "Hound" [] [ strike "Bite" 1.0 2.0 ] ] }) <> [ "actors of the same name" ] then
-            failwith "expected one reason")
+        ignore refused)
+
+    test "flat: actors of one name are two actors, each with a state of its own" (fun () ->
+        let body : MinionBody = { Life = 3000.0; EnergyShield = 100.0; Armour = 0.0; Evasion = 1500.0; Resist = Map.empty; Melee = true; Size = 3.0; Reach = 10.0; Revive = Some 3.0; Power = 1.0; LifeRegen = 5.0; TakesForOwner = 0.0; Explodes = None }
+        let player = { Actor.make "Player" [ Mod.inc CritChance 100.0 ] [ spell "Bolt" Fire 100.0 200.0 ] with Vitals = Some(PlayerStats.basic 50000.0 500.0) }
+        let hound name power =
+            { Actor.make name [ Mod.inc CritChance 50.0 ] [ { strike "Bite" (100.0 * power) (200.0 * power) with Cooldown = Some 1.3 }; strike "Claw" 30.0 60.0 ] with
+                Rotation = [ Actor.always "Bite"; Actor.always "Claw" ]
+                Body = Some body
+                Rules = [ { Hook = OnCrit; Filter = AnySkill; Chance = 100.0; Reaction = GrantBuff("Frenzied", 3.0, 3, [ Mod.inc Speed 15.0 ]) } ]
+                Resources = (if power > 1.0 then [ "PowerCharge", 2 ] else []) }
+        let fight minions = { Fight.single (EnemyDef.make Rarity.defaults 80 Rare "boss" (Vec.make 12.0 0.0) |> fun e -> { e with Life = 1e9 }) player 20.0 with Minions = minions }
+        let few = [ 1u .. 8u ]
+        // two of one name, that differ; three; one that goes by the player's name
+        let two = fight [ hound "Hound" 1.0; hound "Hound" 3.0 ]
+        same two few
+        same (fight [ hound "Hound" 1.0; hound "Hound" 3.0; hound "Hound" 2.0; hound "Hound #2" 5.0 ]) few
+        same (fight [ hound "Player" 2.0; hound "Hound" 1.0 ]) few
+        if not (Flat.unsupported two).IsEmpty then failwithf "refused: %A" (Flat.unsupported two)
+        // they play as the same fight with the names apart does, whichever engine
+        let apart = fight [ hound "Hound" 1.0; hound "Hound #2" 3.0 ]
+        for seed in few do
+            let a, b = Sim.run two seed, Sim.run apart seed
+            if sprintf "%A" a <> sprintf "%A" b then failwithf "seed %d: two of one name do not play as two" seed
+        // each bites on its own cooldown: about twice the bites of one
+        let one = Sim.run (fight [ hound "Hound" 1.0 ]) 1u
+        let both = Sim.run two 1u
+        if not (both.Counts.["uses:Bite"] >= 2 * one.Counts.["uses:Bite"] - 2) then failwithf "bites: one %d, two %d" one.Counts.["uses:Bite"] both.Counts.["uses:Bite"]
+        // the names of a fight that are apart already are left as they are
+        if not (obj.ReferenceEquals(Fight.apart apart, apart)) then failwith "a fight with names apart was changed")
 
     test "flat: a skill that goes by a name the reference keeps a cooldown of its own under shares it" (fun () ->
         // the seals of a skill, under "SealBreak:<skill>"

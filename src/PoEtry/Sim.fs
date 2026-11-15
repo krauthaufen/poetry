@@ -452,6 +452,28 @@ module Fight =
           Replace = false
           MaxTime = maxTime }
 
+    /// The fight with every actor under a name of its own: the engines keep an actor's
+    /// state by its name, so two of one name are told apart before a fight starts. A minion
+    /// that goes by the player's name, or by that of a minion before it, plays as that name
+    /// with " #2" (or the first number that is free). A fight whose names are apart already
+    /// is given back as it is.
+    let apart (fight: Fight) : Fight =
+        let given = fight.Player.Name :: (fight.Minions |> List.map (fun m -> m.Name))
+        if (List.distinct given).Length = given.Length then fight
+        else
+            let all = Set.ofList given
+            let minions, _ =
+                fight.Minions
+                |> List.fold (fun (done': Actor list, taken: Set<string>) m ->
+                    if not (taken.Contains m.Name) then m :: done', taken.Add m.Name
+                    else
+                        let rec free (k: int) =
+                            let name = m.Name + " #" + string k
+                            if taken.Contains name || all.Contains name then free (k + 1) else name
+                        let name = free 2
+                        { m with Name = name } :: done', taken.Add name) ([], Set.singleton fight.Player.Name)
+            { fight with Minions = List.rev minions }
+
 /// A timed effect with stacks.
 type Effect =
     { Name: string
@@ -4182,6 +4204,7 @@ module Sim =
 
     /// Simulate one fight with the given seed.
     let private runWith (trace: (float -> string -> string -> string -> float -> unit) option) (tracing: bool) (fight: Fight) (seed: uint32) : Outcome =
+        let fight = Fight.apart fight
         let env = envOf trace fight
         let rng = Rng(seed)
         /// Expiry events for the resources an actor starts with.
