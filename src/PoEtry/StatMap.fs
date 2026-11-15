@@ -806,6 +806,8 @@ module StatMap =
         // ---- thresholds, stuns and ailments on yourself ----
         | "stun_threshold_+" -> one (Mod.base' (Named "StunThreshold") v)
         | "stun_threshold_+%" -> one (Mod.inc (Named "StunThreshold") v)
+        // "Every Rage also grants X% increased Stun Threshold"
+        | "stun_threshold_+%_per_rage" -> one (Mod.inc (Named "StunThreshold") v |> Mod.whenever (PerStack("Rage", 1.0)))
         | "stun_threshold_+_from_%_maximum_energy_shield" -> one (Mod.base' (Named "StunThresholdFromES") v)
         | "ailment_threshold_+" -> one (Mod.base' (Named "PlayerAilmentThreshold") v)
         | "ailment_threshold_+%" -> one (Mod.inc (Named "PlayerAilmentThreshold") v)

@@ -1089,6 +1089,12 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         equal (box 3) (box (count (Sim.run (fight 30.0) 1u) "consumed:EnduranceCharge"))
         same (fight 30.0) seeds)
 
+    test "Every Rage also grants X% increased Stun Threshold: in the fight, by the Rage held" (fun () ->
+        let c = load { blank with ExtraLines = [ "Every Rage also grants 2% increased Stun Threshold" ] } Options.defaults
+        let p = Setup.player c Options.defaults [] None
+        let at rage = (p.VitalsAt.Value (Map.ofList [ "Rage", rage ])).StunThreshold
+        near (at 0 * 1.2) (at 10))
+
     // ---- Flame Breath ----
 
     test "Empowered Flame Breath: a use with a Power Charge to consume gains 50% of its damage as lightning" (fun () ->
