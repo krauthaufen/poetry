@@ -18,7 +18,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
    whose description or behaviour changed.
 5. Go through the lists below; the wiki's version history of a skill says what changed.
 
-## Rules (160)
+## Rules (164)
 
 ### Hit damage
 
@@ -168,7 +168,11 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | Frost Bomb's exposure | "Initially applies {0}% Elemental Exposure and {1}% Exposure per pulse, up to a maximum of {2}%" (`active_skill_all_elemental_exposure_compounding_magnitude`, `_cap`) | data / guess |
 | The Stars Answer | game data, wiki. Active for the whole fight (it has no duration in the data, the cast is taken to be before the fight) is a guess; more stars per enemy in its radius after the first are not counted | data; guess |
 | Triskelion Cascade | game data. The pattern's measures are not in the data: impacts spaced like Spell Cascade's (1.5 radii), the arms turned at random. The share of the spell's cast time added to the cooldown is not counted | data; pattern guess |
-| Oil Ground | gem data, buff text "Oiled Ground: inflicted with Fire Exposure"; adding the 20% to the keyword's 20% and staying in the oil are guesses | guess |
+| Oil Ground | gem data, stat descriptions; one patch a use, patches that fall together being one, and a spray that covers exactly who is in the patch are ours | data / guess |
+| Covered in Oil | keyword texts (poe2db: Covered in Oil, Oil Ground), game table BuffDefinitions (`covered_in_oil`, `ground_oil`), gem data. Fire only, and only while in the patch: guesses | data / guess |
+| What lit Oil burns with | gem data (`skill_main_hand_total_attack_fire_damage_permyriad_to_add_as_unscalable_damage_to_oil_ground_ignite`). That the ground carries the Ignite that lit it: the user's account of the build (the ground burns with Flameblast's Ignite) and build guides ("this will spread the ignite from our Flameblast", "it will remember your ignite damage", "wait for all the ignited ground to die out and redo", and that any other source of Ignite spoils it; mobalytics, 0.5.5). Ground before enemies, and how the addition enters: ours | guess |
+| Ignited Ground | keyword text (poe2db; 6 s before 0.4), wiki Ignite (igniting aura effects, version history 0.4.0) | data; outright and without a gap: guess; other sources: missing |
+| Tornado | gem data, stat descriptions, wiki Tornado; build guides (the Tornado "will pick up the burning ground effect"). That it keeps the first Ignite it took, that the ground stays, and the extra damage of a storm scaled once: guesses | data / guess |
 | Ice Crystals (Grim Pillars) | gem stats (`wall_maximum_length`, `frost_wall_maximum_life`); wiki Ice Crystal ("larger enemies can walk through them and destroy them", 80% less within 0.5 s); user (no explosion on expiry); placement, one crystal per 0.8 m, and enemy life lost standing for damage to the crystal, are guesses | guess |
 | What a fight starts with | user: buffs that last may be up when the fight starts, what comes from the last kill is not, bosses have introductions far longer than 4 s | guess |
 | Darkness | stat descriptions (base_darkness, darkness_per_level, base_darkness_refresh_rate_ms) | data; that all types are reserved by one share, and that recoup counts only what got past: guess |
