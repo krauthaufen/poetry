@@ -840,6 +840,21 @@ let main _ =
         // bites land at 1 .. 5 s: those at 1 and 2 s are within the three seconds
         near (2.0 * 150.0 + 3.0 * 100.0) o.DamageBy.["Bite (hit)"])
 
+    test "Rageforged: a use with 10 Rage to spend spends it before its hits for 35% more damage; with a 100% chance to skip, it keeps the Rage" (fun () ->
+        let bolt = { fireSpell 100.0 with Mods = [ Mod.base' (Named "RageforgedSpend") 10.0; Mod.base' (Named "RageforgedMore") 35.0 ] }
+        let player = { Actor.make "Player" [ noIgnite ] [ bolt ] with Resources = [ "Rage", 20 ]; MaxResources = Map.ofList [ "Rage", 30 ] }
+        let f = { Fight.single (boss 1e12) player 3.5 with MaxTime = 3.5 }
+        let o = Sim.run f 1u
+        // hits at 1, 2 and 3 s: the first two spend 10 Rage each, the third has none to spend
+        near (135.0 + 135.0 + 100.0) o.DamageBy.["Bolt (hit)"]
+        equal 2 o.Counts.["rageforged:Bolt"]
+        let kept = { bolt with Mods = Mod.base' (Named "RageSkipChance") 100.0 :: bolt.Mods }
+        let o = Sim.run { f with Player = { player with Skills = [ kept ] } } 1u
+        near (3.0 * 135.0) o.DamageBy.["Bolt (hit)"]
+        // the gem: 10 Rage for 35% more, Rageforged II a 30% chance to keep it
+        let stats = StatMap.meaning "support_rageforged_consumes_X_rage_to_enrage_skill_use" 10.0, StatMap.meaning "support_rageforged_enraged_damage_+%_final" 35.0, StatMap.meaning "rage_skip_consume_chance_%" 30.0
+        equal (box (Mods [ Mod.base' (Named "RageforgedSpend") 10.0 ], Mods [ Mod.base' (Named "RageforgedMore") 35.0 ], Mods [ Mod.base' (Named "RageSkipChance") 30.0 ])) (box stats))
+
     test "a minion's mod read off the player's buffs: 50% increased damage while the player has Rally" (fun () ->
         // the player gives itself Rally for 3 s at 0 s; the minion's own Rally is not the player's
         let call = { Skill.make "Call" [ Spell ] with Hits = []; Cooldown = Some 100.0 }

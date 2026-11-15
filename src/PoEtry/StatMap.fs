@@ -971,6 +971,11 @@ module StatMap =
         // what minions have while the player is in some state ("if you've Hit Recently", "while
         // you are affected by a Herald", "while you are not on full Mana"): read off the player's
         // buffs and states (`OfOwner`)
+        // Rageforged: "Supported Skills spend X Rage if possible to deal Y% more Damage", "Z% chance
+        // to gain the benefits of this Support without spending additional Rage" (Sim.startUse)
+        | "support_rageforged_consumes_X_rage_to_enrage_skill_use" -> one (Mod.base' (Named "RageforgedSpend") v)
+        | "support_rageforged_enraged_damage_+%_final" -> one (Mod.base' (Named "RageforgedMore") v)
+        | "rage_skip_consume_chance_%" -> one (Mod.base' (Named "RageSkipChance") v)
         | "minion_damage_+%_if_enemy_hit_recently" -> one (Mod.inc (ForMinions(Damage AllDamage)) v |> Mod.whenever (OfOwner(WhileBuff "HitRecently")))
         | "minion_damage_+%_while_affected_by_a_herald" -> one (Mod.inc (ForMinions(Damage AllDamage)) v |> Mod.whenever (OfOwner(WhileBuff "AffectedByAHerald")))
         | "minion_attack_and_cast_speed_+%_while_you_are_affected_by_a_herald" -> one (Mod.inc (ForMinions Speed) v |> Mod.whenever (OfOwner(WhileBuff "AffectedByAHerald")))

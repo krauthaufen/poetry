@@ -1784,6 +1784,26 @@ module Sim =
             let st = Map.find actor.Name w.Actors
             let ctx = Skill.ctx skill false (skillStacks actor skill st) (status target) |> owned env w
             let mods = skillDb env actor skill st
+            // Rageforged: "Supported Skills spend X Rage if possible to deal Y% more Damage": the
+            // use spends the Rage before its hits, when there is that much, and its hits deal more;
+            // "Z% chance to gain the benefits of this Support without spending additional Rage"
+            let rageforged, w =
+                let spend = Mods.sumBase ctx [ Named "RageforgedSpend" ] mods
+                match Map.tryFind "Rage" st.Buffs with
+                | Some r when spend > 0.0 && float r.Stacks >= spend ->
+                    let more = Mods.sumBase ctx [ Named "RageforgedMore" ] mods
+                    let skip = Mods.sumBase ctx [ Named "RageSkipChance" ] mods
+                    let kept = skip > 0.0 && rng.Chance skip
+                    let w = { w with Counts = bump ("rageforged:" + skill.Name) w.Counts }
+                    let w =
+                        if kept then w
+                        else
+                            updateActor actor.Name (fun st ->
+                                let left = r.Stacks - int spend
+                                { st with Buffs = if left > 0 then Map.add "Rage" { r with Stacks = left } st.Buffs else Map.remove "Rage" st.Buffs }) w
+                    1.0 + more / 100.0, w
+                | _ -> 1.0, w
+            let st = Map.find actor.Name w.Actors
             // "does not use up its Cooldown when empowered" (by what it consumes)
             let free =
                 partFlag skill "NoCooldownWithCharge"
@@ -1931,7 +1951,7 @@ module Sim =
                 pattern |> List.map (fun (timing, mult) ->
                     (match timing with
                      | DuringUse f -> w.Time + f * useTime + skill.HitDelay
-                     | After s -> w.Time + s + skill.HitDelay), mult)
+                     | After s -> w.Time + s + skill.HitDelay), mult * rageforged)
             let first = times |> List.map fst |> List.fold min infinity
             let w =
                 times

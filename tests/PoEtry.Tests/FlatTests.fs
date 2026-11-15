@@ -183,6 +183,10 @@ let randomFight (case: uint32) : Fight * string =
           (fun () -> [ Mod.base' (Named "AftershockChance") (between 10.0 60.0) ])
           (fun () -> [ Mod.base' (Named "RageOnHit") (between 1.0 5.0) ])
           (fun () -> [ Mod.base' (Named(pick [ "RageRegen"; "RageWhenHit"; "RageOnKill"; "RageLossDelay" ])) (between 1.0 6.0); Mod.more (Damage AllDamage) 1.0 |> Mod.whenever (PerStack("Rage", 3.0)) ])
+          // Rageforged: a use spends Rage, when there is enough, for more damage
+          (fun () ->
+            [ Mod.base' (Named(pick [ "RageRegen"; "RageWhenHit" ])) (between 2.0 8.0); Mod.base' (Named "RageforgedSpend") (float (whole 3 12)); Mod.base' (Named "RageforgedMore") 35.0
+              if chance 0.5 then Mod.base' (Named "RageSkipChance") 30.0 ])
           (fun () -> [ Mod.base' (Named "LifeLossPercentPerMinutePerRage") (between 1.0 20.0); Mod.base' (Named "RageRegen") 3.0 ])
           (fun () -> [ Mod.flag (Named "NoRageLoss") ])
           (fun () -> [ Mod.base' (Named "ManaPercentOnConsumePower") (between 1.0 5.0) ])
@@ -1205,6 +1209,17 @@ let run (test: string -> (unit -> unit) -> unit) =
         let fight = { Fight.single (boss 1e12) player 12.0 with Minions = [ hound ] }
         same fight minionSeeds
         same { fight with Enemies = [ boss 3000.0; { boss 5000.0 with Name = "other"; Position = Vec.make 25.0 10.0 } ] } minionSeeds)
+
+    test "flat: Rageforged spends Rage before a use's hits, for more damage; now and then it is kept" (fun () ->
+        let player =
+            { Actor.make "Player" [ noIgnite; Mod.base' (Named "Accuracy") 1e9; Mod.base' (Named "RageWhenHit") 3.0; Mod.more (Damage AllDamage) 1.0 |> Mod.whenever (PerStack("Rage", 1.0)) ]
+                [ { strike "Cleave" 80.0 160.0 with Mods = [ Mod.base' (Named "RageforgedSpend") 10.0; Mod.base' (Named "RageforgedMore") 35.0; Mod.base' (Named "RageSkipChance") 30.0 ] }
+                  { spell "Bolt" Fire 40.0 90.0 with Cooldown = Some 3.0; Mods = [ Mod.base' (Named "RageforgedSpend") 6.0; Mod.base' (Named "RageforgedMore") 35.0 ] } ] with
+                Rotation = [ Actor.always "Bolt"; Actor.always "Cleave" ]
+                MaxResources = Map.ofList [ "Rage", 30 ]; Resources = [ "Rage", 25 ]
+                Vitals = Some(PlayerStats.basic 3000.0 200.0) }
+        let enemy = { boss 1e12 with Attack = Some { Interval = 0.8; Damage = Map.ofList [ Physical, 30.0 ]; Accuracy = 800.0; Range = 6.0; CritChance = 5.0; Melee = true }; Position = Vec.make 8.0 0.0 }
+        same (Fight.single enemy player 20.0) seeds)
 
     test "flat: poisons of an actor that lets several count beside those of one that lets one count" (fun () ->
         // (the weaker poisons of the one are kept: they count once the other's hit lets more stack)

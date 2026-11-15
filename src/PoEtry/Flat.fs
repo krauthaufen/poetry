@@ -648,6 +648,9 @@ module Flat =
     let private qDoubleUses = site MSkill Base (named "DoubleCooldownUses")
     let private qLosePools = site MSkill Base (named "LosePoolsOnUse")
     let private qDodgeDistance = site MSkill Base (named "DodgeRollDistance")
+    let private qRageforgedSpend = site MSkill Base (named "RageforgedSpend")
+    let private qRageforgedMore = site MSkill Base (named "RageforgedMore")
+    let private qRageSkip = site MSkill Base (named "RageSkipChance")
     let private qSpeed = siteMult MSkill [ Speed ]
     let private qFixedUse = site MSkill Base (named "FixedUseTime")
     let private qExtraCost = site MSkill Base (named "ExtraCostPercentOfMaxMana")
@@ -1009,6 +1012,7 @@ module Flat =
           RageFor: float
           RageNeed: float
           CEnraged: int
+          CRageforged: int
           /// A debuff that records the hit damage its enemy takes (Inevitable Agony): the
           /// percent of it taken again (NaN: none), where it is counted and what it deals as.
           Records: float
@@ -2033,6 +2037,7 @@ module Flat =
                       RageFor = anyKind s "SpendsRage"
                       RageNeed = s.Parts |> List.sumBy (fun part -> anyKind part "SpendsRage")
                       CEnraged = counts.Id("enraged:" + s.Name)
+                      CRageforged = counts.Id("rageforged:" + s.Name)
                       Records = (match s.Mods |> List.tryPick (fun m -> if m.Stat = Named "RecordsDamage" then Some m.Value else None) with Some pct when s.Duration > 0.0 -> pct | _ -> nan)
                       CRecording = counts.Id("recording:" + s.Name)
                       RecordSource = sources.Id s.Name
@@ -4392,6 +4397,19 @@ module Flat =
             let dodge = if p.Metas.Length > 0 && info.IsDodgeRoll then Constants.dodgeRollDistance + sumQ ev qDodgeDistance else 0.0
             let lasting = if info.AsksDuration then multQ ev qSkillDuration else 1.0
             let areaMult = if info.AsksArea then multQ ev qArea else 1.0
+            let rageSpend = sumQ ev qRageforgedSpend
+            // Rageforged: the use spends its Rage before its hits, when there is that much, and
+            // its hits deal more (`Sim.startUse`)
+            let mutable rageforged = 1.0
+            if rageSpend > 0.0 && (at s.A.BHas p.BRage) && float (at s.A.BStacks p.BRage) >= rageSpend then
+                let more = sumQ ev qRageforgedMore
+                let skip = sumQ ev qRageSkip
+                let kept = skip > 0.0 && rng.Chance skip
+                bump s info.CRageforged
+                if not kept then
+                    let left = (at s.A.BStacks p.BRage) - int rageSpend
+                    if left > 0 then setBuff s p.BRage left (at s.A.BExpires p.BRage) (at s.A.BMods p.BRage) else removeBuff s p.BRage
+                rageforged <- 1.0 + more / 100.0
             release s
             // "does not use up its Cooldown when empowered" (by what it consumes)
             let free = info.NoCooldown && info.Consumes >= 0 && held s info.Consumes
@@ -4530,7 +4548,7 @@ module Flat =
                 last <- max last at
             for i in 0 .. hits - 1 do
                 let at = (if (at patShare i) then s.Time + (at patAt i) * useTime + skill.HitDelay else s.Time + (at patAt i) + skill.HitDelay)
-                let mult = patMult.[i]
+                let mult = patMult.[i] * rageforged
                 for k in 0 .. info.Parts.Length - 1 do
                     // (what the use reads of a part it reads of its own part; what strikes
                     // is what the part's name stands for)
