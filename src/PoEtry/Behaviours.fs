@@ -1651,6 +1651,8 @@ module Behaviours =
           Flat: float
           PerMinion: float
           FreeMinions: int
+          /// How many minions the player said the gem has.
+          Chosen: int option
           /// Percent of maximum life reserved instead ("Reserve Life instead of Spirit").
           LifePercent: float }
 
@@ -1791,23 +1793,28 @@ module Behaviours =
                     let lifePerSpirit =
                         Gems.rawStats db charMods { Gem = gem.Name; Level = gem.Level; Quality = gem.Quality; StatSet = 1; Supports = supportGems |> List.map (fun x -> x.Name, x.Level) }
                         |> List.filter (fun (k, _) -> k = "skill_reserves_X_life_permyriad_per_spirit_instead_of_spirit") |> List.sumBy snd
-                    if isMinion then Some { Gem = gem.Name; Flat = 0.0; PerMinion = (own + supports) / eff; FreeMinions = int (stat "first_X_minions_have_0_base_spirit_reservation"); LifePercent = 0.0 }
+                    if isMinion then Some { Gem = gem.Name; Flat = 0.0; PerMinion = (own + supports) / eff; FreeMinions = int (stat "first_X_minions_have_0_base_spirit_reservation"); Chosen = gem.Count; LifePercent = 0.0 }
                     elif own + supports + perCurse > 0.0 && lifePerSpirit > 0.0 then
-                        Some { Gem = gem.Name; Flat = 0.0; PerMinion = 0.0; FreeMinions = 0; LifePercent = (own + supports + perCurse) / eff * lifePerSpirit / 100.0 }
-                    elif own + supports + perCurse > 0.0 then Some { Gem = gem.Name; Flat = (own + supports + perCurse) / eff; PerMinion = 0.0; FreeMinions = 0; LifePercent = 0.0 }
+                        Some { Gem = gem.Name; Flat = 0.0; PerMinion = 0.0; FreeMinions = 0; Chosen = None; LifePercent = (own + supports + perCurse) / eff * lifePerSpirit / 100.0 }
+                    elif own + supports + perCurse > 0.0 then Some { Gem = gem.Name; Flat = (own + supports + perCurse) / eff; PerMinion = 0.0; FreeMinions = 0; Chosen = None; LifePercent = 0.0 }
                     else None
                 | _ -> None))
 
     /// How many minions each persistent minion gem has: the free ones, plus what the Spirit
     /// left after everything else pays for. With several minion gems the spare Spirit is
-    /// shared out evenly (the game lets the player choose; the API doesn't say).
+    /// shared out evenly (the game lets the player choose; the API doesn't say), unless the
+    /// player said how many a gem has (`PobGem.Count`).
     let minionCounts (spirit: float) (uses: SpiritUse list) : Map<string, int> =
         let fixedCost = uses |> List.sumBy (fun u -> u.Flat)
         let minionGems = uses |> List.filter (fun u -> u.PerMinion > 0.0)
-        let spare = max 0.0 (spirit - fixedCost)
-        let share = if minionGems.IsEmpty then 0.0 else spare / float minionGems.Length
-        minionGems
-        |> List.map (fun u -> u.Gem, max 1 (u.FreeMinions + int (floor (share / u.PerMinion))))
+        // a gem whose count the player gave has that many, whatever they cost; the others
+        // share what is left after them
+        let said, guessed = minionGems |> List.partition (fun u -> u.Chosen.IsSome)
+        let saidCost = said |> List.sumBy (fun u -> float (max 0 (max 1 u.Chosen.Value - u.FreeMinions)) * u.PerMinion)
+        let spare = max 0.0 (spirit - fixedCost - saidCost)
+        let share = if guessed.IsEmpty then 0.0 else spare / float guessed.Length
+        (said |> List.map (fun u -> u.Gem, max 1 u.Chosen.Value))
+        @ (guessed |> List.map (fun u -> u.Gem, max 1 (u.FreeMinions + int (floor (share / u.PerMinion)))))
         |> Map.ofList
 
     /// A minion's level comes from its gem's (MinionGemLevelScaling: twice the gem level), with

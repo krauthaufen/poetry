@@ -37,7 +37,7 @@ let dossier (name: string) : string list =
         let reqs =
             if not reqs.IsEmpty then reqs
             else [ "Crossbow"; "Bow"; "Spear"; "Quarterstaff" ] |> List.filter d.Types.Contains |> fun l -> if l.IsEmpty && d.Types.Contains "Attack" && not (d.Types.Contains "NonWeaponAttack") then [ "One Hand Mace" ] else l
-        let gem = { Name = name; Level = 20; Quality = 0; Enabled = true; IsSupport = false; StatSet = 1; Minion = None }
+        let gem = { Name = name; Level = 20; Quality = 0; Enabled = true; IsSupport = false; StatSet = 1; Minion = None; Count = None }
         let build : PobBuild =
             { Level = 90; ClassName = "Warrior"; Ascendancy = ""; Items = weaponFor reqs; TreeNodes = []; TreeNodesSet1 = []; TreeNodesSet2 = []
               Groups = [ { Label = ""; Slot = ""; Enabled = true; Gems = [ gem ] } ]; MainGroup = 1; Config = Map.empty; TreeOverrides = Map.empty

@@ -132,6 +132,7 @@ module Report =
 
     /// (`groups`: the build's socket groups before any gem was turned off, `icons`: see `gemIcons`.)
     let character (slots: int list) (anointed: int list) (groups: PobGroup list) (levelsWithSupports: bool) (icons: Map<string, string>) (c: Loaded) : Json =
+        let minionCounts = Behaviours.minionCounts c.Spirit c.SpiritUses
         let sheetMods = ModDb.ofList c.Sheet.Mods
         // a jewel in a socket of the tree: its item text is rarity, name, base, properties, mods
         let jewel (slot: string, text: string) =
@@ -246,6 +247,8 @@ module Report =
                                                            yield obj [ "name", JStr x.Name; "at", num (float at); "level", num (float level); "socketed", num (float x.Level); "quality", num (float x.Quality); "support", JBool x.IsSupport
                                                                        "icon", JStr((Map.tryFind x.Name icons |> Option.defaultValue "|").Split('|').[0])
                                                                        "gemIcon", JStr((Map.tryFind x.Name icons |> Option.defaultValue "|").Split('|').[1])
+                                                                       // how many minions a persistent minion gem has (0: it is none)
+                                                                       "minions", num (float (Map.tryFind x.Name minionCounts |> Option.defaultValue 0))
                                                                        // kept up by Spirit: a persistent buff, a meta gem, a minion
                                                                        "spirit", num (c.SpiritUses |> List.tryFind (fun u -> u.Gem = x.Name) |> Option.map (fun u -> u.Flat + u.PerMinion) |> Option.defaultValue 0.0)
                                                                        "persistent", JBool(not x.IsSupport && (Gems.isPersistentBuff c.Db x.Name || Gems.isMeta c.Db x.Name)) ] ] ] ]
@@ -500,11 +503,12 @@ module Report =
     /// groups count from 1 as "without" names them, a group's gems from 0):
     ///   add|group|name|level|quality   del|group|gem   set|group|gem|level|quality
     ///   swap|group|gem|name            new|name|level|quality (a group of its own)
+    ///   count|group|gem|minions (how many minions a persistent minion gem has)
     let editGems (db: GameDb) (text: string) (b: PobBuild) : PobBuild =
         let supports name = Map.tryFind name db.GemVariants |> Option.defaultValue [] |> List.exists (fun g -> g.Support)
         let skills name = Map.tryFind name db.GemVariants |> Option.defaultValue [] |> List.exists (fun g -> not g.Support)
         let n (x: string) = match System.Int32.TryParse(x.Trim()) with | true, v -> v | _ -> 0
-        let gem name level quality support = { Name = name; Level = max 1 level; Quality = quality; Enabled = true; IsSupport = support; StatSet = 1; Minion = None }
+        let gem name level quality support = { Name = name; Level = max 1 level; Quality = quality; Enabled = true; IsSupport = support; StatSet = 1; Minion = None; Count = None }
         let inGroup (b: PobBuild) at f = { b with Groups = b.Groups |> List.mapi (fun i g -> if i + 1 = at then { g with Gems = f g.Gems } else g) }
         text.Split(';') |> Array.fold (fun (b: PobBuild) (cmd: string) ->
             match cmd.Split('|') |> List.ofArray with
@@ -514,7 +518,8 @@ module Report =
                     else gems @ [ gem name (n level) (n quality) (supports name && (not (skills name) || gems |> List.exists (fun x -> not x.IsSupport))) ])
             | [ "del"; g; k ] -> inGroup b (n g) (fun gems -> gems |> List.indexed |> List.filter (fun (i, _) -> i <> n k) |> List.map snd)
             | [ "set"; g; k; level; quality ] -> inGroup b (n g) (List.mapi (fun i x -> if i = n k then { x with Level = max 1 (n level); Quality = n quality } else x))
-            | [ "swap"; g; k; name ] -> inGroup b (n g) (List.mapi (fun i x -> if i = n k then { x with Name = name; Minion = None } else x))
+            | [ "count"; g; k; count ] -> inGroup b (n g) (List.mapi (fun i x -> if i = n k then { x with Count = Some (max 1 (n count)) } else x))
+            | [ "swap"; g; k; name ] -> inGroup b (n g) (List.mapi (fun i x -> if i = n k then { x with Name = name; Minion = None; Count = None } else x))
             | [ "new"; name; level; quality ] -> { b with Groups = b.Groups @ [ { Label = ""; Slot = ""; Enabled = true; Gems = [ gem name (n level) (n quality) false ] } ] }
             | _ -> b) b
 

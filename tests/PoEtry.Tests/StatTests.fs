@@ -13,7 +13,7 @@ let private blank : PobBuild =
     { Level = 1; ClassName = "Witch"; Ascendancy = ""; Items = []; TreeNodes = []; TreeNodesSet1 = []; TreeNodesSet2 = []
       Groups = []; MainGroup = 1; Config = Map.empty; TreeOverrides = Map.empty; ExtraLines = [] }
 
-let private gem name = { Name = name; Level = 20; Quality = 0; Enabled = true; IsSupport = false; StatSet = 1; Minion = None }
+let private gem name = { Name = name; Level = 20; Quality = 0; Enabled = true; IsSupport = false; StatSet = 1; Minion = None; Count = None }
 let private support name = { gem name with Level = 1; IsSupport = true }
 let private group gems = { Label = ""; Slot = ""; Enabled = true; Gems = gems }
 
