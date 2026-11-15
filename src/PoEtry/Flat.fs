@@ -598,6 +598,7 @@ module Flat =
     let private qNoHitDamage = site MSkill Flag (named "NoHitDamage")
     let private qBreakPhysical = site MSkill Base (named "ArmourBreakOfPhysical")
     let private qBreakFire = site MSkill Base (named "ArmourBreakOfFire")
+    let private qBreakChaos = site MSkill Base (named "ArmourBreakOfChaos")
     let private qBreakDamage = site MSkill Base (named "ArmourBreakOfDamage")
     let private qBreakFlat = site MSkill Base (named "ArmourBreakFlat")
     let private qBreakAmount = siteMult MSkill (named "ArmourBreakAmount")
@@ -5769,6 +5770,7 @@ module Flat =
                 (let share =
                     (at de 0) * sumQ ev qBreakPhysical / 100.0
                     + (at de 3) * sumQ ev qBreakFire / 100.0
+                    + (at de 4) * sumQ ev qBreakChaos / 100.0
                     + dealt * sumQ ev qBreakDamage / 100.0
                     + sumQ ev qBreakFlat
                  // "Players Break 3 times Armour against Normal Monsters and 2 times Armour against Magic Monsters"

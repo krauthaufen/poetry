@@ -2718,6 +2718,7 @@ module Sim =
                     let share =
                         Dmg.get Physical hit.Dealt * Mods.sumBase ctx [ Named "ArmourBreakOfPhysical" ] mods / 100.0
                         + Dmg.get Fire hit.Dealt * Mods.sumBase ctx [ Named "ArmourBreakOfFire" ] mods / 100.0
+                        + Dmg.get Chaos hit.Dealt * Mods.sumBase ctx [ Named "ArmourBreakOfChaos" ] mods / 100.0
                         + dealt * Mods.sumBase ctx [ Named "ArmourBreakOfDamage" ] mods / 100.0
                         + Mods.sumBase ctx [ Named "ArmourBreakFlat" ] mods
                     // "Players Break 3 times Armour against Normal Monsters and 2 times Armour against Magic Monsters"

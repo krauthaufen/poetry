@@ -1438,6 +1438,60 @@ module StatMap =
         | "lose_%_of_life_and_energy_shield_when_you_use_a_chaos_skill" -> one (Mod.base' (Named "LoseLifeAndESOnUse") v |> Mod.whenever (SkillIs(Tag "Chaos")))
         // "Onslaught", "You have Arcane Surge": the effect all the time (Behaviours.keywordMods)
         | "base_should_have_onslaught_from_stat" -> one (Mod.flag (Named "Has:Onslaught"))
+        // ---- what gems say of their own skill, known by what it is ----
+        | "active_skill_poison_effect_+%_final" -> one (Mod.more (AilmentMagnitude(Some Poison)) v)
+        | "support_stronger_ignites_ignite_effect_+%_final" -> one (Mod.more (AilmentMagnitude(Some Ignite)) v)
+        | "support_deep_cuts_bleeding_effect_+%_final" -> one (Mod.more (AilmentMagnitude(Some Bleed)) v)
+        | "active_skill_damaging_ailment_effect_+%_final" -> Some(Mods([ Ignite; Bleed; Poison ] |> List.map (fun a -> Mod.more (AilmentMagnitude(Some a)) v)))
+        | "support_hypothermia_hit_damage_freeze_multiplier_+%_final" -> one (Mod.more (Buildup Freeze) v)
+        // "Chills Enemies as though dealing X% more damage": a Chill's magnitude is its damage's share of the threshold
+        | "active_skill_chill_as_though_damage_+%_final" -> one (Mod.more (AilmentMagnitude(Some Chill)) v)
+        | "support_additional_accurary_rating_+%_final" -> one (Mod.more (Named "Accuracy") v)
+        | "support_astral_projection_aoe_+%_final" -> one (Mod.more AreaOfEffect v)
+        | "support_biting_frost_damage_+%_final_vs_frozen_unique_enemies" ->
+            one (Mod.more (Damage AllDamage) v |> Mod.whenever (EnemyHas "Frozen") |> Mod.whenever (EnemyHas "Unique"))
+        // "more damage with Hits for explosions / Shockwaves originating from a Unique enemy": the
+        // enemy hit is taken for the one it starts from (with one enemy it is)
+        | "snipe_damage_+%_final_if_created_from_unique" | "frag_rounds_damage_+%_final_if_created_from_unique" | "boneshatter_damage_+%_final_if_created_from_unique" ->
+            one (Mod.more (Damage AllDamage) v |> Mod.whenever (EnemyHas "Unique"))
+        | "active_skill_damage_+%_final_vs_fully_broken_armour" -> one (Mod.more (Damage AllDamage) v |> Mod.whenever (EnemyHas "FullyBrokenArmour"))
+        | "attack_damage_is_lucky_if_surrounded" ->
+            one (Mod.base' (Named "LuckyDamageChance") 100.0 |> Mod.whenever (SkillIs Attack) |> Mod.whenever (WhileBuff "Surrounded"))
+        | "gain_x_rage_on_attack_hit" -> one (Mod.base' (Named "RageOnHit") v |> Mod.whenever (SkillIs Attack))
+        | "chaos_damage_%_dealt_as_armour_break" -> one (Mod.base' (Named "ArmourBreakOfChaos") v)
+        // Retreating / Advancing Assault: more damage after a hit of the other kind (Behaviours.recentStates)
+        | "support_retreating_assault_projectile_damage_+%_final_if_melee_hit_in_past_8_seconds" ->
+            one (Mod.more (Damage AllDamage) v |> Mod.whenever (SkillIs Projectile) |> Mod.whenever (WhileBuff "MeleeHitInPast8Seconds"))
+        | "support_advancing_assault_melee_damage_+%_final_if_projectile_attack_damage_hit_in_past_8_seconds" ->
+            one (Mod.more (Damage AllDamage) v |> Mod.whenever (SkillIs Melee) |> Mod.whenever (WhileBuff "ProjectileAttackHitInPast8Seconds"))
+        // Blazing Critical's buff on a critical hit (read where it is built: Behaviours.iceBite)
+        | "support_blazing_crits_gain_%_fire_damage_with_attacks_on_critical_hit" | "support_blazing_crits_base_duration_ms" -> Some Structural
+        // a detonation after a time: read where a skill's hit waits for it (Gems: grenades, Frost
+        // Bomb; Behaviours.toxicDomain), elsewhere not played
+        | "base_skill_detonation_time" | "support_fast_forward_detonation_time_+%_final" | "skill_detonation_time_+%" -> Some(Unsimulated "detonation time")
+        // how a skill is aimed, queued and animated, and markers the game keeps for its own
+        // texts: a fight that plays uses by their times and hits by their places has nothing
+        // these could change
+        | "channel_start_lock_cancelling_scales_with_cast_speed" | "channel_start_lock_cancelling_scales_with_attack_speed"
+        | "active_skill_generic_grace_period_time_ms" | "action_requires_upward_aiming_stance" | "skill_has_trigger_from_unique_item"
+        | "skill_using_no_fear" | "supported_by_greatwood" | "disangage_autotargeting_angle_%" | "skill_moving_start_slowdown"
+        | "console_cast_on_self_custom_range" | "hide_minion_frame" | "active_skill_facing_angle_turn_duration_ms" | "override_turn_duration_ms"
+        | "disable_quadruped_head_movement_when_turning" | "firewall_attached_projectile_effect_mtx" | "skill_can_be_queued_on_cooldown"
+        | "leap_slam_animation_distance_threshold" | "armour_broken_skill_event_variation" -> Some Structural
+        // the player's own leap or dash (RULES.md, "The player stands"): how far it may go
+        | "leap_maximum_allowed_path_distance" | "melee_dash_placement_added_range" -> Some NotOffensive
+        // "+X seconds to base use time when Shapeshifting": a character that uses shapeshift
+        // skills is in its animal form for the whole fight and never changes into it
+        | "use_time_+_ms_if_shapeshift_required" -> Some NotOffensive
+        // Entangle's vines (read where they are built: Behaviours.entangle)
+        | "entangle_apply_vines_every_X_ms" | "entangle_vines_maximum_number_of_vines_allowed" | "entangle_vine_duration_ms"
+        | "entangle_base_movement_speed_+%_final_per_applied_stack" -> Some Structural
+        // "Limit N Fissures": a fissure hits once, as it is made, and the vines are counted for
+        // each enemy, not for each fissure, so how many fissures stand changes nothing here
+        | "base_number_of_entangle_roots_allowed" -> Some NotOffensive
+        // fissures that branch or come in greater number, and plants that are Overgrown: not played
+        | "number_of_branching_fissures" | "skill_additional_fissure_chance_%" -> Some(Unsimulated "fissures")
+        | "entangle_vines_additional_number_of_vines_allowed_when_wet" | "entangle_duration_speed_+%_when_wet" | "plant_skill_damage_+%_final_when_wet" -> Some(Unsimulated "overgrown plants")
         // Thorns: "X to Y Physical Thorns damage" is the damage of the hit that retaliates
         // (Behaviours.thorns), "increased Thorns damage" what that hit deals more of
         | id when (id.StartsWith "thorns_minimum_base_" || id.StartsWith "thorns_maximum_base_") && id.EndsWith "_damage" && (typeWord (id.Split('_').[3])).IsSome ->

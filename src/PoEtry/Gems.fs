@@ -882,7 +882,11 @@ module Gems =
          // the secondary duration is read where the skill's mechanic is built: Freezing Mark's
          // buff (Behaviours.markBuff), Frost Bomb's exposure (useRules), the time between Kelari's
          // Malediction's corpses (summons)
-         if secondaryDurationRead.Contains data.Name then { cov with Unsimulated = cov.Unsimulated |> List.filter (fun (k, _) -> k <> "base_secondary_skill_effect_duration") } else cov)
+         let cov = if secondaryDurationRead.Contains data.Name then { cov with Unsimulated = cov.Unsimulated |> List.filter (fun (k, _) -> k <> "base_secondary_skill_effect_duration") } else cov
+         // the detonation time is read where the hit waits for it (HitDelay above) and for Toxic Domain's pustule
+         if (data.Types.Contains "DetonatesAfterTime" && (data.Types.Contains "Grenade" || data.Name = "Frost Bomb")) || data.Name = "Toxic Domain" then
+             { cov with Unsimulated = cov.Unsimulated |> List.filter (fun (k, _) -> k <> "base_skill_detonation_time" && k <> "support_fast_forward_detonation_time_+%_final") }
+         else cov)
 
     /// Build a simulator Skill from a socketed gem. `characterMods` are needed for
     /// "+N to level of ... gems". Attacks need a weapon. Stat sets that belong to the

@@ -1536,6 +1536,55 @@ module Behaviours =
             names |> List.distinct |> List.map (fun n ->
                 { Hook = OnInflict Freeze; Filter = Called n; Chance = 100.0; Reaction = GrantBuff("Ice Bite", seconds, 1, mods) })
 
+    /// Entangle: "Conjures a rootbound fissure that crawls forward, damaging enemies in its path.
+    /// While the fissure persists, vines lash out from it and attach to nearby enemies, damaging
+    /// and Slowing them." The fissure hits once, as it is made (the skill's own hit). An enemy
+    /// it hit is near a fissure for the skill's duration ("Entangled"), and while it is, vines
+    /// attach to it: "Attaches a Vine every 0.1 seconds", "Can attach up to 3 Vines to each
+    /// enemy", "Vines remain attached for up to 1 second", so a vine a third of a second on one
+    /// enemy however many fissures stand; each attaching deals the Vines' hit, and the enemy is
+    /// slowed by all three. Returns the skill without its Vines part, the Vines as a skill of
+    /// their own, the rule that marks the enemy and the vines' clock.
+    let entangle (db: GameDb) (charMods: ModDb) (setup: GemSetup) (skill: Skill) : (Skill * Skill * Rule * Periodic) option =
+        match skill.Parts |> List.tryFind (fun p -> p.Name.EndsWith ": Vines") with
+        | Some vines when setup.Gem = "Entangle" ->
+            let raw = Gems.rawStats db charMods { setup with StatSet = 2 }
+            let sum id = raw |> List.filter (fun (k, _) -> k = id) |> List.sumBy snd
+            let every, most, lasts = sum "entangle_apply_vines_every_X_ms" / 1000.0, sum "entangle_vines_maximum_number_of_vines_allowed", sum "entangle_vine_duration_ms" / 1000.0
+            if every <= 0.0 || most <= 0.0 || lasts <= 0.0 || skill.Duration <= 0.0 then None
+            else
+                let ctx = { Ctx.empty with SkillTags = skill.Tags; SkillName = skill.Name }
+                let seconds = skill.Duration * Mods.mult ctx [ SkillDuration ] (ModDb.ofList (ModDb.toList charMods @ skill.Mods))
+                let slow = most * sum "entangle_base_movement_speed_+%_final_per_applied_stack"
+                let own =
+                    { vines with
+                        Tags = vines.Tags.Add Triggered
+                        Cost = 0.0
+                        Cooldown = None
+                        Mods = vines.Mods @ [ Mod.flag (Named "OnlyVs:Entangled") ] }
+                Some(
+                    { skill with Parts = skill.Parts |> List.filter (fun p -> p.Name <> vines.Name) },
+                    own,
+                    { Hook = OnHit; Filter = Called skill.Name; Chance = 100.0
+                      Reaction = ApplyDebuff("Entangled", seconds, 1, (if slow < 0.0 then [ Mod.more (Named "MovementSpeed") (max -100.0 slow) ] else [])) },
+                    { Name = "Entangle vines"; Every = max every (lasts / most); Action = TriggerNamed own.Name })
+        | _ -> None
+
+    /// Blazing Critical: "Attacks Gain X% of Damage as Fire Damage for N seconds on Critically
+    /// Hitting with Supported Skills": the same kind of buff as Ice Bite's, for the character's
+    /// attacks, from the critical hits of the supported skill, its parts and its infused form.
+    let blazingCritical (db: GameDb) (charMods: ModDb) (setup: GemSetup) (skill: Skill) (names: string list) : Rule list =
+        let raw = Gems.rawStats db charMods setup
+        let sum id = raw |> List.filter (fun (k, _) -> k = id) |> List.sumBy snd
+        let gain, ms = sum "support_blazing_crits_gain_%_fire_damage_with_attacks_on_critical_hit", sum "support_blazing_crits_base_duration_ms"
+        if gain <= 0.0 || ms <= 0.0 then []
+        else
+            let ctx = { Ctx.empty with SkillTags = skill.Tags; SkillName = skill.Name }
+            let seconds = ms / 1000.0 * Mods.mult ctx [ SkillDuration ] (ModDb.ofList (ModDb.toList charMods @ skill.Mods))
+            let mods = [ for t in DamageType.all -> Mod.base' (GainAs(t, Fire)) gain |> Mod.whenever (SkillIs Attack) |> Mod.from "Blazing Critical" ]
+            names |> List.distinct |> List.map (fun n ->
+                { Hook = OnCrit; Filter = Called n; Chance = 100.0; Reaction = GrantBuff("Blazing Critical", seconds, 1, mods) })
+
     /// The character's Spirit and what its persistent skills reserve.
     /// Spirit: flat amounts (quests, mods, sceptres' own value) and "per X on body armour",
     /// x increases. Reserved: each persistent gem's `spiritReservationFlat` at its level plus
@@ -2222,13 +2271,14 @@ module Behaviours =
     /// lets each run out on its own, so a count kept up by a steady stream is the same and one
     /// that thins out is held a little too long. The most stacks are what the stat's "up to X%"
     /// leaves room for.
-    let recentStates (sheet: CharacterSheet) : Rule list =
+    let recentStates (sheet: CharacterSheet) (skills: Skill list) : Rule list =
         let rec names (c: Cond) =
             match c with
             | WhileBuff b | PerStack (b, _) -> [ b ]
             | Not inner | OfOwner inner -> names inner
             | _ -> []
-        let asked = sheet.Mods |> List.collect (fun m -> m.Conds |> List.collect names) |> Set.ofList
+        let rec ofSkill (s: Skill) = s.Mods @ (s.Parts |> List.collect ofSkill)
+        let asked = sheet.Mods @ (skills |> List.collect ofSkill) |> List.collect (fun m -> m.Conds |> List.collect names) |> Set.ofList
         // the most stacks a count can have: "up to X%" over the percent per stack (the largest of the stats that count it)
         let most (state: string) (upTo: float) =
             let per =
@@ -2249,7 +2299,9 @@ module Behaviours =
           "IgnitedInLast8Seconds", (fun s -> rule s (OnInflict Ignite) AnySkill 8.0 (most s 40.0))
           "FrozenInLast8Seconds", (fun s -> rule s (OnInflict Freeze) AnySkill 8.0 (most s 40.0))
           // "for each time you've been Hit by an Enemy Recently, up to 100%"
-          "TimesHitRecently", (fun s -> rule s WhenHit AnySkill Constants.recentlySeconds (most s 100.0)) ]
+          "TimesHitRecently", (fun s -> rule s WhenHit AnySkill Constants.recentlySeconds (most s 100.0))
+          // "if you've Hit with Projectile Attack Damage in the past eight seconds" (Advancing Assault)
+          "ProjectileAttackHitInPast8Seconds", (fun s -> rule s OnHit (WithTags([ Attack; Projectile ], [])) 8.0 1) ]
         |> List.filter (fun (state, _) -> asked.Contains state)
         |> List.map (fun (state, make) -> make state)
 

@@ -1545,7 +1545,7 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         equal (box [ Mod.inc (Damage AllDamage) 50.0 |> Mod.whenever (SkillIs Projectile) |> Mod.whenever (WhileBuff "MeleeHitInPast8Seconds") ]) (box melee)
         // the rules: only for what is asked, a count with the stacks its "up to" leaves room for
         let sheet = (load blank Options.defaults).Sheet
-        equal 0 (Behaviours.recentStates sheet).Length
+        equal 0 (Behaviours.recentStates sheet []).Length
         let asked =
             { sheet with
                 Mods =
@@ -1556,14 +1556,14 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
                    { Hook = OnHit; Filter = WithTag Melee; Chance = 100.0; Reaction = GrantBuff("MeleeHitInPast8Seconds", 8.0, 1, []) }
                    { Hook = OnInflict Ignite; Filter = AnySkill; Chance = 100.0; Reaction = GrantBuff("IgnitedInLast8Seconds", 8.0, 5, []) }
                    { Hook = WhenHit; Filter = AnySkill; Chance = 100.0; Reaction = GrantBuff("TimesHitRecently", 4.0, 6, []) } ])
-            (box (Behaviours.recentStates asked))
+            (box (Behaviours.recentStates asked []))
         // a jab at 1 s, then shots every 0.7 s: those up to 9 s (eleven) deal 50% more, the four after it do not
         let jab = { Skill.make "Jab" [ Spell; Melee ] with BaseDamage = Map.ofList [ Chaos, { Min = 100.0; Max = 100.0 } ]; BaseCrit = 0.0; Cooldown = Some 100.0 }
         let shot = { Skill.make "Shot" [ Spell; Projectile ] with BaseDamage = Map.ofList [ Chaos, { Min = 100.0; Max = 100.0 } ]; BaseTime = 0.7; BaseCrit = 0.0 }
         let player =
             { Actor.make "Player" melee [ jab; shot ] with
                 Rotation = [ Actor.always "Jab"; Actor.always "Shot" ]
-                Rules = Behaviours.recentStates { sheet with Mods = melee } }
+                Rules = Behaviours.recentStates { sheet with Mods = melee } [] }
         let fight = Fight.single (EnemyDef.atLevel 83 1e12) player 12.0
         let o = Sim.run fight 1u
         equal 15 (count o "hits:Shot")
@@ -1667,3 +1667,60 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         equal
             (box [ { Hook = OnFullBreak; Filter = Called "Smash"; Chance = 30.0; Reaction = GainResource("EnduranceCharge", 1) } ])
             (box (Behaviours.fullBreakRules [ smash; bolt ])))
+
+    test "what gems say of their own skill: ailment magnitudes, damage against a Unique or an enemy with Fully Broken Armour, chaos damage breaking armour, Blazing Critical" (fun () ->
+        equal (box [ Mod.more (AilmentMagnitude(Some Poison)) 30.0 ]) (box (mods "active_skill_poison_effect_+%_final" 30.0))
+        equal (box [ Mod.more (AilmentMagnitude(Some Ignite)) 30.0 ]) (box (mods "support_stronger_ignites_ignite_effect_+%_final" 30.0))
+        equal (box [ Mod.more (Buildup Freeze) 30.0 ]) (box (mods "support_hypothermia_hit_damage_freeze_multiplier_+%_final" 30.0))
+        equal (box [ Mod.more (Damage AllDamage) 30.0 |> Mod.whenever (EnemyHas "Unique") ]) (box (mods "boneshatter_damage_+%_final_if_created_from_unique" 30.0))
+        equal (box [ Mod.more (Damage AllDamage) 30.0 |> Mod.whenever (EnemyHas "FullyBrokenArmour") ]) (box (mods "active_skill_damage_+%_final_vs_fully_broken_armour" 30.0))
+        // 30% more against a Unique enemy, nothing against a Rare one
+        let bolt = { Skill.make "Bolt" [ Spell ] with BaseDamage = Map.ofList [ Chaos, { Min = 100.0; Max = 100.0 } ]; BaseCrit = 0.0 }
+        let fight rarity extra =
+            Fight.single { EnemyDef.atLevel 83 1e12 with Rarity = rarity } (Actor.make "Player" extra [ bolt ]) 5.5
+        let dealt f = (Sim.run f 1u).DamageBy |> Map.toList |> List.sumBy snd
+        near 650.0 (dealt (fight Unique (mods "boneshatter_damage_+%_final_if_created_from_unique" 30.0)))
+        near 500.0 (dealt (fight Rare (mods "boneshatter_damage_+%_final_if_created_from_unique" 30.0)))
+        same (fight Unique (mods "boneshatter_damage_+%_final_if_created_from_unique" 30.0)) seeds
+        // chaos damage that breaks armour: 100 chaos dealt, 50% of it, three times against a Normal monster: 150 a hit
+        equal (box [ Mod.base' (Named "ArmourBreakOfChaos") 50.0 ]) (box (mods "chaos_damage_%_dealt_as_armour_break" 50.0))
+        let armoured = { EnemyDef.atLevel 83 1e12 with Rarity = Normal; Mods = [ Mod.base' Armour 400.0 ] }
+        let breaking = Fight.single armoured (Actor.make "Player" (mods "chaos_damage_%_dealt_as_armour_break" 50.0 @ [ Mod.more (Damage AllDamage) 100.0 |> Mod.whenever (EnemyHas "FullyBrokenArmour") ]) [ bolt ]) 5.5
+        // 400 armour is gone with the third hit (450 broken): the fourth and fifth deal double
+        near (3.0 * 100.0 + 2.0 * 200.0) (dealt breaking)
+        same breaking seeds
+        // Blazing Critical: a critical hit of the supported skill gives the character's attacks fire damage for a while
+        let c = load { blank with Groups = [ group [ gem "Spark"; support "Blazing Critical" ] ] } Options.defaults
+        match Setup.pressed c Options.defaults "Spark" with
+        | Some p ->
+            match p.Rules |> List.tryPick (fun r -> match r.Hook, r.Reaction with OnCrit, GrantBuff ("Blazing Critical", seconds, 1, ms) -> Some(seconds, ms) | _ -> None) with
+            | Some (seconds, ms) ->
+                if seconds <= 0.0 then failwith "no duration"
+                equal (box [ for t in DamageType.all -> GainAs(t, Fire) ]) (box (ms |> List.map (fun m -> m.Stat)))
+                equal (box [ SkillIs Attack ]) (box (ms |> List.collect (fun m -> m.Conds) |> List.distinct))
+            | None -> failwith "no Blazing Critical rule"
+        | None -> failwith "Spark not built")
+
+    test "Entangle: the fissure hits as it is made; while an enemy it hit is near one, a vine attaches every third of a second" (fun () ->
+        let o = { Options.defaults with MaxTime = 10.05; Immortal = true }
+        let c = load { blank with Groups = [ group [ gem "Entangle" ] ] } o
+        let p = (Setup.pressed c o "Entangle").Value
+        equal 0 p.Skill.Parts.Length
+        equal (box [ "Entangle: Vines" ]) (box (p.Extra |> List.map (fun x -> x.Name)))
+        // 3 vines on an enemy, each for 1 s: one every third of a second (not every 0.1 s)
+        match p.Periodics with
+        | [ { Every = every; Action = TriggerNamed "Entangle: Vines" } ] -> near (1.0 / 3.0) every
+        | x -> failwithf "%A" x
+        // the enemy is marked for the fissure's 8 s, and slowed by three vines of 15% each
+        match p.Rules |> List.tryPick (fun r -> match r.Reaction with ApplyDebuff ("Entangled", seconds, 1, ms) -> Some(seconds, ms) | _ -> None) with
+        | Some (seconds, ms) ->
+            near 8.0 seconds
+            equal (box [ Mod.more (Named "MovementSpeed") -45.0 ]) (box ms)
+        | None -> failwith "no Entangled rule"
+        let fight = Setup.fight c o (Setup.player c o [ Spam "Entangle" ] None) (Encounter.boss 83 Rarity.defaults 30.0 |> List.map (fun e -> { e with Life = 1e13 }))
+        let out = Sim.run fight 1u
+        // the first fissure lands at 0.9 s; the vines' clock strikes at 1.0 s, 1.33 s, ... 10.0 s: 28 times
+        equal 28 (count out "hits:Entangle: Vines")
+        // a cast every 0.9 s: 11 in 10 s
+        equal 11 (count out "hits:Entangle")
+        same fight seeds)
