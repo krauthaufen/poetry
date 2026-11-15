@@ -729,6 +729,11 @@ module StatMap =
         | "base_deflection_rating_%_of_evasion_rating" -> one (Mod.base' (Named "DeflectionPercentOfEvasion") v)
         | "base_resist_all_elements_%" -> each (DamageType.elemental |> List.map Resist)
         | "additional_maximum_all_elemental_resistances_%" -> each (DamageType.elemental |> List.map MaxResist)
+        // "+X% to Maximum Fire Resistance while Ignited": while the player is
+        | "base_maximum_fire_damage_resistance_%_while_ignited" -> one (Mod.base' (MaxResist Fire) v |> Mod.whenever (WhileBuff "Ignited"))
+        // "Stun and Ailment Threshold X% increased while Surrounded"
+        | "stun_and_ailment_threshold_+%_while_surrounded" ->
+            Some(Mods [ Mod.inc (Named "StunThreshold") v |> Mod.whenever (WhileBuff "Surrounded"); Mod.inc (Named "PlayerAilmentThreshold") v |> Mod.whenever (WhileBuff "Surrounded") ])
         | "base_chaos_damage_resistance_%" -> one (Mod.base' (Resist Chaos) v)
         | "life_regeneration_rate_per_minute_%" -> one (Mod.base' LifeRegenPercent (v / 60.0))
         | "base_life_regeneration_rate_per_minute" -> one (Mod.base' LifeRegen (v / 60.0))

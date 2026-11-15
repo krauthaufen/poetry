@@ -3837,7 +3837,11 @@ module Sim =
                            || (let st = Map.find env.Fight.Player.Name w.Actors in stacksOf st "ConstantManaFlask" > 0 || stacksOf st "ConstantLifeFlask" > 0))
                           "Leeching", p.Recoups |> List.exists (fun (until, _, pool) -> pool.StartsWith "Leech" && until > w.Time)
                           // surrounded: at least 5 monsters within 3 m (PoB SurroundedRadiusBase, game constant)
-                          "Surrounded", (alive w |> List.filter (fun e -> Vec.length e.Def.Position - e.Def.Size <= 30.0) |> List.length) >= max 1 v.SurroundedAt ]
+                          "Surrounded", (alive w |> List.filter (fun e -> Vec.length e.Def.Position - e.Def.Size <= 30.0) |> List.length) >= max 1 v.SurroundedAt
+                          // the player's own ailments: Ignite is the only damaging one a monster's hit or the
+                          // character itself puts on it (Shocked, Chilled, Frozen, Stunned are buffs of their own)
+                          "Ignited", p.Dots |> List.exists (fun (until, _, t) -> t = Fire && until > w.Time)
+                          "DamagingAilment", p.Dots |> List.exists (fun (until, _, t) -> t = Fire && until > w.Time) ]
                     // charge states: "while at maximum Power Charges", "while you have no Frenzy Charges"
                     let playerSt = Map.find env.Fight.Player.Name w.Actors
                     let states =

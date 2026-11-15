@@ -1312,6 +1312,7 @@ module Flat =
                 yield "AtMaximum" + kind + "Charges"
                 yield "No" + kind + "Charges"
                 yield "YouHaveNo" + kind + "Charges" ]
+        @ [ "Ignited"; "DamagingAilment" ]
 
     let private derivedStatuses =
         [ "Moving"; "Cullable"; "AnyAilment"; "Cursed"; "Marked"; "Immobilised"; "ElementalAilments"; "Exposed"; "RareOrUnique"; "LowLife"; "FullLife" ]
@@ -6739,6 +6740,10 @@ module Flat =
             setState s (10 + 3 * k) (maxN > 0 && n >= maxN)
             setState s (11 + 3 * k) (n = 0)
             setState s (12 + 3 * k) (n = 0)
+        // the player's own ailments (`Sim.step`)
+        let ignited = s.Burning |> List.exists (fun (until, _, t) -> t = Fire && until > s.Time)
+        setState s 19 ignited
+        setState s 20 ignited
 
     /// What is planted in or beside the enemies (`Sim.step`): seeds set off by the damage
     /// their enemy has taken (or its death: the blast then strikes the enemy aimed at), gone

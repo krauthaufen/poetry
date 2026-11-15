@@ -1118,6 +1118,34 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         same (fight (mods "cannot_inflict_blind" 1.0)) seeds
         equal (box Structural) (box (StatMap.meaning "projectiles_cannot_split" 1.0)))
 
+    // ---- the player's own ailments ----
+
+    test "the player's own Ignite is a state conditions read (Ignited, a damaging ailment); max fire resistance while Ignited" (fun () ->
+        // a bolt that deals twice as much while the player is Ignited; a brute whose fire hits ignite it
+        let bolt = { Skill.make "Bolt" [ Spell ] with BaseDamage = Map.ofList [ Cold, { Min = 100.0; Max = 100.0 } ]; BaseTime = 0.5; BaseCrit = 0.0 }
+        let brute fire =
+            { EnemyDef.make Rarity.defaults 70 Magic "brute" (Vec.make 5.0 0.0) with
+                Life = 1e9
+                Attack = Some { Interval = 1.0; Damage = Map.ofList [ Fire, fire ]; Accuracy = 1e9; Range = 20.0; CritChance = 0.0; Melee = true } }
+        let fight fire state =
+            let player =
+                { Actor.make "Player" [ Mod.more (Damage AllDamage) 100.0 |> Mod.whenever (WhileBuff state) ] [ bolt ] with
+                    Vitals = Some { PlayerStats.basic 1e6 0.0 with AilmentThreshold = 10.0; StunThreshold = 1e12 } }
+            Fight.single (brute fire) player 6.0
+        let hit (o: Outcome) = Map.tryFind "Bolt (hit)" o.DamageBy |> Option.defaultValue 0.0
+        for state in [ "Ignited"; "DamagingAilment" ] do
+            let burnt, cold = Sim.run (fight 1000.0 state) 1u, Sim.run (fight 0.0 state) 1u
+            if count burnt "player:Ignited" = 0 then failwith "never ignited"
+            if hit burnt <= hit cold * 1.2 then failwithf "%s: %f against %f" state (hit burnt) (hit cold)
+            same (fight 1000.0 state) seeds
+        // "+5% to Maximum Fire Resistance while Ignited", and "increased Ailment and Stun Threshold while Surrounded"
+        let c = load { blank with ExtraLines = [ "+300% to Fire Resistance"; "+5% to Maximum Fire Resistance while Ignited"; "20% increased Ailment and Stun Threshold while Surrounded" ] } Options.defaults
+        let p = Setup.player c Options.defaults [] None
+        let at st = p.VitalsAt.Value (Map.ofList st)
+        near ((at []).Resist.[Fire] + 5.0) (at [ "Ignited", 1 ]).Resist.[Fire]
+        near ((at []).StunThreshold * 1.2) (at [ "Surrounded", 1 ]).StunThreshold
+        near ((at []).AilmentThreshold * 1.2) (at [ "Surrounded", 1 ]).AilmentThreshold)
+
     // ---- Wind Dancer ----
 
     test "Wind Dancer: stages build up, a hit on the player with one held sets off Gale Force with the group's supports, which takes them" (fun () ->
