@@ -72,7 +72,17 @@ module Defence =
             | WhileBuff b | PerStack (b, _) -> [ b ]
             | Not inner | OfOwner inner -> names inner
             | _ -> []
+        // (stats `computeWith` asks nothing of: what a hit deals and how a skill is used. A
+        // buff that only such mods have conditions on changes no defence: Trinity's Resonance,
+        // which changes with every hit, is one.)
+        let asked (stat: Stat) =
+            match stat with
+            | Damage _ | AddedMin _ | AddedMax _ | AddedDamageEffect | SkillConvert _ | GainAs _ | LuckyDamage | CritChance | CritBonus | Penetration _
+            | HitChance | DoubleDamageChance | AreaOfEffect | AdditionalProjectiles | Pierce | Chains | Speed | CooldownRecovery | SkillDuration
+            | AilmentChance _ | AilmentMagnitude _ | AilmentDuration _ | AilmentStacks _ | Buildup _ | ForMinions _ | ManaLeech | ManaOnKill | ManaCost | ManaCostEfficiency -> false
+            | _ -> true
         sheet.Mods
+        |> List.filter (fun m -> asked m.Stat)
         |> List.collect (fun m -> m.Conds |> List.collect names)
         |> Set.ofList
         |> Set.add "WeaponSetTwo"

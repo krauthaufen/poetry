@@ -1139,7 +1139,7 @@ module Flat =
               Vitals: PlayerStats option
               /// The player's defences for the sets of buffs they were asked for in any run of
               /// this program (a function of the buffs: knowing them changes no result).
-              VitalsKnown: Dictionary<string, PlayerStats>
+              VitalsKnown: Dictionary<int, ResizeArray<int[] * PlayerStats>>
               BuffNames: string[]
               /// The buffs the defences depend on (`Actor.VitalsReads`; all of them where that is not said),
               /// and by buff, whether it is one of them.
@@ -2195,7 +2195,7 @@ module Flat =
                       CMinionNoRoom = count "minion:no room"
                       CMinionLeft = count "minion:left"
                       Vitals = actor.Vitals
-                      VitalsKnown = Dictionary<string, PlayerStats>()
+                      VitalsKnown = Dictionary<int, ResizeArray<int[] * PlayerStats>>()
                       BuffNames = buffNames
                       VitalsOn =
                         (match actor.VitalsReads with
@@ -2865,7 +2865,7 @@ module Flat =
           Entropies: Dictionary<string, Entropy>
           /// The defences for the sets of buffs they were asked for (`Actor.VitalsAt`), by the
           /// buffs written out; and the last set asked for, with its defences.
-          VitalsSeen: Dictionary<string, PlayerStats>
+          VitalsSeen: Dictionary<int, ResizeArray<int[] * PlayerStats>>
           mutable VitalsOf: int
           mutable VitalsLast: PlayerStats option
           /// Mana gained: regen, leech, flask, recoup, hit, kill, consume.
@@ -3670,23 +3670,42 @@ module Flat =
     let private vitalsNow (s: State) (pools: PlayerStats) : PlayerStats =
         let p = s.P
         match p.Fight.Player.VitalsAt with
-        | Some at ->
+        | Some defences ->
             match s.VitalsLast with
             | Some v when s.VitalsOf = s.A.VitalsVersion -> v
             | _ ->
-                // the buffs written out: which there are, and their stacks
-                let mutable key = ""
-                for id in p.VitalsOn do
-                    if s.A.BHas.[id] then key <- key + string id + "=" + string s.A.BStacks.[id] + ";"
+                // (the buffs the defences read, as a number to look them up by: what goes by
+                // the number is kept with the stacks of each of them, 0 for one that is not
+                // there, and is the answer only where those are the same)
+                let on = p.VitalsOn
+                let mutable key = 17
+                for k in 0 .. on.Length - 1 do
+                    let id = at on k
+                    key <- (key * 31 + (if (at s.A.BHas id) then (at s.A.BStacks id) + 1 else 0)) % 1000000007
                 let v =
                     // (what any run of the program has worked out is kept with the program)
                     let seen = s.VitalsSeen
                     lock seen (fun () ->
-                        match seen.TryGetValue key with
-                        | true, v -> v
-                        | _ ->
-                            let v = at (buffMap s)
-                            seen.[key] <- v
+                        let known =
+                            match seen.TryGetValue key with
+                            | true, known -> known
+                            | _ ->
+                                let known = ResizeArray<int[] * PlayerStats>()
+                                seen.[key] <- known
+                                known
+                        let mutable found = -1
+                        for place in 0 .. known.Count - 1 do
+                            if found < 0 then
+                                let (stacks, _) = known.[place]
+                                let mutable same = true
+                                for k in 0 .. on.Length - 1 do
+                                    let id = at on k
+                                    if (at stacks k) <> (if (at s.A.BHas id) then (at s.A.BStacks id) + 1 else 0) then same <- false
+                                if same then found <- place
+                        if found >= 0 then snd known.[found]
+                        else
+                            let v = defences (buffMap s)
+                            known.Add((on |> Array.map (fun id -> if (at s.A.BHas id) then (at s.A.BStacks id) + 1 else 0), v))
                             v)
                 s.VitalsOf <- s.A.VitalsVersion
                 s.VitalsLast <- Some v
@@ -7155,7 +7174,7 @@ module Flat =
     type private Kept =
         { Queue: Queue
           Evs: ResizeArray<Ev>
-          Vitals: Dictionary<string, PlayerStats>
+          Vitals: Dictionary<int, ResizeArray<int[] * PlayerStats>>
           /// By actor: the answers kept per skill and way of asking (see `keepAnswers`), and
           /// the counts they are stamped with. The counts only ever go up, so an answer of an
           /// earlier run is good in a later one exactly where it can change with nothing (it
