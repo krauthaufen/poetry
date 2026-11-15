@@ -226,6 +226,10 @@ module Behaviours =
           match storedBolts db sheet build with
           | Some (_, every) -> yield { Name = "stored bolts"; Every = every; Action = GainRandom [ "StoredBolts" ] }
           | None -> ()
+          // "Gain a stack of Jade every second" (up to 10: Setup)
+          let jade = sum "JadeEveryMs"
+          if jade > 0.0 then
+              yield { Name = "jade"; Every = jade / 1000.0; Action = GainRandom [ "Jade" ] }
           let fragment = sum "DivineFragmentEvery"
           if fragment > 0.0 then
               yield { Name = "fragment of divinity"; Every = fragment; Action = GainRandom [ "DivineFragment" ] }
@@ -1394,6 +1398,20 @@ module Behaviours =
             if every > 0.0 && lasts > 0.0 then Some [ "CriticalWeakness", min 20 (int (ceil (lasts / every))), [] ] else None)
         |> Option.defaultValue []
 
+    /// "Intimidate is a Debuff that inflicts 10% increased damage taken and 10% reduced damage
+    /// dealt" (the game's keyword text).
+    let intimidated =
+        [ Mod.inc (DamageTaken AllDamage) Constants.intimidateTaken |> Mod.from "Intimidated"; Mod.more (Named "DamageDealt") -Constants.intimidateDealt |> Mod.from "Intimidated" ]
+
+    /// "Enemies are Intimidated for X seconds when you Immobilise them": when one of the
+    /// character's hits freezes, electrocutes, pins or heavily stuns an enemy.
+    let intimidateOnImmobilise (sheet: CharacterSheet) : Rule list =
+        match Mods.sumBase Ctx.empty [ Named "IntimidateOnImmobilise" ] (ModDb.ofList sheet.Mods) with
+        | seconds when seconds > 0.0 ->
+            [ Freeze; Electrocute; Pin; HeavyStun ]
+            |> List.map (fun a -> { Hook = OnInflict a; Filter = AnySkill; Chance = 100.0; Reaction = ApplyDebuff("Intimidated", seconds, 1, intimidated) })
+        | _ -> []
+
     /// The radius of the character's Presence, game units: 4 m, as an area scaled by "increased
     /// Presence Area of Effect" (the radius by its square root, as for skills); "Presence
     /// Radius is doubled" doubles the radius.
@@ -1411,6 +1429,8 @@ module Behaviours =
         let fire = Mods.sumBase Ctx.empty [ Named "PresenceResist:Fire" ] db
         [ if has "Hindered" then yield "Hindered", 1, []
           if has "Blinded" then yield "Blinded", 1, []
+          // "Intimidate is a Debuff that inflicts 10% increased damage taken and 10% reduced damage dealt"
+          if has "Intimidated" then yield "Intimidated", 1, intimidated
           if has "Exposure" then
               let k = Mods.inc Ctx.empty [ Named "ExposureEffect" ] db
               for t in DamageType.elemental -> "Exposure:" + DamageType.name t, 1, [ Mod.base' (Resist t) (-Constants.exposureMagnitude * k) |> Mod.from "Presence" ]

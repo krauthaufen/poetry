@@ -282,6 +282,13 @@ module Constants =
     /// The player's Presence: "By default this has a 4 metre radius" (keyword text, poe2db).
     let presenceRadius = 40.0
 
+    /// "Intimidate is a Debuff that inflicts 10% increased damage taken and 10% reduced damage
+    /// dealt" (poe2db Keywords).
+    let intimidateTaken = 10.0
+    let intimidateDealt = 10.0
+    /// "Maximum of 10 Jade stacks" (poe2db Keywords).
+    let jadeStacks = 10
+
     /// "The base radius of Splash damage is 1.5 metres" (poe2db, Splash Damage), game units.
     let splashRadius = 15.0
 

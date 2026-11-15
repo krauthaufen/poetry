@@ -453,6 +453,27 @@ module StatMap =
         | "unique_double_presence_radius" -> one (Mod.flag (Named "PresenceRadiusDoubled"))
         | "base_enemies_in_your_presence_are_hindered" -> one (Mod.flag (Named "PresenceAura:Hindered"))
         | "enemies_in_presence_are_blinded" -> one (Mod.flag (Named "PresenceAura:Blinded"))
+        | "enemies_in_presence_are_intimidated" -> one (Mod.flag (Named "PresenceAura:Intimidated"))
+        // "Enemies are Intimidated for X seconds when you Immobilise them" (Behaviours.intimidateOnImmobilise)
+        | "enemies_intimidated_x_seconds_when_pinned_heavy_stunned_frozen_or_electrocuted" -> one (Mod.base' (Named "IntimidateOnImmobilise") v)
+        // the player's physical damage reduction beside its armour's (Vitals.physicalLeft): "X%
+        // additional Physical Damage Reduction", "Maximum Physical Damage Reduction is 50%", "Your
+        // current Energy Shield is added to your Armour for determining your Physical Damage
+        // Reduction from Armour"; Jade: "1% additional Physical Damage Reduction per stack", "Gain
+        // a stack of Jade every second"
+        | "base_additional_physical_damage_reduction_%" -> one (Mod.base' (Named "AdditionalPhysicalReduction") v)
+        | "maximum_physical_damage_reduction_is_50%" -> one (Mod.flag (Named "PhysicalReductionCap50"))
+        | "current_energy_shield_%_as_physical_damage_reduction" -> one (Mod.base' (Named "ESAsArmour") v)
+        | "buildup_jade_every_x_ms" ->
+            Some(Mods [ Mod.base' (Named "JadeEveryMs") v; Mod.base' (Named "AdditionalPhysicalReduction") 1.0 |> Mod.whenever (PerStack("Jade", 1.0)) |> Mod.from "Jade" ])
+        // "X% of Armour also applies to Elemental Damage while Shapeshifted", "... to Chaos Damage
+        // while on full Energy Shield"
+        | "x%_of_armour_applies_to_elemental_damage_while_shapeshifted" ->
+            Some(Mods [ for t in DamageType.elemental -> Mod.base' (Named("ArmourAppliesTo:" + DamageType.name t)) v |> Mod.whenever (WhileBuff "Shapeshifted") ])
+        | "armour_%_also_applies_to_chaos_damage_while_at_full_es" -> one (Mod.base' (Named "ArmourAppliesTo:Chaos") v |> Mod.whenever (WhileBuff "FullEnergyShield"))
+        | "maximum_fire_damage_resistance_+%_while_shapeshifted" -> one (Mod.base' (MaxResist Fire) v |> Mod.whenever (WhileBuff "Shapeshifted"))
+        | "maximum_cold_damage_resistance_+%_while_shapeshifted" -> one (Mod.base' (MaxResist Cold) v |> Mod.whenever (WhileBuff "Shapeshifted"))
+        | "life_leech_amount_+%_while_shapeshifted" -> one (Mod.inc (Named "LifeLeechAmount") v |> Mod.whenever (WhileBuff "Shapeshifted"))
         | "enemies_in_presence_have_exposure" -> one (Mod.flag (Named "PresenceAura:Exposure"))
         | "enemies_in_presence_elemental_damage_resisted_by_lowest_elemental_resistance" -> one (Mod.flag (Named "PresenceAura:LowestResist"))
         | "enemies_in_presence_have_fire_resistance_%" -> one (Mod.base' (Named "PresenceResist:Fire") v)
@@ -2156,6 +2177,14 @@ module StatMap =
           "hexproof"; "life_leeched_from_-permyriad"; "mana_leeched_from_-permyriad"; "energy_shield_leeched_from_-permyriad"
           // "Unaffected by Elemental Weakness": no monster here curses the player
           "unaffected_by_elemental_weakness"
+          // "Remove a Curse when you use a Mana Flask / after Channelling for 2 seconds": there is none
+          "remove_curse_on_mana_flask_use"; "remove_x_curses_after_channelling_for_2_seconds"
+          // "Immune to Bleeding / Maim / Poison / Exposure", "Cannot be Blinded", "increased effect
+          // of Withered on you": monsters here leave no Bleeding, Maim, Poison, Exposure, Blind or
+          // Withered on the player
+          "immune_to_bleeding_while_shapeshifted"; "immune_to_maim_while_shapeshifted"; "immune_to_bleeding_if_helmet_grants_higher_armour_than_evasion"
+          "immune_to_poison_if_helmet_grants_higher_evasion_than_armour"; "immune_to_exposure"; "cannot_be_blinded_while_on_full_life"
+          "withered_effect_on_self_+%"
           // "Inflict Abyssal Wasting on Hit": Abyssal Wasting reduces Life Regeneration Rate by 50%
           // for 6 seconds (the game's keyword), and monsters here never regenerate; its magnitude
           // and duration likewise. What a line makes it do besides (blind, hinder, lower

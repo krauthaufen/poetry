@@ -2062,3 +2062,49 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         equal (box false) (box ((Behaviours.lifeCost ModDb.empty bolt).Tags.Contains(Tag "CostsLife")))
         let gains = mods "spells_gain_%_physical_damage_if_they_cost_life" 12.0
         equal (box true) (box (gains |> List.forall (fun m -> List.contains (SkillIs(Tag "CostsLife")) m.Conds && List.contains (SkillIs Spell) m.Conds))))
+
+    test "physical damage reduction beside the armour's: additional, its cap, energy shield as armour, Jade; Intimidate" (fun () ->
+        let basic = PlayerStats.basic 1000.0 0.0
+        // 100 physical: 20% additional reduction leaves 80
+        near 80.0 (Defence.taken { basic with PhysicalReduction = 20.0 } Physical false 100.0)
+        // armour of 9000 against 100: 90%; with "Maximum Physical Damage Reduction is 50%": 50
+        near 10.0 (Defence.taken { basic with Armour = 9000.0 } Physical false 100.0)
+        near 50.0 (Defence.taken { basic with Armour = 9000.0; PhysicalReductionCap = 50.0 } Physical false 100.0)
+        // 1000 energy shield as armour against 100: 1000 / (1000 + 1000) = 50%
+        near 50.0 (Defence.taken { basic with EnergyShield = 1000.0; ESAsArmour = 100.0 } Physical false 100.0)
+        equal (box (Named "AdditionalPhysicalReduction")) (box (mods "base_additional_physical_damage_reduction_%" 8.0).Head.Stat)
+        equal (box (Named "ESAsArmour")) (box (mods "current_energy_shield_%_as_physical_damage_reduction" 100.0).Head.Stat)
+        // on a character: the lines, and Jade building up to 10 stacks of 1% each
+        let c = load { blank with ExtraLines = [ "Maximum Physical Damage Reduction is 50%"; "Gain a stack of Jade every second" ] } Options.defaults
+        near 50.0 c.Vitals.PhysicalReductionCap
+        equal (box (Some 10)) (box (Map.tryFind "Jade" c.MaxResources))
+        let jade n = (Defence.computeWith (Map.ofList [ "Jade", n ]) Map.empty c.Sheet).PhysicalReduction
+        near 0.0 (jade 0)
+        near 7.0 (jade 7)
+        equal (box [ 1.0 ]) (box (Behaviours.periodics db.Value c.Sheet c.Build 0.0 |> List.choose (fun p -> if p.Name = "jade" then Some p.Every else None)))
+        // in a fight: a monster's physical hits on a player with each of them
+        let bolt = { Skill.make "Bolt" [ Spell ] with BaseDamage = Map.ofList [ Fire, Range.fixedAt 100.0 ]; BaseCrit = 0.0 }
+        let fight (v: PlayerStats) =
+            let player = { Actor.make "Player" [] [ bolt ] with Rotation = [ Actor.always "Bolt" ]; Vitals = Some v }
+            let enemy = { EnemyDef.atLevel 83 1e9 with Mods = []; Attack = Some { Interval = 0.7; Damage = Map.ofList [ Physical, 60.0; Cold, 20.0 ]; Accuracy = 1e9; Range = 40.0; CritChance = 5.0; Melee = false } }
+            Fight.single enemy player 12.5
+        let tough = { PlayerStats.basic 5000.0 100.0 with EnergyShield = 800.0; Armour = 1500.0; EnergyShieldRecharge = 100.0 }
+        same (fight { tough with PhysicalReduction = 15.0 }) seeds
+        same (fight { tough with PhysicalReductionCap = 50.0; Armour = 30000.0 }) seeds
+        same (fight { tough with ESAsArmour = 100.0 }) seeds
+        // the hit count is the same and less damage arrives with the reduction
+        let took v = (Sim.run (fight v) 1u).DamageTaken
+        equal (box true) (box (took { tough with PhysicalReduction = 15.0 } < took tough))
+        equal (box true) (box (took { tough with ESAsArmour = 100.0 } < took tough))
+        // Intimidate: 10% increased damage taken and 10% reduced damage dealt
+        let auras lines = Behaviours.presenceAuras (load { blank with ExtraLines = lines } Options.defaults).Sheet
+        match auras [ "Enemies in your Presence are Intimidated" ] |> List.filter (fun (n, _, _) -> n = "Intimidated") with
+        | [ _, 1, ms ] -> equal (box [ DamageTaken AllDamage, Inc, 10.0; Named "DamageDealt", More, -10.0 ]) (box (ms |> List.map (fun m -> m.Stat, m.Kind, m.Value)))
+        | other -> failwithf "unexpected %A" other
+        let sheet = { (load blank Options.defaults).Sheet with Mods = mods "enemies_intimidated_x_seconds_when_pinned_heavy_stunned_frozen_or_electrocuted" 4.0 }
+        equal (box [ OnInflict Freeze; OnInflict Electrocute; OnInflict Pin; OnInflict HeavyStun ]) (box (Behaviours.intimidateOnImmobilise sheet |> List.map (fun r -> r.Hook)))
+        // what monsters never leave on the player
+        equal (box NotOffensive) (box (StatMap.meaning "immune_to_bleeding_while_shapeshifted" 1.0))
+        let applies = mods "x%_of_armour_applies_to_elemental_damage_while_shapeshifted" 30.0
+        equal 3 applies.Length
+        equal (box [ WhileBuff "Shapeshifted" ]) (box applies.Head.Conds))

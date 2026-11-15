@@ -322,6 +322,9 @@ module Setup =
         let maxResources, startResources =
             if Mods.sumBase Ctx.empty [ Named "DivineFragmentEvery" ] (ModDb.ofList sheet.Mods) > 0.0 then Map.add "DivineFragment" 1 maxResources, Map.add "DivineFragment" 1 startResources
             else maxResources, startResources
+        // Jade builds up to its 10 stacks (none at the start)
+        let maxResources =
+            if Mods.sumBase Ctx.empty [ Named "JadeEveryMs" ] (ModDb.ofList sheet.Mods) > 0.0 then Map.add "Jade" Constants.jadeStacks maxResources else maxResources
         // bolts that build up by themselves: full at the start
         let maxResources, startResources =
             match Behaviours.storedBolts db sheet build with
@@ -776,7 +779,7 @@ module Setup =
                 @ Behaviours.selfIgnite sheet
                 @ Behaviours.rareModsOnKill sheet
                 @ Behaviours.totemRecently sheet pressedSkills
-                @ Behaviours.recentStates sheet pressedSkills
+                @ Behaviours.recentStates sheet pressedSkills @ Behaviours.intimidateOnImmobilise sheet
                 @ (thorns |> Option.map snd |> Option.toList)
                 @ (match arctic with Some (_, r, _, _) -> r | None -> [])
                 @ Behaviours.scavengedPlating db sheet c.Build

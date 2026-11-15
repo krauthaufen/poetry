@@ -6713,7 +6713,7 @@ module Flat =
                                 match t with
                                 | Physical ->
                                     let d = if atk.Melee then max 0.0 (d - v.FlatPhysicalTaken) else d
-                                    d * (1.0 - Vitals.armourReduction (v.Armour * armourShare) d / 100.0)
+                                    Vitals.physicalLeft v (v.Armour * armourShare) s.Shield d
                                 | t ->
                                     let d = d * (1.0 - (Map.tryFind t v.Resist |> Option.defaultValue 0.0) / 100.0)
                                     // "X% of Armour also applies to <type> damage"
