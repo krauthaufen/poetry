@@ -1070,6 +1070,25 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         near 0.0 v.ESRegen
         near 0.0 v.EnergyShieldRecharge)
 
+    // ---- Flame Breath ----
+
+    test "Empowered Flame Breath: a use with a Power Charge to consume gains 50% of its damage as lightning" (fun () ->
+        let gain = mods "wyvern_devour_empowered_flame_breath_base_all_damage_%_to_gain_as_lightning" 50.0
+        equal (box 5) (box gain.Length)
+        // a breath of 100 fire; a charge comes with each use (before its hits), the use consumes it
+        let breath = { Skill.make "Breath" [ Attack ] with BaseDamage = Map.ofList [ Fire, { Min = 100.0; Max = 100.0 } ]; BaseTime = 1.0; BaseCrit = 0.0; Consumes = Some "PowerCharge"; Mods = gain }
+        let fight charged =
+            let player =
+                { Actor.make "Player" [ Mod.override' (AilmentChance Ignite) 0.0 ] [ breath ] with
+                    Rules = (if charged then [ { Hook = OnUse; Filter = AnySkill; Chance = 100.0; Reaction = GainResource("PowerCharge", 1) } ] else [])
+                    MaxResources = Map.ofList [ "PowerCharge", 3 ]
+                    Rotation = [ { Use = "Breath"; When = fun v -> v.Time < 0.1 } ] }
+            Fight.single { EnemyDef.atLevel 83 1e12 with Mods = []; Attack = None } player 3.0
+        let hit (o: Outcome) = Map.tryFind "Breath (hit)" o.DamageBy |> Option.defaultValue 0.0
+        let plain = hit (Sim.run (fight false) 1u)
+        near (plain * 1.5) (hit (Sim.run (fight true) 1u))
+        same (fight true) seeds)
+
     // ---- durations ----
 
     test "durations: of Ignite, Shock and Chill; Swift Affliction's and Limit's more; flask effect; banners" (fun () ->

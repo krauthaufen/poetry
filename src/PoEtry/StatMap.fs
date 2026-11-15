@@ -1001,6 +1001,10 @@ module StatMap =
         | "flask_duration_+%" -> one (Mod.inc (Named "FlaskDuration") v)
         // "Banner Skills have X% increased Duration"
         | "banner_duration_+%" -> one (Mod.inc (Named "BannerDuration") v)
+        // "Empowered Flame Breath Gains X% of damage as Lightning damage": empowered by the Power
+        // Charge the use consumes, which goes when its hits are done; a use with a charge is one
+        | "wyvern_devour_empowered_flame_breath_base_all_damage_%_to_gain_as_lightning" ->
+            Some(Mods(DamageType.all |> List.map (fun t -> Mod.base' (GainAs(t, Lightning)) v |> Mod.whenever (WhileBuff "PowerCharge"))))
         // "X% increased Minion Duration": of temporary minions
         | "base_minion_duration_+%" -> one (Mod.inc (Named "MinionDuration") v)
         | "ailment_chance_+%" -> Some(Mods(allAilments |> List.map (fun a -> Mod.inc (AilmentChance a) v)))
