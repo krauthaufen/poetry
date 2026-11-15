@@ -18,7 +18,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
    whose description or behaviour changed.
 5. Go through the lists below; the wiki's version history of a skill says what changed.
 
-## Rules (123)
+## Rules (125)
 
 ### Hit damage
 
@@ -31,6 +31,12 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | Rule | Source, and what is guessed | Confidence |
 |---|---|---|
 | Duration | game keyword text ("Fully Broken for 12 seconds"); the partial case is our reading | data / guess |
+
+### Ailments
+
+| Rule | Source, and what is guessed | Confidence |
+|---|---|---|
+| Ailment durations | stat descriptions; Electrocute among the elemental ailments: recollection of the game's keyword | data; electrocute: guess |
 
 ### Timing and the event engine
 
@@ -58,6 +64,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | Full circle from the player | geometry | guess |
 | Damage per target | — | guess |
 | Resistances "treated as negated" | game text | guess (interaction with penetration/exposure order) |
+| Life per Endurance Charge consumed | stat description; "none when kept" is our reading of "consumed" | data; guess |
 | Chance to not remove charges | game text | guess (cap: Flicker Strike's equivalent is hard-capped at 75%) |
 | Projectiles of `ProjectilesNotFromUser` skills (Falling Thunder) | skill text, skill type | guess (geometry) |
 | Slam impact point | setting (default 15) | guess |
@@ -114,7 +121,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | Additional Remnants | stat descriptions; adding the two up is a guess | guess |
 | Using them up | game rule | guess |
 | Herald of Plague | gem description, `herald_of_agony_poison_spread_on_kill_radius_base_magnitude_to_grant` (its description: a radius in tenths of a metre) | data / guess |
-| Kills by damage over time | game: "on kill" effects are not limited to hits unless they say so; the owner rule and Agony left out are simplifications | guess |
+| Kills by damage over time | game: "on kill" effects are not limited to hits unless they say so; the owner rule is a simplification | guess |
 | Chains | game rule (recollection) | guess |
 | Herald of Ash | gem description + data | data; the ignite takes no further modifiers (guess); in the damage shares it is the herald's, not "Ignite" |
 | Item modifier magnitudes | item text as the API gives it | guess |
