@@ -897,7 +897,7 @@ let main _ =
 
     // ---- minions that can be killed ----
     let body life revive =
-        { Life = life; EnergyShield = 0.0; Armour = 0.0; Evasion = 0.0; Resist = Map.empty; Melee = true; Size = 1.0; Reach = 12.0; Revive = revive; Power = 0.55; LifeRegen = 0.0; TakesForOwner = 0.0; Explodes = None }
+        { Life = life; EnergyShield = 0.0; Armour = 0.0; Evasion = 0.0; Resist = Map.empty; Melee = true; Size = 1.0; Reach = 12.0; Revive = revive; Power = 0.55; LifeRegen = 0.0; TakesForOwner = 0.0; Explodes = None; Taken = 1.0; PhysicalReduction = 0.0 }
 
     test "minions: a monster kills a minion, it is revived after its revive time and killed again" (fun () ->
         // the player can't be hurt, so every attack (60 a second) goes at the skeleton with 100

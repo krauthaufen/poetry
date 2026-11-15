@@ -660,7 +660,9 @@ let randomFight (case: uint32) : Fight * string =
                   Power = between 0.3 2.0
                   LifeRegen = (if chance 0.3 then between 1.0 60.0 else 0.0)
                   TakesForOwner = (if chance 0.25 then between 10.0 70.0 else 0.0)
-                  Explodes = None }
+                  Explodes = None
+                  Taken = (if chance 0.2 then between 0.6 1.3 else 1.0)
+                  PhysicalReduction = (if chance 0.2 then between 5.0 30.0 else 0.0) }
             let persistent =
                 [ for i in 1 .. whole 0 4 do
                     let name = sprintf "Minion %d" i
@@ -1130,7 +1132,7 @@ let run (test: string -> (unit -> unit) -> unit) =
         same { fine with Player = { player with Pool = Some "Pack" } } few
         same { fine with Player = { player with ActiveWhile = Some "Totem" } } few
         same { fine with Player = { player with ActiveWhile = Some "Totem"; Resources = [ "Totem", 1 ] } } few
-        let body : MinionBody = { Life = 500.0; EnergyShield = 100.0; Armour = 0.0; Evasion = 0.0; Resist = Map.empty; Melee = false; Size = 3.0; Reach = 10.0; Revive = Some 3.0; Power = 1.0; LifeRegen = 5.0; TakesForOwner = 0.0; Explodes = None }
+        let body : MinionBody = { Life = 500.0; EnergyShield = 100.0; Armour = 0.0; Evasion = 0.0; Resist = Map.empty; Melee = false; Size = 3.0; Reach = 10.0; Revive = Some 3.0; Power = 1.0; LifeRegen = 5.0; TakesForOwner = 0.0; Explodes = None; Taken = 1.0; PhysicalReduction = 0.0 }
         same { fine with Player = { player with Body = Some body } } few
         same { fine with Player = { player with Body = Some body; Vitals = None } } few
         // periodics and cycles of one name: the first answers for both
@@ -1142,7 +1144,7 @@ let run (test: string -> (unit -> unit) -> unit) =
         same { fine with Player = twice } few)
 
     test "flat: defenders that go by one name share what decides whether attacks on them land" (fun () ->
-        let body : MinionBody = { Life = 5000.0; EnergyShield = 100.0; Armour = 0.0; Evasion = 3000.0; Resist = Map.empty; Melee = true; Size = 3.0; Reach = 10.0; Revive = Some 3.0; Power = 1.0; LifeRegen = 5.0; TakesForOwner = 0.0; Explodes = None }
+        let body : MinionBody = { Life = 5000.0; EnergyShield = 100.0; Armour = 0.0; Evasion = 3000.0; Resist = Map.empty; Melee = true; Size = 3.0; Reach = 10.0; Revive = Some 3.0; Power = 1.0; LifeRegen = 5.0; TakesForOwner = 0.0; Explodes = None; Taken = 1.0; PhysicalReduction = 0.0 }
         let player name =
             { Actor.make name [ Mod.base' (Named "Accuracy") 900.0; Mod.inc CritChance 100.0 ] [ strike "Swing" 300.0 500.0 ] with
                 Vitals = Some { PlayerStats.basic 50000.0 500.0 with Evasion = 4000.0 } }
@@ -1206,7 +1208,7 @@ let run (test: string -> (unit -> unit) -> unit) =
     let sure = Mod.base' (Named "Accuracy") 1e12
     let idle = { Skill.make "Wait" [ Spell ] with Hits = [] }
     let body life revive =
-        { Life = life; EnergyShield = 0.0; Armour = 0.0; Evasion = 0.0; Resist = Map.empty; Melee = true; Size = 1.0; Reach = 12.0; Revive = revive; Power = 0.55; LifeRegen = 0.0; TakesForOwner = 0.0; Explodes = None }
+        { Life = life; EnergyShield = 0.0; Armour = 0.0; Evasion = 0.0; Resist = Map.empty; Melee = true; Size = 1.0; Reach = 12.0; Revive = revive; Power = 0.55; LifeRegen = 0.0; TakesForOwner = 0.0; Explodes = None; Taken = 1.0; PhysicalReduction = 0.0 }
     let brute t dmg interval =
         { EnemyDef.atLevel 83 1e9 with
             Name = "brute"; Position = Vec.make 8.0 0.0; Size = 4.0; Mods = []
@@ -1505,7 +1507,7 @@ let run (test: string -> (unit -> unit) -> unit) =
         ignore refused)
 
     test "flat: actors of one name are two actors, each with a state of its own" (fun () ->
-        let body : MinionBody = { Life = 3000.0; EnergyShield = 100.0; Armour = 0.0; Evasion = 1500.0; Resist = Map.empty; Melee = true; Size = 3.0; Reach = 10.0; Revive = Some 3.0; Power = 1.0; LifeRegen = 5.0; TakesForOwner = 0.0; Explodes = None }
+        let body : MinionBody = { Life = 3000.0; EnergyShield = 100.0; Armour = 0.0; Evasion = 1500.0; Resist = Map.empty; Melee = true; Size = 3.0; Reach = 10.0; Revive = Some 3.0; Power = 1.0; LifeRegen = 5.0; TakesForOwner = 0.0; Explodes = None; Taken = 1.0; PhysicalReduction = 0.0 }
         let player = { Actor.make "Player" [ Mod.inc CritChance 100.0 ] [ spell "Bolt" Fire 100.0 200.0 ] with Vitals = Some(PlayerStats.basic 50000.0 500.0) }
         let hound name power =
             { Actor.make name [ Mod.inc CritChance 50.0 ] [ { strike "Bite" (100.0 * power) (200.0 * power) with Cooldown = Some 1.3 }; strike "Claw" 30.0 60.0 ] with

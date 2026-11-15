@@ -334,6 +334,10 @@ module StatMap =
         // "You require N fewer enemies to be Surrounded" (the value is negative)
         | "required_enemies_to_be_considered_surrounded_offset" -> one (Mod.base' (Named "SurroundedOffset") v)
         | "remnant_recover_%_mana_on_pickup" -> one (Mod.base' (Named "RemnantRecoverManaPercent") v)
+        // "Recover X% of Maximum Life when you collect a Remnant": with a Life Remnant (Behaviours.lifeRemnants)
+        | "remnant_recover_%_life_on_pickup" -> one (Mod.base' (Named "RemnantRecoverLifePercent") v)
+        // Life Remnants' own numbers (Behaviours.lifeRemnants)
+        | "life_remnants_gain_per_globe" | "life_remnants_chance_to_spawn_orb_on_killing_enemy_%" | "life_remnants_spawn_remnant_on_hit_vs_enemy_every_X_ms" -> Some Structural
         // Mana Remnants' own numbers: read by Behaviours.manaRemnants
         | "mana_remnants_mana_gain_per_globe" | "mana_remnants_spawn_remnant_on_crit_vs_elemental_ailment_enemy_every_X_ms"
         | "mana_remnants_chance_to_spawn_orb_on_killing_enemy_with_elemental_ailment_%" -> Some Structural
@@ -453,6 +457,52 @@ module StatMap =
         | "unique_double_presence_radius" -> one (Mod.flag (Named "PresenceRadiusDoubled"))
         | "base_enemies_in_your_presence_are_hindered" -> one (Mod.flag (Named "PresenceAura:Hindered"))
         | "enemies_in_presence_are_blinded" -> one (Mod.flag (Named "PresenceAura:Blinded"))
+        | "enemies_in_presence_are_intimidated" -> one (Mod.flag (Named "PresenceAura:Intimidated"))
+        | "enemies_in_presence_non_skill_base_all_damage_%_to_gain_as_chaos" -> one (Mod.base' (Named "PresenceEnemyGainAsChaos") v)
+        // "Unwithered enemies are Withered for X seconds when they enter your Presence" (Behaviours.presenceEntry)
+        | "inflict_withered_for_x_seconds_on_unwithered_enemies_when_they_enter_your_presence" -> one (Mod.base' (Named "WitherOnEnteringPresence") v)
+        // "Warcries Debilitate Enemies" (Behaviours.debilitateOnWarcry; the id's second)
+        | "warcries_debilitate_enemies_for_1_second" -> one (Mod.base' (Named "DebilitateOnWarcry") 1.0)
+        // "Recover X% of Missing Life before being Hit by an Enemy" (the engines' monster hit)
+        | "missing_life_%_gained_as_life_before_hit" -> one (Mod.base' (Named "MissingLifeBeforeHit") v)
+        // leech: "Leech Life X% faster"; what life leech goes by beside physical damage, or in
+        // its place; "X% of Spell Damage Leeched as Life": of every type a spell deals
+        | "base_life_leech_rate_+%" -> one (Mod.inc (Named "LifeLeechRate") v)
+        | "life_leech_also_recovers_based_on_lightning_damage" -> one (Mod.flag (Named "LeechFrom:Lightning"))
+        | "life_leech_also_recovers_based_on_elemental_damage_types" -> Some(Mods [ for t in DamageType.elemental -> Mod.flag (Named("LeechFrom:" + DamageType.name t)) ])
+        | "life_leech_recovers_based_on_your_chaos_damage_instead_of_physical_damage" -> Some(Mods [ Mod.flag (Named "LeechFrom:Chaos"); Mod.flag (Named "LeechNotFromPhysical") ])
+        | "base_life_leech_from_all_spell_damage_permyriad" ->
+            Some(Mods(
+                    (Mod.base' (Named "LifeLeech") (v / 100.0) |> Mod.whenever (SkillIs Spell))
+                    :: [ for t in [ Fire; Cold; Lightning; Chaos ] -> Mod.flag (Named("LeechFrom:" + DamageType.name t)) |> Mod.whenever (SkillIs Spell) ]))
+        // "Life Leeched by Supported Skills is not removed at full Life": no leech is, here
+        // (RULES.md, "Leech")
+        | "life_leech_from_source_not_removed_at_full_life" -> Some Structural
+        // "Hits against you have X% reduced Critical Damage Bonus per socketed Rune or Soul Core"
+        | "base_self_critical_strike_multiplier_-%_per_rune_or_soul_core" -> one (Mod.base' (Named "LessCritDamageTaken") v |> Mod.whenever (PerStack("NonIdolAugments", 1.0)))
+        | "deflect_chance_is_lucky_while_on_low_life" -> one (Mod.flag (Named "LuckyDeflect") |> Mod.whenever (WhileBuff "LowLife"))
+        // "Enemies you Curse have -X% to Chaos Resistance"
+        | "enemies_chaos_resistance_%_while_cursed" -> one (Mod.base' (Named "EnemyResist:Chaos") v |> Mod.whenever (EnemyHas "Cursed"))
+        // "Enemies are Intimidated for X seconds when you Immobilise them" (Behaviours.intimidateOnImmobilise)
+        | "enemies_intimidated_x_seconds_when_pinned_heavy_stunned_frozen_or_electrocuted" -> one (Mod.base' (Named "IntimidateOnImmobilise") v)
+        // the player's physical damage reduction beside its armour's (Vitals.physicalLeft): "X%
+        // additional Physical Damage Reduction", "Maximum Physical Damage Reduction is 50%", "Your
+        // current Energy Shield is added to your Armour for determining your Physical Damage
+        // Reduction from Armour"; Jade: "1% additional Physical Damage Reduction per stack", "Gain
+        // a stack of Jade every second"
+        | "base_additional_physical_damage_reduction_%" -> one (Mod.base' (Named "AdditionalPhysicalReduction") v)
+        | "maximum_physical_damage_reduction_is_50%" -> one (Mod.flag (Named "PhysicalReductionCap50"))
+        | "current_energy_shield_%_as_physical_damage_reduction" -> one (Mod.base' (Named "ESAsArmour") v)
+        | "buildup_jade_every_x_ms" ->
+            Some(Mods [ Mod.base' (Named "JadeEveryMs") v; Mod.base' (Named "AdditionalPhysicalReduction") 1.0 |> Mod.whenever (PerStack("Jade", 1.0)) |> Mod.from "Jade" ])
+        // "X% of Armour also applies to Elemental Damage while Shapeshifted", "... to Chaos Damage
+        // while on full Energy Shield"
+        | "x%_of_armour_applies_to_elemental_damage_while_shapeshifted" ->
+            Some(Mods [ for t in DamageType.elemental -> Mod.base' (Named("ArmourAppliesTo:" + DamageType.name t)) v |> Mod.whenever (WhileBuff "Shapeshifted") ])
+        | "armour_%_also_applies_to_chaos_damage_while_at_full_es" -> one (Mod.base' (Named "ArmourAppliesTo:Chaos") v |> Mod.whenever (WhileBuff "FullEnergyShield"))
+        | "maximum_fire_damage_resistance_+%_while_shapeshifted" -> one (Mod.base' (MaxResist Fire) v |> Mod.whenever (WhileBuff "Shapeshifted"))
+        | "maximum_cold_damage_resistance_+%_while_shapeshifted" -> one (Mod.base' (MaxResist Cold) v |> Mod.whenever (WhileBuff "Shapeshifted"))
+        | "life_leech_amount_+%_while_shapeshifted" -> one (Mod.inc (Named "LifeLeechAmount") v |> Mod.whenever (WhileBuff "Shapeshifted"))
         | "enemies_in_presence_have_exposure" -> one (Mod.flag (Named "PresenceAura:Exposure"))
         | "enemies_in_presence_elemental_damage_resisted_by_lowest_elemental_resistance" -> one (Mod.flag (Named "PresenceAura:LowestResist"))
         | "enemies_in_presence_have_fire_resistance_%" -> one (Mod.base' (Named "PresenceResist:Fire") v)
@@ -718,6 +768,9 @@ module StatMap =
             one (Mod.inc (Damage AllDamage) v |> Mod.whenever (SkillIs Spell) |> Mod.whenever (WhileBuff "FullEnergyShield"))
         // Darkness (see Defence, takeDamage)
         | "darkness_per_level" -> one (Mod.base' (Named "DarknessPerLevel") v)
+        // "Gain X% of Damage as Extra Chaos Damage per 20 Unreserved Darkness" (Sim.syncDarkness)
+        | "gain_%_damage_as_chaos_from_unreserved_darkness" ->
+            Some(Mods [ for t in DamageType.all -> Mod.base' (GainAs(t, Chaos)) v |> Mod.whenever (PerStack("UnreservedDarkness", 20.0)) ])
         | "maximum_darkness_+%" -> one (Mod.inc (Named "Darkness") v)
         | "base_darkness_refresh_rate_ms" -> one (Mod.base' (Named "DarknessSeconds") (v / 1000.0))
         | "darkness_refresh_rate_+%" -> one (Mod.inc (Named "DarknessSeconds") v)
@@ -992,7 +1045,13 @@ module StatMap =
               "seismic_cry_slam_skill_additional_aftershocks"; "warcry_empowers_per_X_monster_power"; "warcry_empowers_per_X_monster_power_mp_cap"
               "curse_delay_duration_ms"; "trigger_vicious_hex_explosion_when_curse_ends"
               "active_skill_all_elemental_exposure_magnitude"; "active_skill_all_elemental_exposure_compounding_magnitude"
-              "active_skill_all_elemental_exposure_compounding_magnitude_cap" ]
+              "active_skill_all_elemental_exposure_compounding_magnitude_cap"
+              // Behaviours.spiritUses: what a gem reserves (Blasphemy per curse, the first minions
+              // free, life in place of Spirit); summons: a Raging Spirit per so much radius;
+              // ancestralSpirits: that a totem has its Ancestral Spirits
+              "blasphemy_base_spirit_reservation_per_socketed_curse"; "first_X_minions_have_0_base_spirit_reservation"
+              "skill_reserves_X_life_permyriad_per_spirit_instead_of_spirit"; "skill_raging_spirit_per_x_radius"
+              "totem_has_ancestral_warrior_spirit" ]
 
     let private explicit (id: string) (v: float) : Meaning option =
         let one m = Some(Mods [ m ])
@@ -1000,6 +1059,25 @@ module StatMap =
         | id when readWhereBuilt.Contains id -> Some Structural
         // (a support's "more / less life" for the minions of its gem: Behaviours.minions)
         | id when id.StartsWith "support_" && id.EndsWith "minion_life_+%_final" -> Some Structural
+        // "+N to Level of Supported Skills if ... other Supports" (Gems.supportLevels), the
+        // energy a meta gem gains when a minion dies (Behaviours.metas), the flag of a gem whose
+        // skill places totems (Behaviours.totems)
+        | id when id.StartsWith "supported_" && id.Contains "_skill_gem_level_+" && (id.EndsWith "_other_supports" || id.EndsWith "_other_support") -> Some Structural
+        | "cast_on_minion_death_gain_1_energy_per_X_minion_relative_defensiveness_%" | "base_skill_summons_totems" -> Some Structural
+        // the gem's own "Minions have X% more Maximum Life", and a support's "Minions take X%
+        // more / less Damage" (Feeding Frenzy, Meat Shield): Behaviours.minions
+        | "active_skill_minion_life_+%_final" | "feeding_frenzy_minion_damage_taken_+%_final"
+        | "support_minion_defensive_stance_minion_damage_taken_+%_final" -> Some Structural
+        // Splash: read into what the strike hits (Gems.buildSet)
+        | "melee_splash" | "minion_melee_splash" -> Some Structural
+        // what culling with the skill gives (Behaviours.cullRules)
+        | "support_thrill_of_the_kill_buff_grant_%_added_lightning_attack_damage" | "support_thrill_of_the_kill_buff_base_duration_ms"
+        | "support_thrill_of_the_kill_buff_shock_chance_+%" | "support_culling_strike_threshold_+%_on_cull_for_seconds_from_code"
+        | "skill_grant_X_frenzy_charges_against_normal_and_magic_monsters" | "skill_grant_X_frenzy_charges_against_rare_monsters"
+        | "skill_grant_X_frenzy_charges_against_unique_monsters" | "skill_grant_X_power_charges_against_normal_and_magic_monsters"
+        | "skill_grant_X_power_charges_against_rare_monsters" | "skill_grant_X_power_charges_against_unique_monsters" -> Some Structural
+        // "Minions have X% additional Physical Damage Reduction" (Behaviours.minionBody)
+        | "minion_additional_physical_damage_reduction_%" -> one (Mod.base' (ForMinions(Named "AdditionalPhysicalReduction")) v)
         // where a Flame of Chayula appears and from how far it is seen: every flame is taken
         // to be picked up at once (RULES.md, Flames of Chayula)
         | "breach_flame_spawn_radius" | "breach_walk_base_visibility_range" -> Some Structural
@@ -1305,6 +1383,121 @@ module StatMap =
         | id when id.EndsWith "projectile_speed_+%_final" -> one (Mod.more (Named "ProjectileSpeed") v)
         | "base_cooldown_modifiable_repeat_interval_ms" | "cooldown_recovery_modifiers_also_apply_to_repeat_interval" -> Some Structural
         | "base_chance_to_pierce_%" -> one (Mod.base' (Named "PierceChance") v)
+        // "Projectiles Pierce N additional Targets" on an item or passive (a gem's own is read
+        // into its delivery), "Arrows Pierce an additional Target"
+        | "projectile_base_number_of_targets_to_pierce" -> one (Mod.base' Pierce v)
+        | "arrow_base_number_of_targets_to_pierce" -> one (Mod.base' Pierce v |> Mod.whenever (SkillIs Bow))
+        // "X% more Freeze / Ignite / Shock duration on you while a Supported Skill is active"
+        | "support_freeze_protection_spirit_cost_freeze_duration_on_self_+%_final" -> one (Mod.more (Named "SelfDuration:Freeze") v)
+        | "support_ignite_protection_spirit_cost_ignite_duration_on_self_+%_final" -> one (Mod.more (Named "SelfDuration:Ignite") v)
+        | "support_shock_protection_spirit_cost_shock_duration_on_self_+%_final" -> one (Mod.more (Named "SelfDuration:Shock") v)
+        // a part of a use (Toxic Domain's pustule) costs nothing of its own: so are all parts here
+        | "skill_no_cost_or_reservation" -> Some Structural
+        // "+1 to Limit" of what stands where it was cast (Behaviours.sustained): of a support's
+        // skill, or of the character's skills of a kind
+        | "base_limit_+" | "support_storm_skill_limit_+" -> one (Mod.base' (Named "SkillLimit") v)
+        | "storm_skill_limit_+" -> one (Mod.base' (Named "SkillLimit") v |> Mod.whenever (SkillIs(Tag "Type:Storm")))
+        | "orb_skill_limit_+" -> one (Mod.base' (Named "SkillLimit") v |> Mod.whenever (SkillIs(Tag "Type:Orb")))
+        | "fissure_skills_limit_+" -> one (Mod.base' (Named "SkillLimit") v |> Mod.whenever (SkillIs(Tag "Type:CreatesFissure")))
+        // "+1 to Limit for Elemental Skills": a skill of fire, cold or lightning, once
+        | "elemental_skill_limit_+" ->
+            Some(Mods [ Mod.base' (Named "SkillLimit") v |> Mod.whenever (SkillIs(Tag "Fire"))
+                        Mod.base' (Named "SkillLimit") v |> Mod.whenever (SkillIs(Tag "Cold")) |> Mod.whenever (Not(SkillIs(Tag "Fire")))
+                        Mod.base' (Named "SkillLimit") v |> Mod.whenever (SkillIs(Tag "Lightning")) |> Mod.whenever (Not(SkillIs(Tag "Fire"))) |> Mod.whenever (Not(SkillIs(Tag "Cold"))) ])
+        // the limit of a gem's temporary minions (Behaviours.summonLimit reads it by its form)
+        | "base_number_of_raging_spirits_allowed" | "base_number_of_wardbound_minions_allowed" | "base_number_of_skeletal_constructs_allowed"
+        | "maximum_corpse_beetles_allowed" -> Some Structural
+        // flags for what Gems.partConditions says by the skill's name: which part takes the
+        // enemy's Shock or Freeze with it
+        | "base_consume_enemy_shock_on_hit" | "base_consume_enemy_freeze_on_hit" -> Some Structural
+        // "Supported Skills Consume Freeze / Fully Broken Armour on enemies to deal X% more
+        // Damage": more against an enemy in that state, which a hit that lands takes off it
+        | "support_active_skill_consume_enemy_freeze_to_gain_damage_+%_final" ->
+            Some(Mods [ Mod.more (Damage AllDamage) v |> Mod.whenever (EnemyHas "Frozen"); Mod.flag (Named "Takes:Frozen") ])
+        | "support_gem_consume_enemy_fully_broken_armour_to_gain_damage_+%_final" ->
+            Some(Mods [ Mod.more (Damage AllDamage) v |> Mod.whenever (EnemyHas "FullyBrokenArmour"); Mod.flag (Named "Takes:FullyBrokenArmour") ])
+        // life costs (Sim.splitCost, Behaviours.lifeCost): "X% of Mana Costs Converted to Life
+        // Costs" (of a support's skill, of spells), "Skills gain a Base Life Cost equal to Base
+        // Mana Cost", "Non-Channelling Spells cost an additional X% of your maximum Life",
+        // "increased Life Cost Efficiency"
+        | "base_skill_cost_life_instead_of_mana_%" -> one (Mod.base' (Named "CostAsLife") v)
+        | "spells_cost_life_instead_of_mana_%" -> one (Mod.base' (Named "CostAsLife") v |> Mod.whenever (SkillIs Spell))
+        | "skill_cost_base_life_equal_to_base_mana" -> one (Mod.base' (Named "LifeCostEqualToMana") 1.0)
+        | "base_life_cost_+_with_non_channelling_spells_%_maximum_life" ->
+            one (Mod.base' (Named "LifeCostPercentOfLife") v |> Mod.whenever (SkillIs Spell) |> Mod.whenever (Not(SkillIs Channelling)))
+        | "base_life_cost_efficiency_+%" -> one (Mod.inc (Named "LifeCostEfficiency") v)
+        // what a skill that costs life gets
+        | "spells_gain_%_physical_damage_if_they_cost_life" ->
+            Some(Mods [ for t in DamageType.all -> Mod.base' (GainAs(t, Physical)) v |> Mod.whenever (SkillIs Spell) |> Mod.whenever (SkillIs(Tag "CostsLife")) ])
+        | "spell_damage_+%_with_spells_that_cost_life" -> one (Mod.inc (Damage AllDamage) v |> Mod.whenever (SkillIs Spell) |> Mod.whenever (SkillIs(Tag "CostsLife")))
+        | "gain_%_of_damage_as_physical_per_20_life_cost_up_to_40_%" -> one (Mod.base' (Named "GainPhysicalPer20LifeCost") v)
+        | "hazard_area_of_effect_+%" -> one (Mod.inc AreaOfEffect v |> Mod.whenever (SkillIs(Tag "Type:Hazard")))
+        | "hazard_duration_+%" -> one (Mod.inc SkillDuration v |> Mod.whenever (SkillIs(Tag "Type:Hazard")))
+        // "Projectile Damage builds Pin"
+        | "all_projectile_damage_can_pin" -> one (Mod.flag (Named "CanPin") |> Mod.whenever (SkillIs Projectile))
+        // "Break Armour on Critical Hit with Spells equal to X% of Physical Damage dealt"
+        | "armour_break_equal_to_%_physical_damage_dealt_on_critical_strike_with_spells" ->
+            one (Mod.base' (Named "ArmourBreakOfPhysical") v |> Mod.whenever (SkillIs Spell) |> Mod.whenever IsCrit)
+        // "Gain 1 Fear Incarnate when you Cull a target" (Behaviours.fearIncarnate)
+        | "grant_fear_incarnate_stack_on_culling_enemies" -> one (Mod.flag (Named "FearIncarnateOnCull"))
+        // "X% increased Attack Damage for each Minion in your Presence, up to a maximum of 80%":
+        // per persistent minion, counted up to as many as make 80% (Setup)
+        | "gain_attack_damage_+%_for_each_your_minion_in_presence_capped" when v > 0.0 ->
+            one (Mod.inc (Damage AllDamage) v |> Mod.whenever (SkillIs Attack) |> Mod.whenever (PerStack(sprintf "ActiveMinionsUpTo:%d" (int (floor (80.0 / v + 1e-9))), 1.0)))
+        // a skill used by another object (an orb) "cannot be reflected or leech"
+        | "damage_cannot_be_reflected_or_leech_if_used_by_other_object" ->
+            Some(Mods [ Mod.more (Named "LifeLeechAmount") -100.0; Mod.more (Named "ManaLeechAmount") -100.0 ])
+        // "X% more Curse Effect / Curse Magnitudes", "Curse zones erupt after X% more delay",
+        // "Hazards created by Supported Skills have X% more duration"
+        | "support_atziri_curse_effect_+%_final" | "coil_of_undoing_curse_magnitude_+%_final" -> one (Mod.more (Named "CurseEffect") v)
+        | "support_focus_curse_curse_delay_+%_final" | "support_ritual_curse_curse_delay_+%_final" -> one (Mod.more (Named "CurseDelay") v)
+        | "support_sunblast_hazard_hazard_duration_+%_final" -> one (Mod.more SkillDuration v)
+        // "X% more Immobilisation buildup"
+        | "ascendancy_tactician_suppressing_fire_hit_damage_immobilisation_multiplier_+%_final" ->
+            Some(Mods([ Freeze; HeavyStun; Electrocute; Pin ] |> List.map (fun a -> Mod.more (Buildup a) v)))
+        // "Bear Skills Convert X% of Physical Damage to Fire Damage"
+        | "non_skill_physical_damage_%_to_convert_to_fire_with_bear_skills" -> one (Mod.base' (Convert(Physical, Fire)) v |> Mod.whenever (SkillIs(Tag "Type:Bear")))
+        // "Base Critical Hit Chance for Spells is X%" (Setup.player: the base of the player's spells)
+        | "base_spell_critical_strike_chance_override_permyriad" -> one (Mod.base' (Named "SpellBaseCritOverride") (v / 100.0))
+        // "Culling Strike" under its other id
+        | "kill_enemy_on_hit_if_under_10%_life" -> one (Mod.flag (Named "CullingStrike"))
+        | "cannot_break_armour" -> one (Mod.more (Named "ArmourBreakAmount") -100.0)
+        | "hits_ignore_enemy_fire_resistance" -> one (Mod.flag (Named "IgnoreResist:Fire"))
+        | "cannot_pierce" -> one (Mod.base' Pierce -1000.0)
+        | "damage_+%_vs_hindered_enemies" -> one (Mod.inc (Damage AllDamage) v |> Mod.whenever (EnemyHas "Hindered"))
+        | "spells_chance_to_hinder_on_hit_%" -> one (Mod.base' (AilmentChance Hinder) v |> Mod.whenever (SkillIs Spell))
+        | "melee_damage_+%_at_close_range" -> one (Mod.inc (Damage AllDamage) v |> Mod.whenever (SkillIs Melee) |> Mod.whenever (EnemyHas "Close"))
+        | "titan_damage_+%_final_against_heavy_stunned_enemies" -> one (Mod.more (Damage AllDamage) v |> Mod.whenever (EnemyHas "HeavilyStunned"))
+        | "passive_tree_mace_damage_+%_final_vs_heavy_stunned_enemies" ->
+            one (Mod.more (Damage AllDamage) v |> Mod.whenever (SkillIs Mace) |> Mod.whenever (EnemyHas "HeavilyStunned"))
+        | "physical_damage_%_to_gain_as_fire_vs_heavy_stunned" -> one (Mod.base' (GainAs(Physical, Fire)) v |> Mod.whenever (EnemyHas "HeavilyStunned"))
+        | "stormweaver_shock_effect_+%_final" -> one (Mod.more (AilmentMagnitude(Some Shock)) v)
+        | "spell_damage_+%_per_10_int" -> one (Mod.inc (Damage AllDamage) v |> Mod.whenever (SkillIs Spell) |> Mod.whenever (PerStack("Int", 10.0)))
+        | "attack_speed_+%_per_25_dex" -> one (Mod.inc Speed v |> Mod.whenever (SkillIs Attack) |> Mod.whenever (PerStack("Dex", 25.0)))
+        | "gain_accuracy_rating_equal_to_strength" -> one (Mod.base' (Named "Accuracy") 1.0 |> Mod.whenever (PerStack("Str", 1.0)))
+        // "X% of Elemental Damage Converted to Cold / Fire / Lightning / Chaos Damage": of each
+        // elemental type but the one it becomes
+        | "non_skill_base_elemental_damage_%_to_convert_to_cold" | "non_skill_base_elemental_damage_%_to_convert_to_fire"
+        | "non_skill_base_elemental_damage_%_to_convert_to_lightning" | "non_skill_base_elemental_damage_%_to_convert_to_chaos" ->
+            let into = (typeWord (id.Substring(id.LastIndexOf '_' + 1))).Value
+            Some(Mods [ for from in DamageType.elemental do if from <> into then yield Mod.base' (Convert(from, into)) v ])
+        | "number_of_additional_chains_for_spell_projectiles" -> one (Mod.base' Chains v |> Mod.whenever (SkillIs Spell) |> Mod.whenever (SkillIs Projectile))
+        | "one_handed_attack_ailment_chance_+%" ->
+            Some(Mods(allAilments |> List.map (fun a -> Mod.inc (AilmentChance a) v |> Mod.whenever (SkillIs Attack) |> Mod.whenever (SkillIs(Tag "OneHanded")))))
+        | "base_attack_skill_cost_efficiency_+%" -> one (Mod.inc ManaCostEfficiency v |> Mod.whenever (SkillIs Attack))
+        | "attack_mana_cost_efficiency_+%_during_mana_flask" -> one (Mod.inc ManaCostEfficiency v |> Mod.whenever (SkillIs Attack) |> Mod.whenever (WhileBuff "ManaFlaskEffect"))
+        // states of a while ago (Behaviours.recentStates)
+        | "elemental_damage_+%_if_enemy_shocked_recently" -> one (Mod.inc (Damage Elemental) v |> Mod.whenever (WhileBuff "ShockedEnemyRecently"))
+        | "elemental_damage_+%_if_enemy_ignited_recently" -> one (Mod.inc (Damage Elemental) v |> Mod.whenever (WhileBuff "IgnitedEnemyRecently"))
+        | "attack_speed_+%_if_have_blocked_recently" -> one (Mod.inc Speed v |> Mod.whenever (SkillIs Attack) |> Mod.whenever (WhileBuff "BlockedRecently"))
+        // "Curses you inflict have infinite Duration": a thousand times as long
+        | "curses_never_expire" -> one (Mod.more (Named "CurseDuration") 99900.0)
+        | "mark_skill_gem_level_+" -> one (Mod.base' (Named "GemLevel") v |> Mod.whenever (SkillIs(Tag "Type:Mark")))
+        | "despair_gem_level_+" -> one (Mod.base' (Named "GemLevel") v |> Mod.whenever (SkillNamed "Despair"))
+        // "Increases and Reductions to Spell damage also apply to Attacks" (Behaviours.minionIncreasesOnYou)
+        | "additive_spell_damage_modifiers_apply_to_attack_damage" -> one (Mod.flag (Named "SpellDamageAppliesToAttacks"))
+        // "Defend with 200% of Armour"
+        | "double_armour_effect" -> one (Mod.base' (Named "DefendWithArmour") 200.0)
         | "always_pierce" -> one (Mod.base' Pierce 99.0)
         // "X% chance to fire an additional Projectile" (above 100%: one for sure and a chance of another)
         | "chance_to_fire_1_additional_projectile_%_with_rollover" -> one (Mod.base' (Named "ExtraProjectileChance1") v)
@@ -1878,11 +2071,33 @@ module StatMap =
             Some(Local(lv, v))
         | _ -> None
 
-    /// Stats with no effect on a fight as we simulate it: loot, light, experience, what can be
-    /// equipped or reserved. (The variant is still called NotOffensive.)
-    let private noCombatWords =
-        set [ "rarity"; "quantity"; "light"; "gold"; "experience"; "fish"; "fishing"; "spirit"; "reservation"
-              "requirements"; "requirement"; "footprints"; "currency"; "slots" ]
+    /// Stats with no effect on a fight as we simulate it, each kind with what it is about. No
+    /// bare word decides: "spirit", "reservation", "light", "requirement", "rarity" and
+    /// "quantity" each caught stats that change a fight (a charm's spirit, Spirit Charges, light
+    /// stuns, damage per increased quantity found), so every kind is told by what its ids are.
+    /// (The variant is still called NotOffensive.)
+    let private noCombat (id: string) =
+        let words = split id
+        let has w = List.contains w words
+        // what drops, and what is gained beside the fight: rarity and quantity of items, gold,
+        // experience, fish. Not what scales with how much is found ("increased Damage per 1%
+        // increased Quantity of Items found", "Life per 2% increased Rarity"): those name the
+        // damage or the life first
+        ((has "rarity" || has "quantity" || has "gold" || has "experience" || has "fish" || has "fishing" || has "currency")
+         && (has "found" || has "dropped" || has "drops" || has "fish" || has "fishing" || id = "gold_+%_from_enemies" || id.EndsWith "experience_gain_+%")
+         && not (id.StartsWith "damage_" || id.StartsWith "maximum_life_"))
+        // how far the character's light reaches, and what an item looks like
+        || id = "light_radius_+%" || id = "light_radius_scales_with_energy_shield" || id = "unique_loris_lantern_golden_light" || has "footprints"
+        // what can be equipped and socketed: the build as it is read wears and uses it
+        || List.contains id
+            [ "dexterity_can_satisfy_strength_and_intelligence_requirements_of_melee_weapons_and_skills"
+              "strength_can_satisfy_dexterity_and_intelligence_requirements_of_melee_weapons_and_skills"
+              "global_equipment_no_attribute_requirements"; "global_skill_gems_no_attribute_requirements"
+              "ignore_strength_requirements_of_melee_weapons_and_skills"; "global_item_attribute_requirements_+%"
+              "gem_requirements_can_be_satisfied_by_highest_attribute"; "ignore_attribute_requirements_for_gloves"
+              "ignore_shapeshift_talisman_requirement"; "num_additional_skill_slots"; "num_charm_slots" ]
+        // Mana Reservation: nothing reserves Mana in this game (lines left from the first one)
+        || id.Contains "mana_reservation"
 
     /// Offensive mechanics the engine doesn't model yet, by keyword.
     let private unsimulated =
@@ -1949,6 +2164,8 @@ module StatMap =
             [ "projectile_attacks_%_chance_to_fire_2_additional_projectiles_while_moving"; "evasion_rating_+%_if_sprinting"
               "deflection_rating_+%_while_moving"; "life_regeneration_rate_+%_while_moving"; "life_loss_%_per_minute_while_sprinting"
               "slows_have_no_potency_on_you_while_sprinting"; "unique_boots_secondary_ground_shock_while_moving"
+              // an abyssal augment's movement speed per 15 Spirit
+              "abyss_socketable_movement_speed_is_only_base_+%_per_15_spirit_up_to_+40%"
               "unique_boots_secondary_ground_ignite_while_moving_base_fire_damage_%_of_life" ]
 
     /// How fast minions get where they fight, and how far off a totem can be put down: melee
@@ -1958,7 +2175,34 @@ module StatMap =
     let private alliesInPlace (id: string) =
         List.contains id
             [ "minion_movement_speed_+%"; "companion_movement_speed_%"; "companion_movement_speed_+%"; "tame_beasts_unique_movement_velocity_+%"
-              "totem_placement_range_+%" ]
+              "totem_placement_range_+%"
+              // the time between the wolves of a pack as they are summoned: they are all there
+              "skill_minion_summon_delay_interval_ms"
+              "allies_in_presence_movement_speed_+%"; "power_charged_zombie_movement_speed_+%_final"
+              // how far a banner's aura and an offering's reach: the player stands in its banner
+              // and the minions have the offering's buff (RULES.md, "Banners", "Offerings")
+              "banner_area_of_effect_+%"; "offering_area_of_effect_+%" ]
+
+    /// What holds against monsters of one kind (Undead, Demons, Beasts, Humanoids,
+    /// Constructs): the monsters of a fight are made of their level and rarity alone
+    /// (RULES.md, "Encounters and geometry"), they are of no kind, so none of these ever holds.
+    let private enemiesOfNoKind (id: string) =
+        List.contains id
+            [ "damage_against_undead_+%"; "damage_+%_vs_demons"; "critical_hit_chance_+%_vs_humanoids"; "hit_damage_immobilisation_multiplier_+%_vs_constructs"
+              "ailment_duration_+%_vs_beasts"; "culling_strike_vs_beasts_while_in_presence_of_beast_companion" ]
+
+    /// Where a skill can be aimed and how its projectiles rise and fall on their way: the
+    /// enemy aimed at is where it is, and a flight is followed on the ground (RULES.md,
+    /// "Encounters and geometry"). The least and the greatest distance a skill can be aimed at, where an orb
+    /// can be put, the angle a projectile is lobbed at, how high it flies, and from how far a
+    /// bell is called back change nothing here.
+    let private howItIsAimed (id: string) =
+        List.contains id
+            [ "projectile_ballistic_angle_from_target_distance"; "projectile_ballistic_angle_from_reference_event"; "projectile_maximum_downwards_angle_degrees"
+              "projectiles_normal_distribution_height_mean"; "projectiles_normal_distribution_height_standard_deviation"
+              "minimum_projectile_target_distance_+"; "skill_mortar_minimum_projectile_distance"; "skill_mortar_maximum_projectile_distance"
+              "remote_spear_mine_minimum_target_distance"; "orb_of_storms_minimum_placement_range_%"; "orb_of_storms_maximum_placement_range_%"
+              "bell_distance_limit_for_recall"; "projectiles_move_with_precise_movement" ]
 
     /// What nothing in a fight can hurt: totems ("totem life is ignored", RULES.md, "Totems")
     /// and offerings (a buff on the minions for its time). Their life, resistances and
@@ -1966,6 +2210,11 @@ module StatMap =
     let private cannotBeHurt (id: string) =
         List.contains id
             [ "totem_life_+%"; "totem_elemental_resistance_%"; "totem_chaos_resistance_%"; "totems_regenerate_%_life_per_minute"
+              "totem_maximum_all_elemental_resistances_%"
+              // "X% less damage if destroyed within 0.5 seconds by something other than you": the
+              // monsters of a fight strike the player and its minions, never what a skill has put down
+              "hazard_damage_+%_final_for_first_500_ms_when_not_killed_by_self"; "shield_wall_damage_+%_final_for_first_500_ms_when_not_killed_by_self"
+              "ice_crystals_damage_+%_final_for_first_500_ms_when_not_killed_by_self"
               "offering_life_+%"; "offerings_cannot_be_damaged_if_created_recently" ]
 
     /// What the character gives its allies that no minion here reads: charges ("X% chance to
@@ -2004,6 +2253,16 @@ module StatMap =
           "hexproof"; "life_leeched_from_-permyriad"; "mana_leeched_from_-permyriad"; "energy_shield_leeched_from_-permyriad"
           // "Unaffected by Elemental Weakness": no monster here curses the player
           "unaffected_by_elemental_weakness"
+          // "Remove a Curse when you use a Mana Flask / after Channelling for 2 seconds": there is none
+          "remove_curse_on_mana_flask_use"; "remove_x_curses_after_channelling_for_2_seconds"
+          // "Enemies you Curse cannot Recharge Energy Shield": no monster here has an energy shield
+          "enemies_you_curse_cannot_recharge_energy_shield"
+          // "Immune to Bleeding / Maim / Poison / Exposure", "Cannot be Blinded", "increased effect
+          // of Withered on you": monsters here leave no Bleeding, Maim, Poison, Exposure, Blind or
+          // Withered on the player
+          "immune_to_bleeding_while_shapeshifted"; "immune_to_maim_while_shapeshifted"; "immune_to_bleeding_if_helmet_grants_higher_armour_than_evasion"
+          "immune_to_poison_if_helmet_grants_higher_evasion_than_armour"; "immune_to_exposure"; "cannot_be_blinded_while_on_full_life"
+          "withered_effect_on_self_+%"
           // "Inflict Abyssal Wasting on Hit": Abyssal Wasting reduces Life Regeneration Rate by 50%
           // for 6 seconds (the game's keyword), and monsters here never regenerate; its magnitude
           // and duration likewise. What a line makes it do besides (blind, hinder, lower
@@ -2021,7 +2280,9 @@ module StatMap =
         [ "enable_ring_slot_3"; "titan_additional_inventory"; "can_have_2_companions"; "can_have_unlimited_companions"
           "ascendancy_disconnected_passives_can_be_allocated_around_allocated_keystones"; "local_unique_jewel_nearby_disconnected_passives_can_be_allocated"
           "unique_jewel_nearby_disconnected_passives_can_be_allocated"
-          "tame_beast_can_target_unique_beasts"; "ascendancy_shaman_gain_additional_socketable_mods" ]
+          "tame_beast_can_target_unique_beasts"; "ascendancy_shaman_gain_additional_socketable_mods"
+          // "Can only use a Normal Body Armour": the one that is worn is among the items
+          "cannot_use_non_normal_body_armour" ]
         |> List.contains id
 
     /// "X% increased Explicit Resistance Modifier magnitudes" and the like on an item: the
@@ -2030,9 +2291,7 @@ module StatMap =
         id.StartsWith "heist_enchantment_" && id.EndsWith "_mod_effect_+%"
 
     let private isNonOffensive (id: string) =
-        let words = split id
-        // A penetration / enemy debuff line mentions resistance but is offensive.
-        words |> List.exists noCombatWords.Contains || ownMovement id || alliesInPlace id || cannotBeHurt id || alliesReadNothing id || monstersNeverDo id || shownOnTheItem id || howItIsBuilt id
+        noCombat id || ownMovement id || alliesInPlace id || enemiesOfNoKind id || howItIsAimed id || cannotBeHurt id || alliesReadNothing id || monstersNeverDo id || shownOnTheItem id || howItIsBuilt id
 
     let rec private direct (id: string) value =
         match explicit id value with
@@ -2102,12 +2361,23 @@ module StatMap =
         elif id.StartsWith "active_skill_" then direct (id.Substring 13) value
         else None
 
+    /// Engine-internal flags of the game: what is shown, how a skill is aimed and animated,
+    /// which stat set a display or an animation uses. ("targets" is no such word: it caught
+    /// pierce counts, "damage against targets with missing Concentration" and the number of
+    /// enemies a beam goes to; the ids about aiming that have it are named.)
     let private structural (id: string) =
         let words = split id
         let has w = List.contains w words
         has "index" || has "visual" || has "show" || has "display" || has "cursor" || has "pathing" || has "contact"
-        || has "collide" || has "targets" || id.StartsWith "can_perform_skill" || id.StartsWith "base_is_"
+        || (has "collide" && id <> "projectile_only_collide_with_wet_targets") || id.StartsWith "can_perform_skill" || id.StartsWith "base_is_"
         || id.StartsWith "is_" || id.EndsWith "_step_distance"
+        || List.contains id
+            [ "check_for_targets_between_initiator_and_projectile_source"; "totem_targets_ignoring_action_distance"
+              // which of several enemies a commanded minion goes for first
+              "command_target_rarity_prioritisation_radius"
+              // a skill that may give more than one charge in one use: nothing here holds a
+              // skill to one charge a use
+              "skill_can_add_multiple_charges_per_action" ]
 
     /// Rare monster modifiers that act on the enemies around their bearer, not on it: a player
     /// that has them would slow and drain the monsters (Temporal Bubble's lower action speed and

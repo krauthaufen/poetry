@@ -282,6 +282,24 @@ module Constants =
     /// The player's Presence: "By default this has a 4 metre radius" (keyword text, poe2db).
     let presenceRadius = 40.0
 
+    /// "Intimidate is a Debuff that inflicts 10% increased damage taken and 10% reduced damage
+    /// dealt" (poe2db Keywords).
+    let intimidateTaken = 10.0
+    let intimidateDealt = 10.0
+    /// "Debilitate inflicts 20% reduced movement speed and 10% reduced damage dealt" (poe2db Keywords).
+    let debilitateSlow = 20.0
+    let debilitateDealt = 10.0
+    /// "Each Fear Incarnate grants 10% increased Culling Strike Threshold and lasts 10 seconds",
+    /// "You can have up to a maximum of 20 Fear Incarnate" (poe2db Keywords).
+    let fearIncarnateThreshold = 10.0
+    let fearIncarnateSeconds = 10.0
+    let fearIncarnateStacks = 20
+    /// "Maximum of 10 Jade stacks" (poe2db Keywords).
+    let jadeStacks = 10
+
+    /// "The base radius of Splash damage is 1.5 metres" (poe2db, Splash Damage), game units.
+    let splashRadius = 15.0
+
     /// Exposure where nothing names its size: "By default it lowers Resistances by -20%"
     /// (keyword text, poe2db).
     let exposureMagnitude = 20.0

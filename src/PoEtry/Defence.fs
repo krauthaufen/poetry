@@ -274,6 +274,10 @@ module Defence =
           ArmourAppliesTo = DamageType.all |> List.map (fun t -> t, named ("ArmourAppliesTo:" + DamageType.name t)) |> List.filter (fun (_, v) -> v > 0.0) |> Map.ofList
           TakenMult = DamageType.all |> List.map (fun t -> t, max 0.0 (Mods.mult c [ Named "Taken:All"; Named("Taken:" + DamageType.name t) ] db)) |> Map.ofList
           FlatPhysicalTaken = named "FlatPhysicalAttackTaken"
+          PhysicalReduction = named "AdditionalPhysicalReduction"
+          PhysicalReductionCap = (if flag "PhysicalReductionCap50" then 50.0 else 90.0)
+          ESAsArmour = named "ESAsArmour"
+          MissingLifeBeforeHit = (if ci then 0.0 else named "MissingLifeBeforeHit")
           LessCritDamageTaken = named "LessCritDamageTaken"
           EnemyCritChanceMult = max 0.0 (Mods.inc c [ Named "EnemyCritChanceAgainstSelf" ] db)
           BlindedEnemyCritMult = max 0.0 (Mods.inc c [ Named "BlindedEnemyCritChance" ] db)
@@ -371,7 +375,7 @@ module Defence =
             match t with
             | Physical ->
                 let d = if melee then max 0.0 (raw - v.FlatPhysicalTaken) else raw
-                d * (1.0 - Vitals.armourReduction v.Armour d / 100.0)
+                Vitals.physicalLeft v v.Armour v.EnergyShield d
             | t ->
                 let d = raw * (1.0 - (Map.tryFind t v.Resist |> Option.defaultValue 0.0) / 100.0)
                 match Map.tryFind t v.ArmourAppliesTo with

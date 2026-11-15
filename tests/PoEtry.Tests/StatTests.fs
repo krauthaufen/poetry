@@ -1882,3 +1882,407 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
             (Setup.pressed c Options.defaults "Shockwave Totem").Value.Rules |> List.pick (fun r -> match r.Reaction with GrantBuff (n, s, _, _) when n.EndsWith " buff" -> Some s | _ -> None)
         let t = load { blank with Groups = [ group [ gem "Shockwave Totem" ] ] } Options.defaults
         near (1.2 * seconds t) (seconds { t with Sheet = { t.Sheet with Mods = t.Sheet.Mods @ mods "totem_duration_+%" 20.0 } }))
+
+    // ---- round 15: the word lists, limits, what is read by its ending ----
+
+    test "word lists: no bare word makes a stat a non-combat one; what the words caught is mapped or reported" (fun () ->
+        // loot stays loot; what scales with it, a charm's spirit and a light stun are no loot
+        equal (box NotOffensive) (box (StatMap.meaning "base_item_found_rarity_+%" 10.0))
+        equal (box NotOffensive) (box (StatMap.meaning "light_radius_+%" 10.0))
+        equal (box Unmapped) (box (StatMap.meaning "damage_+%_per_1%_increased_item_found_quantity" 1.0))
+        equal (box (Unsimulated "charms")) (box (StatMap.meaning "charm_possesed_by_bear_spirit_for_x_seconds_when_used" 10.0))
+        equal (box (Unsimulated "charges")) (box (StatMap.meaning "gain_spirit_charge_on_kill_%_chance" 10.0))
+        equal (box (Unsimulated "stun / ailment threshold")) (box (StatMap.meaning "always_light_stun" 1.0))
+        equal (box Unmapped) (box (StatMap.meaning "despair_no_reservation" 1.0))
+        equal (box Unmapped) (box (StatMap.meaning "witchhunter_up_to_damage_+%_final_against_targets_with_missing_focus" 30.0))
+        // "Arrows Pierce an additional Target", "Projectiles Pierce 2 additional Targets"
+        let arrow = (mods "arrow_base_number_of_targets_to_pierce" 1.0).Head
+        equal (box Pierce) (box arrow.Stat)
+        equal (box [ SkillIs Bow ]) (box arrow.Conds)
+        near 2.0 (mods "projectile_base_number_of_targets_to_pierce" 2.0).Head.Value
+        // "30% less Freeze duration on you while a Supported Skill is active"
+        let freeze = (mods "support_freeze_protection_spirit_cost_freeze_duration_on_self_+%_final" -30.0).Head
+        equal (box (Named "SelfDuration:Freeze", More, -30.0)) (box (freeze.Stat, freeze.Kind, freeze.Value)))
+
+    test "limits: a standing skill is cast again a limit-th of its time after the last; +1 to Limit" (fun () ->
+        let stands (c: Loaded) name =
+            (Setup.pressed c Options.defaults name).Value.Rules |> List.pick (fun r -> match r.Reaction with GrantBuff (n, s, _, _) when n.EndsWith " buff" -> Some s | _ -> None)
+        let c = load { blank with Groups = [ group [ gem "Firestorm" ]; group [ gem "Icestorm" ] ] } Options.defaults
+        let duration name = (Setup.pressed c Options.defaults name).Value.Skill.Duration
+        // Firestorm: "Limit 1 Firestorm"; Icestorm: icestorm_max_number_of_storms 3
+        near (duration "Firestorm") (stands c "Firestorm")
+        near (duration "Icestorm" / 3.0) (stands c "Icestorm")
+        // "+1 to Limit for Elemental Skills": two firestorms, four icestorms
+        let more = { c with Sheet = { c.Sheet with Mods = c.Sheet.Mods @ mods "elemental_skill_limit_+" 1.0 } }
+        near (duration "Firestorm" / 2.0) (stands more "Firestorm")
+        near (duration "Icestorm" / 4.0) (stands more "Icestorm"))
+
+    test "gem stats read by their ending are not listed as not understood; skill types played for a skill" (fun () ->
+        let cov name =
+            match Gems.skill db.Value ModDb.empty None { Gem = name; Level = 20; Quality = 0; StatSet = 1; Supports = [] } with
+            | Ok (_, cov) -> (cov.Unmapped |> List.map fst) @ (cov.Unsimulated |> List.map fst)
+            | Error e -> failwith e
+        let volcano, orb = cov "Volcano", cov "Orb of Storms"
+        for id in [ "volcano_fires_projectiles_every_x_ms"; "volcano_maximum_number_of_stages"; "volcano_base_number_of_geysers_allowed"
+                    "volcano_initial_explosion_damage_+%_final_per_additional_stage" ] do
+            equal (box false) (box (List.contains id volcano))
+        for id in [ "orb_of_storms_base_bolt_frequency_ms"; "orb_of_storms_maximum_number_of_hits"; "orb_of_storms_base_maximum_number_of_orbs"
+                    "orb_of_storms_minimum_placement_range_%"; "skill_can_add_multiple_charges_per_action" ] do
+            equal (box false) (box (List.contains id orb))
+        // what the engine does not read stays listed
+        equal (box true) (box (List.contains "volcano_delay_between_slams_ms" volcano))
+        equal (box false) (box (List.contains "Hazard" (Gems.unmodelledTypes db.Value "Spearfield")))
+        equal (box true) (box (List.contains "DetonatesAfterTime" (Gems.unmodelledTypes db.Value "Explosive Spear")))
+        equal (box false) (box (List.contains "Orb" (Gems.unmodelledTypes db.Value "Orb of Storms"))))
+
+    test "stats: elemental conversion, consumed states, culling under its other id, states of a while ago, spell increases for attacks" (fun () ->
+        let cold = mods "non_skill_base_elemental_damage_%_to_convert_to_cold" 50.0
+        equal (box (set [ Convert(Fire, Cold); Convert(Lightning, Cold) ])) (box (cold |> List.map (fun m -> m.Stat) |> Set.ofList))
+        let frozen = mods "support_active_skill_consume_enemy_freeze_to_gain_damage_+%_final" 40.0
+        equal (box [ Damage AllDamage; Named "Takes:Frozen" ]) (box (frozen |> List.map (fun m -> m.Stat)))
+        equal (box [ EnemyHas "Frozen" ]) (box frozen.Head.Conds)
+        equal (box (Named "CullingStrike")) (box (mods "kill_enemy_on_hit_if_under_10%_life" 1.0).Head.Stat)
+        equal (box NotOffensive) (box (StatMap.meaning "damage_against_undead_+%" 20.0))
+        equal (box NotOffensive) (box (StatMap.meaning "projectile_ballistic_angle_from_target_distance" 1.0))
+        let c = load blank Options.defaults
+        let sheet = { c.Sheet with Mods = c.Sheet.Mods @ mods "elemental_damage_+%_if_enemy_shocked_recently" 25.0 @ mods "attack_speed_+%_if_have_blocked_recently" 10.0 }
+        let states = Behaviours.recentStates sheet [] |> List.choose (fun r -> match r.Hook, r.Reaction with h, GrantBuff (n, s, 1, _) -> Some(n, h, s) | _ -> None)
+        equal (box true) (box (List.contains ("ShockedEnemyRecently", OnInflict Shock, 4.0) states))
+        equal (box true) (box (List.contains ("BlockedRecently", OnBlock, 4.0) states))
+        // "Increases and Reductions to Spell damage also apply to Attacks": 30% for spells is 30% for attacks too
+        let wand = { c.Sheet with Mods = [ Mod.inc (Damage AllDamage) 30.0 |> Mod.whenever (SkillIs Spell); Mod.inc (Damage(OfType Fire)) 10.0 ] @ mods "additive_spell_damage_modifiers_apply_to_attack_damage" 1.0 }
+        match Behaviours.minionIncreasesOnYou wand with
+        | [ m ] -> equal (box (Damage AllDamage, Inc, 30.0, [ SkillIs Attack ])) (box (m.Stat, m.Kind, m.Value, m.Conds))
+        | other -> failwithf "unexpected %A" other)
+
+    test "minions: a support's more or less damage taken, additional physical damage reduction; Splash" (fun () ->
+        let bodies gems lines =
+            let c = load { blank with Groups = [ group gems ]; ExtraLines = lines } Options.defaults
+            c.Minions |> List.choose (fun m -> m.Body)
+        let plain = (bodies [ gem "Skeletal Warrior Minion" ] []).Head
+        near 1.0 plain.Taken
+        near 0.0 plain.PhysicalReduction
+        // Feeding Frenzy I: "Minions from Supported Skills take 20% more Damage"; Meat Shield I: 35% less
+        near 1.2 (bodies [ gem "Skeletal Warrior Minion"; support "Feeding Frenzy I" ] []).Head.Taken
+        near 0.65 (bodies [ gem "Skeletal Warrior Minion"; support "Meat Shield I" ] []).Head.Taken
+        let reduced = mods "minion_additional_physical_damage_reduction_%" 15.0
+        equal (box (ForMinions(Named "AdditionalPhysicalReduction"))) (box reduced.Head.Stat)
+        // a monster's hit of 100 physical and 100 fire on a minion without armour or resistances:
+        // 200 as it is; 240 with 20% more taken; 100 x 0.85 + 100 with 15% physical reduction
+        let body taken reduction : MinionBody =
+            { Life = 1e6; EnergyShield = 0.0; Armour = 0.0; Evasion = 0.0; Resist = Map.empty; Melee = true; Size = 1.0; Reach = 12.0; Revive = None; Power = 1.0
+              LifeRegen = 0.0; TakesForOwner = 0.0; Explodes = None; Taken = taken; PhysicalReduction = reduction }
+        let bite = { Skill.make "Bite" [ Attack; Melee ] with BaseDamage = Map.ofList [ Physical, Range.fixedAt 1.0 ]; BaseCrit = 0.0 }
+        let fight (b: MinionBody) =
+            let wolf = { Actor.make "Wolf" [ Mod.base' (Named "Accuracy") 1e9 ] [ bite ] with Rotation = [ Actor.always "Bite" ]; Body = Some b }
+            let enemy = { EnemyDef.atLevel 83 1e9 with Mods = []; Attack = Some { Interval = 1.0; Damage = Map.ofList [ Physical, 100.0; Fire, 100.0 ]; Accuracy = 1e9; Range = 20.0; CritChance = 0.0; Melee = true } }
+            { Fight.single enemy (Actor.make "Player" [] []) 5.5 with Minions = [ wolf ] }
+        same (fight (body 1.0 0.0)) seeds
+        same (fight (body 1.2 0.0)) seeds
+        same (fight (body 1.0 15.0)) seeds
+        // Splash: the strike hits the enemies within 1.5 m of the one it hit; a support's flag
+        equal (box Structural) (box (StatMap.meaning "melee_splash" 1.0))
+        near 15.0 Constants.splashRadius)
+
+    test "culling: Thrill of the Kill, charges for the culled monster's rarity, a wider threshold after a cull" (fun () ->
+        let swing = { Skill.make "Swing" [ Attack; Melee ] with BaseDamage = Map.ofList [ Physical, Range.fixedAt 100.0 ]; BaseCrit = 0.0; Mods = [ Mod.flag (Named "CullingStrike") ] }
+        let rulesOf gemName supports = Behaviours.cullRules db.Value ModDb.empty { Gem = gemName; Level = 20; Quality = 0; StatSet = 1; Supports = supports } swing
+        // Thrill of the Kill II: 25% of damage as lightning for attacks for 8 s, 40% increased shock chance
+        match rulesOf "Cull the Weak" [ "Thrill of the Kill II", 1 ] |> List.choose (fun r -> match r.Hook, r.Reaction with OnKillOf "Cullable", GrantBuff ("Thrill of the Kill", s, 1, ms) -> Some(s, ms) | _ -> None) with
+        | [ seconds, ms ] ->
+            near 8.0 seconds
+            equal (box true) (box (ms |> List.exists (fun m -> m.Stat = GainAs(Physical, Lightning) && m.Value = 25.0 && m.Conds = [ SkillIs Attack ])))
+            equal (box true) (box (ms |> List.exists (fun m -> m.Stat = AilmentChance Shock && m.Kind = Inc && m.Value = 40.0)))
+        | other -> failwithf "unexpected %A" other
+        // Culling Strike II: 20% increased threshold for 20 s
+        equal (box true)
+            (box (rulesOf "Cull the Weak" [ "Culling Strike II", 1 ] |> List.exists (fun r -> match r.Reaction with GrantBuff (_, 20.0, 1, [ m ]) -> m.Stat = Named "CullingThreshold" && m.Value = 20.0 | _ -> false)))
+        // Cull the Weak: 1 Frenzy Charge for a normal or magic monster, 2 for a rare, 3 for a unique one
+        let rules = rulesOf "Cull the Weak" [ "Thrill of the Kill II", 1 ]
+        let charges status = rules |> List.sumBy (fun r -> match r.Hook, r.Reaction with OnKillOf s, (GainResource("FrenzyCharge", n) | IfBuff (_, GainResource("FrenzyCharge", n))) when s = status -> n | _ -> 0)
+        equal (box (1, 1, 1)) (box (charges "Cullable", charges "RareOrUnique", charges "Unique"))
+        // in a fight: a rare of 101 life has 1 left after the first swing and is culled by the
+        // second: 2 Frenzy Charges (each 100% increased damage here) and the Thrill, so every
+        // swing after deals (100 + 25) x 3 to the tough one. A rare killed outright gives nothing
+        let perCharge = Mod.inc (Damage AllDamage) 100.0 |> Mod.whenever (PerStack("FrenzyCharge", 1.0))
+        let player (rs: Rule list) =
+            { Actor.make "Player" [ Mod.base' (Named "Accuracy") 1e9; perCharge ] [ swing ] with
+                Rotation = [ Actor.always "Swing" ]; Rules = rs; MaxResources = Map.ofList [ "FrenzyCharge", 3 ] }
+        let target name x life = { EnemyDef.atLevel 83 life with Name = name; Position = Vec.make x 0.0; Size = 4.0; Mods = []; Attack = None }
+        let fight rs rareLife =
+            { Fight.single (target "tough" 12.0 1e9) (player rs) 6.5 with
+                Enemies = [ { target "rare" 10.0 rareLife with Rarity = Rare }; target "tough" 12.0 1e9 ]
+                Targeting = Nearest }
+        let onTough (o: Outcome) kills = (count o "hits:Swing" - kills, o.DamageBy.["Swing (hit)"])
+        let bareHits, bareTotal = onTough (Sim.run (fight [] 101.0) 1u) 2
+        let onRare = bareTotal - float bareHits * 100.0
+        let hits, total = onTough (Sim.run (fight rules 101.0) 1u) 2
+        near (onRare + float hits * 375.0) total
+        // killed by the swing itself, from above the threshold: no cull
+        let hits, total = onTough (Sim.run (fight rules 90.0) 1u) 1
+        near (90.0 + float hits * 100.0) total
+        same (fight rules 101.0) seeds
+        same (fight rules 90.0) seeds)
+
+    test "life costs: a share of the mana cost paid with life, a life cost equal to the mana cost, a share of maximum life; what a skill that costs life gets" (fun () ->
+        equal (box (Named "CostAsLife")) (box (mods "base_skill_cost_life_instead_of_mana_%" 50.0).Head.Stat)
+        equal (box [ SkillIs Spell ]) (box (mods "spells_cost_life_instead_of_mana_%" 30.0).Head.Conds)
+        // a bolt that costs 40 mana, with 100 life and 200 mana and nothing that recovers either:
+        // five bolts as it is. A life cost that would leave less than 1 life is not paid
+        let bolt = { Skill.make "Bolt" [ Spell ] with BaseDamage = Map.ofList [ Fire, Range.fixedAt 100.0 ]; BaseCrit = 0.0; Cost = 40.0 }
+        let fight (ms: Mod list) =
+            let player =
+                { Actor.make "Player" ms [ bolt ] with
+                    Rotation = [ Actor.always "Bolt" ]
+                    Vitals = Some { PlayerStats.basic 100.0 200.0 with ManaRegen = 0.0 } }
+            Fight.single { EnemyDef.atLevel 83 1e9 with Mods = []; Attack = None } player 20.5
+        let uses ms = count (Sim.run (fight ms) 1u) "uses:Bolt"
+        equal 5 (uses [])
+        // "50% of Mana Costs Converted to Life Costs": 20 mana and 20 life: the mana is enough
+        // for ten, the life for four (100, 80, 60, 40, 20)
+        equal 4 (uses (mods "base_skill_cost_life_instead_of_mana_%" 50.0))
+        // "25% of ...": 30 mana and 10 life: six for the mana
+        equal 6 (uses (mods "base_skill_cost_life_instead_of_mana_%" 25.0))
+        // "Skills gain a Base Life Cost equal to Base Mana Cost": 40 of each, two bolts (100, 60,
+        // 20); with 25% increased Life Cost Efficiency 32 life, three (100, 68, 36, 4)
+        equal 2 (uses (mods "skill_cost_base_life_equal_to_base_mana" 1.0))
+        equal 3 (uses (mods "skill_cost_base_life_equal_to_base_mana" 1.0 @ mods "base_life_cost_efficiency_+%" 25.0))
+        // "Non-Channelling Spells cost an additional 30% of your maximum Life": 30 life beside
+        // the 40 mana, three bolts (100, 70, 40, 10)
+        equal 3 (uses (mods "base_life_cost_+_with_non_channelling_spells_%_maximum_life" 30.0))
+        for ms in [ []; mods "base_skill_cost_life_instead_of_mana_%" 50.0; mods "skill_cost_base_life_equal_to_base_mana" 1.0
+                    mods "base_life_cost_+_with_non_channelling_spells_%_maximum_life" 30.0 ] do
+            same (fight ms) seeds
+        // what a skill that costs life gets: the tag, and 5% of damage as physical per 20 life of
+        // its cost, up to 40% (a cost of 100, half of it life: 50 life, 2 x 5%)
+        let costly = { bolt with Cost = 100.0; Mods = mods "base_skill_cost_life_instead_of_mana_%" 50.0 @ mods "gain_%_of_damage_as_physical_per_20_life_cost_up_to_40_%" 5.0 }
+        let built = Behaviours.lifeCost ModDb.empty costly
+        equal (box true) (box (built.Tags.Contains(Tag "CostsLife")))
+        equal (box [ 10.0 ]) (box (built.Mods |> List.choose (fun m -> if m.Stat = GainAs(Fire, Physical) then Some m.Value else None)))
+        equal (box false) (box ((Behaviours.lifeCost ModDb.empty bolt).Tags.Contains(Tag "CostsLife")))
+        let gains = mods "spells_gain_%_physical_damage_if_they_cost_life" 12.0
+        equal (box true) (box (gains |> List.forall (fun m -> List.contains (SkillIs(Tag "CostsLife")) m.Conds && List.contains (SkillIs Spell) m.Conds))))
+
+    test "physical damage reduction beside the armour's: additional, its cap, energy shield as armour, Jade; Intimidate" (fun () ->
+        let basic = PlayerStats.basic 1000.0 0.0
+        // 100 physical: 20% additional reduction leaves 80
+        near 80.0 (Defence.taken { basic with PhysicalReduction = 20.0 } Physical false 100.0)
+        // armour of 9000 against 100: 90%; with "Maximum Physical Damage Reduction is 50%": 50
+        near 10.0 (Defence.taken { basic with Armour = 9000.0 } Physical false 100.0)
+        near 50.0 (Defence.taken { basic with Armour = 9000.0; PhysicalReductionCap = 50.0 } Physical false 100.0)
+        // 1000 energy shield as armour against 100: 1000 / (1000 + 1000) = 50%
+        near 50.0 (Defence.taken { basic with EnergyShield = 1000.0; ESAsArmour = 100.0 } Physical false 100.0)
+        equal (box (Named "AdditionalPhysicalReduction")) (box (mods "base_additional_physical_damage_reduction_%" 8.0).Head.Stat)
+        equal (box (Named "ESAsArmour")) (box (mods "current_energy_shield_%_as_physical_damage_reduction" 100.0).Head.Stat)
+        // on a character: the lines, and Jade building up to 10 stacks of 1% each
+        let c = load { blank with ExtraLines = [ "Maximum Physical Damage Reduction is 50%"; "Gain a stack of Jade every second" ] } Options.defaults
+        near 50.0 c.Vitals.PhysicalReductionCap
+        equal (box (Some 10)) (box (Map.tryFind "Jade" c.MaxResources))
+        let jade n = (Defence.computeWith (Map.ofList [ "Jade", n ]) Map.empty c.Sheet).PhysicalReduction
+        near 0.0 (jade 0)
+        near 7.0 (jade 7)
+        equal (box [ 1.0 ]) (box (Behaviours.periodics db.Value c.Sheet c.Build 0.0 |> List.choose (fun p -> if p.Name = "jade" then Some p.Every else None)))
+        // in a fight: a monster's physical hits on a player with each of them
+        let bolt = { Skill.make "Bolt" [ Spell ] with BaseDamage = Map.ofList [ Fire, Range.fixedAt 100.0 ]; BaseCrit = 0.0 }
+        let fight (v: PlayerStats) =
+            let player = { Actor.make "Player" [] [ bolt ] with Rotation = [ Actor.always "Bolt" ]; Vitals = Some v }
+            let enemy = { EnemyDef.atLevel 83 1e9 with Mods = []; Attack = Some { Interval = 0.7; Damage = Map.ofList [ Physical, 60.0; Cold, 20.0 ]; Accuracy = 1e9; Range = 40.0; CritChance = 5.0; Melee = false } }
+            Fight.single enemy player 12.5
+        let tough = { PlayerStats.basic 5000.0 100.0 with EnergyShield = 800.0; Armour = 1500.0; EnergyShieldRecharge = 100.0 }
+        same (fight { tough with PhysicalReduction = 15.0 }) seeds
+        same (fight { tough with PhysicalReductionCap = 50.0; Armour = 30000.0 }) seeds
+        same (fight { tough with ESAsArmour = 100.0 }) seeds
+        // the hit count is the same and less damage arrives with the reduction
+        let took v = (Sim.run (fight v) 1u).DamageTaken
+        equal (box true) (box (took { tough with PhysicalReduction = 15.0 } < took tough))
+        equal (box true) (box (took { tough with ESAsArmour = 100.0 } < took tough))
+        // Intimidate: 10% increased damage taken and 10% reduced damage dealt
+        let auras lines = Behaviours.presenceAuras (load { blank with ExtraLines = lines } Options.defaults).Sheet
+        match auras [ "Enemies in your Presence are Intimidated" ] |> List.filter (fun (n, _, _) -> n = "Intimidated") with
+        | [ _, 1, ms ] -> equal (box [ DamageTaken AllDamage, Inc, 10.0; Named "DamageDealt", More, -10.0 ]) (box (ms |> List.map (fun m -> m.Stat, m.Kind, m.Value)))
+        | other -> failwithf "unexpected %A" other
+        let sheet = { (load blank Options.defaults).Sheet with Mods = mods "enemies_intimidated_x_seconds_when_pinned_heavy_stunned_frozen_or_electrocuted" 4.0 }
+        equal (box [ OnInflict Freeze; OnInflict Electrocute; OnInflict Pin; OnInflict HeavyStun ]) (box (Behaviours.intimidateOnImmobilise sheet |> List.map (fun r -> r.Hook)))
+        // what monsters never leave on the player
+        equal (box NotOffensive) (box (StatMap.meaning "immune_to_bleeding_while_shapeshifted" 1.0))
+        let applies = mods "x%_of_armour_applies_to_elemental_damage_while_shapeshifted" 30.0
+        equal 3 applies.Length
+        equal (box [ WhileBuff "Shapeshifted" ]) (box applies.Head.Conds))
+
+    test "Presence: Withered on entering it; monsters in it gain extra chaos damage; missing life recovered before a hit; what leech goes by" (fun () ->
+        // (the walker of the Presence test: inside after 2.75 s; 100 chaos damage every 0.5 s)
+        let bolt = { Skill.make "Bolt" [ Spell ] with BaseDamage = Map.ofList [ Chaos, { Min = 100.0; Max = 100.0 } ]; BaseTime = 0.5; BaseCrit = 0.0 }
+        let walker =
+            { EnemyDef.make Rarity.defaults 70 Normal "walker" (Vec.make 100.0 0.0) with
+                Life = 1e9; Mods = []; Size = 5.0; Speed = 20.0
+                Attack = Some { Interval = 1.0; Damage = Map.ofList [ Physical, 1.0 ]; Accuracy = 100.0; Range = 6.0; CritChance = 0.0; Melee = true } }
+        let player = { Actor.make "Player" [] [ bolt ] with Vitals = Some(PlayerStats.basic 1e6 0.0) }
+        let weakened = [ Mod.inc (DamageTaken AllDamage) 100.0 ]
+        let entering seconds = { Fight.single walker player 5.2 with Presence = 40.0; PresenceEntry = [ "Weakened", 1, weakened, seconds ] }
+        let dealt f = (Sim.run f 1u).DamageBy |> Map.toList |> List.sumBy snd
+        // for 1.4 s from when it is inside: the hits at 3.0, 3.5 and 4.0 s deal double, and it
+        // does not come again while the monster stays inside
+        near (7.0 * 100.0 + 3.0 * 200.0) (dealt (entering 1.4))
+        near (5.0 * 100.0 + 5.0 * 200.0) (dealt (entering 60.0))
+        same (entering 1.4) seeds
+        // on a character: one stack of Withered for the line's seconds
+        let c = load { blank with ExtraLines = [ "Unwithered enemies are Withered for 8 seconds when they enter your Presence" ] } Options.defaults
+        match Behaviours.presenceEntry c.Sheet with
+        | [ "Withered", 1, [ m ], seconds ] ->
+            near 8.0 seconds
+            equal (box (DamageTaken(OfType Chaos), Inc, 5.0)) (box (m.Stat, m.Kind, m.Value))
+        | other -> failwithf "unexpected %A" other
+        // a monster's hit of 60 physical and 20 cold with 50% of damage gained as extra chaos: 40 more
+        let foe = { EnemyDef.atLevel 83 1e9 with Mods = []; Attack = Some { Interval = 0.7; Damage = Map.ofList [ Physical, 60.0; Cold, 20.0 ]; Accuracy = 1e9; Range = 40.0; CritChance = 0.0; Melee = false } }
+        let hitFight (v: PlayerStats) auras = { Fight.single foe { player with Rotation = [ Actor.always "Bolt" ]; Vitals = Some v } 12.5 with PresenceAuras = auras }
+        let chaos = [ "Presence: Extra Chaos Damage", 1, [ Mod.base' (Named "GainAsChaos") 50.0 ] ]
+        let basic = PlayerStats.basic 1e6 0.0
+        let took f = (Sim.run f 1u).DamageTaken
+        near (1.5 * took (hitFight basic [])) (took (hitFight basic chaos))
+        same (hitFight basic chaos) seeds
+        equal (box (Named "PresenceEnemyGainAsChaos")) (box (mods "enemies_in_presence_non_skill_base_all_damage_%_to_gain_as_chaos" 10.0).Head.Stat)
+        // "Recover 50% of Missing Life before being Hit": 5000 life, hits of 80: 5000, 4920, then
+        // half of what is missing comes back before each hit; never below 4840 (twice a hit under full)
+        let healed = { PlayerStats.basic 5000.0 0.0 with MissingLifeBeforeHit = 50.0 }
+        let hits = took (hitFight (PlayerStats.basic 5000.0 0.0) []) / 80.0
+        near (1.0 - 80.0 * hits / 5000.0) (Sim.run (hitFight (PlayerStats.basic 5000.0 0.0) []) 1u).MinLife
+        let low = (Sim.run (hitFight healed []) 1u).MinLife
+        equal (box true) (box (low > 4840.0 / 5000.0 && low < 4850.0 / 5000.0))
+        same (hitFight healed []) seeds
+        // leech: of physical damage; with "also recovers based on Lightning damage" of that too
+        let leech = mods "base_life_leech_from_all_spell_damage_permyriad" 500.0
+        equal (box (Named "LifeLeech", 5.0, [ SkillIs Spell ])) (box (leech.Head.Stat, leech.Head.Value, leech.Head.Conds))
+        equal 5 leech.Length
+        let zap = { Skill.make "Zap" [ Attack ] with BaseDamage = Map.ofList [ Lightning, Range.fixedAt 400.0; Physical, Range.fixedAt 100.0 ]; BaseTime = 0.5; BaseCrit = 0.0 }
+        let leeching (ms: Mod list) =
+            let p = { Actor.make "Player" (Mod.base' (Named "Accuracy") 1e9 :: Mod.base' (Named "LifeLeech") 10.0 :: ms) [ zap ] with Rotation = [ Actor.always "Zap" ]; Vitals = Some(PlayerStats.basic 5000.0 0.0) }
+            Fight.single foe p 12.5
+        let lowest ms = (Sim.run (leeching ms) 1u).MinLife
+        // 10 a hit from the physical damage, 50 with the lightning: the life sinks less
+        equal (box true) (box (lowest (mods "life_leech_also_recovers_based_on_lightning_damage" 1.0) > lowest [] + 0.01))
+        equal (box true) (box (lowest (mods "life_leech_recovers_based_on_your_chaos_damage_instead_of_physical_damage" 1.0) < lowest [] - 0.001))
+        for ms in [ []; mods "life_leech_also_recovers_based_on_elemental_damage_types" 1.0; mods "life_leech_recovers_based_on_your_chaos_damage_instead_of_physical_damage" 1.0 ] do
+            same (leeching ms) seeds)
+
+    test "Ancestral Bond: the totems and the persistent minions share the Spirit that is left, no point is spent twice" (fun () ->
+        let b = { blank with Groups = [ group [ gem "Shockwave Totem" ]; group [ gem "Skeletal Warrior Minion" ] ]; ExtraLines = [ "+400 to Spirit" ] }
+        let c = load b Options.defaults
+        let bonded = { c.Sheet with Mods = c.Sheet.Mods @ mods "keystone_ancestral_bond" 1.0 }
+        let spirit = Behaviours.spiritTotal c.Sheet b
+        let countsOf sheet = Behaviours.minionCounts spirit (Behaviours.spiritUses db.Value sheet b)
+        let per = (Behaviours.spiritUses db.Value c.Sheet b |> List.find (fun u -> u.Gem = "Skeletal Warrior Minion"))
+        // without the keystone the minions have all of it
+        equal (box (per.FreeMinions + int (floor (spirit / per.PerMinion)))) (box (countsOf c.Sheet).["Skeletal Warrior Minion"])
+        equal (box false) (box ((countsOf c.Sheet).ContainsKey "Shockwave Totem"))
+        // with it each has half: 75 a totem, the minions' cost a minion
+        let shared = countsOf bonded
+        equal (box (int (floor (spirit / 2.0 / 75.0)))) (box shared.["Shockwave Totem"])
+        equal (box (per.FreeMinions + int (floor (spirit / 2.0 / per.PerMinion)))) (box shared.["Skeletal Warrior Minion"])
+        // the totems that stand: the doubled limit of one, which half the Spirit pays for
+        equal 2 (Behaviours.totems db.Value bonded b |> fst).Length
+        equal (box true) (box (float shared.["Shockwave Totem"] * 75.0 + float (shared.["Skeletal Warrior Minion"] - per.FreeMinions) * per.PerMinion <= spirit))
+        // build 017 of the corpus has the keystone and no totem gem: nothing to place
+        equal 0 (Behaviours.totems db.Value { c.Sheet with Mods = bonded.Mods } { b with Groups = [ group [ gem "Spark" ] ] } |> fst).Length)
+
+    test "Darkness: damage gained as chaos per 20 Unreserved Darkness; Fear Incarnate; minions in the Presence counted up to a cap" (fun () ->
+        let gain = mods "gain_%_damage_as_chaos_from_unreserved_darkness" 10.0
+        equal (box [ PerStack("UnreservedDarkness", 20.0) ]) (box gain.Head.Conds)
+        // 100 Darkness, none reserved: 5 x 10% of a bolt's 100 fire as chaos, 150 a bolt
+        let bolt = { Skill.make "Bolt" [ Spell ] with BaseDamage = Map.ofList [ Fire, Range.fixedAt 100.0 ]; BaseTime = 0.5; BaseCrit = 0.0 }
+        let fight attack =
+            let player =
+                { Actor.make "Player" gain [ bolt ] with
+                    Rotation = [ Actor.always "Bolt" ]
+                    Vitals = Some { PlayerStats.basic 10000.0 0.0 with Darkness = 100.0; DarknessSeconds = 3.0 }
+                    MaxResources = Map.ofList [ "UnreservedDarkness", 100 ] }
+            Fight.single { EnemyDef.atLevel 83 1e9 with Mods = []; Attack = attack } player 10.2
+        let o = Sim.run (fight None) 1u
+        near (150.0 * float (count o "hits:Bolt")) (o.DamageBy |> Map.toList |> List.sumBy snd)
+        // a monster's hits of 45 every 0.8 s: each reserves 45 for 3 s, so between 0 and 4
+        // twenties are unreserved and the bolts deal less; the same in both engines
+        let hits = Some { Interval = 0.8; Damage = Map.ofList [ Physical, 45.0 ]; Accuracy = 1e9; Range = 40.0; CritChance = 0.0; Melee = false }
+        let o' = Sim.run (fight hits) 1u
+        let total = o'.DamageBy |> Map.toList |> List.sumBy snd
+        equal (box true) (box (total < 150.0 * float (count o' "hits:Bolt") - 100.0 && total >= 100.0 * float (count o' "hits:Bolt")))
+        same (fight None) seeds
+        same (fight hits) seeds
+        // Fear Incarnate: 10% increased Culling Strike Threshold a stack, 10 s, up to 20, on a
+        // cull by a skill that has Culling Strike
+        let c = load blank Options.defaults
+        let sheet = { c.Sheet with Mods = c.Sheet.Mods @ mods "grant_fear_incarnate_stack_on_culling_enemies" 1.0 }
+        let culling = { bolt with Name = "Reap"; Mods = [ Mod.flag (Named "CullingStrike") ] }
+        match Behaviours.fearIncarnate sheet [ bolt; culling ] with
+        | [ { Hook = OnKillOf "Cullable"; Filter = Called "Reap"; Reaction = GrantBuff ("Fear Incarnate", 10.0, 20, [ m ]) } ] ->
+            equal (box (Named "CullingThreshold", Inc, 10.0)) (box (m.Stat, m.Kind, m.Value))
+        | other -> failwithf "unexpected %A" other
+        // "4% increased Attack Damage for each Minion in your Presence, up to a maximum of 80%": up to 20 minions
+        let per = (mods "gain_attack_damage_+%_for_each_your_minion_in_presence_capped" 4.0).Head
+        equal (box (Damage AllDamage, Inc, 4.0)) (box (per.Stat, per.Kind, per.Value))
+        equal (box true) (box (List.contains (PerStack("ActiveMinionsUpTo:20", 1.0)) per.Conds))
+        equal (box (Mods [ Mod.inc AreaOfEffect 20.0 |> Mod.whenever (SkillIs(Tag "Type:Hazard")) ])) (box (StatMap.meaning "hazard_area_of_effect_+%" 20.0)))
+
+    test "stats: a spell's base critical hit chance set by a line, more immobilisation buildup, bear skills' conversion, what an orb's hits cannot do, more curse effect and delay" (fun () ->
+        // "Base Critical Hit Chance for Spells is 15%": Spark's own base gives way to it; an attack keeps its own
+        let c = load { blank with Groups = [ group [ gem "Spark" ] ] } Options.defaults
+        let own = (Setup.player c Options.defaults [ Spam "Spark" ] None).Skills |> List.find (fun s -> s.Name = "Spark")
+        let set = { c with Sheet = { c.Sheet with Mods = c.Sheet.Mods @ mods "base_spell_critical_strike_chance_override_permyriad" 1500.0 } }
+        let overridden = (Setup.player set Options.defaults [ Spam "Spark" ] None).Skills |> List.find (fun s -> s.Name = "Spark")
+        equal (box true) (box (own.BaseCrit <> 15.0))
+        near 15.0 overridden.BaseCrit
+        let buildup = mods "ascendancy_tactician_suppressing_fire_hit_damage_immobilisation_multiplier_+%_final" 40.0
+        equal (box [ Buildup Freeze, More, 40.0; Buildup HeavyStun, More, 40.0; Buildup Electrocute, More, 40.0; Buildup Pin, More, 40.0 ]) (box (buildup |> List.map (fun m -> m.Stat, m.Kind, m.Value)))
+        let bear = (mods "non_skill_physical_damage_%_to_convert_to_fire_with_bear_skills" 50.0).Head
+        equal (box (Convert(Physical, Fire), [ SkillIs(Tag "Type:Bear") ])) (box (bear.Stat, bear.Conds))
+        equal (box [ Named "LifeLeechAmount", More, -100.0; Named "ManaLeechAmount", More, -100.0 ])
+            (box (mods "damage_cannot_be_reflected_or_leech_if_used_by_other_object" 1.0 |> List.map (fun m -> m.Stat, m.Kind, m.Value)))
+        equal (box (Named "CurseEffect", More, 30.0)) (box (let m = (mods "support_atziri_curse_effect_+%_final" 30.0).Head in m.Stat, m.Kind, m.Value))
+        equal (box (Named "CurseDelay", More, 50.0)) (box (let m = (mods "support_ritual_curse_curse_delay_+%_final" 50.0).Head in m.Stat, m.Kind, m.Value))
+        equal (box Structural) (box (StatMap.meaning "supported_active_skill_gem_level_+_if_two_other_supports" 1.0))
+        equal (box NotOffensive) (box (StatMap.meaning "hazard_damage_+%_final_for_first_500_ms_when_not_killed_by_self" -50.0)))
+
+    test "Life Remnants: one from a hit every few seconds and by chance from a kill; its life comes in while it is collected" (fun () ->
+        // the gem at level 20: 410 life a remnant, one from a hit every 3 s, 25% from a kill
+        let c = load { blank with Groups = [ group [ gem "Life Remnants" ] ]; ExtraLines = [ "+500 to Spirit" ] } Options.defaults
+        match Behaviours.lifeRemnants db.Value c.Sheet c.Build 0.5 with
+        | Some r ->
+            near 410.0 r.LifePerRemnant
+            near 3.0 r.HitCooldown
+            near 25.0 r.OnKillChance
+            near 0.5 r.Delay
+        | None -> failwith "no Life Remnants"
+        equal (box None) (box (Behaviours.lifeRemnants db.Value (load blank Options.defaults).Sheet blank 0.5))
+        // "Recover 2% of Maximum Life when you collect a Remnant": with each Life Remnant
+        equal (box (Named "RemnantRecoverLifePercent")) (box (mods "remnant_recover_%_life_on_pickup" 2.0).Head.Stat)
+        // in a fight: a bolt every 0.5 s, a monster's hits of 150 every second on 2000 life. A
+        // remnant every 2 s gives 200 life over half a second: the life sinks by 100 in 2 s
+        // where it sank by 300
+        let bolt = { Skill.make "Bolt" [ Spell ] with BaseDamage = Map.ofList [ Fire, Range.fixedAt 100.0 ]; BaseTime = 0.5; BaseCrit = 0.0 }
+        let foe = { EnemyDef.atLevel 83 1e9 with Mods = []; Attack = Some { Interval = 1.0; Damage = Map.ofList [ Physical, 150.0 ]; Accuracy = 1e9; Range = 40.0; CritChance = 0.0; Melee = false } }
+        let fight (remnants: LifeRemnants option) =
+            let player = { Actor.make "Player" [] [ bolt ] with Rotation = [ Actor.always "Bolt" ]; Vitals = Some(PlayerStats.basic 2000.0 0.0); LifeRemnants = remnants }
+            Fight.single foe player 10.2
+        let every2 = Some { LifeRemnants.OnKillChance = 0.0; HitCooldown = 2.0; LifePerRemnant = 200.0; PercentOfMaxLife = 0.0; ExtraChance = 0.0; Delay = 0.5 }
+        let bare, fed = Sim.run (fight None) 1u, Sim.run (fight every2) 1u
+        near (1.0 - bare.DamageTaken / 2000.0) bare.MinLife
+        equal (box true) (box (count fed "life remnant" >= 5))
+        // every remnant's 200 life has come in by the end, but for the last one's rest
+        equal (box true) (box (fed.MinLife > bare.MinLife + 0.3))
+        same (fight every2) seeds
+        same (fight (Some { every2.Value with PercentOfMaxLife = 2.0; ExtraChance = 30.0; OnKillChance = 50.0 })) seeds)
+
+    test "life costs: the life flask is drunk when life spent on a skill leaves the life below half" (fun () ->
+        // 100 life, a bolt that costs 40 mana and 40 life: 60, 20 (the flask: 60 at once, 80), 40;
+        // a fourth cannot be paid. Without the flask two
+        let bolt = { Skill.make "Bolt" [ Spell ] with BaseDamage = Map.ofList [ Fire, Range.fixedAt 100.0 ]; BaseCrit = 0.0; Cost = 40.0 }
+        let flask = { Amount = 60.0; Duration = 3.0; ChargesPerUse = 20.0; MaxCharges = 20.0; ChargesPerSecond = 0.0; ChargeGainMult = 1.0; Instant = 1.0 }
+        let fight (withFlask: bool) =
+            let player =
+                { Actor.make "Player" (mods "skill_cost_base_life_equal_to_base_mana" 1.0) [ bolt ] with
+                    Rotation = [ Actor.always "Bolt" ]
+                    Vitals = Some { PlayerStats.basic 100.0 200.0 with ManaRegen = 0.0; LifeFlask = (if withFlask then Some flask else None) } }
+            Fight.single { EnemyDef.atLevel 83 1e9 with Mods = []; Attack = None } player 20.5
+        let o = Sim.run (fight true) 1u
+        equal 3 (count o "uses:Bolt")
+        equal 1 (count o "flask:life")
+        equal 2 (count (Sim.run (fight false) 1u) "uses:Bolt")
+        same (fight true) seeds)

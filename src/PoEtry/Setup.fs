@@ -322,6 +322,14 @@ module Setup =
         let maxResources, startResources =
             if Mods.sumBase Ctx.empty [ Named "DivineFragmentEvery" ] (ModDb.ofList sheet.Mods) > 0.0 then Map.add "DivineFragment" 1 maxResources, Map.add "DivineFragment" 1 startResources
             else maxResources, startResources
+        // Jade builds up to its 10 stacks (none at the start)
+        let maxResources =
+            if Mods.sumBase Ctx.empty [ Named "JadeEveryMs" ] (ModDb.ofList sheet.Mods) > 0.0 then Map.add "Jade" Constants.jadeStacks maxResources else maxResources
+        // "per 20 Unreserved Darkness": the engines keep what is not reserved as a buff's stacks
+        // where a line asks for it
+        let maxResources =
+            if sheet.Mods |> List.exists (fun m -> m.Conds |> List.exists (function PerStack ("UnreservedDarkness", _) -> true | _ -> false))
+            then Map.add "UnreservedDarkness" (int vitals.Darkness) maxResources else maxResources
         // bolts that build up by themselves: full at the start
         let maxResources, startResources =
             match Behaviours.storedBolts db sheet build with
@@ -444,7 +452,7 @@ module Setup =
                         match Behaviours.demonForm db charMods setup s with
                         | Some (s', rs, ms) -> s', cryRules @ rs, cryGrants @ ms
                         | None -> s, cryRules, cryGrants
-                    let cryRules = cryRules @ Behaviours.sigilOfPower db charMods setup s @ Behaviours.markBuff db charMods setup s @ Behaviours.offering db charMods setup s @ Behaviours.summoner db charMods setup s @ Behaviours.triskelion db charMods setup s @ Behaviours.toxicDomain db charMods setup s
+                    let cryRules = cryRules @ Behaviours.sigilOfPower db charMods setup s @ Behaviours.markBuff db charMods setup s @ Behaviours.offering db charMods setup s @ Behaviours.cullRules db charMods setup s @ Behaviours.summoner db charMods setup s @ Behaviours.triskelion db charMods setup s @ Behaviours.toxicDomain db charMods setup s
                     // parts that happen when the skill kills (Crushing Fear's shockwave)
                     let cryRules =
                         cryRules
@@ -467,7 +475,7 @@ module Setup =
                         @ Behaviours.oilGround db charMods setup s @ Behaviours.whirlwind db setup s
                     let rules = cryRules @ biteRules @ (match lasting with Some (_, rs) -> rs | None -> []) @ Behaviours.useRules db charMods setup s.Name o.Pickup @ Behaviours.buffRules db charMods setup s @ Behaviours.totemPlacement db charMods setup s @ curseRules
                     let grants = Behaviours.verisiumGrant db charMods setup
-                    let s = Behaviours.applyObserved s
+                    let s = Behaviours.applyObserved s |> Behaviours.lifeCost charMods
                     // Entangle: the vines are a skill of their own, on a clock, against what a fissure hit
                     let vines = Behaviours.entangle db charMods setup s
                     let s = match vines with Some (main, _, _, _) -> main | None -> s
@@ -523,7 +531,7 @@ module Setup =
                     let skip = isDefaultAttack || (not offering && ([ "Travel"; "Minion"; "ModifiesNextSkill"; "Persistent" ] |> List.exists d.Types.Contains))
                     let empowers = p.Rules |> List.exists (fun r -> match r.Reaction with Empower _ -> true | _ -> false)
                     // (a buff the skill's use gives: not one that comes of what its hits inflict, like Ice Bite's)
-                    let grantsBuff = p.Rules |> List.exists (fun r -> match r.Hook, r.Reaction with (OnInflict _ | OnCrit | OnFullBreak), _ -> false | _, (ChargeBuff _ | GrantBuff _) -> true | _ -> false)
+                    let grantsBuff = p.Rules |> List.exists (fun r -> match r.Hook, r.Reaction with (OnInflict _ | OnCrit | OnFullBreak | OnKill | OnKillOf _), _ -> false | _, (ChargeBuff _ | GrantBuff _) -> true | _ -> false)
                     let cooldown = p.Skill.Cooldown |> Option.defaultValue 0.0
                     let needsBuilding = p.Skill.Mods |> List.exists (fun m -> match m.Stat with Named n -> (n.StartsWith "Requires:" || n.StartsWith "NeedsEnemyStacks:") && m.Value > 0.0 | _ -> false)
                     // Barrage is readied whenever it can be, for a main skill it can repeat
@@ -577,7 +585,7 @@ module Setup =
         // a main "skill" that only places a totem or grants a buff is kept up, not spammed
         let main =
             match pressed c o mainGem with
-            | Some p when (p.Skill.Hits.IsEmpty || p.Pattern.IsSome) && p.Rules |> List.exists (fun r -> match r.Hook, r.Reaction with (OnInflict _ | OnCrit | OnFullBreak), _ -> false | _, (ChargeBuff _ | GrantBuff _) -> true | _ -> false) -> KeepBuff mainGem
+            | Some p when (p.Skill.Hits.IsEmpty || p.Pattern.IsSome) && p.Rules |> List.exists (fun r -> match r.Hook, r.Reaction with (OnInflict _ | OnCrit | OnFullBreak | OnKill | OnKillOf _), _ -> false | _, (ChargeBuff _ | GrantBuff _) -> true | _ -> false) -> KeepBuff mainGem
             | _ -> Spam mainGem
         let plain =
             // a main skill with a cooldown of its own goes first whenever it is ready: otherwise the
@@ -764,7 +772,14 @@ module Setup =
                 else
                     let inc = if per > 0.0 then min 40.0 (per * combo) else max -40.0 (per * combo)
                     { sk with Mods = sk.Mods @ [ Mod.inc (Damage AllDamage) inc |> Mod.from "Combo consumed" ] })
-        { Actor.make "Player" (sheet.Mods @ (used |> List.collect (fun (_, p) -> p.Grants))) (comboConsumed << gloryGeneration << onBolts <| (pressedSkills @ (metas |> List.collect (fun (_, s, _) -> s)) @ (consumers |> List.map (fun (_, _, cp) -> cp)) @ heraldSkills @ (used |> List.collect (fun (_, p) -> p.Extra)))) with
+        // "Base Critical Hit Chance for Spells is X%": in place of what each spell's gem says
+        let spellBaseCrit (skills: Skill list) =
+            match Mods.sumBase Ctx.empty [ Named "SpellBaseCritOverride" ] (ModDb.ofList sheet.Mods) with
+            | v when v > 0.0 ->
+                let rec set (s: Skill) = { (if s.Tags.Contains Spell then { s with BaseCrit = v } else s) with Parts = s.Parts |> List.map set }
+                skills |> List.map set
+            | _ -> skills
+        { Actor.make "Player" (sheet.Mods @ (used |> List.collect (fun (_, p) -> p.Grants))) (spellBaseCrit << comboConsumed << gloryGeneration << onBolts <| (pressedSkills @ (metas |> List.collect (fun (_, s, _) -> s)) @ (consumers |> List.map (fun (_, _, cp) -> cp)) @ heraldSkills @ (used |> List.collect (fun (_, p) -> p.Extra)))) with
             Rotation = steps
             OverkillBurns = overkillBurns
             HitPattern = used |> List.choose (fun (_, p) -> p.Pattern |> Option.map (fun pat -> p.Skill.Name, pat)) |> Map.ofList
@@ -776,7 +791,7 @@ module Setup =
                 @ Behaviours.selfIgnite sheet
                 @ Behaviours.rareModsOnKill sheet
                 @ Behaviours.totemRecently sheet pressedSkills
-                @ Behaviours.recentStates sheet pressedSkills
+                @ Behaviours.recentStates sheet pressedSkills @ Behaviours.intimidateOnImmobilise sheet @ Behaviours.debilitateOnWarcry sheet @ Behaviours.fearIncarnate sheet pressedSkills
                 @ (thorns |> Option.map snd |> Option.toList)
                 @ (match arctic with Some (_, r, _, _) -> r | None -> [])
                 @ Behaviours.scavengedPlating db sheet c.Build
@@ -846,6 +861,7 @@ module Setup =
             ParallelUses = not o.SequentialUses
             WardRemnants = Behaviours.wardRemnants db sheet c.Build o.Pickup
             ManaRemnants = Behaviours.manaRemnants db sheet c.Build o.Pickup
+            LifeRemnants = Behaviours.lifeRemnants db sheet c.Build o.Pickup
             Banners = Behaviours.banners db sheet c.Build
             Archons = [ (let a = Behaviours.elementalArchon sheet in { a with Duration = a.Duration / Behaviours.buffExpiry sheet }) ]
             Charms = (if o.Immortal || o.NoFlask then [] else c.Charms)
@@ -930,6 +946,10 @@ module Setup =
             [ "ActiveMinions", persistent.Length
               "PersistentMinionTypes", persistent |> List.map kind |> List.distinct |> List.length
               "CompanionTypes", persistent |> List.filter isCompanion |> List.map kind |> List.distinct |> List.length ]
+            // ("for each Minion in your Presence, up to ...": counted up to what the line names)
+            @ (player.Mods |> List.collect (fun m -> m.Conds) |> List.choose (function
+                | PerStack (name, _) when name.StartsWith "ActiveMinionsUpTo:" -> Some(name, min persistent.Length (int (name.Substring 18)))
+                | _ -> None) |> List.distinct)
             |> List.filter (fun (_, n) -> n > 0)
         let counted (a: Actor) =
             { a with Resources = a.Resources @ minionCounts; MaxResources = minionCounts |> List.fold (fun acc (k, n) -> Map.add k n acc) a.MaxResources }
@@ -945,6 +965,7 @@ module Setup =
             @ (if auraMods.IsEmpty then [] else [ "Overwhelming Presence", 1, auraMods ])
             @ Behaviours.presenceAuras c.Sheet
             @ (if asksPresence then [ "InPresence", 1, [] ] else [])
+          PresenceEntry = Behaviours.presenceEntry c.Sheet
           Player = player
           // a totem uses its skill with the character's modifiers, so it also counts with the
           // character's numbers ("per 100 maximum Mana", "per 15 Strength", socketed gem colours)

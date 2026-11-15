@@ -271,6 +271,20 @@ type PeriodicAction =
 /// Mana Remnants: a remnant on a critical hit against an enemy with an elemental ailment (at
 /// most one per `CritCooldown` seconds) and by chance on killing one; collected, each gives
 /// mana, which can overflow the maximum.
+/// Life Remnants: "enemies you kill have a chance to spawn a Life Remnant, and Hitting a
+/// target spawns a Life Remnant every few seconds. Picking up a Life Remnant grants you Life".
+/// The life of one comes in evenly over the time it takes to collect it.
+type LifeRemnants =
+    { OnKillChance: float
+      /// Seconds between two remnants from hits.
+      HitCooldown: float
+      LifePerRemnant: float
+      /// "Recover N% of Maximum Life when you collect a Remnant".
+      PercentOfMaxLife: float
+      ExtraChance: float
+      /// Seconds from creation until it is collected.
+      Delay: float }
+
 type ManaRemnants =
     { OnKillChance: float
       CritCooldown: float
@@ -328,7 +342,13 @@ type MinionBody =
       /// Percent of the damage of hits on its owner it takes in the owner's place.
       TakesForOwner: float
       /// It explodes when reduced to low life, with this skill of its own (Minion Instability).
-      Explodes: string option }
+      Explodes: string option
+      /// What it takes of a hit's damage after its armour and resistances ("Minions take X%
+      /// more / less Damage"): a multiplier, 1 where nothing says so.
+      Taken: float
+      /// "Minions have X% additional Physical Damage Reduction": percent, added to its armour's
+      /// (up to 90% together).
+      PhysicalReduction: float }
 
 /// The player or a minion.
 type Actor =
@@ -369,6 +389,7 @@ type Actor =
       ParallelUses: bool
       WardRemnants: WardRemnants option
       ManaRemnants: ManaRemnants option
+      LifeRemnants: LifeRemnants option
       Banners: Banner list
       /// The actor only acts while the player has this buff (a totem while it stands).
       ActiveWhile: string option
@@ -404,6 +425,7 @@ module Actor =
           ParallelUses = false
           WardRemnants = None
           ManaRemnants = None
+          LifeRemnants = None
           Banners = []
           ActiveWhile = None
           Body = None
@@ -437,6 +459,10 @@ type Fight =
       /// into it; looked at whenever something happens in the fight.
       Presence: float
       PresenceAuras: (string * int * Mod list) list
+      /// What an enemy gets once as it comes into the Presence, if it has none of it then
+      /// ("Unwithered enemies are Withered for X seconds when they enter your Presence"): name,
+      /// stacks, monster-side mods per stack, seconds. Again only after it has been out of it.
+      PresenceEntry: (string * int * Mod list * float) list
       /// A dead enemy is replaced by a new one of its kind that walks in from further out
       /// (a pack that never ends: the fight lasts until MaxTime).
       Replace: bool
@@ -456,6 +482,7 @@ module Fight =
           EnemyAuras = []
           Presence = infinity
           PresenceAuras = []
+          PresenceEntry = []
           Replace = false
           MaxTime = maxTime }
 
@@ -645,6 +672,7 @@ module Sim =
           InfernalFlame: float
           LastStunRemnant: float
           LastManaRemnant: float
+          LastLifeRemnant: float
           /// Life still to be recovered from leech.
           LifeLeechPool: float
           StrikeLifeLeech: float
@@ -1159,7 +1187,7 @@ module Sim =
     /// into the Presence, and loses them when it is out of it again. (One that is put on an
     /// enemy by something else under the same name and runs out is the aura's again.)
     let private syncPresence (fight: Fight) (w: World) =
-        if fight.PresenceAuras.IsEmpty then w
+        if fight.PresenceAuras.IsEmpty && fight.PresenceEntry.IsEmpty then w
         else
             alive w
             |> List.fold
@@ -1177,7 +1205,23 @@ module Sim =
                                 | Some x when not inside && System.Double.IsPositiveInfinity x.Expires -> Map.remove name ds
                                 | _ -> ds)
                             e.Debuffs
-                    if obj.ReferenceEquals(debuffs, e.Debuffs) then w else { w with Enemies = Map.add e.Def.Name { e with Debuffs = debuffs } w.Enemies })
+                    // what an enemy gets once as it comes in: a mark says it is inside, and is
+                    // taken off when it is out again
+                    let debuffs, expiries =
+                        fight.PresenceEntry
+                        |> List.fold
+                            (fun (ds: Map<string, Effect>, ex: float list) (name, stacks, mods, seconds) ->
+                                let mark = "Entered: " + name
+                                match Map.containsKey mark ds with
+                                | false when inside ->
+                                    let ds = Map.add mark { Name = mark; Mods = []; Stacks = 1; Expires = infinity } ds
+                                    if Map.tryFind name ds |> Option.exists (fun x -> x.Expires > w.Time) then ds, ex
+                                    else Map.add name { Name = name; Mods = mods; Stacks = stacks; Expires = w.Time + seconds } ds, (w.Time + seconds) :: ex
+                                | true when not inside -> Map.remove mark ds, ex
+                                | _ -> ds, ex)
+                            (debuffs, [])
+                    let w = if obj.ReferenceEquals(debuffs, e.Debuffs) then w else { w with Enemies = Map.add e.Def.Name { e with Debuffs = debuffs } w.Enemies }
+                    List.foldBack (fun t w -> schedule t Expire w) expiries w)
                 w
 
     /// Mana recovery while time passes: regeneration, leech (rate-capped), ES recharge, life regen.
@@ -2305,6 +2349,38 @@ module Sim =
         // "+1 second to Total Cast Time": added after speed
         own.BaseTime / speed * (1.0 + Constants.longerPerRepeat * repeats) + Mods.sumBase ctx [ Named "FixedUseTime" ] db
 
+    /// Life spent on a skill can leave the life below half as a hit can: the life flask is
+    /// drunk then, as when a hit leaves it there (`takeDamage`).
+    let private drinkLifeFlask (pools: PlayerStats) (w: World) =
+        match pools.LifeFlask, w.Player with
+        | Some f, Some p when p.Died.IsNone && pools.Life > 1.0 && p.Life < 0.5 * pools.Life && w.Time >= p.LifeFlaskUntil && p.LifeFlaskCharges >= f.ChargesPerUse ->
+            { w with
+                Player =
+                    Some
+                        { p with
+                            LifeFlaskCharges = p.LifeFlaskCharges - f.ChargesPerUse
+                            LifeFlaskUntil = w.Time + f.Duration
+                            LifeFlaskRate = f.Amount * (1.0 - f.Instant) * pools.LifeRecoveryRate / f.Duration
+                            Life = min (max p.Life pools.Life) (p.Life + f.Amount * f.Instant * pools.LifeRecoveryRate)
+                            EnergyShield =
+                                if pools.LifeFlaskAlsoES then min (max p.EnergyShield (min pools.EnergyShield pools.ESRecoverCap)) (p.EnergyShield + f.Amount * f.Instant * pools.LifeRecoveryRate)
+                                else p.EnergyShield }
+                Counts = bump "flask:life" w.Counts }
+        | _ -> w
+
+    /// What of a use's cost is paid with life, and what is left for mana: "X% of Mana Costs
+    /// Converted to Life Costs" (that share of the cost), "Skills gain a Base Life Cost equal
+    /// to Base Mana Cost" (the cost once more, in life), "cost an additional X% of your maximum
+    /// Life"; the life part over "increased Life Cost Efficiency". Returns (mana, life).
+    let private splitCost (pools: PlayerStats) (ctx: Ctx) (db: ModDb) (cost: float) : float * float =
+        let share = Mods.sumBase ctx [ Named "CostAsLife" ] db
+        let equal = Mods.sumBase ctx [ Named "LifeCostEqualToMana" ] db
+        let ofLife = Mods.sumBase ctx [ Named "LifeCostPercentOfLife" ] db
+        if share = 0.0 && equal = 0.0 && ofLife = 0.0 then cost, 0.0
+        else
+            let k = min 1.0 (max 0.0 (share / 100.0))
+            cost * (1.0 - k), (cost * k + (if equal > 0.0 then cost else 0.0) + pools.Life * ofLife / 100.0) / Mods.inc ctx [ Named "LifeCostEfficiency" ] db
+
     let private onReadyUnlocked env (rng: Rng) name (w: World) =
         let actor = actorDef env name
         let st = Map.find name w.Actors
@@ -2332,7 +2408,9 @@ module Sim =
             | Some pools, Some p when pools.CostsInfernalFlame -> true
             | Some pools, Some p when pools.CostsLife -> (let c = costOf skill in c <= 0.0 || p.Life - c >= 1.0)
             // (enough within rounding: a wait for mana ends with exactly the cost, give or take the last bit)
-            | Some _, Some p -> (let cost = costOf skill in not (p.Mana < cost - 1e-9 * max 1.0 cost))
+            | Some pools, Some p ->
+                let cost, life = splitCost pools { Ctx.empty with SkillTags = skill.Tags; SkillName = skill.Name } (skillDb env actor skill st) (costOf skill)
+                not (p.Mana < cost - 1e-9 * max 1.0 cost) && (life <= 0.0 || p.Life - life >= 1.0)
             | _ -> true
         // the first step that is ready and can be paid for; if none can be paid, wait for the first
         let choice =
@@ -2452,7 +2530,16 @@ module Sim =
                                      Mana = min (max p.Mana manaMax) (p.Mana + f.Amount * f.Instant) })
                         Counts = bump "flask:mana" w.Counts }
                 | _ -> w
+            // what of the cost is paid with life (after the flask, which goes by the whole cost)
+            let cost, lifeCost =
+                match actor.Vitals with
+                | Some v when not v.CostsLife && not v.CostsInfernalFlame -> splitCost v costCtx db cost
+                | _ -> cost, 0.0
             match actor.Vitals, w.Player with
+            | Some v, Some p when lifeCost > 0.0 && p.Life - lifeCost < 1.0 ->
+                // a life cost that would kill: the skill waits (and the life flask is drunk)
+                let wait = max Constants.serverTick 0.25
+                { w with Player = Some { p with Starved = p.Starved + wait } } |> drinkLifeFlask v |> schedule (w.Time + wait) (Ready name)
             | Some v, Some p when v.CostsLife ->
                 // Blood Magic: the cost is paid with life; a skill that would kill waits
                 if p.Life - cost >= 1.0 || cost <= 0.0 then
@@ -2486,7 +2573,8 @@ module Sim =
                 let wait = max Constants.serverTick (if rate > 0.0 then (cost - p.Mana) / rate else 1.0)
                 { w with Player = Some { p with Starved = p.Starved + wait } } |> schedule (w.Time + wait) (Ready name)
             | Some v, Some p ->
-                { w with Player = Some { p with Mana = max 0.0 (p.Mana - cost) } } |> sigilSpend name cost v.Mana |> go
+                { w with Player = Some { p with Mana = max 0.0 (p.Mana - cost); Life = p.Life - lifeCost } }
+                |> (if lifeCost > 0.0 then drinkLifeFlask v else id) |> sigilSpend name cost v.Mana |> go
             | _ -> go w
         | None ->
             // Nothing usable: wait for the next cooldown, or a server tick.
@@ -2824,8 +2912,13 @@ module Sim =
                         let leechMult = Mods.mult ctx [ Named "ManaLeechAmount" ] mods
                         let extra = extra * leechMult
                         // life: leech from physical attack damage (same one-enemy rule), gain per hit
+                        // (of physical damage; "Life Leech recovers based on your Lightning / Elemental
+                        // damage as well as Physical damage", "... on your Chaos damage instead of Physical damage")
+                        let leechBase =
+                            let also t = if Mods.flag ctx (Named("LeechFrom:" + DamageType.name t)) mods then Dmg.get t hit.Dealt else 0.0
+                            (if Mods.flag ctx (Named "LeechNotFromPhysical") mods then 0.0 else Dmg.get Physical hit.Dealt) + also Lightning + also Cold + also Fire + also Chaos
                         let lifeLeechFull =
-                            min (Dmg.get Physical hit.Dealt) Constants.effectiveMaxDamageForLeech * Mods.sumBase ctx [ Named "LifeLeech" ] mods / 100.0
+                            min leechBase Constants.effectiveMaxDamageForLeech * Mods.sumBase ctx [ Named "LifeLeech" ] mods / 100.0
                             * Mods.mult ctx [ Named "LifeLeechAmount" ] mods * v.LifeRecoveryRate
                         let lifeLeech = max 0.0 (lifeLeechFull - p.StrikeLifeLeech)
                         let onHit = Mods.sumBase ctx [ Named "LifeOnHit" ] mods * v.LifeRecoveryRate
@@ -3072,6 +3165,20 @@ module Sim =
                             { w with Counts = bump "mana remnant" w.Counts } |> schedule (w.Time + r.Delay) (ManaArrives((r.ManaPerRemnant + r.PercentOfMaxMana / 100.0 * (actor.Vitals |> Option.map (fun v -> v.Mana) |> Option.defaultValue 0.0)) * count))
                         else w
                     | _ -> w
+                // Life Remnants: from a kill, or from a hit no more than once every so often
+                let w =
+                    match actor.LifeRemnants, actor.Vitals, w.Player with
+                    | Some r, Some v, Some p ->
+                        let fromKill = dead && rng.Chance r.OnKillChance
+                        let fromHit = w.Time - p.LastLifeRemnant >= r.HitCooldown
+                        if fromKill || fromHit then
+                            let count = if rng.Chance r.ExtraChance then 2.0 else 1.0
+                            let rate = (r.LifePerRemnant + r.PercentOfMaxLife / 100.0 * v.Life) * count * v.LifeRecoveryRate / r.Delay
+                            { w with
+                                Player = Some { p with LastLifeRemnant = (if fromHit then w.Time else p.LastLifeRemnant); Recoups = (w.Time + r.Delay, rate, "Life") :: p.Recoups }
+                                Counts = bump "life remnant" w.Counts }
+                        else w
+                    | _ -> w
                 // Trinity: the hit's strongest element gains resonance (up to 100), the others lose some
                 let w =
                     let gain = Mods.sumBase ctx [ Named "TrinityGain" ] mods
@@ -3141,9 +3248,24 @@ module Sim =
                 let w = react env rng actor OnHit skill (Some target) w
                 if hit.Crit then react env rng actor OnCrit skill (Some target) w else w
 
+    /// "Gain X% of Damage as Extra Chaos Damage per 20 Unreserved Darkness": the Darkness that
+    /// is not reserved now, as the stacks of a buff the player's hits ask about. Looked at when
+    /// a strike of the player's is due (a reservation ends by itself, at no event), where the
+    /// character has the line (the resource "UnreservedDarkness" is among its maxima then).
+    let private syncDarkness (env: Env) (actor: Actor) (w: World) =
+        match actor.Vitals, w.Player with
+        | Some pools, Some p when pools.Darkness > 0.0 && actor.MaxResources.ContainsKey "UnreservedDarkness" ->
+            let live = p.Darkness |> List.filter (fun (until, _) -> until > w.Time)
+            let n = int (floor (max 0.0 (pools.Darkness - (live |> List.sumBy snd))))
+            match Map.tryFind "UnreservedDarkness" (Map.find actor.Name w.Actors).Buffs with
+            | Some e when e.Stacks = n -> w
+            | _ -> updateActor actor.Name (fun st -> { st with Buffs = Map.add "UnreservedDarkness" { Name = "UnreservedDarkness"; Mods = []; Stacks = n; Expires = infinity } st.Buffs }) w
+        | _ -> w
+
     let private onStrike env (rng: Rng) name skillName mult aimedAt (elapsed: float option) (direct: bool) (w: World) =
         let actor = actorDef env name
         let skill = skillOf actor skillName
+        let w = syncDarkness env actor w
         let living = alive w |> List.map (fun e -> e.Def)
         // Aim where the use was aimed; if that enemy died meanwhile, at the next one.
         let primary =
@@ -3425,7 +3547,7 @@ module Sim =
             let debuffs = (defender e).Mods
             let actionSpeed = max 0.1 (Mods.more Ctx.empty [ Named "ActionSpeed" ] debuffs)
             let dealt = max 0.0 (Mods.more Ctx.empty [ Named "DamageDealt" ] debuffs)
-            let atk = { atk with Damage = atk.Damage |> Map.map (fun _ d -> d * dealt) }
+            let atk = { atk with Damage = atk.Damage |> Map.map (fun _ d -> d * dealt) |> Vitals.withExtraChaos (Mods.sumBase Ctx.empty [ Named "GainAsChaos" ] debuffs) }
             let next = atk.Interval / max 0.1 (1.0 - chill / 100.0) / actionSpeed
             let w = schedule (w.Time + next) (EnemyAttack name) w
             let inRange = Vec.length e.Def.Position - e.Def.Size <= atk.Range + 1e-6
@@ -3443,6 +3565,11 @@ module Sim =
                 if not landed then
                     { w with Counts = bump "enemy:evaded" w.Counts }
                 else
+                    // "Recover X% of Missing Life before being Hit by an Enemy"
+                    let w =
+                        match w.Player with
+                        | Some p when v.MissingLifeBeforeHit > 0.0 && p.Life < v.Life -> { w with Player = Some { p with Life = p.Life + (v.Life - p.Life) * v.MissingLifeBeforeHit / 100.0 } }
+                        | _ -> w
                     let blockRoll () = rng.Chance v.Block
                     let blocked = blockRoll () || (v.LuckyBlock && blockRoll ())
                     let deflectChance =
@@ -3476,7 +3603,7 @@ module Sim =
                                 match t with
                                 | Physical ->
                                     let d = if atk.Melee then max 0.0 (d - v.FlatPhysicalTaken) else d
-                                    d * (1.0 - Vitals.armourReduction (v.Armour * armourShare) d / 100.0)
+                                    Vitals.physicalLeft v (v.Armour * armourShare) (match w.Player with Some p -> p.EnergyShield | None -> 0.0) d
                                 | t ->
                                     let d = d * (1.0 - (Map.tryFind t v.Resist |> Option.defaultValue 0.0) / 100.0)
                                     // "X% of Armour also applies to <type> damage"
@@ -3659,6 +3786,7 @@ module Sim =
         let debuffs = (defender e).Mods
         let actionSpeed = max 0.1 (Mods.more Ctx.empty [ Named "ActionSpeed" ] debuffs)
         let dealt = max 0.0 (Mods.more Ctx.empty [ Named "DamageDealt" ] debuffs)
+        let atk = { atk with Damage = Vitals.withExtraChaos (Mods.sumBase Ctx.empty [ Named "GainAsChaos" ] debuffs) atk.Damage }
         let next = atk.Interval / max 0.1 (1.0 - chill / 100.0) / actionSpeed
         let w = schedule (w.Time + next) (EnemyAttack name) w
         if stopped then { w with Counts = bump "enemy:stopped" w.Counts }
@@ -3675,8 +3803,8 @@ module Sim =
                     |> Map.map (fun t d ->
                         let d = d * dealt * critMult
                         match t with
-                        | Physical -> d * (1.0 - Vitals.armourReduction body.Armour d / 100.0)
-                        | t -> d * (1.0 - (Map.tryFind t body.Resist |> Option.defaultValue 0.0) / 100.0))
+                        | Physical -> d * body.Taken * (1.0 - (if body.PhysicalReduction = 0.0 then Vitals.armourReduction body.Armour d else min 90.0 (Vitals.armourReduction body.Armour d + body.PhysicalReduction)) / 100.0)
+                        | t -> d * body.Taken * (1.0 - (Map.tryFind t body.Resist |> Option.defaultValue 0.0) / 100.0))
                 hurtMinion env rng minion taken { w with Counts = bump "minion:hit" w.Counts }
 
     /// A monster's attack goes at the player or at one of the minions in its reach, each as
@@ -3821,6 +3949,15 @@ module Sim =
                 if ailing && rng.Chance r.OnKillChance then
                     let count = if rng.Chance r.ExtraChance then 2.0 else 1.0
                     { w with Counts = bump "mana remnant" w.Counts } |> schedule (w.Time + r.Delay) (ManaArrives((r.ManaPerRemnant + r.PercentOfMaxMana / 100.0 * (player.Vitals |> Option.map (fun v -> v.Mana) |> Option.defaultValue 0.0)) * count))
+                else w
+            | _ -> w
+        let w =
+            match player.LifeRemnants, player.Vitals, w.Player with
+            | Some r, Some v, Some p when mine ->
+                if rng.Chance r.OnKillChance then
+                    let count = if rng.Chance r.ExtraChance then 2.0 else 1.0
+                    let rate = (r.LifePerRemnant + r.PercentOfMaxLife / 100.0 * v.Life) * count * v.LifeRecoveryRate / r.Delay
+                    { w with Player = Some { p with Recoups = (w.Time + r.Delay, rate, "Life") :: p.Recoups }; Counts = bump "life remnant" w.Counts }
                 else w
             | _ -> w
         let w =
@@ -4316,6 +4453,7 @@ module Sim =
                       InfernalFlame = 0.0
                       LastStunRemnant = -1e9
                       LastManaRemnant = -1e9
+                      LastLifeRemnant = -1e9
                       LifeLeechPool = 0.0
                       StrikeLifeLeech = 0.0
                       LifeFlaskCharges = v.LifeFlask |> Option.map (fun f -> f.MaxCharges) |> Option.defaultValue 0.0

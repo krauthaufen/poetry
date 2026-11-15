@@ -145,6 +145,7 @@ module Scenarios =
                   EnemyAuras = []
                   Presence = infinity
                   PresenceAuras = []
+                  PresenceEntry = []
                   Walls = []
                   MaxTime = maxTime })
 
