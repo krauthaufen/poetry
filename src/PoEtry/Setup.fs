@@ -979,6 +979,11 @@ module Setup =
             // ("for each Minion in your Presence, up to ...": counted up to what the line names)
             @ (player.Mods |> List.collect (fun m -> m.Conds) |> List.choose (function
                 | PerStack (name, _) when name.StartsWith "ActiveMinionsUpTo:" -> Some(name, min persistent.Length (int (name.Substring 18)))
+                // ("per 400 Accuracy Rating, up to 20%": the Accuracy Rating of the character's
+                // attacks, counted up to what the line's most takes)
+                | PerStack (name, _) when name.StartsWith "AccuracyUpTo:" ->
+                    let accuracy = Mods.total { Ctx.empty with SkillTags = Set.ofList [ Attack ] } [ Named "Accuracy" ] (ModDb.ofList player.Mods)
+                    Some(name, min (int accuracy) (int (name.Substring 13)))
                 | _ -> None) |> List.distinct)
             |> List.filter (fun (_, n) -> n > 0)
         let counted (a: Actor) =

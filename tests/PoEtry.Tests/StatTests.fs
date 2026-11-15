@@ -2541,3 +2541,21 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         equal (box true) (box (full.DamageTaken > o.DamageTaken * (1.0 + 0.5 * extra)))
         equal (box true) (box (o.DamageTaken <= full.DamageTaken / (1.0 + extra) + 10.0 * extra + 1e-6))
         same (fight { basic with BlindedEnemyCritBonusMult = 0.0 } blinding []) seeds)
+
+    test "attack speed per 400 Accuracy Rating, up to 20%" (fun () ->
+        let m = (mods "attack_speed_+%_per_200_accuracy_rating" 4.0).Head
+        equal (box (Speed, Inc, 4.0, [ PerStack("AccuracyUpTo:2000", 400.0); SkillIs Attack ])) (box (m.Stat, m.Kind, m.Value, m.Conds))
+        // a level 1 character with +1000 to Accuracy Rating: 1000 and 6 per Dexterity, counted up
+        // to the 2000 that make 20%; with +5000 the 2000
+        let counted (line: string) =
+            let c = load { blank with ExtraLines = [ line; "4% increased Attack Speed per 400 Accuracy Rating, up to 20%" ] } Options.defaults
+            let player = Setup.player c Options.defaults [] None
+            let f = Setup.fight c Options.defaults player [ EnemyDef.atLevel 83 1e9 ]
+            c.Vitals.Dex, f.Player.Resources |> List.tryPick (fun (k, n) -> if k = "AccuracyUpTo:2000" then Some n else None) |> Option.defaultValue -1
+        let dex, some = counted "+1000 to Accuracy Rating"
+        equal (int (1000.0 + 6.0 * dex)) some
+        equal 2000 (snd (counted "+5000 to Accuracy Rating"))
+        // 2 full 400s of 1000-odd: 8% increased attack speed, and nothing for a spell
+        let ctx tags = { Ctx.empty with SkillTags = Set.ofList tags; Buffs = Map.ofList [ "AccuracyUpTo:2000", some ] }
+        equal (box (Some 8.0)) (box (Mod.eval (ctx [ Attack ]) m))
+        equal (box None) (box (Mod.eval (ctx [ Spell ]) m)))

@@ -1523,6 +1523,9 @@ module StatMap =
         | "physical_damage_from_hits_also_contributes_to_chill_and_freeze" -> ailmentSources [ Chill, Physical; Freeze, Physical ] []
         | "elemental_damage_also_contributes_to_flammability_ignite_chill_freeze_and_shock" ->
             ailmentSources [ Ignite, Cold; Ignite, Lightning; Chill, Fire; Chill, Lightning; Freeze, Fire; Freeze, Lightning; Shock, Fire; Shock, Cold ] []
+        // "X% increased Attack Speed per 400 Accuracy Rating, up to 20%" (Setup.fight counts the Accuracy Rating)
+        | "attack_speed_+%_per_200_accuracy_rating" when v > 0.0 ->
+            one (Mod.inc Speed v |> Mod.whenever (SkillIs Attack) |> Mod.whenever (PerStack(sprintf "AccuracyUpTo:%d" (400 * int (floor (20.0 / v + 1e-9))), 400.0)))
         // "Your Hits cannot be Evaded by Pinned Enemies"
         | "pinned_enemies_cannot_evade_your_attacks" -> one (Mod.override' HitChance 100.0 |> Mod.whenever (EnemyHas "Pinned"))
         // Puppet Master and Archon of Undeath (Behaviours.puppetMaster, archonOfUndeath)
@@ -2333,7 +2336,9 @@ module StatMap =
           "unique_jewel_nearby_disconnected_passives_can_be_allocated"
           "tame_beast_can_target_unique_beasts"; "ascendancy_shaman_gain_additional_socketable_mods"
           // "Can only use a Normal Body Armour": the one that is worn is among the items
-          "cannot_use_non_normal_body_armour" ]
+          "cannot_use_non_normal_body_armour"
+          // a Staff can be wielded with a Focus: both are among the items
+          "can_equip_staff_with_focus" ]
         |> List.contains id
 
     /// "X% increased Explicit Resistance Modifier magnitudes" and the like on an item: the
