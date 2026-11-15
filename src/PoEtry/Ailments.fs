@@ -121,6 +121,13 @@ module Ailments =
                 (List.contains t basic || (List.contains (a, t) alsoFrom && all (alsoFromStat a t)))
                 && not (List.contains (a, t) notFrom && all (notFromStat a t)))
 
+    /// What an enemy covered in Oil has, monster side: Flammability inflicted on it is so much
+    /// more ("200% more Magnitude of Flammability inflicted on them"), and a Detonator's hit is
+    /// sure to Ignite it ("Detonator Skills are guaranteed to Ignite").
+    let flammabilityTaken = "FlammabilityTaken"
+    let coveredInOil = "CoveredInOil"
+    let detonator = Tag "Type:Detonator"
+
     /// Chance in percent that this hit inflicts the ailment.
     let chance (ctx: Ctx) mods defender (hit: HitResult) a =
         let baseChance, mult = chanceMods ctx mods a
@@ -130,7 +137,11 @@ module Ailments =
             match a with
             // the chance to Ignite is "the total Magnitude of Flammability on the target, including
             // the amount added by that Hit" (keyword text): what earlier hits left is on the defender
-            | Ignite -> (fromDamage Constants.igniteChanceMultiplier + baseChance) * mult + Mods.sumBase Ctx.empty [ Named "Flammability" ] defender.Mods
+            | Ignite ->
+                if ctx.SkillTags.Contains detonator && Mods.sumBase Ctx.empty [ Named coveredInOil ] defender.Mods > 0.0 then 100.0
+                else
+                    (fromDamage Constants.igniteChanceMultiplier + baseChance) * mult * Mods.more Ctx.empty [ Named flammabilityTaken ] defender.Mods
+                    + Mods.sumBase Ctx.empty [ Named "Flammability" ] defender.Mods
             | Shock -> (fromDamage Constants.shockChanceMultiplier + baseChance) * mult
             | _ -> baseChance * mult
         min 100.0 (max 0.0 c)
@@ -141,7 +152,7 @@ module Ailments =
         let ctx = { ctx with Crit = hit.Crit }
         let baseChance, mult = chanceMods ctx mods Ignite
         if Dmg.sumOf (scalesFromWith ctx mods Ignite) hit.Unmitigated <= 0.0 then 0.0
-        else min 100.0 (max 0.0 ((Dmg.sumOf (scalesFromWith ctx mods Ignite) hit.Unmitigated / threshold defender * Constants.igniteChanceMultiplier + baseChance) * mult))
+        else min 100.0 (max 0.0 ((Dmg.sumOf (scalesFromWith ctx mods Ignite) hit.Unmitigated / threshold defender * Constants.igniteChanceMultiplier + baseChance) * mult * Mods.more Ctx.empty [ Named flammabilityTaken ] defender.Mods))
 
     /// Everything this hit inflicts, rolling chances with the given Rng.
     let fromHit (rng: Rng) (ctx: Ctx) mods (defender: Defender) (hit: HitResult) : Inflict list =

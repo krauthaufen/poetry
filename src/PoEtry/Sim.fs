@@ -18,7 +18,59 @@ type View =
       EnemiesAlive: int
       Energy: Map<string, float>
       /// The skill the actor used last (for cycling rotations).
-      LastUsed: string }
+      LastUsed: string
+      /// What stands or lies where a skill put it (ground, a storm), counted by the skill.
+      Standing: Map<string, int> }
+
+/// What a ground surface or a storm is.
+type GroundKind =
+    /// Oil Ground: who stands in it is covered in Oil; it catches fire.
+    | Oil
+    /// Ignited Ground: who stands in it is Ignited.
+    | Burning
+    /// A storm that takes up the Elemental Ground Surfaces it overlaps (Tornado).
+    | Storm
+
+/// Something a skill leaves where it lands: a patch of ground, or a storm. It is a circle
+/// that lasts its time; an enemy is in it while its body reaches into it.
+type Ground =
+    { /// The skill it is of (`View.Standing` counts it under this name).
+      Skill: string
+      Kind: GroundKind
+      /// Its radius as it appears, game units.
+      Radius: float
+      /// "gain X% increased Area of Effect per second, up to a maximum of Y%" (percent).
+      GrowPerSecond: float
+      GrowMax: float
+      Seconds: float
+      /// How many of the skill there are at once (one more takes the oldest away); 0: any number.
+      Limit: int
+      /// Oil: what an enemy in it has, monster side (its slow, the Flammability it takes).
+      Mods: Mod list
+      /// Oil, and Ignited Ground that was Oil: the Exposure of an enemy in it, percent of
+      /// fire resistance (before the enemy's and the actor's exposure effect).
+      Exposure: float
+      /// Ignited Ground: the Ignite of who stands in it, damage per second before the enemy's
+      /// mitigation. Oil: what it adds, once lit, to the Ignite that lit it.
+      Ignite: float
+      /// How long an Ignite it inflicts lasts.
+      IgniteSeconds: float
+      /// A storm: for an element whose ground it has absorbed, the damage per second it deals
+      /// to who is in it.
+      Absorbs: (DamageType * float) list
+      /// It appears where the actor stands and goes to where it was aimed, so fast (game
+      /// units a second; 0: it is where it was aimed from the start).
+      Speed: float }
+
+module Ground =
+    /// The debuffs of an enemy in Oil, of one on Ignited Ground, and the Exposure both have.
+    let oiled = "Covered in Oil"
+    let ignited = "On Ignited Ground"
+    let exposed = "Exposure:Oil"
+    let dotLabel (skill: string) (t: DamageType) = sprintf "%s (%s over time)" skill ((DamageType.name t).ToLowerInvariant())
+    let make skill kind radius seconds =
+        { Skill = skill; Kind = kind; Radius = radius; GrowPerSecond = 0.0; GrowMax = 0.0; Seconds = seconds; Limit = 0; Mods = []; Exposure = 0.0
+          Ignite = 0.0; IgniteSeconds = Constants.igniteDuration; Absorbs = []; Speed = 0.0 }
 
 type SkillFilter =
     | AnySkill
@@ -139,6 +191,8 @@ type Reaction =
     /// start the time again. The time is the actor's own, by `key`; it is no cooldown (cooldown
     /// recovery does not shorten it) and no buff (nothing makes it expire faster).
     | Every of key: string * seconds: float * then': Reaction
+    /// The skill leaves this where the enemy concerned is (on use: the enemy aimed at).
+    | LayGround of Ground
 
 /// "Enemies you sufficiently Overkill ... cause an explosion that Ignites nearby enemies
 /// based on the Overkill damage dealt" (Herald of Ash). `Skill` is the explosion among the
@@ -535,7 +589,10 @@ type DotInstance =
       Dps: float
       Expires: float
       MaxStacks: int
-      Owner: string }
+      Owner: string
+      /// An Ignite: what Oil it lights burns with (for a hit's Ignite its damage per second;
+      /// for one that Ignited Ground inflicted, the Ignite that lit that ground).
+      Carried: float }
 
 /// What happened in a fight, for showing it: a skill use and what it looked like, a hit on
 /// an enemy, where an enemy went, a hit on the player.
@@ -703,9 +760,29 @@ module Sim =
           /// Charges per charm (by its buff name).
           CharmCharges: Map<string, float> }
 
+    /// A ground surface or storm as it is in a fight (see `Ground`).
+    type private GroundState =
+        { Spec: Ground
+          Owner: string
+          /// The actor's exposure effect (for the Exposure of who is in it).
+          ExposureEffect: float
+          /// Where it appeared and where it goes (the same place unless it moves).
+          From: Vec
+          To: Vec
+          Born: float
+          Until: float
+          /// What it is now: Oil that was lit is Ignited Ground.
+          Kind: GroundKind
+          /// Ignited Ground: the Ignite that lit it, and the Ignite it inflicts (with what it
+          /// adds). A storm: the Ignite of the ground it has absorbed (0: none yet).
+          Carried: float
+          Ignite: float }
+
     type private World =
         { Player: PlayerState option
           Time: float
+          /// What skills have left on the ground, oldest first.
+          Grounds: GroundState list
           Enemies: Map<string, EnemyState>
           Actors: Map<string, ActorState>
           Queue: Map<float * int, Event>
@@ -1096,7 +1173,10 @@ module Sim =
           EnemyRarity = target |> Option.map (fun e -> e.Def.Rarity) |> Option.defaultValue Normal
           EnemiesAlive = (alive w).Length
           Energy = st.Energy
-          LastUsed = st.LastUsed }
+          LastUsed = st.LastUsed
+          Standing =
+            (if w.Grounds.IsEmpty then Map.empty
+             else w.Grounds |> List.filter (fun g -> g.Until > w.Time) |> List.countBy (fun g -> g.Spec.Skill) |> Map.ofList) }
 
     let private matches filter (skill: Skill) =
         match filter with
@@ -1464,7 +1544,8 @@ module Sim =
                   Dps = dps
                   Expires = w.Time + duration
                   MaxStacks = maxStacks
-                  Owner = owner }
+                  Owner = owner
+                  Carried = dps }
             updateEnemy target (fun e -> { e with Dots = d :: e.Dots }) w |> schedule d.Expires Expire
         | Status (Shock, magnitude, duration) ->
             // Shocks don't stack: keep the strongest.
@@ -1541,6 +1622,151 @@ module Sim =
                 |> Option.defaultValue 0.0
             if amount * k >= current then addDebuff t name duration 1 [ Mod.base' (Resist dt) (-amount * k) ] w else w
         | _ -> w
+
+    /// How far a ground surface reaches now ("gain X% increased Area of Effect per second, up to
+    /// a maximum of Y%": the radius grows with the root of the area), and where it is.
+    let groundRadius (g: Ground) (age: float) = g.Radius * sqrt (1.0 + min g.GrowMax (g.GrowPerSecond * age) / 100.0)
+    let groundCentre (g: Ground) (from: Vec) (towards: Vec) (age: float) =
+        if g.Speed <= 0.0 then towards
+        else
+            let d = Vec.dist from towards
+            let gone = g.Speed * age
+            if gone >= d || d <= 0.0 then towards else Vec.add from (Vec.scale (gone / d) (Vec.sub towards from))
+
+    /// What lies on the ground and the storms, looked at whenever something happens in the
+    /// fight (as the Presence is):
+    /// Oil catches fire where Ignited Ground touches it, or an Ignited enemy stands in it: it
+    /// is Ignited Ground from then, for its whole time again, and burns with the Ignite that
+    /// lit it (the ground's, if ground lit it; else the strongest of the enemies in it) plus
+    /// what the skill adds. A storm that overlaps Ignited Ground takes that ground's Ignite
+    /// (the strongest it overlaps then) and keeps it. An enemy in Oil is covered in it and
+    /// has its Exposure; one on Ignited Ground, or in a storm that has taken some up, is
+    /// Ignited with that Ignite (again as soon as it runs out), and in such a storm takes
+    /// the storm's damage of that element. Nothing here is rolled.
+    let private syncGround (env: Env) (w: World) =
+        if w.Grounds.IsEmpty then w
+        else
+            let now = w.Time
+            let tell kind skill x = match env.Trace with Some tell -> tell now "Ground" skill kind x | None -> ()
+            let live = w.Grounds |> List.filter (fun g -> g.Until > now)
+            let radius (g: GroundState) = groundRadius g.Spec (now - g.Born)
+            let centre (g: GroundState) = groundCentre g.Spec g.From g.To (now - g.Born)
+            let inside (g: GroundState) (e: EnemyState) = Vec.dist e.Def.Position (centre g) - e.Def.Size <= radius g
+            let touch (a: GroundState) (b: GroundState) = Vec.dist (centre a) (centre b) <= radius a + radius b
+            let living = alive w
+            // the Ignite an enemy has, as Oil would burn with it (-1: it is not Ignited)
+            // (its strongest Ignite's)
+            let burns (e: EnemyState) =
+                e.Dots
+                |> List.fold (fun (dps, carried) d ->
+                    if d.Ailment = Some Ignite && d.Expires > now && (d.Dps > dps || (d.Dps = dps && d.Carried > carried)) then d.Dps, d.Carried else dps, carried) (-1.0, -1.0)
+                |> snd
+            // Oil catches fire: round after round, each from what burned in the round before
+            let rec light (gs: GroundState list) (lit: GroundState list) =
+                let burning = gs |> List.filter (fun g -> g.Kind = Burning)
+                let gs', lit' =
+                    gs |> List.fold (fun (out, lit) g ->
+                        if g.Kind <> Oil then g :: out, lit
+                        else
+                            let byGround = burning |> List.fold (fun best b -> if touch g b && b.Carried > best then b.Carried else best) -1.0
+                            let by =
+                                if byGround >= 0.0 then byGround
+                                else living |> List.fold (fun best e -> if inside g e then max best (burns e) else best) -1.0
+                            if by < 0.0 then g :: out, lit
+                            else
+                                let g' = { g with Kind = Burning; Carried = by; Ignite = by + g.Spec.Ignite; Until = now + g.Spec.Seconds }
+                                g' :: out, g' :: lit) ([], lit)
+                let gs' = List.rev gs'
+                if lit'.Length > lit.Length then light gs' lit' else gs', lit'
+            let live, lit = if live |> List.exists (fun g -> g.Kind = Oil) then light live [] else live, []
+            let w =
+                List.rev lit |> List.fold (fun (w: World) g ->
+                    tell "lit" g.Spec.Skill g.Ignite
+                    { w with Counts = bump ("lit:" + g.Spec.Skill) w.Counts } |> schedule g.Until Expire) w
+            // a storm takes up the Ignited Ground it overlaps
+            let live, w =
+                if not (live |> List.exists (fun g -> g.Kind = Storm && g.Ignite <= 0.0 && not g.Spec.Absorbs.IsEmpty)) then live, w
+                else
+                    let burning = live |> List.filter (fun g -> g.Kind = Burning)
+                    live |> List.fold (fun (out, w: World) g ->
+                        if g.Kind <> Storm || g.Ignite > 0.0 || g.Spec.Absorbs.IsEmpty then g :: out, w
+                        else
+                            match burning |> List.filter (touch g) with
+                            | [] -> g :: out, w
+                            | touched ->
+                                let b = touched |> List.fold (fun (best: GroundState) x -> if x.Ignite > best.Ignite then x else best) touched.Head
+                                if b.Ignite <= 0.0 then g :: out, w
+                                else
+                                    tell "absorbed" g.Spec.Skill b.Ignite
+                                    { g with Ignite = b.Ignite; Carried = b.Carried } :: out, { w with Counts = bump ("absorbed:" + g.Spec.Skill) w.Counts }) ([], w)
+                    |> fun (out, w) -> List.rev out, w
+            let w = { w with Grounds = live }
+            // the enemies: what each has of where it stands
+            living |> List.fold (fun (w: World) e ->
+                let mutable oil : GroundState option = None
+                let mutable onFire = false
+                let mutable exposure = 0.0
+                let mutable ignite = 0.0
+                let mutable carried = 0.0
+                let mutable seconds = 0.0
+                let mutable owner = ""
+                let mutable dots : (string * DamageType * float * string) list = []
+                for g in live do
+                    if inside g e then
+                        match g.Kind with
+                        | Oil ->
+                            if oil.IsNone then oil <- Some g
+                            exposure <- max exposure (g.Spec.Exposure * g.ExposureEffect)
+                        | Burning ->
+                            onFire <- true
+                            exposure <- max exposure (g.Spec.Exposure * g.ExposureEffect)
+                            if g.Ignite > ignite then
+                                ignite <- g.Ignite
+                                carried <- g.Carried
+                                seconds <- g.Spec.IgniteSeconds
+                                owner <- g.Owner
+                        | Storm ->
+                            if g.Ignite > 0.0 then
+                                if g.Ignite > ignite then
+                                    ignite <- g.Ignite
+                                    carried <- g.Carried
+                                    seconds <- g.Spec.IgniteSeconds
+                                    owner <- g.Owner
+                                for (t, dps) in g.Spec.Absorbs do
+                                    if t = Fire && dps > 0.0 then
+                                        let label = Ground.dotLabel g.Spec.Skill t
+                                        if not (dots |> List.exists (fun (l, _, d, _) -> l = label && d >= dps)) then
+                                            dots <- (label, t, dps, g.Owner) :: (dots |> List.filter (fun (l, _, _, _) -> l <> label))
+                let oil, onFire, exposure, ignite, carried, seconds, owner, dots = oil, onFire, exposure, ignite, carried, seconds, owner, dots
+                // what is on it while it stands there, and goes when it does not
+                let held (name: string) (ds: Map<string, Effect>) = Map.tryFind name ds |> Option.filter (fun x -> System.Double.IsPositiveInfinity x.Expires)
+                let set (name: string) (mods: Mod list option) (ds: Map<string, Effect>) =
+                    match mods, held name ds with
+                    | Some ms, Some x when x.Mods = ms -> ds
+                    | Some ms, _ -> Map.add name { Name = name; Mods = ms; Stacks = 1; Expires = infinity } ds
+                    | None, Some _ -> Map.remove name ds
+                    | None, None -> ds
+                let debuffs =
+                    e.Debuffs
+                    |> set Ground.oiled (oil |> Option.map (fun g -> g.Spec.Mods))
+                    |> set Ground.ignited (if onFire then Some [] else None)
+                    |> set Ground.exposed (if exposure > 0.0 then Some [ Mod.base' (Resist Fire) (-exposure * effectOnSelf e "ExposureEffectOnSelf") ] else None)
+                // the storm's damage of the element it took up
+                let stays (d: DotInstance) = not (d.Ailment.IsNone && System.Double.IsPositiveInfinity d.Expires) || dots |> List.exists (fun (l, _, dps, _) -> l = d.Label && dps = d.Dps)
+                let kept = if e.Dots |> List.forall stays then e.Dots else e.Dots |> List.filter stays
+                let fresh =
+                    dots |> List.rev |> List.filter (fun (l, _, _, _) -> not (kept |> List.exists (fun d -> d.Ailment.IsNone && d.Label = l && System.Double.IsPositiveInfinity d.Expires)))
+                    |> List.map (fun (l, t, dps, by) -> { Ailment = None; Label = l; Type = t; Dps = dps; Expires = infinity; MaxStacks = 1; Owner = by; Carried = 0.0 })
+                let kept = if fresh.IsEmpty then kept else fresh @ kept
+                // the Ignite of the ground, where the enemy has none as strong
+                let burnsNow = ignite > 0.0 && not (kept |> List.exists (fun d -> d.Ailment = Some Ignite && d.Label = Ailment.name Ignite && d.Expires > now && d.Dps >= ignite))
+                let kept =
+                    if not burnsNow then kept
+                    else { Ailment = Some Ignite; Label = Ailment.name Ignite; Type = Fire; Dps = ignite; Expires = now + seconds; MaxStacks = 1; Owner = owner; Carried = carried } :: kept
+                if obj.ReferenceEquals(debuffs, e.Debuffs) && obj.ReferenceEquals(kept, e.Dots) then w
+                else
+                    let w = { w with Enemies = Map.add e.Def.Name { e with Debuffs = debuffs; Dots = kept } w.Enemies }
+                    if burnsNow then { w with Counts = bump "ground ignite" w.Counts } |> schedule (now + seconds) Expire else w) w
 
     /// Mana spent while a Sigil of Power stands: a Stage for every share of maximum mana, at
     /// most one a second, up to its maximum.
@@ -1763,6 +1989,49 @@ module Sim =
                           match Map.tryFind buff (Map.find actor.Name w.Actors).Buffs with
                           | Some e when e.Stacks > 0 && e.Expires > w.Time -> perform next w
                           | _ -> w
+                      | LayGround g ->
+                          // where the enemy concerned is (if it has just died: where it was)
+                          let spot =
+                              match target |> Option.bind (fun t -> Map.tryFind t w.Enemies) with
+                              | Some e -> Some e.Def.Position
+                              | None -> aimed env w |> Option.map (fun e -> e.Def.Position)
+                          match spot with
+                          | None -> w
+                          | Some spot ->
+                              let live = w.Grounds |> List.filter (fun x -> x.Until > w.Time)
+                              let from = if g.Speed > 0.0 then Vec.zero else spot
+                              // (a patch poured where one of the skill lies already is that patch, for its time anew)
+                              let there = if g.Kind = Storm then None else live |> List.tryFindIndex (fun x -> x.Spec.Skill = g.Skill && x.Owner = actor.Name && x.Kind <> Storm && x.To = spot && x.From = from)
+                              (match env.Trace with Some tell -> tell w.Time "Ground" g.Skill "laid" g.Radius | None -> ())
+                              match there with
+                              | Some i ->
+                                  { w with Grounds = live |> List.mapi (fun k x -> if k = i then { x with Until = w.Time + g.Seconds } else x); Counts = bump ("ground:" + g.Skill) w.Counts }
+                                  |> schedule (w.Time + g.Seconds) Expire
+                              | None ->
+                                  // "Limit N": one more takes the oldest of the skill away
+                                  let live =
+                                      let mine = live |> List.filter (fun x -> x.Spec.Skill = g.Skill && x.Owner = actor.Name)
+                                      if g.Limit <= 0 || mine.Length < g.Limit then live
+                                      else
+                                          let gone = mine.Length - g.Limit + 1
+                                          live
+                                          |> List.fold (fun (kept, seen) x ->
+                                              if x.Spec.Skill = g.Skill && x.Owner = actor.Name then (if seen < gone then kept, seen + 1 else x :: kept, seen + 1)
+                                              else x :: kept, seen) ([], 0)
+                                          |> fst |> List.rev
+                                  let laid =
+                                      { Spec = g
+                                        Owner = actor.Name
+                                        ExposureEffect = Mods.inc Ctx.empty [ Named "ExposureEffect" ] (ModDb.ofList actor.Mods)
+                                        From = from
+                                        To = spot
+                                        Born = w.Time
+                                        Until = w.Time + g.Seconds
+                                        Kind = g.Kind
+                                        Carried = (if g.Kind = Burning then g.Ignite else 0.0)
+                                        Ignite = (if g.Kind = Burning then g.Ignite else 0.0) }
+                                  { w with Grounds = live @ [ laid ]; Counts = bump ("ground:" + g.Skill) w.Counts }
+                                  |> schedule laid.Until Expire
                       | Every (key, seconds, next) ->
                           let k = "Every:" + key
                           if w.Time >= (Map.tryFind k (Map.find actor.Name w.Actors).Energy |> Option.defaultValue -infinity) - 1e-9 then
@@ -1813,7 +2082,7 @@ module Sim =
                         | Some t when w.Enemies.[t].Life > 0.0 -> f t
                         | _ -> w
                      match reaction with
-                     | SpendStack _ | SetStacks _ | Empower _ | IfEnemyHas _ | IfBuff _ | Every _ | WithCorpse _ | IgniteSelf _ | RegenES _ | NoReaction -> w
+                     | SpendStack _ | SetStacks _ | Empower _ | IfEnemyHas _ | IfBuff _ | Every _ | WithCorpse _ | IgniteSelf _ | RegenES _ | LayGround _ | NoReaction -> w
                      | Explode (percent, dt, radius) ->
                          match target with
                          | Some t -> schedule w.Time (Explosion(actor.Name, t, percent, dt, radius)) w
@@ -3046,7 +3315,7 @@ module Sim =
                             (fun w t perSecond ->
                                 let label = sprintf "%s (%s over time)" skill.Name ((DamageType.name t).ToLowerInvariant())
                                 let dps = perSecond * Hit.damageMult dotCtx mods t * Mods.mult dotCtx [ Named "DotDamage" ] mods
-                                let d = { Ailment = None; Label = label; Type = t; Dps = dps; Expires = w.Time + duration; MaxStacks = 1; Owner = actor.Name }
+                                let d = { Ailment = None; Label = label; Type = t; Dps = dps; Expires = w.Time + duration; MaxStacks = 1; Owner = actor.Name; Carried = 0.0 }
                                 updateEnemy target (fun e -> { e with Dots = d :: (e.Dots |> List.filter (fun x -> x.Label <> label || x.Dps > dps)) }) w
                                 |> schedule d.Expires Expire)
                             w
@@ -4055,7 +4324,7 @@ module Sim =
                 status w.Enemies.[name] |> Map.fold (fun w k _ -> react env rng player (OnKillOf k) dotKiller (Some name) w) w
         dotKillGains env rng w.Enemies.[name] mine w
 
-    let private step env rng (w: World) =
+    let private stepEvent env rng (w: World) =
         let (KeyValue ((t, sq), ev)) = Seq.head w.Queue
         let dt = t - w.Time
         (match env.Trace with
@@ -4109,7 +4378,7 @@ module Sim =
             else
                 w.Kills |> List.truncate n |> List.rev
                 |> List.fold (fun w (name, _, at) -> killedOverTime env rng name (playersDotKill env w.Enemies.[name] at) w) w
-        let w = w |> syncPresence env.Fight
+        let w = w |> syncPresence env.Fight |> syncGround env
         let rates = match env.Fight.Player.Vitals with Some v when not v.RatesVary -> Some v | _ -> vitalsNow env w
         let w = w |> recover env.Fight.Player.Vitals rates env.Fight.Player.ManaFlask env.Fight.Player.Charms dt
         if allDead w || (w.Player |> Option.exists (fun p -> p.Died.IsSome)) then
@@ -4432,6 +4701,11 @@ module Sim =
                     | _ -> { st with Buffs = Map.remove buff st.Buffs }) w
             | Expire -> w
 
+    /// The next event, and then the ground again: what the event left or lit is there at once.
+    let private step env rng (w: World) =
+        let w = stepEvent env rng w
+        if w.Grounds.IsEmpty then w else syncGround env w
+
     /// The defences that the runs of the fight that was run last have worked out, by the
     /// buffs written out (a function of the buffs: knowing them changes no result). Runs
     /// of one fight follow each other, or go side by side: they share what is known.
@@ -4552,6 +4826,7 @@ module Sim =
                       FreezeBuildup = 0.0
                       CharmCharges = fight.Player.Charms |> List.map (fun c -> c.Buff, c.MaxCharges) |> Map.ofList })
               Time = 0.0
+              Grounds = []
               Enemies =
                 fight.Enemies |> List.map (fun d -> d.Name, fresh d)
                 |> Map.ofList

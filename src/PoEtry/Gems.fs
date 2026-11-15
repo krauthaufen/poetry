@@ -411,8 +411,8 @@ module Gems =
         |> Option.map (fun d ->
             // (a detonation after a time is played for grenades and Frost Bomb: their hit's delay)
             let fused = d.Types.Contains "Grenade" || d.Name = "Frost Bomb" || lodged.Contains d.Name
-            // (what Grim Pillars and Oil Barrage leave on the ground is played: Ice Crystals, Oil Ground)
-            let grounded = d.Name = "Grim Pillars" || d.Name = "Oil Barrage"
+            // (what Grim Pillars, Oil Barrage and Oil Grenade leave on the ground is played: Ice Crystals, Oil Ground)
+            let grounded = d.Name = "Grim Pillars" || d.Name = "Oil Barrage" || d.Name = "Oil Grenade"
             let played t = match Map.tryFind t playedTypes with Some [] -> true | Some names -> List.contains d.Name names | None -> false
             d.Types |> Set.filter (fun t -> not (descriptiveTypes.Contains t) && not (modelledTypes.Contains t) && not (played t) && not (fused && t = "DetonatesAfterTime") && not (grounded && t = "CreatesGroundEffect")) |> Set.toList)
         |> Option.defaultValue []
@@ -577,7 +577,7 @@ module Gems =
     let private impactIsSecondary = set [ "Thunderstorm", "Thunderstorm" ]
 
     /// Skills whose `base_secondary_skill_effect_duration` is read where their mechanic is built.
-    let private secondaryDurationRead = set [ "Freezing Mark"; "Frost Bomb"; "Kelari's Malediction" ]
+    let private secondaryDurationRead = set [ "Freezing Mark"; "Frost Bomb"; "Kelari's Malediction"; "Oil Grenade" ]
 
     let private conditionMods (skill: string) (label: string) (isMain: bool) : Mod list =
         (Map.tryFind (skill, label) partConditions |> Option.defaultValue [])

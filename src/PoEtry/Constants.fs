@@ -276,6 +276,9 @@ module Constants =
     /// Life loss from hits that is prevented and then lost "over 4 seconds" (stat descriptions).
     let deferredLossSeconds = 4.0
 
+    /// "Enemies covered in Oil ... have 200% more Magnitude of Flammability inflicted on them" (keyword text, poe2db).
+    let oilFlammabilityMore = 200.0
+
     /// "Shocked Ground ... lasts 6 seconds by default" (keyword text, poe2db).
     let shockedGroundSeconds = 6.0
 

@@ -754,20 +754,184 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         near (1.6 * 5.0 * dealt out "Flameblast (hit)") (dealt out "Ignite")
         same fight seeds)
 
-    test "Oil Ground: the plain barrage's hits leave the enemy in oil: Fire Exposure of 20% + 20%, 20% slower, for 6 s" (fun () ->
-        let setup = { Gem = "Oil Barrage"; Level = 20; Quality = 0; StatSet = 1; Supports = [] }
-        let skill = Skill.make "Oil Barrage" [ Attack; Projectile ]
-        let rules = Behaviours.oilGround db.Value ModDb.empty setup skill
-        equal (box [ "exposure", 40.0, 6.0; "slow", -20.0, 6.0 ])
-            (box (rules |> List.map (fun r ->
-                match r.Hook, r.Filter, r.Reaction with
-                | OnHit, Called "Oil Barrage", ApplyExposure (Fire, a, d) -> "exposure", a, d
-                | OnHit, Called "Oil Barrage", ApplyDebuff ("Oil Ground", d, 1, [ m ]) when m.Stat = Named "MovementSpeed" -> "slow", m.Value, d
-                | _ -> "other", 0.0, 0.0)))
+    // ---- ground surfaces: Oil, Ignited Ground, a storm that takes them up ----
+
+    let pour (ground: Ground) = { Hook = OnLand; Filter = Called ground.Skill; Chance = 100.0; Reaction = LayGround ground }
+    let oilOf (name: string) (radius: float) =
+        { Ground.make name Oil radius 6.0 with
+            Mods = [ Mod.more (Named "MovementSpeed") -40.0; Mod.more (Named Ailments.flammabilityTaken) 200.0; Mod.base' (Named Ailments.coveredInOil) 1.0 ]
+            Exposure = 20.0
+            Ignite = 50.0 }
+    let still (name: string) (x: float) = { EnemyDef.atLevel 83 1e9 with Name = name; Position = Vec.make x 0.0; Size = 4.0; Mods = []; Attack = None }
+    let toss (name: string) = { Skill.make name [ Attack ] with BaseDamage = Map.ofList [ Physical, Range.fixedAt 1.0 ]; BaseTime = 0.5; BaseCrit = 0.0 }
+    let blast = { Skill.make "Blast" [ Spell ] with BaseDamage = Map.ofList [ Fire, Range.fixedAt 1000.0 ]; BaseTime = 0.5; BaseCrit = 0.0; Mods = [ Mod.base' (AilmentChance Ignite) 100.0 ] }
+    let sure = Mod.base' (Named "Accuracy") 1e9
+    let dealt (out: Outcome) (source: string) = Map.tryFind source out.DamageBy |> Option.defaultValue 0.0
+    let up (out: Outcome) (status: string) = Map.tryFind status out.Uptime |> Option.defaultValue 0.0
+
+    test "Oil: who stands in it is covered in Oil (slower, Fire Exposure); an Ignited enemy lights it, and the ground burns with that Ignite and what the skill adds" (fun () ->
+        // oil at 0.5 s (the toss lands), the blast at 1 s: 1000 fire against -20% resistance,
+        // an Ignite of 200 a second. The ground burns from then with 200 + 50, for its 6 s anew
+        let player =
+            { Actor.make "Player" [ sure ] [ toss "Oil"; blast ] with
+                Rules = [ pour (oilOf "Oil" 20.0) ]
+                Rotation = [ { Use = "Oil"; When = fun v -> v.Time < 0.1 }; { Use = "Blast"; When = fun v -> v.LastUsed = "Oil" && v.EnemyStatus.ContainsKey Ground.oiled } ] }
+        let fight = Fight.single (still "Target" 30.0) player 12.0
+        let out = Sim.run fight 1u
+        equal (box [ 1; 1; 1 ]) (box [ count out "ground:Oil"; count out "lit:Oil"; count out "uses:Blast" ])
+        near 1200.0 (dealt out "Blast (hit)")
+        // the ground's Ignite at 1 s and again when it has run out, at 5 s (the ground lasts
+        // until 7 s, and the Exposure with it): 250 a second, x 1.2 for 6 s, then 2 s more
+        equal (box 2) (box (count out "ground ignite"))
+        near (250.0 * 1.2 * 6.0 + 250.0 * 2.0) (dealt out "Ignite")
+        // in Oil from 0.5 s to 1 s, on Ignited Ground from 1 s to 7 s, exposed all the while
+        near 0.5 (up out Ground.oiled)
+        near 6.0 (up out Ground.ignited)
+        near 6.5 (up out Ground.exposed)
+        same fight seeds
+        // without the blast nothing lights it: 6 s of Oil and no Ignite
+        let dry = { fight with Player = { player with Rotation = [ { Use = "Oil"; When = fun v -> v.Time < 0.1 } ] } }
+        let out = Sim.run dry 1u
+        near 6.0 (up out Ground.oiled)
+        near 0.0 (dealt out "Ignite")
+        same dry seeds)
+
+    test "Oil: Flammability inflicted on an enemy covered in Oil is 200% more, and a Detonator's hit is sure to Ignite it" (fun () ->
+        // 100 fire against an ailment threshold of 2000: 5% of it, 1% Flammability; in Oil 3%
+        let foe mods : Defender = { Level = 83; Mods = ModDb.ofList (Mod.more AilmentThreshold ((2000.0 / Constants.ailmentThreshold 83 - 1.0) * 100.0) :: mods) }
+        let oiled = [ Mod.more (Named Ailments.flammabilityTaken) 200.0; Mod.base' (Named Ailments.coveredInOil) 1.0 ]
+        let hit : HitResult = { Unmitigated = Map.ofList [ Fire, 100.0 ]; Dealt = Map.ofList [ Fire, 100.0 ]; Crit = false }
+        let c = Ctx.empty
+        near 1.0 (Ailments.chance c ModDb.empty (foe []) hit Ignite)
+        near 3.0 (Ailments.chance c ModDb.empty (foe oiled) hit Ignite)
+        near 3.0 (Ailments.flammability c ModDb.empty (foe oiled) hit)
+        near 100.0 (Ailments.chance { c with SkillTags = Set.ofList [ Ailments.detonator ] } ModDb.empty (foe oiled) hit Ignite)
+        near 1.0 (Ailments.chance { c with SkillTags = Set.ofList [ Ailments.detonator ] } ModDb.empty (foe []) hit Ignite)
+        // in a fight: a detonator's hit on an enemy in Oil Ignites it, and that lights the Oil; in both engines
+        let boom = { Skill.make "Boom" [ Attack; Ailments.detonator ] with BaseDamage = Map.ofList [ Fire, Range.fixedAt 1.0 ]; BaseTime = 0.5; BaseCrit = 0.0 }
+        let player =
+            { Actor.make "Player" [ sure ] [ toss "Oil"; boom ] with
+                Rules = [ pour { oilOf "Oil" 20.0 with Seconds = 100.0 } ]
+                Rotation = [ { Use = "Oil"; When = fun v -> v.Time < 0.1 }; { Use = "Boom"; When = fun v -> v.Time < 0.9 } ] }
+        let fight = Fight.single (still "Target" 30.0) player 3.0
+        let out = Sim.run fight 1u
+        equal (box [ 1; 1; 1 ]) (box [ count out "uses:Boom"; count out "inflict:Ignite"; count out "lit:Oil" ])
+        same fight seeds)
+
+    test "a ground surface grows by its area a second up to its most; an enemy is in it while its body reaches into it" (fun () ->
+        // 20% more area a second up to 100%: the radius grows with the root of the area
+        let g = { oilOf "Oil" 20.0 with GrowPerSecond = 20.0; GrowMax = 100.0 }
+        near 20.0 (Sim.groundRadius g 0.0)
+        near (20.0 * sqrt 1.5) (Sim.groundRadius g 2.5)
+        near (20.0 * sqrt 2.0) (Sim.groundRadius g 5.0)
+        near (20.0 * sqrt 2.0) (Sim.groundRadius g 60.0)
+        // the oil lies on the enemy aimed at (the boss, at 30); another stands at 58: 28 away,
+        // its body 4 wide, so it is in the oil once the radius is 24: 20 x sqrt(1 + 0.2 t) = 24
+        // at t = 2.2 s after the oil came at 0.5 s. The oil lasts 6 s: 3.8 s in it
+        let player =
+            { Actor.make "Player" [ sure ] [ toss "Oil" ] with
+                Rules = [ pour g ]
+                Rotation = [ { Use = "Oil"; When = fun v -> v.Time < 0.1 } ] }
+        let fight = { Fight.single (still "Boss" 30.0) player 10.0 with Enemies = [ still "Boss" 30.0; { still "Other" 58.0 with Rarity = Normal } ] }
+        let out = Sim.run fight 1u
+        // (uptime is averaged over the two enemies; the idle player looks every 33 ms)
+        let both = up out Ground.oiled * 2.0
+        if abs (both - (6.0 + 3.8)) > 0.04 then failwithf "in Oil for %g s" both
+        same fight seeds)
+
+    test "Ignited Ground Ignites who stands in it, again when the Ignite runs out; a storm that overlaps it takes its Ignite to who is inside the storm, and deals its fire damage" (fun () ->
+        // Ignited Ground of 500 a second, 10 wide, on the boss at 30; another enemy at 50 is
+        // outside it (6 from its edge). The storm (radius 30, 8 s) is cast on the boss at 2.5 s
+        // and holds both: it takes up the ground's Ignite at once
+        let fire = { Ground.make "Fire" Burning 10.0 20.0 with Ignite = 500.0 }
+        let storm = { Ground.make "Storm" Storm 30.0 8.0 with Limit = 1; Absorbs = [ Fire, 100.0 ] }
+        let player =
+            { Actor.make "Player" [ sure ] [ toss "Fire"; toss "Storm" ] with
+                Rules = [ pour fire; pour storm ]
+                Rotation = [ { Use = "Fire"; When = fun v -> v.Time < 0.1 }; { Use = "Storm"; When = fun v -> v.Time >= 2.0 && v.Time < 2.02 } ] }
+        let foes = [ still "Boss" 30.0; { still "Other" 50.0 with Rarity = Normal } ]
+        let fight = { Fight.single foes.Head player 14.5 with Enemies = foes }
+        let out = Sim.run fight 1u
+        equal (box [ 1; 1; 1 ]) (box [ count out "ground:Fire"; count out "ground:Storm"; count out "absorbed:Storm" ])
+        equal (box (4 + 2)) (box (count out "ground ignite"))
+        same fight seeds
+        // a storm that overlaps no Ignited Ground deals none of it
+        let plain = { fight with Player = { player with Rotation = [ { Use = "Storm"; When = fun v -> v.Time >= 2.0 && v.Time < 2.02 } ] } }
+        let out' = Sim.run plain 1u
+        near 0.0 (dealt out' "Ignite" + dealt out' "Storm (fire over time)")
+        same plain seeds
+        // the boss burns from 0.5 s: Ignites at 0.5, 4.5, 8.5 and 12.5 s, the last cut off at
+        // 14.5 s: 14 s of 500. The other from when the storm has come: Ignited then and 4 s
+        // later, and no more when that runs out as the storm ends, 8 s after it came: 8 s of
+        // 500. The storm's own fire: 8 s x 100 each
+        near (500.0 * 14.0 + 500.0 * 8.0) (dealt out "Ignite")
+        near (100.0 * 8.0 * 2.0) (dealt out "Storm (fire over time)"))
+
+    test "what a skill left standing is seen, and a Limit takes the oldest away: a storm cast when none stands; Ignited Ground lights the Oil that touches it" (fun () ->
+        let storm = { Ground.make "Storm" Storm 30.0 8.0 with Limit = 1 }
+        let player =
+            { Actor.make "Player" [ sure ] [ toss "Storm"; toss "Jab" ] with
+                Rules = [ pour storm ]
+                Rotation = [ { Use = "Storm"; When = fun v -> not (v.Standing.ContainsKey "Storm") }; Actor.always "Jab" ] }
+        let fight = Fight.single (still "Target" 30.0) player 20.0
+        let out = Sim.run fight 1u
+        // cast at 0 (it stands from 0.5 s for 8 s; a jab takes 0.5 s), again at 8.5 s and at 17 s
+        equal (box 3) (box (count out "ground:Storm"))
+        same fight seeds
+        // with a Limit of 1 and cast all the time, never more than one stands
+        let seen = ResizeArray<int>()
+        let eager = { fight with Player = { player with Rotation = [ { Use = "Storm"; When = fun v -> seen.Add(Map.tryFind "Storm" v.Standing |> Option.defaultValue 0); true } ] } }
+        Sim.run eager 1u |> ignore
+        equal (box 1) (box (Seq.max seen))
+        // Oil poured where Ignited Ground lies burns with that ground's Ignite, and what it adds
+        let fire = { Ground.make "Fire" Burning 10.0 20.0 with Ignite = 300.0 }
+        let player =
+            { Actor.make "Player" [ sure ] [ toss "Fire"; toss "Oil" ] with
+                Rules = [ pour fire; pour (oilOf "Oil" 20.0) ]
+                Rotation = [ { Use = "Fire"; When = fun v -> v.Time < 0.1 }; { Use = "Oil"; When = fun v -> v.LastUsed = "Fire" } ] }
+        let fight = { Fight.single (still "Boss" 30.0) player 6.0 with Enemies = [ still "Boss" 30.0; { still "Other" 48.0 with Rarity = Normal } ] }
+        let out = Sim.run fight 1u
+        equal (box 1) (box (count out "lit:Oil"))
+        // the boss: 300 from 0.5 s, 350 from 1 s (the Oil, lit as it lands; Fire Exposure of 20%);
+        // the other (in the Oil only): 350 x 1.2 from 1 s. To 6 s
+        near (300.0 * 0.5 + 350.0 * 1.2 * 5.0 + 350.0 * 1.2 * 5.0) (dealt out "Ignite")
+        same fight seeds)
+
+    test "Oil Grenade and Oil Barrage: the Oil Ground of the gem's numbers, with Magnified Area and Encroaching Ground" (fun () ->
+        let weapon = (Items.parse db.Value "Rarity: Normal\nMakeshift Crossbow\n--------\n").Weapon
+        let oil (gemName: string) (supports: string list) (charMods: Mod list) =
+            let setup = { Gem = gemName; Level = 20; Quality = 0; StatSet = 1; Supports = supports |> List.map (fun n -> n, 1) }
+            match Gems.skill db.Value (ModDb.ofList charMods) weapon setup with
+            | Ok (skill, _) ->
+                match Behaviours.oilGround db.Value (ModDb.ofList charMods) setup skill with
+                | [ { Hook = hook; Filter = Called name; Reaction = LayGround g } ] when name = skill.Name -> hook, g, skill
+                | other -> failwithf "%A" other
+            | Error e -> failwith e
+        // Oil Grenade, level 20: radius 2.6 m, 6 s, 40% slower, Exposure of 20%, where the grenade bursts
+        let hook, g, skill = oil "Oil Grenade" [] []
+        equal (box (OnLand, Oil, 26.0, 6.0, 20.0, 0.0, 0.0)) (box (hook, g.Kind, g.Radius, g.Seconds, g.Exposure, g.GrowPerSecond, g.GrowMax))
+        equal (box [ Named "MovementSpeed", -40.0; Named Ailments.flammabilityTaken, 200.0; Named Ailments.coveredInOil, 1.0 ]) (box (g.Mods |> List.map (fun m -> m.Stat, m.Value)))
+        // "Once Ignited, Oil Ground adds 150% of this Attack's Fire Damage": the attack's
+        // physical damage (the weapon's x the skill's multiplier) as fire, 150% of it, 20% a second
+        let physical = (skill.BaseDamage.[Physical].Min + skill.BaseDamage.[Physical].Max) / 2.0 * skill.BaseMultiplier
+        if physical <= 0.0 then failwith "the grenade deals nothing"
+        near (physical * 1.5 * 0.2) g.Ignite
+        near 4.0 g.IgniteSeconds
+        // 40% increased fire damage scales it (it is the attack's fire damage); physical damage does not
+        let _, hot, _ = oil "Oil Grenade" [] [ Mod.inc (Damage(OfType Fire)) 40.0; Mod.inc (Damage(OfType Physical)) 100.0 ]
+        near (physical * 1.4 * 1.5 * 0.2) hot.Ignite
+        // Magnified Area II (45% increased area: floor(26 x 1.20)), Encroaching Ground (20% more area a second up to 100%)
+        let _, wide, _ = oil "Oil Grenade" [ "Magnified Area II"; "Encroaching Ground" ] []
+        equal (box (31.0, 20.0, 100.0)) (box (wide.Radius, wide.GrowPerSecond, wide.GrowMax))
         // 50% increased skill effect duration: 9 s
-        let longer = Behaviours.oilGround db.Value (ModDb.ofList [ Mod.inc SkillDuration 50.0 ]) setup skill
-        equal (box [ 9.0; 9.0 ]) (box (longer |> List.map (fun r -> match r.Reaction with ApplyExposure (_, _, d) | ApplyDebuff (_, d, _, _) -> d | _ -> 0.0)))
-        equal (box ([]: string list)) (box (Gems.unmodelledTypes db.Value "Oil Barrage" |> List.filter ((=) "CreatesGroundEffect"))))
+        let _, long, _ = oil "Oil Grenade" [] [ Mod.inc SkillDuration 50.0 ]
+        near 9.0 long.Seconds
+        // Oil Barrage: where a projectile of the plain barrage hits; radius 2.1 m, 6 s, 20% slower,
+        // Exposure of 20% (not the keyword's 20% and 20% more), 100% of the attack's fire damage
+        let hook, b, _ = oil "Oil Barrage" [] []
+        equal (box (OnHit, Oil, 21.0, 6.0, 20.0)) (box (hook, b.Kind, b.Radius, b.Seconds, b.Exposure))
+        equal (box (Named "MovementSpeed", -20.0)) (box (b.Mods.Head.Stat, b.Mods.Head.Value))
+        equal (box ([]: string list)) (box ([ "Oil Barrage"; "Oil Grenade" ] |> List.collect (Gems.unmodelledTypes db.Value) |> List.filter ((=) "CreatesGroundEffect"))))
 
     test "Combat Frenzy: a Frenzy Charge for a freeze, electrocute or pin, at most once every few seconds" (fun () ->
         let c = load { blank with Groups = [ group [ gem "Combat Frenzy" ] ]; ExtraLines = [ "+100 to Spirit" ] } Options.defaults

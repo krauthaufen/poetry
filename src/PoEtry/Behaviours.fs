@@ -1709,11 +1709,23 @@ module Behaviours =
                     { Name = "Combat Frenzy"; Every = ms / 1000.0; Action = GainAnyRandom [ "CombatFrenzyReady" ] },
                     [ for a in [ Freeze; Electrocute; Pin ] -> { Hook = OnInflict a; Filter = AnySkill; Chance = 100.0; Reaction = grant } ]))
 
-    /// Oil Ground (Oil Barrage without a charge): "creating Oil Ground where the Projectiles
-    /// land"; it slows movement ("Oil Slows enemy movement speed by X%") and inflicts Fire
-    /// Exposure ("Oiled Ground": "inflicted with Fire Exposure"), whose 20% "Exposure lowers
-    /// Total Elemental Resistances by an additional X%" raises. The enemies the plain barrage
-    /// hits are in the oil, and are taken to stay in it for its time (as for Jagged Ground).
+    /// How a ground surface grows: "gain X% increased Area of Effect per second, up to a maximum
+    /// of Y%" (Encroaching Ground, or the skill's own).
+    let private groundGrowth (raw: (string * float) list) : float * float =
+        let sum id = raw |> List.filter (fun (k, _) -> k = id) |> List.sumBy snd
+        sum "support_ground_effect_area_of_effect_+%_final_per_second" + sum "active_skill_ground_effect_area_of_effect_+%_final_per_second",
+        sum "support_ground_effect_area_of_effect_+%_final_per_second_max" + sum "active_skill_ground_effect_area_of_effect_+%_final_per_second_max"
+
+    /// Oil (Oil Grenade: "covering the ground and nearby enemies in Oil"; Oil Barrage without a
+    /// charge: "creating Oil Ground where the Projectiles land"): a patch of Oil Ground where
+    /// the grenade bursts (the enemy aimed at), or where a projectile of the barrage hits, of
+    /// the skill's radius and for its duration. An enemy in it is covered in Oil: slowed ("Oil
+    /// Slows enemy movement speed by X%"), exposed ("Oil applies Exposure, lowering Total
+    /// Elemental Resistances by X%": Fire Exposure, by the buff's text) and takes more
+    /// Flammability; a Detonator's hit is sure to Ignite it. Lit, the ground burns with the
+    /// Ignite that lit it and "adds X% of this Attack's Fire Damage as unscalable Damage to the
+    /// Ignite": that share of what the attack would deal as fire with all its physical damage
+    /// converted, before a critical hit and the enemy, as an Ignite's 20% a second.
     let oilGround (db: GameDb) (charMods: ModDb) (setup: GemSetup) (skill: Skill) : Rule list =
         let raw = Gems.rawStats db charMods setup
         let sum id = raw |> List.filter (fun (k, _) -> k = id) |> List.sumBy snd
@@ -1721,11 +1733,38 @@ module Behaviours =
         if exposure = 0.0 && slow = 0.0 then []
         else
             let ctx = { Ctx.empty with SkillTags = skill.Tags; SkillName = skill.Name }
-            let seconds = sum "base_skill_effect_duration" / 1000.0 * Mods.mult ctx [ SkillDuration ] (ModDb.ofList (ModDb.toList charMods @ skill.Mods))
-            [ if exposure > 0.0 then
-                  yield { Hook = OnHit; Filter = Called skill.Name; Chance = 100.0; Reaction = ApplyExposure(Fire, Constants.exposureMagnitude + exposure, seconds) }
-              if slow < 0.0 then
-                  yield { Hook = OnHit; Filter = Called skill.Name; Chance = 100.0; Reaction = ApplyDebuff("Oil Ground", seconds, 1, [ Mod.more (Named "MovementSpeed") slow ]) } ]
+            let mods = ModDb.ofList (ModDb.toList charMods @ skill.Mods)
+            let ms = match sum "base_secondary_skill_effect_duration" with | 0.0 -> sum "base_skill_effect_duration" | v -> v
+            let seconds = ms / 1000.0 * Mods.mult ctx [ SkillDuration ] mods * Mods.inc ctx [ Named "GroundDuration" ] mods
+            let radius = Geometry.radius (sum "active_skill_base_area_of_effect_radius") (Mods.mult ctx [ AreaOfEffect ] mods)
+            let added =
+                let share =
+                    Gems.data db setup.Gem
+                    |> Option.map (fun d ->
+                        d.StatSets |> List.collect (fun set -> set.ConstantStats)
+                        |> List.filter (fun (k, _) -> k = "skill_main_hand_total_attack_fire_damage_permyriad_to_add_as_unscalable_damage_to_oil_ground_ignite")
+                        |> List.fold (fun m (_, v) -> max m v) 0.0)
+                    |> Option.defaultValue 0.0
+                if share <= 0.0 then 0.0
+                else
+                    let burning = ModDb.add mods (Mod.base' (SkillConvert(Physical, Fire)) 100.0)
+                    let fire =
+                        Hit.ranges ctx burning skill |> Map.tryFind Fire
+                        |> Option.map (fun r -> (r.Min + r.Max) / 2.0 * Hit.damageMult ctx burning Fire) |> Option.defaultValue 0.0
+                    fire * share / 10000.0 * Ailments.percentPerSecond Ignite / 100.0
+            let grow, most = groundGrowth raw
+            let ground =
+                { Ground.make skill.Name Oil radius seconds with
+                    GrowPerSecond = grow
+                    GrowMax = most
+                    Mods =
+                        [ if slow < 0.0 then yield Mod.more (Named "MovementSpeed") slow
+                          yield Mod.more (Named Ailments.flammabilityTaken) Constants.oilFlammabilityMore
+                          yield Mod.base' (Named Ailments.coveredInOil) 1.0 ]
+                    Exposure = exposure
+                    Ignite = added
+                    IgniteSeconds = Ailments.duration ctx mods Ignite }
+            [ { Hook = (if skill.Tags.Contains(Tag "Grenade") then OnLand else OnHit); Filter = Called skill.Name; Chance = 100.0; Reaction = LayGround ground } ]
 
     /// Shocked Ground: "X% chance on Shocking Enemies to create Shocked Ground"; "Shocked Ground
     /// Shocks those standing in it, and lasts 6 seconds by default" (keyword text). The shocked
