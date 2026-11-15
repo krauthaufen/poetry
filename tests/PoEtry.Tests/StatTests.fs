@@ -726,6 +726,34 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         if plain <= 0.0 then failwith "Hammer of the Gods builds no Glory"
         near (plain * 1.25) (builds [ "25% increased Glory generation" ]))
 
+    test "Flameblast: the Ignite of a full channel with Searing Flame, and the quality's more Magnitude of Damaging Ailments per Stage" (fun () ->
+        // level 20, 10 stages: 75% more damage a stage (x 8.5); Searing Flame II: 30% less damage
+        // with hits, 100% more Magnitude of Ignite. The Ignite is 20% a second of the fire the hit
+        // deals, for 4 s: with Searing Flame II 2 x 0.2 x 4 = 1.6 times the hit, whatever it rolled
+        let dealt (out: Outcome) (source: string) = Map.tryFind source out.DamageBy |> Option.defaultValue 0.0
+        let fought (charMods: Mod list) (quality: int) =
+            let setup = { Gem = "Flameblast"; Level = 20; Quality = quality; StatSet = 1; Supports = [ "Searing Flame II", 1 ] }
+            match Gems.skill db.Value (ModDb.ofList charMods) None setup with
+            | Ok (skill, cov) ->
+                if not cov.Unmapped.IsEmpty then failwithf "unmapped: %A" cov.Unmapped
+                let player = { Actor.make "Player" [ Mod.base' (AilmentChance Ignite) 100.0 ] [ skill ] with Rotation = [ { Use = skill.Name; When = fun v -> v.Time < 0.1 } ] }
+                let fight = Fight.single { EnemyDef.atLevel 83 1e12 with Mods = []; Attack = None } player 9.0
+                skill, fight, Sim.run fight 1u
+            | Error e -> failwith e
+        let _, fight, out = fought [] 0
+        let hit = dealt out "Flameblast (hit)"
+        // the hit: the gem's 244 to 367 fire x 8.5 x 0.7 (twice that if it was a critical hit)
+        if hit < 244.0 * 8.5 * 0.7 - 1e-6 || hit > 367.0 * 8.5 * 0.7 * 2.0 + 1e-6 then failwithf "the hit dealt %g" hit
+        near (1.6 * hit) (dealt out "Ignite")
+        same fight seeds
+        // 20% quality of the other kind: 2% more Magnitude of Damaging Ailments per quality and
+        // Stage: 40% x 10 stages = 400% more, the Ignite 5 times as strong
+        let skill, fight, out = fought [ Mod.flag (Named "AltQuality") ] 20
+        equal (box [ 400.0; 400.0; 400.0 ])
+            (box (skill.Mods |> List.filter (fun m -> m.Kind = More && (match m.Stat with AilmentMagnitude (Some _) -> true | _ -> false) && m.Source = "stages") |> List.map (fun m -> m.Value)))
+        near (1.6 * 5.0 * dealt out "Flameblast (hit)") (dealt out "Ignite")
+        same fight seeds)
+
     test "Oil Ground: the plain barrage's hits leave the enemy in oil: Fire Exposure of 20% + 20%, 20% slower, for 6 s" (fun () ->
         let setup = { Gem = "Oil Barrage"; Level = 20; Quality = 0; StatSet = 1; Supports = [] }
         let skill = Skill.make "Oil Barrage" [ Attack; Projectile ]

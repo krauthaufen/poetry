@@ -220,7 +220,7 @@ module Gems =
         let ends (es: string list) = es |> List.exists (fun (e: string) -> id.EndsWith e)
         (types.Contains "Channel"
          && ends [ "_maximum_stages"; "_max_stages"; "_max_number_of_stages"; "_maximum_number_of_stages"; "damage_+%_final_per_stage"; "damage_+%_final_per_stack"
-                   "damage_+%_final_per_additional_stage"; "all_damage_%_to_gain_as_fire_per_stage"; "radius_+_per_stage"
+                   "damage_+%_final_per_additional_stage"; "all_damage_%_to_gain_as_fire_per_stage"; "radius_+_per_stage"; "damaging_ailment_effect_per_stage_+%_final"
                    "_initial_explosion_number_of_additional_projectiles_per_additional_stage" ])
         || (types.Contains "Sustained"
             && (ends [ "_frequency_ms"; "_pulse_delay_ms"; "_pulse_interval_ms"; "_every_x_ms"; "_fireball_delay_ms"; "_hit_interval_ms"; "_maximum_number_of_hits"; "_number_of_pulses" ]
@@ -762,8 +762,13 @@ module Gems =
             else
                 let more = perStage [ "damage_+%_final_per_stage"; "damage_+%_final_per_stack" ] * stages + perStage [ "damage_+%_final_per_additional_stage" ] * (stages - 1.0)
                 let gainFire = perStage [ "all_damage_%_to_gain_as_fire_per_stage" ] * stages
+                // "X% more Magnitude of Damaging Ailments per Stage" (Flameblast's quality)
+                let ailing = perStage [ "damaging_ailment_effect_per_stage_+%_final" ] * stages
                 [ yield Mod.base' (Named "ChannelStages") stages |> Mod.from "stages"
                   if more <> 0.0 then yield Mod.more (Damage AllDamage) more |> Mod.from "stages"
+                  if ailing <> 0.0 then
+                      for a in Ailment.damaging do
+                          yield Mod.more (AilmentMagnitude(Some a)) ailing |> Mod.from "stages"
                   if gainFire > 0.0 then
                       for t in DamageType.all do
                           yield Mod.base' (GainAs(t, Fire)) gainFire |> Mod.from "stages" ]

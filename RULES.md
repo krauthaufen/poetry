@@ -406,7 +406,7 @@ Checked against PoB's defensive numbers for 131 public characters (`tools/corpus
 
 | Mechanic | Rule | Source | Confidence |
 |---|---|---|---|
-| Staged channels | Flameblast, Supercharged Slam, Detonating Arrow, Volcano: one use is the channel to the maximum number of stages (each takes the skill's own time) plus the release animation; the hit carries the per-stage more damage, gain as fire and radius | gem stats `*_maximum_stages`, `*_damage_+%_final_per_stage`, `*_radius_+_per_stage` | data; always channelling to full is a play-style assumption |
+| Staged channels | Flameblast, Supercharged Slam, Detonating Arrow, Volcano: one use is the channel to the maximum number of stages (each takes the skill's own time) plus the release animation; the hit carries the per-stage more damage, gain as fire and radius, and what it inflicts the "X% more Magnitude of Damaging Ailments per Stage" of Flameblast's other quality (2% a quality: with 10 stages 20 times the quality, as more Magnitude of Ignite, Bleeding and Poison) | gem stats `*_maximum_stages`, `*_damage_+%_final_per_stage`, `*_radius_+_per_stage`, `*_damaging_ailment_effect_per_stage_+%_final` | data; always channelling to full is a play-style assumption |
 | Held channels | a channelled skill with a cooldown (Flame Breath) is held for `base_minimum_channel_time_ms`: one use lasts that long and hits once per its own attack / cast time | gem stats; holding exactly the minimum is a play-style assumption | data |
 | Other channels | used repeatedly, one hit per use time (Incinerate's fuel, Snipe's perfect timing, Rampage, shield skills: not modelled) | - | partial |
 
