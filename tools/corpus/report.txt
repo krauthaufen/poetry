@@ -658,7 +658,7 @@
 019-ranger-ice-shot                                  Ice Shot                                       349230 dps (theirs     289128)  0 unknown, 2 unmapped, 2 unsimulated  deflection 9460/12526
 020-ritualist-lightning-warp                         Lightning Warp                                    103 dps (theirs       1642)  0 unknown, 0 unmapped, 4 unsimulated
 021-shaman-spearfield                                Spearfield                                        983 dps (theirs       4417)  0 unknown, 11 unmapped, 11 unsimulated
-022-smith-of-kitava-detonate-dead                    Detonate Dead (pressed Flameblast)               1943 dps (theirs      22760)  0 unknown, 3 unmapped, 2 unsimulated  life 3521/3819  cold res 98/93  lightning res 102/97  chaos res 115/119
+022-smith-of-kitava-detonate-dead                    Detonate Dead (pressed Flameblast)               2214 dps (theirs      22760)  0 unknown, 3 unmapped, 2 unsimulated  life 3521/3819  cold res 98/93  lightning res 102/97  chaos res 115/119
 023-sorceress-orb-of-storms                          Orb of Storms                                     822 dps (theirs       1020)  0 unknown, 2 unmapped, 6 unsimulated  armour 1266/1349  fire res 132/107
 024-spirit-walker-companion-zekoa-the-headcrusher    Wild Protector                                7783664 dps (theirs     448836)  0 unknown, 1 unmapped, 2 unsimulated  energy shield 1069/882  spirit 370/326  fire res 84/96  cold res 43/55  chaos res 68/60
 025-stormweaver-living-bomb                          Living Bomb (pressed Raise Shield)                508 dps (theirs     659332)  0 unknown, 5 unmapped, 11 unsimulated
@@ -706,7 +706,7 @@
 067-chronomancer-raise-zombie                        Raise Zombie                                   398475 dps (theirs      23805)  0 unknown, 4 unmapped, 3 unsimulated  energy shield 10147/10909
 068-deadeye-pounce                                   Pounce (pressed Tornado Shot)                   81099 dps (theirs       1606)  0 unknown, 4 unmapped, 5 unsimulated
 069-disciple-of-varashta-kelari-s-deception          Kelari, the Tainted Sands                     6209792 dps (theirs          0)  0 unknown, 3 unmapped, 4 unsimulated  energy shield 13136/13826  spirit 401/367
-070-gemling-legionnaire-flameblast                   Flameblast                                   16480333 dps (theirs     747377)  0 unknown, 0 unmapped, 1 unsimulated  life 3902/4075  spirit 246/220  chaos res 79/68
+070-gemling-legionnaire-flameblast                   Flameblast                                   44430191 dps (theirs     747377)  0 unknown, 0 unmapped, 1 unsimulated  life 3902/4075  spirit 246/220  chaos res 79/68
 071-infernalist-spark                                Spark                                         5665790 dps (theirs    2424071)  0 unknown, 0 unmapped, 0 unsimulated  lightning res 53/98
 072-invoker-shattering-palm                          Shattering Palm                                703829 dps (theirs     405235)  0 unknown, 2 unmapped, 4 unsimulated  dexterity 157/144
 073-lich-companion-elephant-tortoise                 Elemental Weakness                             147690 dps (theirs          0)  0 unknown, 0 unmapped, 7 unsimulated  energy shield 6491/6677  evasion 37273/44610  deflection 28290/33858  fire res 81/76  cold res 128/113  lightning res 94/79
