@@ -1773,3 +1773,50 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         let ranged = { brute with Attack = brute.Attack |> Option.map (fun a -> { a with Melee = false }) }
         equal 0 (count (Sim.run (Setup.fight c o p [ ranged ]) 1u) "hits:Arctic Armour: Burst")
         same fight seeds)
+
+    test "Ancestral Bond doubles the totem limit as far as 75 Spirit a totem pays; more totems; what a totem has for every totem standing" (fun () ->
+        equal (box [ Mod.flag (Named "AncestralBond") ]) (box (mods "keystone_ancestral_bond" 1.0))
+        let totemsOf spirit extra =
+            let b = { blank with Groups = [ group [ gem "Shockwave Totem" ] ]; ExtraLines = (if spirit > 0 then [ sprintf "+%d to Spirit" spirit ] else []) }
+            let c = load b Options.defaults
+            Behaviours.totems db.Value { c.Sheet with Mods = c.Sheet.Mods @ extra } b |> fst
+        let bond = mods "keystone_ancestral_bond" 1.0
+        equal 1 (totemsOf 0 []).Length
+        // doubled, where there is Spirit for two; one at least
+        equal 2 (totemsOf 200 bond).Length
+        equal 1 (totemsOf 100 bond).Length
+        equal 1 (totemsOf 0 bond).Length
+        // "+1 to maximum number of Summoned Totems": two, four with the limit doubled and Spirit for four
+        equal 2 (totemsOf 0 (mods "number_of_additional_totems_allowed" 1.0)).Length
+        equal 4 (totemsOf 400 (bond @ mods "number_of_additional_totems_allowed" 1.0)).Length
+        equal 3 (totemsOf 250 (bond @ mods "number_of_additional_totems_allowed" 1.0)).Length
+        // "Spells Cast by Totems have 5% increased Cast Speed per Summoned Totem", "4% more Totem Damage per Summoned Totem": for two totems
+        let two = totemsOf 0 (mods "number_of_additional_totems_allowed" 1.0 @ mods "totems_spells_cast_speed_+%_per_active_totem" 5.0 @ mods "totem_damage_+%_final_per_active_totem" 4.0)
+        let own = two.Head.Skills.Head.Mods |> List.filter (fun m -> m.Source = "per Summoned Totem") |> List.map (fun m -> m.Stat, m.Kind, m.Value)
+        equal (box [ Speed, Inc, 10.0; Damage AllDamage, More, 8.0 ]) (box own))
+
+    test "damage taken, defences on low life, block while Surrounded, energy shield on block, counted Power of warcries, supports of a colour" (fun () ->
+        equal (box [ Mod.more (Named "Taken:All") -10.0 ]) (box (mods "marauder_hidden_ascendancy_damage_taken_+%_final" -10.0))
+        equal (box [ Mod.more (Named "Taken:All") 20.0 |> Mod.whenever (WhileBuff "LowLife") ]) (box (mods "hand_wraps_damage_taken_+%_final_on_low_life" 20.0))
+        equal (box [ Mod.inc (Named "Block") 25.0 |> Mod.whenever (WhileBuff "Surrounded") ]) (box (mods "block_chance_+%_while_surrounded" 25.0))
+        equal (box [ Mod.base' (MaxResist Fire) 2.0 |> Mod.whenever (WhileBuff "Supports5:red") ]) (box (mods "maximum_fire_resistance_+%_if_at_least_5_red_supports_socketed" 2.0))
+        equal (box [ Mod.base' (Named "AllyRegenPercentOfOwnerRegen") 30.0 ]) (box (mods "total_base_life_regeneration_rate_per_minute_%_granted_to_allies_in_your_presence" 30.0))
+        // 10% less damage taken on the sheet
+        let plain = load blank Options.defaults
+        let less = load { blank with ExtraLines = [ "Take 10% less Damage" ] } Options.defaults
+        near (0.9 * Map.find Fire plain.Vitals.TakenMult) (Map.find Fire less.Vitals.TakenMult)
+        // energy shield gained (or lost) on block: both engines the same
+        equal (box [ Mod.base' (Named "ESOnBlock") 30.0 ]) (box (mods "energy_shield_gained_on_block" 30.0))
+        let monster = { EnemyDef.atLevel 83 1e12 with Mods = []; Position = Vec.make 5.0 0.0; Attack = Some { Interval = 0.4; Damage = Map.ofList [ Fire, 60.0 ]; Accuracy = 1e9; Range = 10.0; CritChance = 0.0; Melee = true } }
+        let idle = { Skill.make "Wait" [ Spell ] with Hits = []; Cooldown = Some 100.0 }
+        for gain in [ 30.0; -30.0 ] do
+            let vitals = { PlayerStats.basic 1e6 0.0 with EnergyShield = 300.0; Block = 50.0; ESOnBlock = gain }
+            same (Fight.single monster { Actor.make "Player" [] [ idle ] with Vitals = Some vitals } 8.0) seeds
+        // "50% increased total Power counted by Warcries": an attack for two thirds of the power, counted up to two thirds
+        let c = load { blank with Groups = [ group [ gem "Infernal Cry" ] ] } Options.defaults
+        let empower (c: Loaded) =
+            (Setup.pressed c Options.defaults "Infernal Cry").Value.Rules |> List.pick (fun r -> match r.Reaction with Empower (_, per, cap) -> Some(per, cap) | _ -> None)
+        let per, cap = empower c
+        let per2, cap2 = empower { c with Sheet = { c.Sheet with Mods = c.Sheet.Mods @ mods "warcry_monster_power_+%" 50.0 } }
+        near (per / 1.5) per2
+        if cap < infinity then near (cap / 1.5) cap2)

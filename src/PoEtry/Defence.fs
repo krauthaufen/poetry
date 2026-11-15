@@ -289,6 +289,7 @@ module Defence =
           ESOnKill = es * named "ESPercentOnKill" / 100.0 * esRecovery
           LifeOnBlock = if ci || onlyLeech then 0.0 else named "LifeOnBlock" * lifeRecovery
           ManaOnBlock = named "ManaOnBlock" * manaRecovery
+          ESOnBlock = named "ESOnBlock"
           Recoup =
             [ "Life", DamageType.all, named "RecoupLife"
               "Life", [ Physical ], named "RecoupLife:Physical"

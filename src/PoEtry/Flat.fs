@@ -6746,6 +6746,7 @@ module Flat =
                         bump s p.CBlocked
                         s.Ward <- (if v.WardOnBlock > 0.0 then min (max s.Ward pools.Ward) (s.Ward + v.WardOnBlock) else s.Ward)
                         s.Life <- min (max s.Life pools.Life) (s.Life + v.LifeOnBlock)
+                        if v.ESOnBlock <> 0.0 then s.Shield <- max 0.0 (min (max s.Shield (min pools.EnergyShield v.ESRecoverCap)) (s.Shield + v.ESOnBlock))
                         s.Mana <- min pools.Mana (s.Mana + v.ManaOnBlock)
                         // blocks feed meta gems (what a block triggers is aimed at the enemy whose hit was blocked)
                         for i in 0 .. p.Metas.Length - 1 do

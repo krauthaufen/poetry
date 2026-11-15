@@ -1362,7 +1362,7 @@ module StatMap =
         | "power_only_conduit" | "generate_power_charges_for_allies_in_your_presence" -> one (Mod.flag (Named "Conduit:PowerCharge"))
         | "frenzy_only_conduit" | "generate_frenzy_charges_for_allies_in_your_presence" -> one (Mod.flag (Named "Conduit:FrenzyCharge"))
         | "endurance_only_conduit" | "generate_endurance_charges_for_allies_in_your_presence" -> one (Mod.flag (Named "Conduit:EnduranceCharge"))
-        | "minions_get_amulet_stats_instead_of_you" | "keystone_ancestral_bond" ->
+        | "minions_get_amulet_stats_instead_of_you" ->
             Some(Unsimulated "minions / allies")
         | "keystone_bulwark" -> Some(Unsimulated "movement")
         // "When taking damage from Hits, 20% of Life Loss is prevented, then 150% of Life Loss
@@ -1483,6 +1483,40 @@ module StatMap =
         // "+X seconds to base use time when Shapeshifting": a character that uses shapeshift
         // skills is in its animal form for the whole fight and never changes into it
         | "use_time_+_ms_if_shapeshift_required" -> Some NotOffensive
+        | "energy_shield_gained_on_block" -> one (Mod.base' (Named "ESOnBlock") v)
+        // damage the character takes
+        | "marauder_hidden_ascendancy_damage_taken_+%_final" -> one (Mod.more (Named "Taken:All") v)
+        | "hand_wraps_damage_taken_+%_final_on_low_life" -> one (Mod.more (Named "Taken:All") v |> Mod.whenever (WhileBuff "LowLife"))
+        | "ascendancy_shaman_reactive_growth_elemental_damage_taken_+%_final" ->
+            Some(Mods(DamageType.elemental |> List.map (fun t -> Mod.more (Named("Taken:" + DamageType.name t)) v)))
+        | "armour_and_evasion_on_low_life_+%" -> Some(Mods [ Mod.inc Armour v |> Mod.whenever (WhileBuff "LowLife"); Mod.inc Evasion v |> Mod.whenever (WhileBuff "LowLife") ])
+        | "fire_damage_resistance_%_when_on_low_life" -> one (Mod.base' (Resist Fire) v |> Mod.whenever (WhileBuff "LowLife"))
+        | "block_chance_+%_while_surrounded" -> one (Mod.inc (Named "Block") v |> Mod.whenever (WhileBuff "Surrounded"))
+        // "X% of your Base Life Regeneration is granted to Allies in your Presence" (Behaviours.minions)
+        | "total_base_life_regeneration_rate_per_minute_%_granted_to_allies_in_your_presence" -> one (Mod.base' (Named "AllyRegenPercentOfOwnerRegen") v)
+        // totems: more of them, and what each has for every one standing (Behaviours.totems)
+        | "keystone_ancestral_bond" -> one (Mod.flag (Named "AncestralBond"))
+        | "number_of_additional_totems_allowed" -> one (Mod.base' (Named "AdditionalTotems") v)
+        | "attack_skills_additional_ballista_totems_allowed" | "additional_ballista_totems_allowed" -> one (Mod.base' (Named "AdditionalBallistaTotems") v)
+        | "totems_spells_cast_speed_+%_per_active_totem" -> one (Mod.base' (Named "TotemCastSpeedPerTotem") v)
+        | "totems_attack_speed_+%_per_active_totem" -> one (Mod.base' (Named "TotemAttackSpeedPerTotem") v)
+        | "totem_damage_+%_final_per_active_totem" -> one (Mod.base' (Named "TotemDamagePerTotem") v)
+        // a shield skill's damage from the shield's armour or evasion (read where it is built: Gems.skill)
+        | id when (id.StartsWith "off_hand_minimum_added_physical_damage_per_" || id.StartsWith "off_hand_maximum_added_physical_damage_per_") && id.Contains "_shield_" -> Some Structural
+        // "X% increased total Power counted by Warcries" (Behaviours.warcry)
+        | "warcry_monster_power_+%" -> one (Mod.inc (Named "WarcryPower") v)
+        // "if you have at least 5 Red Support Gems Socketed" (the counts: Setup.loadWith)
+        | "maximum_fire_resistance_+%_if_at_least_5_red_supports_socketed" -> one (Mod.base' (MaxResist Fire) v |> Mod.whenever (WhileBuff "Supports5:red"))
+        | "maximum_cold_resistance_+%_if_at_least_5_blue_supports_socketed" -> one (Mod.base' (MaxResist Cold) v |> Mod.whenever (WhileBuff "Supports5:blue"))
+        | "maximum_lightning_resistance_+%_if_at_least_5_green_supports_socketed" -> one (Mod.base' (MaxResist Lightning) v |> Mod.whenever (WhileBuff "Supports5:green"))
+        | "additional_maximum_all_elemental_resistances_%_if_at_least_5_red_green_blue_supports_socketed" ->
+            Some(Mods(DamageType.elemental |> List.map (fun t ->
+                Mod.base' (MaxResist t) v |> Mod.whenever (WhileBuff "Supports5:red") |> Mod.whenever (WhileBuff "Supports5:green") |> Mod.whenever (WhileBuff "Supports5:blue"))))
+        // "while your Companion is in your Presence": while the character has one (Setup.loadWith)
+        | "global_armour_evasion_energy_shield_while_in_presence_of_companion_+%" ->
+            Some(Mods([ Armour; Evasion; MaxEnergyShield ] |> List.map (fun st -> Mod.inc st v |> Mod.whenever (WhileBuff "CompanionInPresence"))))
+        | "damage_+%_while_in_presence_of_companion" -> one (Mod.inc (Damage AllDamage) v |> Mod.whenever (WhileBuff "CompanionInPresence"))
+        | "attack_speed_+%_while_in_presence_of_companion" -> one (Mod.inc Speed v |> Mod.whenever (SkillIs Attack) |> Mod.whenever (WhileBuff "CompanionInPresence"))
         // Arctic Armour's stages and its burst (read where they are built: Behaviours.arcticArmour)
         | "arctic_armour_minimum_added_cold_damage_per_stack" | "arctic_armour_maximum_added_cold_damage_per_stack"
         | "maximum_number_of_arctic_armour_stationary_stacks" -> Some Structural
@@ -1879,6 +1913,23 @@ module StatMap =
             [ "minion_movement_speed_+%"; "companion_movement_speed_%"; "companion_movement_speed_+%"; "tame_beasts_unique_movement_velocity_+%"
               "totem_placement_range_+%" ]
 
+    /// What nothing in a fight can hurt: totems ("totem life is ignored", RULES.md, "Totems")
+    /// and offerings (a buff on the minions for its time). Their life, resistances and
+    /// regeneration change nothing.
+    let private cannotBeHurt (id: string) =
+        List.contains id
+            [ "totem_life_+%"; "totem_elemental_resistance_%"; "totem_chaos_resistance_%"; "totems_regenerate_%_life_per_minute"
+              "offering_life_+%"; "offerings_cannot_be_damaged_if_created_recently" ]
+
+    /// What the character gives its allies that no minion here reads: charges ("X% chance to
+    /// grant an Endurance / Frenzy / Power Charge to Allies in your Presence on Hit": as with
+    /// Conduit, what the allies hold changes nothing they do), and the character's aura buffs,
+    /// which are its own here, so "Your Aura Buffs do not affect Allies" takes nothing away.
+    let private alliesReadNothing (id: string) =
+        List.contains id
+            [ "chance_to_grant_endurance_charge_to_nearby_allies_on_hit_%"; "chance_to_grant_frenzy_charge_to_nearby_allies_on_hit_%"
+              "chance_to_grant_power_charge_to_nearby_allies_on_hit_%"; "buff_auras_dont_affect_allies" ]
+
     /// What monsters never do in a fight as it is simulated: they hit, with their damage and
     /// their accuracy, and nothing else (RULES.md, "Monster hits", "Not modelled: monster
     /// skills"). They put no curse on the player, break none of its armour, leave no Maim and
@@ -1927,7 +1978,7 @@ module StatMap =
     let private isNonOffensive (id: string) =
         let words = split id
         // A penetration / enemy debuff line mentions resistance but is offensive.
-        words |> List.exists noCombatWords.Contains || ownMovement id || alliesInPlace id || monstersNeverDo id || shownOnTheItem id || howItIsBuilt id
+        words |> List.exists noCombatWords.Contains || ownMovement id || alliesInPlace id || cannotBeHurt id || alliesReadNothing id || monstersNeverDo id || shownOnTheItem id || howItIsBuilt id
 
     let rec private direct (id: string) value =
         match explicit id value with

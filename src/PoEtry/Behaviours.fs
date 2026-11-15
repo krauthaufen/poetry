@@ -987,7 +987,11 @@ module Behaviours =
                 let empowered (m: Mod) = m |> Mod.whenever (SkillIs Attack) |> Mod.whenever (WhileBuff "EmpoweredAttacks") |> Mod.from skill.Name
                 let fire = sum "infernal_cry_exerted_attack_all_damage_%_to_gain_as_fire_%"
                 let aftershocks = sum "seismic_cry_slam_skill_additional_aftershocks"
-                [ { Hook = OnUse; Filter = Called skill.Name; Chance = 100.0; Reaction = Empower("EmpoweredAttacks", per, (if cap > 0.0 then cap else infinity)) } ],
+                // "X% increased total Power counted by Warcries": the power counted and what a
+                // warcry counts at most are that much more, which is the same as an attack for
+                // so much less power, counted up to so much less
+                let counted = max 0.01 (Mods.inc { Ctx.empty with SkillTags = skill.Tags; SkillName = skill.Name } [ Named "WarcryPower" ] (ModDb.ofList (ModDb.toList charMods @ skill.Mods)))
+                [ { Hook = OnUse; Filter = Called skill.Name; Chance = 100.0; Reaction = Empower("EmpoweredAttacks", per / counted, (if cap > 0.0 then cap / counted else infinity)) } ],
                 [ if fire > 0.0 then
                       for t in DamageType.all -> empowered (Mod.base' (GainAs(t, Fire)) fire)
                   if aftershocks > 0.0 then yield empowered (Mod.base' (Named "AftershockChance") (100.0 * aftershocks) |> Mod.whenever (SkillIs Slam)) ]
@@ -1995,6 +1999,12 @@ module Behaviours =
                     let explodePct = supportStat "explode_on_low_life_%_maximum_life_to_deal"
                     // "Allies in your Presence Regenerate X% of your Maximum Life per second"
                     let ownerRegen = Mods.sumBase Ctx.empty [ Named "Sheet:Life" ] charMods * Mods.sumBase Ctx.empty [ Named "AllyRegenPercentOfOwnerLife" ] charMods / 100.0
+                    // "X% of your Base Life Regeneration is granted to Allies in your Presence":
+                    // the character's own, before what increases it
+                    let ownerRegen =
+                        ownerRegen
+                        + (Mods.sumBase Ctx.empty [ LifeRegen ] charMods + Mods.sumBase Ctx.empty [ Named "Sheet:Life" ] charMods * Mods.sumBase Ctx.empty [ LifeRegenPercent ] charMods / 100.0)
+                          * Mods.sumBase Ctx.empty [ Named "AllyRegenPercentOfOwnerRegen" ] charMods / 100.0
                     let withSupports (b: MinionBody) =
                         let b = { b with Life = b.Life * lifeMore; TakesForOwner = takes; LifeRegen = b.LifeRegen + ownerRegen }
                         if explodePct > 0.0 then { b with Explodes = Some(m.Name + ": Minion Instability") } else b
@@ -2248,6 +2258,26 @@ module Behaviours =
                         let limit =
                             Gems.rawStats db charMods { Gem = gem.Name; Level = gem.Level; Quality = gem.Quality; StatSet = 1; Supports = supports }
                             |> List.filter (fun (k, _) -> k = "base_number_of_totems_allowed") |> List.sumBy snd |> int |> max 1
+                        // "+N to maximum number of Summoned Totems" (Ballista Totems: of those)
+                        let named n = Mods.sumBase Ctx.empty [ Named n ] charMods
+                        let limit = limit + int (named "AdditionalTotems") + (if gem.Name.Contains "Ballista" then int (named "AdditionalBallistaTotems") else 0)
+                        // Ancestral Bond: "Your Totem Limit is doubled", "Totems reserve 75 Spirit
+                        // each": as many as the Spirit the persistent gems leave pays for, one at least
+                        let limit =
+                            if not (Mods.flag Ctx.empty (Named "AncestralBond") charMods) then limit
+                            else
+                                let free = spiritTotal sheet build - (spiritUses db sheet build |> List.sumBy (fun u -> u.Flat))
+                                max 1 (min (2 * limit) (int (free / Constants.ancestralBondSpirit)))
+                        // what a totem has for every totem standing (all of them stand together)
+                        let s =
+                            let perTotem n = named n * float limit
+                            let extra =
+                                [ Mod.inc Speed (perTotem "TotemCastSpeedPerTotem") |> Mod.whenever (SkillIs Spell)
+                                  Mod.inc Speed (perTotem "TotemAttackSpeedPerTotem") |> Mod.whenever (SkillIs Attack)
+                                  Mod.more (Damage AllDamage) (perTotem "TotemDamagePerTotem") ]
+                                |> List.filter (fun m -> m.Value <> 0.0) |> List.map (Mod.from "per Summoned Totem")
+                            let rec add (sk: Skill) = { sk with Mods = sk.Mods @ extra; Parts = sk.Parts |> List.map add }
+                            if extra.IsEmpty then s else add s
                         [ for i in 1 .. limit ->
                             { Actor.make (if limit > 1 then sprintf "%s %d" gem.Name i else gem.Name + " (totem)") sheet.Mods [ s ] with ActiveWhile = Some(gem.Name + " buff") } ],
                         []

@@ -3559,6 +3559,9 @@ module Sim =
                                         { p with
                                             Ward = (if v.WardOnBlock > 0.0 then min (max p.Ward pools.Ward) (p.Ward + v.WardOnBlock) else p.Ward)
                                             Life = min (max p.Life pools.Life) (p.Life + v.LifeOnBlock)
+                                            EnergyShield =
+                                                (if v.ESOnBlock = 0.0 then p.EnergyShield
+                                                 else max 0.0 (min (max p.EnergyShield (min pools.EnergyShield v.ESRecoverCap)) (p.EnergyShield + v.ESOnBlock)))
                                             Mana = min pools.Mana (p.Mana + v.ManaOnBlock) } }
                         | _ -> w
                     if blocked then

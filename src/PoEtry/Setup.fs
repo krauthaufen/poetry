@@ -216,6 +216,7 @@ module Setup =
             let most = named |> List.map (fun (c, _) -> count c) |> List.max
             [ for c, name in named do
                 if count c >= 10 then yield "Supports10:" + name
+                if count c >= 5 then yield "Supports5:" + name
                 if most > 0 && count c = most then yield "SupportsMajority:" + name ]
         // "for each Corrupted Item Equipped"
         let corrupted = Behaviours.corruptedItems build
@@ -275,6 +276,13 @@ module Setup =
             match Behaviours.windDancerStages db sheet build with
             | Some n -> Map.add "WindDancerStage" n maxResources, Map.add "WindDancerStage" (if o.StartEmpty then 0 else n) startResources
             | None -> maxResources, startResources
+        // "while your Companion is in your Presence": a character with a companion gem has it
+        // beside it for the whole fight
+        let startResources =
+            let companion =
+                build.Groups |> List.filter (fun g -> g.Enabled) |> List.collect (fun g -> g.Gems)
+                |> List.exists (fun x -> x.Enabled && not x.IsSupport && (x.Name.StartsWith "Companion: " || (Gems.data db x.Name |> Option.exists (fun d -> d.Types.Contains "Companion"))))
+            if companion then Map.add "CompanionInPresence" 1 startResources else startResources
         // and so do Arctic Armour's
         let maxResources, startResources =
             match Behaviours.arcticArmour db sheet build with
