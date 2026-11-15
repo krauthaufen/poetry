@@ -952,6 +952,53 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         near 12.5 (storm [ "Advancing Storm" ]).Speed
         equal (box ([]: string list)) (box (Gems.unmodelledTypes db.Value "Tornado" |> List.filter ((=) "InteractsWithElementalGround"))))
 
+    // ---- a rotation's conditions ----
+
+    test "a rotation's conditions on the enemy's states and on what stands are followed, in both engines; the character says what they can ask about" (fun () ->
+        let b =
+            { blank with
+                Level = 90
+                Items = [ "Weapon 1", "Rarity: Normal\nMakeshift Crossbow\n--------\n" ]
+                Groups = [ group [ gem "Oil Grenade" ]; group [ gem "Flameblast" ]; group [ gem "Tornado" ] ]
+                ExtraLines = [ "+5000 to maximum Mana"; "+1000000 to maximum Life"; "100000% increased Flammability Magnitude" ] }
+        let c = load b Options.defaults
+        // what the page is told it can offer
+        let said = Report.character [] [] b.Groups false Map.empty c |> Json.field "conditions"
+        let names key = said |> Option.bind (Json.field key) |> Json.list |> List.choose Json.str
+        equal (box [ "Ignite"; "Shock"; "Chill"; "Freeze"; "Electrocute"; "Bleed"; "Poison"; "Heavy Stun"; "Pinned"; "Oil"; "Ignited Ground"; "Exposure" ]) (box (names "states"))
+        equal (box [ "Oil Grenade"; "Tornado" ]) (box (names "skills"))
+        let fought (rotation: string) =
+            let ready = Report.prepare c (Json.parse (sprintf "{\"rotation\":\"%s\",\"scenario\":\"boss\",\"time\":20,\"life\":1000000000000}" rotation))
+            let told = ResizeArray<string>()
+            let out =
+                Sim.traced (fun _ kind who what _ ->
+                    let line = if kind = "Ground" then who + " " + what elif kind = "Strike" && who = ready.Fight.Player.Name then what else ""
+                    if line <> "" && not (told.Contains line) then told.Add line) ready.Fight 1u
+            same ready.Fight [ 1u; 2u; 3u ]
+            ready, List.ofSeq told, out
+        // Flameblast while the enemy stands on no Ignited Ground; Oil on an Ignited enemy (it
+        // catches fire at once, with Flameblast's Ignite); a Tornado when none stands
+        let ready, told, out = fought "Flameblast@lacks:Ignited Ground|Oil Grenade@has:Ignite|Tornado@down:Tornado"
+        equal (box [ "Flameblast"; "Oil Grenade"; "Oil Grenade laid"; "Oil Grenade lit"; "Tornado"; "Tornado laid"; "Tornado absorbed" ]) (box told)
+        equal (box [ "when it fits", "lacks:Ignited Ground"; "when it fits", "has:Ignite"; "when it fits", "down:Tornado" ])
+            (box (ready.Steps |> List.map (fun (p, code) -> (match p with When _ -> "when it fits" | _ -> "other"), code)))
+        // the ground is kept burning by the Oil that follows, so one Flameblast is all there is
+        equal (box 1) (box (count out "uses:Flameblast"))
+        if count out "uses:Tornado" < 2 then failwith "the Tornado is not cast again when it is gone"
+        // the other way round: Oil on an enemy that has none, Flameblast on one in Oil (which lights it)
+        let _, told, _ = fought "Oil Grenade@lacks:Oil+lacks:Ignited Ground|Flameblast@has:Oil+lacks:Ignite|Tornado@up:Oil Grenade+down:Tornado"
+        equal (box [ "Oil Grenade"; "Oil Grenade laid"; "Flameblast"; "Oil Grenade lit"; "Tornado"; "Tornado laid"; "Tornado absorbed" ]) (box told)
+        // a state or a skill nothing goes by: never had, never up; an old code can be one of the parts
+        let _, told, out = fought "Flameblast@has:Nothing|Tornado@up:Nothing|Oil Grenade@lacks:Nothing+down:Nothing+ready"
+        equal (box [ "Oil Grenade"; "Oil Grenade laid" ]) (box told)
+        equal (box 0) (box (count out "uses:Flameblast" + count out "uses:Tornado"))
+        // the old codes alone are what they were
+        let ready, _, _ = fought "Tornado@ready|Flameblast"
+        equal (box [ "ready"; "" ]) (box (ready.Steps |> List.map snd))
+        match ready.Steps |> List.map fst with
+        | [ OnCooldown "Tornado"; Spam "Flameblast" ] -> ()
+        | other -> failwithf "%A" (other |> List.map Setup.gemOf))
+
     test "Combat Frenzy: a Frenzy Charge for a freeze, electrocute or pin, at most once every few seconds" (fun () ->
         let c = load { blank with Groups = [ group [ gem "Combat Frenzy" ] ]; ExtraLines = [ "+100 to Spirit" ] } Options.defaults
         let player = Setup.player c Options.defaults [] None

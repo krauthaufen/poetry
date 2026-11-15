@@ -1090,3 +1090,86 @@ module Setup =
         |> List.sortByDescending snd
         |> List.tryHead
         |> Option.map fst
+
+    /// When a step of a play style for one gem is taken, as a condition on what the player sees
+    /// (what `player` makes of the play; the cooldown, the cost and the rest stay the engine's).
+    let condition (c: Loaded) (o: Options) (play: Play) : View -> bool =
+        match play with
+        | Spam _ | Cycle _ -> fun _ -> true
+        | When (cond, _) -> cond
+        | WhileBelow (r, n, _) -> fun v -> (Map.tryFind r v.Buffs |> Option.defaultValue 0) < n
+        | OnCooldown g ->
+            match pressed c o g with
+            | Some p when p.GrantsVerisium > 0 ->
+                let cap = Map.find "VerisiumInfusion" (Behaviours.infusionMaxima c.Sheet)
+                fun v -> (Map.tryFind "VerisiumInfusion" v.Buffs |> Option.defaultValue 0) < cap
+            | _ -> fun _ -> true
+        | KeepBuff g ->
+            match pressed c o g with
+            | Some p ->
+                let full =
+                    p.Rules |> List.tryPick (fun r -> match r.Reaction with ChargeBuff (_, ch, _, _, _) -> Some ch | _ -> None)
+                    |> Option.map (fun ch -> fun (v: View) -> (Map.tryFind ch v.Buffs |> Option.defaultValue 0) >= (Map.tryFind ch c.MaxResources |> Option.defaultValue 0))
+                    |> Option.defaultValue (fun _ -> true)
+                let buff = p.Skill.Name + " buff"
+                fun v -> not (v.Buffs.ContainsKey buff) && full v
+            | None -> fun _ -> true
+        | KeepCurse g ->
+            match pressed c o g with
+            | Some { Curse = Some name } -> fun v -> not (v.EnemyStatus.ContainsKey name || v.EnemyStatus.ContainsKey("Pending " + name))
+            | _ -> fun _ -> true
+
+    /// The states of an enemy that a rotation's condition can name ("has:Ignite", "lacks:Oil"),
+    /// each with what the engines call it. A curse or a mark goes by its own name ("Despair"),
+    /// and what the engines call a state is understood too ("Ignited", "Curse:Despair").
+    let stateNames : (string * string) list =
+        [ "Ignite", Ailment.status Ignite; "Shock", Ailment.status Shock; "Chill", Ailment.status Chill; "Freeze", Ailment.status Freeze
+          "Electrocute", Ailment.status Electrocute; "Bleed", Ailment.status Bleed; "Poison", Ailment.status Poison
+          "Heavy Stun", Ailment.status HeavyStun; "Pinned", Ailment.status Pin; "Daze", Ailment.status Daze; "Maim", Ailment.status Maim
+          "Blind", Ailment.status Blind; "Hinder", Ailment.status Hinder
+          "Exposure", "Exposed"; "Curse", "Cursed"; "Mark", "Marked"; "Immobilised", "Immobilised"
+          "Armour Break", "ArmourBreak"; "Fully Broken Armour", "FullyBrokenArmour"
+          "Oil", Ground.oiled; "Ignited Ground", Ground.ignited ]
+
+    /// What the engines may call the state a condition names: an enemy has the state when it
+    /// has one of these. A name nothing goes by is a state no enemy ever has.
+    let stateKeys (name: string) : string list =
+        (stateNames |> List.filter (fun (n, _) -> n = name) |> List.map snd) @ [ name; "Curse:" + name; "Mark:" + name ] |> List.distinct
+
+    /// Whether something the skill left stands ("up:Tornado"): a ground surface or a storm of
+    /// it, or the buff that says its storm, orb or totem stands. The skill is named as its gem is.
+    let standing (c: Loaded) (o: Options) (gem: string) : View -> bool =
+        let names = gem :: (pressed c o gem |> Option.map (fun p -> p.Skill.Name) |> Option.toList) |> List.distinct
+        let buffs = names |> List.map (fun n -> n + " buff")
+        fun v -> names |> List.exists v.Standing.ContainsKey || buffs |> List.exists v.Buffs.ContainsKey
+
+    /// What a rotation's conditions can ask about in this character's fights: the states an
+    /// enemy can have (the ailments, and what the character's skills put on it: curses and
+    /// marks by name, debuffs, Exposure, Oil and Ignited Ground), and the skills that leave
+    /// something standing (ground, a storm, a totem; by gem, a triggered one by its own name).
+    let conditions (c: Loaded) (o: Options) : string list * string list =
+        let rec states (r: Reaction) : string list =
+            match r with
+            | ApplyCurse (name, _, _) -> [ name.Substring(name.IndexOf ':' + 1) ]
+            | ApplyDebuff (name, _, _, _) when not (name.StartsWith "Pending ") -> [ name ]
+            | ApplyExposure _ | GrowExposure _ -> [ "Exposure" ]
+            | LayGround g when g.Kind = Oil -> [ "Oil"; "Ignited Ground" ] @ (if g.Exposure > 0.0 then [ "Exposure" ] else [])
+            | LayGround g when g.Kind = Burning -> [ "Ignited Ground" ]
+            | WithCorpse (a, b) -> states a @ states b
+            | SpendStack (_, next) | IfEnemyHas (_, next) | IfBuff (_, next) | Every (_, _, next) -> states next
+            | _ -> []
+        let all = pressable c |> List.choose (fun g -> pressed c o g |> Option.map (fun p -> g, p))
+        let triggered = Behaviours.triggeredGrounds c.Db c.Sheet c.Build
+        let stands (p: Pressed) =
+            p.Rules |> List.exists (fun r ->
+                match r.Reaction with
+                | LayGround _ -> true
+                | GrantBuff (name, _, _, _) -> name = p.Skill.Name + " buff"
+                | _ -> false)
+        [ "Ignite"; "Shock"; "Chill"; "Freeze"; "Electrocute"; "Bleed"; "Poison"; "Heavy Stun"; "Pinned" ]
+        @ (all |> List.collect (fun (_, p) -> (p.Curse |> Option.map (fun (n: string) -> n.Substring(n.IndexOf ':' + 1)) |> Option.toList) @ (p.Rules |> List.collect (fun r -> states r.Reaction))))
+        @ (triggered |> List.collect (fun r -> states r.Reaction))
+        |> List.distinct,
+        (all |> List.filter (fun (_, p) -> stands p) |> List.map fst)
+        @ (triggered |> List.choose (fun r -> match r.Reaction with LayGround g -> Some g.Skill | _ -> None))
+        |> List.distinct
