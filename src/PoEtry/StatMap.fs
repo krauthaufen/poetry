@@ -153,6 +153,22 @@ module StatMap =
             | "if" :: "have" :: "not" :: "been" :: "hit" :: "recently" :: tail | "if" :: "not" :: "hit" :: "recently" :: tail ->
                 go (Not(WhileBuff "BeenHitRecently") :: acc) tail
             | "for" :: "4" :: "seconds" :: "on" :: "crit" :: tail -> go (WhileBuff "CritRecently" :: acc) tail
+            // states the character's rules keep where a stat asks for them (Behaviours.recentStates)
+            | "if" :: "you" :: "havent" :: "been" :: "hit" :: "recently" :: tail | "if" :: "havent" :: "been" :: "hit" :: "recently" :: tail ->
+                go (Not(WhileBuff "BeenHitRecently") :: acc) tail
+            | "if" :: "you" :: "have" :: "hit" :: "an" :: "enemy" :: "recently" :: tail -> go (WhileBuff "HitRecently" :: acc) tail
+            | "when" :: "not" :: "stunned" :: "recently" :: tail -> go (Not(WhileBuff "StunnedRecently") :: acc) tail
+            | "if" :: "you" :: "dodge" :: "rolled" :: "recently" :: tail | "if" :: "dodge" :: "rolled" :: "recently" :: tail ->
+                go (WhileBuff "DodgeRolledRecently" :: acc) tail
+            | "if" :: "not" :: "dodge" :: "rolled" :: "recently" :: tail -> go (Not(WhileBuff "DodgeRolledRecently") :: acc) tail
+            | "if" :: "have" :: "stunned" :: "an" :: "enemy" :: "recently" :: tail | "if" :: "stunned" :: "an" :: "enemy" :: "recently" :: tail ->
+                go (WhileBuff "StunnedEnemyRecently" :: acc) tail
+            | "if" :: "youve" :: "dealt" :: "melee" :: "hit" :: "recently" :: tail -> go (WhileBuff "MeleeHitInPast8Seconds" :: acc) tail
+            | "per" :: "warcry" :: "used" :: "recently" :: tail -> go (PerStack("WarcriesRecently", 1.0) :: acc) tail
+            | "per" :: "poison" :: "applied" :: "recently" :: tail -> go (PerStack("PoisonsRecently", 1.0) :: acc) tail
+            | "per" :: "enemy" :: "ignited" :: "last" :: "8" :: "seconds" :: tail -> go (PerStack("IgnitedInLast8Seconds", 1.0) :: acc) tail
+            | "per" :: "enemy" :: "frozen" :: "last" :: "8" :: "seconds" :: tail -> go (PerStack("FrozenInLast8Seconds", 1.0) :: acc) tail
+            | "for" :: "each" :: "time" :: "hit" :: "recently" :: "up" :: "to" :: "100%" :: tail -> go (PerStack("TimesHitRecently", 1.0) :: acc) tail
             | ("while" | "if") :: "surrounded" :: tail -> go (WhileBuff "Surrounded" :: acc) tail
             | "per" :: "enemy" :: "elemental" :: "ailment" :: tail -> go (PerEnemyStack("ElementalAilments", 1.0) :: acc) tail
             // "... per 15 strength": the character's attributes are stacks "Str" / "Dex" / "Int"
@@ -1623,6 +1639,13 @@ module StatMap =
             |> Option.map (List.map (Mod.whenever (PerStack("Mote:" + colour, 1.0))))
         | _ -> None
 
+    /// States the fight keeps for the player whatever asks for them, or that the character's
+    /// rules keep where a stat does (Behaviours.recentStates).
+    let private keptStates =
+        set [ "BeenHitRecently"; "HitRecently"; "CritRecently"; "KilledRecently"; "StunnedRecently"; "DodgeRolledRecently"; "StunnedEnemyRecently"
+              "MeleeHitInPast8Seconds"; "WarcriesRecently"; "PoisonsRecently"; "IgnitedInLast8Seconds"; "FrozenInLast8Seconds"; "TimesHitRecently"
+              "LowLife"; "FullLife"; "LowMana"; "FullMana"; "Surrounded"; "Shapeshifted" ]
+
     let private rules = [ perMote; accuracy; defenceScaled; areaOfEffect; buildup; scaledDamage; addedDamage; penetration; gainAs; convert; ailmentStat; crit; speed; gemLevel ]
 
     /// Try the pattern rules on the whole id; failing that, pull the conditions out of it
@@ -1637,7 +1660,24 @@ module StatMap =
         | None ->
             let conds, rest = conditions words
             if conds.IsEmpty || rest.IsEmpty then None
-            else tryRules rest |> Option.map (fun ms -> Mods(ms |> List.map (fun m -> { m with Conds = conds @ m.Conds })))
+            else
+                let withConds ms = Mods(ms |> List.map (fun (m: Mod) -> { m with Conds = conds @ m.Conds }))
+                match tryRules rest with
+                | Some ms -> Some(withConds ms)
+                | None ->
+                    // what is left is a stat known by its id ("stun_threshold_+%"), where the
+                    // condition is a state the fight keeps
+                    let rec kept (c: Cond) =
+                        match c with
+                        | WhileBuff b | PerStack (b, _) -> keptStates.Contains b
+                        | Not inner | OfOwner inner -> kept inner
+                        | _ -> true
+                    if not (conds |> List.forall kept) then None
+                    else
+                        let rest = String.concat "_" rest
+                        match explicit rest v |> Option.orElse (defensive rest v) with
+                        | Some (Mods ms) when not ms.IsEmpty -> Some(withConds ms)
+                        | _ -> None
 
     /// Item-local stats: they change the weapon, not the character.
     let private local (id: string) v =

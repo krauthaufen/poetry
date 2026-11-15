@@ -735,6 +735,7 @@ module Setup =
                 @ Behaviours.selfIgnite sheet
                 @ Behaviours.rareModsOnKill sheet
                 @ Behaviours.totemRecently sheet pressedSkills
+                @ Behaviours.recentStates sheet
                 @ (match windDancer with Some (_, r, _, _) -> r | None -> [])
                 @ Behaviours.shockedGround sheet
                 @ fst (Behaviours.summons db sheet c.Build pressedSkills)

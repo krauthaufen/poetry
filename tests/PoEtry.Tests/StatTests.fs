@@ -1527,3 +1527,45 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         // without energy shield there is nothing to recharge
         near 2300.0 (Sim.run { fight with Player = { player with Vitals = Some { vitals with EnergyShield = 0.0 } } } 1u).DamageBy.["Bolt (hit)"]
         same fight seeds)
+
+    test "states of a while ago, kept where a stat asks: stunned an enemy, a melee hit in the past 8 s, dodge rolled, counts with their most" (fun () ->
+        equal (box [ Mod.inc AreaOfEffect 15.0 |> Mod.whenever (WhileBuff "StunnedEnemyRecently") ]) (box (mods "area_of_effect_+%_if_have_stunned_an_enemy_recently" 15.0))
+        equal (box [ Mod.inc Evasion 30.0 |> Mod.whenever (WhileBuff "DodgeRolledRecently") ]) (box (mods "evasion_rating_+%_if_you_dodge_rolled_recently" 30.0))
+        equal (box [ Mod.inc Evasion 30.0 |> Mod.whenever (WhileBuff "HitRecently") ]) (box (mods "evasion_rating_+%_if_you_have_hit_an_enemy_recently" 30.0))
+        equal (box [ Mod.inc Armour 30.0 |> Mod.whenever (Not(WhileBuff "BeenHitRecently")) ]) (box (mods "armour_+%_if_you_havent_been_hit_recently" 30.0))
+        equal (box [ Mod.inc (Named "StunThreshold") 30.0 |> Mod.whenever (Not(WhileBuff "StunnedRecently")) ]) (box (mods "stun_threshold_+%_when_not_stunned_recently" 30.0))
+        equal (box [ Mod.inc (Named "StunThreshold") 10.0 |> Mod.whenever (PerStack("TimesHitRecently", 1.0)) ]) (box (mods "stun_threshold_+%_for_each_time_hit_recently_up_to_100%" 10.0))
+        equal
+            (box [ Mod.inc AreaOfEffect 8.0 |> Mod.whenever (SkillIs Attack) |> Mod.whenever (PerStack("IgnitedInLast8Seconds", 1.0)) ])
+            (box (mods "attack_area_of_effect_+%_per_enemy_ignited_last_8_seconds" 8.0))
+        equal (box [ Mod.inc (AilmentDuration(Some Poison)) 5.0 |> Mod.whenever (PerStack("PoisonsRecently", 1.0)) ]) (box (mods "poison_duration_+%_per_poison_applied_recently" 5.0))
+        equal (box [ Mod.inc SkillDuration 8.0 |> Mod.whenever (PerStack("FrozenInLast8Seconds", 1.0)) ]) (box (mods "skill_effect_duration_+%_per_enemy_frozen_last_8_seconds" 8.0))
+        equal (box [ Mod.inc (Damage AllDamage) 6.0 |> Mod.whenever (PerStack("WarcriesRecently", 1.0)) ]) (box (mods "damage_+%_per_warcry_used_recently" 6.0))
+        let melee = mods "projectile_damage_+%_if_youve_dealt_melee_hit_recently" 50.0
+        equal (box [ Mod.inc (Damage AllDamage) 50.0 |> Mod.whenever (SkillIs Projectile) |> Mod.whenever (WhileBuff "MeleeHitInPast8Seconds") ]) (box melee)
+        // the rules: only for what is asked, a count with the stacks its "up to" leaves room for
+        let sheet = (load blank Options.defaults).Sheet
+        equal 0 (Behaviours.recentStates sheet).Length
+        let asked =
+            { sheet with
+                Mods =
+                    melee @ mods "stun_threshold_+%_for_each_time_hit_recently_up_to_100%" 15.0 @ mods "attack_area_of_effect_+%_per_enemy_ignited_last_8_seconds" 8.0
+                    @ mods "area_of_effect_+%_if_have_stunned_an_enemy_recently" 15.0 }
+        equal
+            (box [ { Hook = OnInflict HeavyStun; Filter = AnySkill; Chance = 100.0; Reaction = GrantBuff("StunnedEnemyRecently", 4.0, 1, []) }
+                   { Hook = OnHit; Filter = WithTag Melee; Chance = 100.0; Reaction = GrantBuff("MeleeHitInPast8Seconds", 8.0, 1, []) }
+                   { Hook = OnInflict Ignite; Filter = AnySkill; Chance = 100.0; Reaction = GrantBuff("IgnitedInLast8Seconds", 8.0, 5, []) }
+                   { Hook = WhenHit; Filter = AnySkill; Chance = 100.0; Reaction = GrantBuff("TimesHitRecently", 4.0, 6, []) } ])
+            (box (Behaviours.recentStates asked))
+        // a jab at 1 s, then shots every 0.7 s: those up to 9 s (eleven) deal 50% more, the four after it do not
+        let jab = { Skill.make "Jab" [ Spell; Melee ] with BaseDamage = Map.ofList [ Chaos, { Min = 100.0; Max = 100.0 } ]; BaseCrit = 0.0; Cooldown = Some 100.0 }
+        let shot = { Skill.make "Shot" [ Spell; Projectile ] with BaseDamage = Map.ofList [ Chaos, { Min = 100.0; Max = 100.0 } ]; BaseTime = 0.7; BaseCrit = 0.0 }
+        let player =
+            { Actor.make "Player" melee [ jab; shot ] with
+                Rotation = [ Actor.always "Jab"; Actor.always "Shot" ]
+                Rules = Behaviours.recentStates { sheet with Mods = melee } }
+        let fight = Fight.single (EnemyDef.atLevel 83 1e12) player 12.0
+        let o = Sim.run fight 1u
+        equal 15 (count o "hits:Shot")
+        near (11.0 * 150.0 + 4.0 * 100.0) o.DamageBy.["Shot (hit)"]
+        same fight seeds)

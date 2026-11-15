@@ -2158,6 +2158,44 @@ module Behaviours =
             |> List.filter (fun s -> s.Tags.Contains(Tag "Type:SummonsTotem"))
             |> List.map (fun s -> { Hook = OnUse; Filter = Called s.Name; Chance = 100.0; Reaction = GrantBuff("SummonedTotemRecently", Constants.recentlySeconds, 1, []) })
 
+    /// States about what the character did or suffered a while ago, kept only where one of its
+    /// stats asks for them: a rule gives the state (or one more stack of it, for stats that
+    /// count "for each ...") when the thing happens, and it lasts 4 s ("Recently") or the 8 s
+    /// the stat names. A count's stacks share one time, started anew by every stack: the game
+    /// lets each run out on its own, so a count kept up by a steady stream is the same and one
+    /// that thins out is held a little too long. The most stacks are what the stat's "up to X%"
+    /// leaves room for.
+    let recentStates (sheet: CharacterSheet) : Rule list =
+        let rec names (c: Cond) =
+            match c with
+            | WhileBuff b | PerStack (b, _) -> [ b ]
+            | Not inner | OfOwner inner -> names inner
+            | _ -> []
+        let asked = sheet.Mods |> List.collect (fun m -> m.Conds |> List.collect names) |> Set.ofList
+        // the most stacks a count can have: "up to X%" over the percent per stack (the largest of the stats that count it)
+        let most (state: string) (upTo: float) =
+            let per =
+                sheet.Mods |> List.filter (fun m -> m.Conds |> List.exists (fun c -> names c = [ state ]) && m.Value <> 0.0) |> List.map (fun m -> abs m.Value)
+            if upTo <= 0.0 || per.IsEmpty then 1000 else max 1 (int (floor (upTo / List.min per + 1e-9)))
+        let rule state hook filter seconds stacks = { Hook = hook; Filter = filter; Chance = 100.0; Reaction = GrantBuff(state, seconds, stacks, []) }
+        [ // "if you have Stunned an Enemy Recently": the stuns monsters suffer here are Heavy Stuns
+          "StunnedEnemyRecently", (fun s -> rule s (OnInflict HeavyStun) AnySkill Constants.recentlySeconds 1)
+          // "if you've dealt a Melee Hit in the past eight seconds"
+          "MeleeHitInPast8Seconds", (fun s -> rule s OnHit (WithTag Melee) 8.0 1)
+          // "if you've Dodge Rolled Recently": where the dodge roll is pressed (Cast on Dodge)
+          "DodgeRolledRecently", (fun s -> rule s OnUse (WithTag(Tag "DodgeRoll")) Constants.recentlySeconds 1)
+          // "for each time you've Warcried Recently"
+          "WarcriesRecently", (fun s -> rule s OnUse (WithTag Warcry) Constants.recentlySeconds (most s 0.0))
+          // "for each Poison you have inflicted Recently, up to a maximum of 100%"
+          "PoisonsRecently", (fun s -> rule s (OnInflict Poison) AnySkill Constants.recentlySeconds (most s 100.0))
+          // "per Enemy you've Ignited / Frozen in the last 8 seconds, up to 40%"
+          "IgnitedInLast8Seconds", (fun s -> rule s (OnInflict Ignite) AnySkill 8.0 (most s 40.0))
+          "FrozenInLast8Seconds", (fun s -> rule s (OnInflict Freeze) AnySkill 8.0 (most s 40.0))
+          // "for each time you've been Hit by an Enemy Recently, up to 100%"
+          "TimesHitRecently", (fun s -> rule s WhenHit AnySkill Constants.recentlySeconds (most s 100.0)) ]
+        |> List.filter (fun (state, _) -> asked.Contains state)
+        |> List.map (fun (state, make) -> make state)
+
     /// Using a totem gem places the totem: the buff its actor waits for, lasting the totem's
     /// duration ("base_totem_duration" x skill duration mods).
     let totemPlacement (db: GameDb) (charMods: ModDb) (setup: GemSetup) (skill: Skill) : Rule list =
