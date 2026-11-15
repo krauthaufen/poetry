@@ -2220,3 +2220,22 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         equal (box (Damage AllDamage, Inc, 4.0)) (box (per.Stat, per.Kind, per.Value))
         equal (box true) (box (List.contains (PerStack("ActiveMinionsUpTo:20", 1.0)) per.Conds))
         equal (box (Mods [ Mod.inc AreaOfEffect 20.0 |> Mod.whenever (SkillIs(Tag "Type:Hazard")) ])) (box (StatMap.meaning "hazard_area_of_effect_+%" 20.0)))
+
+    test "stats: a spell's base critical hit chance set by a line, more immobilisation buildup, bear skills' conversion, what an orb's hits cannot do, more curse effect and delay" (fun () ->
+        // "Base Critical Hit Chance for Spells is 15%": Spark's own base gives way to it; an attack keeps its own
+        let c = load { blank with Groups = [ group [ gem "Spark" ] ] } Options.defaults
+        let own = (Setup.player c Options.defaults [ Spam "Spark" ] None).Skills |> List.find (fun s -> s.Name = "Spark")
+        let set = { c with Sheet = { c.Sheet with Mods = c.Sheet.Mods @ mods "base_spell_critical_strike_chance_override_permyriad" 1500.0 } }
+        let overridden = (Setup.player set Options.defaults [ Spam "Spark" ] None).Skills |> List.find (fun s -> s.Name = "Spark")
+        equal (box true) (box (own.BaseCrit <> 15.0))
+        near 15.0 overridden.BaseCrit
+        let buildup = mods "ascendancy_tactician_suppressing_fire_hit_damage_immobilisation_multiplier_+%_final" 40.0
+        equal (box [ Buildup Freeze, More, 40.0; Buildup HeavyStun, More, 40.0; Buildup Electrocute, More, 40.0; Buildup Pin, More, 40.0 ]) (box (buildup |> List.map (fun m -> m.Stat, m.Kind, m.Value)))
+        let bear = (mods "non_skill_physical_damage_%_to_convert_to_fire_with_bear_skills" 50.0).Head
+        equal (box (Convert(Physical, Fire), [ SkillIs(Tag "Type:Bear") ])) (box (bear.Stat, bear.Conds))
+        equal (box [ Named "LifeLeechAmount", More, -100.0; Named "ManaLeechAmount", More, -100.0 ])
+            (box (mods "damage_cannot_be_reflected_or_leech_if_used_by_other_object" 1.0 |> List.map (fun m -> m.Stat, m.Kind, m.Value)))
+        equal (box (Named "CurseEffect", More, 30.0)) (box (let m = (mods "support_atziri_curse_effect_+%_final" 30.0).Head in m.Stat, m.Kind, m.Value))
+        equal (box (Named "CurseDelay", More, 50.0)) (box (let m = (mods "support_ritual_curse_curse_delay_+%_final" 50.0).Head in m.Stat, m.Kind, m.Value))
+        equal (box Structural) (box (StatMap.meaning "supported_active_skill_gem_level_+_if_two_other_supports" 1.0))
+        equal (box NotOffensive) (box (StatMap.meaning "hazard_damage_+%_final_for_first_500_ms_when_not_killed_by_self" -50.0)))

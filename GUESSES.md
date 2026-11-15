@@ -18,7 +18,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
    whose description or behaviour changed.
 5. Go through the lists below; the wiki's version history of a skill says what changed.
 
-## Rules (149)
+## Rules (153)
 
 ### Hit damage
 
@@ -78,6 +78,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 
 | Rule | Source, and what is guessed | Confidence |
 |---|---|---|
+| Jade | poe2db Keywords | data; never lost: guess |
 | Resistances | — | guess (no campaign penalty) |
 | Skill cost | skill data; PoB SupportManaMultiplier | data (efficiency formula: guess) |
 | Mana on kill | game text | guess (DoT kills) |
@@ -123,12 +124,14 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | Aftershock | stat text | guess (same damage and area) |
 | Jagged Ground | poe2db keyword text, GameConstants `JaggedGroundMagnitude`, support gem data and descriptions. That an enemy stays in the patch is a guess | data / guess |
 | Curses that hinder | stat description; scaling with the enemy's curse effect is a guess | data / guess |
+| Limits of what stands | gem data, skill type `Limit`; when it is cast again: a way to play within the limit | data; play: guess |
 | Shapeshift skills | using one means "while Shapeshifted" conditions hold for the whole fight | | guess |
 | Onslaught on kill | stat descriptions; 4 s as the stat that names it | data; 4 s guess |
 | Thorns | poe2db keyword Thorns; that modifiers to all damage apply and the base critical chance of 0 are ours | data; guess |
 | Life and energy shield lost on use | stat description; that a triggered use loses nothing is ours | data; guess |
 | Arctic Armour | gem description and stats; that the burst counts the stage it takes, and that spell damage added by the character's lines adds to it once: ours | data; guess |
 | Ancestral Bond and more totems | stat descriptions; that the doubling comes after what adds to the limit, that minions counted by Spirit are not deducted first and that a character with the keystone has at least one totem: ours. "No Charge requirement for placing Totems" changes nothing here | data; guess |
+| Spirit shared by totems and minions | the even shares: as for several minion gems | guess |
 | Life regeneration granted to allies | stat description; "Base" as before increases: ours | data; guess |
 | Companion in your Presence | stat description; always beside the character: ours | guess |
 | Power counted by warcries | stat description; that the cap grows too: ours | data; guess |
@@ -184,6 +187,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | Per block chance, per lowest attribute | stat descriptions; PoB for the lucky question | guess |
 | While moving | user | guess |
 | Which weapon set is in hand | - | guess |
+| Fear Incarnate | poe2db Keywords; one time for all stacks: guess | data / guess |
 | Totems | - | guess |
 | Flames of Chayula | skill data; 8 s and the colours from poe2db patch notes; cap of ten from PoB; pick-up is a guess | guess |
 | Low life | user: low life must be justified by the build | guess |

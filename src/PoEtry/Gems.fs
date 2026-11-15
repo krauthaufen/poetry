@@ -963,6 +963,8 @@ module Gems =
                     | Projectiles _ -> false
                     | _ -> radius.IsNone || strips.ContainsKey(data.Name, set.Label) || impactIsSecondary.Contains(data.Name, set.Label)))
          let cov = if used then { cov with Unsimulated = cov.Unsimulated |> List.filter (fun (k, _) -> k <> "active_skill_base_secondary_area_of_effect_radius") } else cov
+         // a staged channel's release animation is part of its use (above)
+         let cov = if stages > 0.0 then { cov with Unsimulated = cov.Unsimulated |> List.filter (fun (k, _) -> k <> "channel_skill_end_animation_duration_override_ms") } else cov
          // the secondary duration is read where the skill's mechanic is built: Freezing Mark's
          // buff (Behaviours.markBuff), Frost Bomb's exposure (useRules), the time between Kelari's
          // Malediction's corpses (summons)

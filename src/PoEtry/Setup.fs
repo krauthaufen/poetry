@@ -772,7 +772,14 @@ module Setup =
                 else
                     let inc = if per > 0.0 then min 40.0 (per * combo) else max -40.0 (per * combo)
                     { sk with Mods = sk.Mods @ [ Mod.inc (Damage AllDamage) inc |> Mod.from "Combo consumed" ] })
-        { Actor.make "Player" (sheet.Mods @ (used |> List.collect (fun (_, p) -> p.Grants))) (comboConsumed << gloryGeneration << onBolts <| (pressedSkills @ (metas |> List.collect (fun (_, s, _) -> s)) @ (consumers |> List.map (fun (_, _, cp) -> cp)) @ heraldSkills @ (used |> List.collect (fun (_, p) -> p.Extra)))) with
+        // "Base Critical Hit Chance for Spells is X%": in place of what each spell's gem says
+        let spellBaseCrit (skills: Skill list) =
+            match Mods.sumBase Ctx.empty [ Named "SpellBaseCritOverride" ] (ModDb.ofList sheet.Mods) with
+            | v when v > 0.0 ->
+                let rec set (s: Skill) = { (if s.Tags.Contains Spell then { s with BaseCrit = v } else s) with Parts = s.Parts |> List.map set }
+                skills |> List.map set
+            | _ -> skills
+        { Actor.make "Player" (sheet.Mods @ (used |> List.collect (fun (_, p) -> p.Grants))) (spellBaseCrit << comboConsumed << gloryGeneration << onBolts <| (pressedSkills @ (metas |> List.collect (fun (_, s, _) -> s)) @ (consumers |> List.map (fun (_, _, cp) -> cp)) @ heraldSkills @ (used |> List.collect (fun (_, p) -> p.Extra)))) with
             Rotation = steps
             OverkillBurns = overkillBurns
             HitPattern = used |> List.choose (fun (_, p) -> p.Pattern |> Option.map (fun pat -> p.Skill.Name, pat)) |> Map.ofList

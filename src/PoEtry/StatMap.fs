@@ -1055,6 +1055,11 @@ module StatMap =
         | id when readWhereBuilt.Contains id -> Some Structural
         // (a support's "more / less life" for the minions of its gem: Behaviours.minions)
         | id when id.StartsWith "support_" && id.EndsWith "minion_life_+%_final" -> Some Structural
+        // "+N to Level of Supported Skills if ... other Supports" (Gems.supportLevels), the
+        // energy a meta gem gains when a minion dies (Behaviours.metas), the flag of a gem whose
+        // skill places totems (Behaviours.totems)
+        | id when id.StartsWith "supported_" && id.Contains "_skill_gem_level_+" && (id.EndsWith "_other_supports" || id.EndsWith "_other_support") -> Some Structural
+        | "cast_on_minion_death_gain_1_energy_per_X_minion_relative_defensiveness_%" | "base_skill_summons_totems" -> Some Structural
         // the gem's own "Minions have X% more Maximum Life", and a support's "Minions take X%
         // more / less Damage" (Feeding Frenzy, Meat Shield): Behaviours.minions
         | "active_skill_minion_life_+%_final" | "feeding_frenzy_minion_damage_taken_+%_final"
@@ -1435,6 +1440,21 @@ module StatMap =
         // per persistent minion, counted up to as many as make 80% (Setup)
         | "gain_attack_damage_+%_for_each_your_minion_in_presence_capped" when v > 0.0 ->
             one (Mod.inc (Damage AllDamage) v |> Mod.whenever (SkillIs Attack) |> Mod.whenever (PerStack(sprintf "ActiveMinionsUpTo:%d" (int (floor (80.0 / v + 1e-9))), 1.0)))
+        // a skill used by another object (an orb) "cannot be reflected or leech"
+        | "damage_cannot_be_reflected_or_leech_if_used_by_other_object" ->
+            Some(Mods [ Mod.more (Named "LifeLeechAmount") -100.0; Mod.more (Named "ManaLeechAmount") -100.0 ])
+        // "X% more Curse Effect / Curse Magnitudes", "Curse zones erupt after X% more delay",
+        // "Hazards created by Supported Skills have X% more duration"
+        | "support_atziri_curse_effect_+%_final" | "coil_of_undoing_curse_magnitude_+%_final" -> one (Mod.more (Named "CurseEffect") v)
+        | "support_focus_curse_curse_delay_+%_final" | "support_ritual_curse_curse_delay_+%_final" -> one (Mod.more (Named "CurseDelay") v)
+        | "support_sunblast_hazard_hazard_duration_+%_final" -> one (Mod.more SkillDuration v)
+        // "X% more Immobilisation buildup"
+        | "ascendancy_tactician_suppressing_fire_hit_damage_immobilisation_multiplier_+%_final" ->
+            Some(Mods([ Freeze; HeavyStun; Electrocute; Pin ] |> List.map (fun a -> Mod.more (Buildup a) v)))
+        // "Bear Skills Convert X% of Physical Damage to Fire Damage"
+        | "non_skill_physical_damage_%_to_convert_to_fire_with_bear_skills" -> one (Mod.base' (Convert(Physical, Fire)) v |> Mod.whenever (SkillIs(Tag "Type:Bear")))
+        // "Base Critical Hit Chance for Spells is X%" (Setup.player: the base of the player's spells)
+        | "base_spell_critical_strike_chance_override_permyriad" -> one (Mod.base' (Named "SpellBaseCritOverride") (v / 100.0))
         // "Culling Strike" under its other id
         | "kill_enemy_on_hit_if_under_10%_life" -> one (Mod.flag (Named "CullingStrike"))
         | "cannot_break_armour" -> one (Mod.more (Named "ArmourBreakAmount") -100.0)
@@ -2186,6 +2206,11 @@ module StatMap =
     let private cannotBeHurt (id: string) =
         List.contains id
             [ "totem_life_+%"; "totem_elemental_resistance_%"; "totem_chaos_resistance_%"; "totems_regenerate_%_life_per_minute"
+              "totem_maximum_all_elemental_resistances_%"
+              // "X% less damage if destroyed within 0.5 seconds by something other than you": the
+              // monsters of a fight strike the player and its minions, never what a skill has put down
+              "hazard_damage_+%_final_for_first_500_ms_when_not_killed_by_self"; "shield_wall_damage_+%_final_for_first_500_ms_when_not_killed_by_self"
+              "ice_crystals_damage_+%_final_for_first_500_ms_when_not_killed_by_self"
               "offering_life_+%"; "offerings_cannot_be_damaged_if_created_recently" ]
 
     /// What the character gives its allies that no minion here reads: charges ("X% chance to
