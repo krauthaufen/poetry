@@ -1109,6 +1109,15 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         let at st = (p.VitalsAt.Value (Map.ofList st)).Deflection
         near (at [] * 1.4) (at [ "Surrounded", 1 ]))
 
+    test "Cannot inflict Blind; Projectiles cannot Split is what the engine does anyway" (fun () ->
+        let strike ms = { Skill.make "Strike" [ Attack ] with BaseDamage = Map.ofList [ Physical, { Min = 50.0; Max = 50.0 } ]; BaseTime = 1.0; BaseCrit = 0.0; Mods = Mod.base' (AilmentChance Blind) 100.0 :: ms }
+        let fight ms = Fight.single { EnemyDef.atLevel 83 1e9 with Mods = []; Attack = None } { Actor.make "Player" [] [ strike ms ] with Rotation = [ { Use = "Strike"; When = fun _ -> true } ] } 5.0
+        let blinded ms = Map.tryFind "Blinded" (Sim.run (fight ms) 1u).Uptime |> Option.defaultValue 0.0
+        if blinded [] <= 0.0 then failwith "never blinded"
+        near 0.0 (blinded (mods "cannot_inflict_blind" 1.0))
+        same (fight (mods "cannot_inflict_blind" 1.0)) seeds
+        equal (box Structural) (box (StatMap.meaning "projectiles_cannot_split" 1.0)))
+
     // ---- Flame Breath ----
 
     test "Empowered Flame Breath: a use with a Power Charge to consume gains 50% of its damage as lightning" (fun () ->

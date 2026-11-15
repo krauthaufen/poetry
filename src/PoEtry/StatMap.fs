@@ -528,6 +528,11 @@ module StatMap =
         | "projectiles_cannot_fork" -> one (Mod.flag (Named "CannotFork"))
         // "Projectiles cannot Chain": whatever else gives chains
         | "base_projectiles_cannot_chain" -> one (Mod.flag (Named "CannotChain"))
+        // "Projectiles cannot Split": the engine splits no projectile, whatever gives splits, which
+        // is just what this asks
+        | "projectiles_cannot_split" -> Some Structural
+        // "Cannot inflict Blind"
+        | "cannot_inflict_blind" -> one (Mod.more (AilmentChance Blind) -100.0)
         | "chance_to_fork_extra_projectile_%" -> one (Mod.base' (Named "ForkExtraChance") v)
         | "forking_angle_+%" -> one (Mod.inc (Named "ForkAngle") v)
         | "support_fork_forked_projectile_damage_+%_final" -> one (Mod.more (Named "ForkedDamage") v)
