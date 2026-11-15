@@ -1737,7 +1737,7 @@ module Sim =
                                     owner <- g.Owner
                                 for (t, dps) in g.Spec.Absorbs do
                                     if t = Fire && dps > 0.0 then
-                                        let label = Ground.dotLabel g.Spec.Skill t
+                                        let label = Ground.dotLabel g.Spec.Shared t
                                         if not (dots |> List.exists (fun (l, _, d, _) -> l = label && d >= dps)) then
                                             dots <- (label, t, dps, g.Owner) :: (dots |> List.filter (fun (l, _, _, _) -> l <> label))
                 let oil, onFire, exposure, ignite, carried, seconds, owner, dots = oil, onFire, exposure, ignite, carried, seconds, owner, dots

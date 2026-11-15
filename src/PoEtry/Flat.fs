@@ -1704,7 +1704,7 @@ module Flat =
                     REmpower(buff b, perPower, cap, Array.init (most + 1) (fun n -> counts.Id("empowered:" + string n)))
                 | NoReaction -> RNone
                 | LayGround g ->
-                    RLayGround(g, [| for (t, _) in g.Absorbs -> sources.Id(Ground.dotLabel g.Skill t) |], counts.Id("ground:" + g.Skill), counts.Id("lit:" + g.Skill), counts.Id("absorbed:" + g.Skill))
+                    RLayGround(g, [| for (t, _) in g.Absorbs -> sources.Id(Ground.dotLabel g.Shared t) |], counts.Id("ground:" + g.Skill), counts.Id("lit:" + g.Skill), counts.Id("absorbed:" + g.Skill))
                 | GrantMinionBuff (name, duration, mods) ->
                     checkMods mods
                     RGrantMinionBuff(buff name, duration, mods)
