@@ -2269,3 +2269,20 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         equal (box true) (box (fed.MinLife > bare.MinLife + 0.3))
         same (fight every2) seeds
         same (fight (Some { every2.Value with PercentOfMaxLife = 2.0; ExtraChance = 30.0; OnKillChance = 50.0 })) seeds)
+
+    test "life costs: the life flask is drunk when life spent on a skill leaves the life below half" (fun () ->
+        // 100 life, a bolt that costs 40 mana and 40 life: 60, 20 (the flask: 60 at once, 80), 40;
+        // a fourth cannot be paid. Without the flask two
+        let bolt = { Skill.make "Bolt" [ Spell ] with BaseDamage = Map.ofList [ Fire, Range.fixedAt 100.0 ]; BaseCrit = 0.0; Cost = 40.0 }
+        let flask = { Amount = 60.0; Duration = 3.0; ChargesPerUse = 20.0; MaxCharges = 20.0; ChargesPerSecond = 0.0; ChargeGainMult = 1.0; Instant = 1.0 }
+        let fight (withFlask: bool) =
+            let player =
+                { Actor.make "Player" (mods "skill_cost_base_life_equal_to_base_mana" 1.0) [ bolt ] with
+                    Rotation = [ Actor.always "Bolt" ]
+                    Vitals = Some { PlayerStats.basic 100.0 200.0 with ManaRegen = 0.0; LifeFlask = (if withFlask then Some flask else None) } }
+            Fight.single { EnemyDef.atLevel 83 1e9 with Mods = []; Attack = None } player 20.5
+        let o = Sim.run (fight true) 1u
+        equal 3 (count o "uses:Bolt")
+        equal 1 (count o "flask:life")
+        equal 2 (count (Sim.run (fight false) 1u) "uses:Bolt")
+        same (fight true) seeds)

@@ -2349,6 +2349,25 @@ module Sim =
         // "+1 second to Total Cast Time": added after speed
         own.BaseTime / speed * (1.0 + Constants.longerPerRepeat * repeats) + Mods.sumBase ctx [ Named "FixedUseTime" ] db
 
+    /// Life spent on a skill can leave the life below half as a hit can: the life flask is
+    /// drunk then, as when a hit leaves it there (`takeDamage`).
+    let private drinkLifeFlask (pools: PlayerStats) (w: World) =
+        match pools.LifeFlask, w.Player with
+        | Some f, Some p when p.Died.IsNone && pools.Life > 1.0 && p.Life < 0.5 * pools.Life && w.Time >= p.LifeFlaskUntil && p.LifeFlaskCharges >= f.ChargesPerUse ->
+            { w with
+                Player =
+                    Some
+                        { p with
+                            LifeFlaskCharges = p.LifeFlaskCharges - f.ChargesPerUse
+                            LifeFlaskUntil = w.Time + f.Duration
+                            LifeFlaskRate = f.Amount * (1.0 - f.Instant) * pools.LifeRecoveryRate / f.Duration
+                            Life = min (max p.Life pools.Life) (p.Life + f.Amount * f.Instant * pools.LifeRecoveryRate)
+                            EnergyShield =
+                                if pools.LifeFlaskAlsoES then min (max p.EnergyShield (min pools.EnergyShield pools.ESRecoverCap)) (p.EnergyShield + f.Amount * f.Instant * pools.LifeRecoveryRate)
+                                else p.EnergyShield }
+                Counts = bump "flask:life" w.Counts }
+        | _ -> w
+
     /// What of a use's cost is paid with life, and what is left for mana: "X% of Mana Costs
     /// Converted to Life Costs" (that share of the cost), "Skills gain a Base Life Cost equal
     /// to Base Mana Cost" (the cost once more, in life), "cost an additional X% of your maximum
@@ -2517,10 +2536,10 @@ module Sim =
                 | Some v when not v.CostsLife && not v.CostsInfernalFlame -> splitCost v costCtx db cost
                 | _ -> cost, 0.0
             match actor.Vitals, w.Player with
-            | Some _, Some p when lifeCost > 0.0 && p.Life - lifeCost < 1.0 ->
-                // a life cost that would kill: the skill waits
+            | Some v, Some p when lifeCost > 0.0 && p.Life - lifeCost < 1.0 ->
+                // a life cost that would kill: the skill waits (and the life flask is drunk)
                 let wait = max Constants.serverTick 0.25
-                { w with Player = Some { p with Starved = p.Starved + wait } } |> schedule (w.Time + wait) (Ready name)
+                { w with Player = Some { p with Starved = p.Starved + wait } } |> drinkLifeFlask v |> schedule (w.Time + wait) (Ready name)
             | Some v, Some p when v.CostsLife ->
                 // Blood Magic: the cost is paid with life; a skill that would kill waits
                 if p.Life - cost >= 1.0 || cost <= 0.0 then
@@ -2554,7 +2573,8 @@ module Sim =
                 let wait = max Constants.serverTick (if rate > 0.0 then (cost - p.Mana) / rate else 1.0)
                 { w with Player = Some { p with Starved = p.Starved + wait } } |> schedule (w.Time + wait) (Ready name)
             | Some v, Some p ->
-                { w with Player = Some { p with Mana = max 0.0 (p.Mana - cost); Life = p.Life - lifeCost } } |> sigilSpend name cost v.Mana |> go
+                { w with Player = Some { p with Mana = max 0.0 (p.Mana - cost); Life = p.Life - lifeCost } }
+                |> (if lifeCost > 0.0 then drinkLifeFlask v else id) |> sigilSpend name cost v.Mana |> go
             | _ -> go w
         | None ->
             // Nothing usable: wait for the next cooldown, or a server tick.

@@ -3721,6 +3721,19 @@ module Flat =
                     bump s s.P.CFlaskLife
                 | _ -> ()
 
+    /// The life flask is drunk when life spent on a skill has left the life below half (`Sim.drinkLifeFlask`).
+    let private drinkLifeFlask (s: State) (pools: PlayerStats) =
+        match pools.LifeFlask with
+        | Some f when alive s && pools.Life > 1.0 && s.Life < 0.5 * pools.Life && s.Time >= s.LifeFlaskUntil && s.LifeFlaskCharges >= f.ChargesPerUse ->
+            s.LifeFlaskCharges <- s.LifeFlaskCharges - f.ChargesPerUse
+            s.LifeFlaskUntil <- s.Time + f.Duration
+            s.LifeFlaskRate <- f.Amount * (1.0 - f.Instant) * pools.LifeRecoveryRate / f.Duration
+            s.Life <- min (max s.Life pools.Life) (s.Life + f.Amount * f.Instant * pools.LifeRecoveryRate)
+            if pools.LifeFlaskAlsoES then
+                s.Shield <- min (max s.Shield (min pools.EnergyShield pools.ESRecoverCap)) (s.Shield + f.Amount * f.Instant * pools.LifeRecoveryRate)
+            bump s s.P.CFlaskLife
+        | _ -> ()
+
     /// What the recovery streams give from `t0` to now, by pool, into `State.Streams`
     /// (recoup, leech: see `recover`).
     let private recouped (s: State) (t0: float) =
@@ -5135,6 +5148,7 @@ module Flat =
                 if lifeCost > 0.0 && s.Life - lifeCost < 1.0 then
                     let wait = max Constants.serverTick 0.25
                     s.Starved <- s.Starved + wait
+                    drinkLifeFlask s pools
                     schedule s (s.Time + wait) EReady 0 0 0.0 0.0
                 elif pools.CostsLife then
                     // Blood Magic: the cost is paid with life; a skill that would kill waits
@@ -5173,7 +5187,9 @@ module Flat =
                     schedule s (s.Time + wait) EReady 0 0 0.0 0.0
                 else
                     s.Mana <- max 0.0 (s.Mana - cost)
-                    if lifeCost > 0.0 then s.Life <- s.Life - lifeCost
+                    if lifeCost > 0.0 then
+                        s.Life <- s.Life - lifeCost
+                        drinkLifeFlask s pools
                     if p.HasSigil then sigilSpend s cost pools.Mana
                     useNow s rng sid t
         else
