@@ -1918,6 +1918,10 @@ module Behaviours =
                         Some { Gem = gem.Name; Flat = 0.0; PerMinion = 0.0; FreeMinions = 0; LifePercent = (own + supports + perCurse) / eff * lifePerSpirit / 100.0 }
                     elif own + supports + perCurse > 0.0 then Some { Gem = gem.Name; Flat = (own + supports + perCurse) / eff; PerMinion = 0.0; FreeMinions = 0; LifePercent = 0.0 }
                     else None
+                // Ancestral Bond: "Totems reserve 75 Spirit each": a totem gem takes its share of the
+                // Spirit that is left like a gem of persistent minions does, so much for each totem
+                | Some d when d.Types.Contains "SummonsTotem" && Mods.flag Ctx.empty (Named "AncestralBond") charMods ->
+                    Some { Gem = gem.Name; Flat = 0.0; PerMinion = Constants.ancestralBondSpirit; FreeMinions = 0; LifePercent = 0.0 }
                 | _ -> None))
 
     /// How many minions each persistent minion gem has: the free ones, plus what the Spirit
@@ -2425,8 +2429,10 @@ module Behaviours =
                         let limit =
                             if not (Mods.flag Ctx.empty (Named "AncestralBond") charMods) then limit
                             else
-                                let free = spiritTotal sheet build - (spiritUses db sheet build |> List.sumBy (fun u -> u.Flat))
-                                max 1 (min (2 * limit) (int (free / Constants.ancestralBondSpirit)))
+                                // (the Spirit left is shared out among the totem gems and the gems of
+                                // persistent minions, `minionCounts`: no point of it is spent twice)
+                                let paid = minionCounts (spiritTotal sheet build) (spiritUses db sheet build) |> Map.tryFind gem.Name |> Option.defaultValue 1
+                                max 1 (min (2 * limit) paid)
                         // what a totem has for every totem standing (all of them stand together)
                         let s =
                             let perTotem n = named n * float limit

@@ -2163,3 +2163,23 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         equal (box true) (box (lowest (mods "life_leech_recovers_based_on_your_chaos_damage_instead_of_physical_damage" 1.0) < lowest [] - 0.001))
         for ms in [ []; mods "life_leech_also_recovers_based_on_elemental_damage_types" 1.0; mods "life_leech_recovers_based_on_your_chaos_damage_instead_of_physical_damage" 1.0 ] do
             same (leeching ms) seeds)
+
+    test "Ancestral Bond: the totems and the persistent minions share the Spirit that is left, no point is spent twice" (fun () ->
+        let b = { blank with Groups = [ group [ gem "Shockwave Totem" ]; group [ gem "Skeletal Warrior Minion" ] ]; ExtraLines = [ "+400 to Spirit" ] }
+        let c = load b Options.defaults
+        let bonded = { c.Sheet with Mods = c.Sheet.Mods @ mods "keystone_ancestral_bond" 1.0 }
+        let spirit = Behaviours.spiritTotal c.Sheet b
+        let countsOf sheet = Behaviours.minionCounts spirit (Behaviours.spiritUses db.Value sheet b)
+        let per = (Behaviours.spiritUses db.Value c.Sheet b |> List.find (fun u -> u.Gem = "Skeletal Warrior Minion"))
+        // without the keystone the minions have all of it
+        equal (box (per.FreeMinions + int (floor (spirit / per.PerMinion)))) (box (countsOf c.Sheet).["Skeletal Warrior Minion"])
+        equal (box false) (box ((countsOf c.Sheet).ContainsKey "Shockwave Totem"))
+        // with it each has half: 75 a totem, the minions' cost a minion
+        let shared = countsOf bonded
+        equal (box (int (floor (spirit / 2.0 / 75.0)))) (box shared.["Shockwave Totem"])
+        equal (box (per.FreeMinions + int (floor (spirit / 2.0 / per.PerMinion)))) (box shared.["Skeletal Warrior Minion"])
+        // the totems that stand: the doubled limit of one, which half the Spirit pays for
+        equal 2 (Behaviours.totems db.Value bonded b |> fst).Length
+        equal (box true) (box (float shared.["Shockwave Totem"] * 75.0 + float (shared.["Skeletal Warrior Minion"] - per.FreeMinions) * per.PerMinion <= spirit))
+        // build 017 of the corpus has the keystone and no totem gem: nothing to place
+        equal 0 (Behaviours.totems db.Value { c.Sheet with Mods = bonded.Mods } { b with Groups = [ group [ gem "Spark" ] ] } |> fst).Length)
