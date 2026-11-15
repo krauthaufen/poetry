@@ -247,6 +247,8 @@ module Report =
                                                            yield obj [ "name", JStr x.Name; "at", num (float at); "level", num (float level); "socketed", num (float x.Level); "quality", num (float x.Quality); "support", JBool x.IsSupport
                                                                        "icon", JStr((Map.tryFind x.Name icons |> Option.defaultValue "|").Split('|').[0])
                                                                        "gemIcon", JStr((Map.tryFind x.Name icons |> Option.defaultValue "|").Split('|').[1])
+                                                                       // what the gem reserves in all: a minion gem for every minion that is not free
+                                                                       "reserved", num (c.SpiritUses |> List.tryFind (fun u -> u.Gem = x.Name) |> Option.map (fun u -> u.Flat + float (max 0 ((Map.tryFind x.Name minionCounts |> Option.defaultValue 0) - u.FreeMinions)) * u.PerMinion) |> Option.defaultValue 0.0)
                                                                        // how many minions a persistent minion gem has (0: it is none)
                                                                        "minions", num (float (Map.tryFind x.Name minionCounts |> Option.defaultValue 0))
                                                                        // kept up by Spirit: a persistent buff, a meta gem, a minion

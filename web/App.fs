@@ -11,7 +11,7 @@ type Row = { Label : string; Value : string }
 /// A socketed gem (`Key`: how the simulator is told to leave it out) and a group of them.
 /// (`At`: its place in its group, `Socketed`: its level before what gear and supports add,
 /// `Gives`: the percent of the damage lost without it, as an analysis found; not a number: unknown.)
-type Gem = { Key : string; Named : string; Level : int; Quality : int; Support : bool; Icon : string; Own : string; Spirit : float; Persistent : bool; At : int; Socketed : int; Gives : float; Minions : int }
+type Gem = { Key : string; Named : string; Level : int; Quality : int; Support : bool; Icon : string; Own : string; Spirit : float; Persistent : bool; At : int; Socketed : int; Gives : float; Minions : int; Reserved : float }
 type GemGroup = { Slot : string; Number : int; Gems : Gem list }
 
 /// An item of the inventory: where it is worn (`Place`: its number, as "unequip" names it;
@@ -1676,7 +1676,7 @@ let rec private step (msg : Msg) (m : Model) : Model =
                                     let name = Json.string (Json.field "name" x)
                                     { Key = string index + ":" + name; Named = name; Level = Json.int (Json.field "level" x); Quality = Json.int (Json.field "quality" x)
                                       Support = Json.bool (Json.field "support" x); Icon = Json.string (Json.field "icon" x); Own = Json.string (Json.field "gemIcon" x); Spirit = Json.number (Json.field "spirit" x); Persistent = Json.bool (Json.field "persistent" x)
-                                      At = Json.int (Json.field "at" x); Socketed = Json.int (Json.field "socketed" x); Gives = nan; Minions = Json.int (Json.field "minions" x) }) })
+                                      At = Json.int (Json.field "at" x); Socketed = Json.int (Json.field "socketed" x); Gives = nan; Minions = Json.int (Json.field "minions" x); Reserved = Json.number (Json.field "reserved" x) }) })
                     Pressable = Json.field "pressable" j |> Json.list |> List.map Json.string
                     // (Runic Ward beside life and energy shield, for a character that has any)
                     Pools = [ row "Life" (n [ "pools"; "life" ]); row "Energy Shield" (n [ "pools"; "energyShield" ]) ] @ (if n [ "pools"; "ward" ] > 0.0 then [ row "Runic Ward" (n [ "pools"; "ward" ]) ] else []) @ [ row "Mana" (n [ "pools"; "mana" ]); row "Spirit" (n [ "pools"; "spirit" ]) ]
@@ -1833,10 +1833,11 @@ let private gem (m : Model) (g : Gem) : Node<Msg> =
     let level = "Level " + string g.Level
     let quality = "+" + string g.Quality + "% quality"
     let minions = string g.Minions + (if g.Minions = 1 then " minion" else " minions")
-    let spirit = if g.Minions > 0 then sprintf "%s, %.0f Spirit each" minions g.Spirit else sprintf "reserves %.0f Spirit" g.Spirit
+    let spirit = if g.Minions > 0 then sprintf "%s, %.0f Spirit each, %.0f in all" minions g.Spirit g.Reserved else sprintf "reserves %.0f Spirit" g.Spirit
     let turn = if off then "Turn on" else "Turn off"
     // (a skill's own picture; a support's gem)
     let picture = if g.Support then g.Own else g.Icon
+    let faced = if g.Minions > 0 then string g.Minions + " × " + g.Named else g.Named
     let lvl = if g.Support then "" elif g.Quality > 0 then string g.Level + " / " + string g.Quality else string g.Level
     let what = if g.Support then "Support gem" elif g.Persistent then "Persistent skill" else "Skill gem"
     let group = g.Key.Substring (0, g.Key.IndexOf ':')
@@ -1851,7 +1852,7 @@ let private gem (m : Model) (g : Gem) : Node<Msg> =
             Dom.Class "face"
             Dom.OnClick (fun _ -> Pin (if pinned then "" else g.Key))
             if picture <> "" then img { Dom.Attr ("src", picture); Dom.Attr ("alt", "") }
-            span { Dom.Class "name"; g.Named }
+            span { Dom.Class "name"; faced }
             span { Dom.Class "lvl"; lvl }
             if known then worths m ("gem:" + g.Key)
         }
@@ -1897,7 +1898,7 @@ let private gem (m : Model) (g : Gem) : Node<Msg> =
 /// A socket group as a card (as poe.ninja lists them): its gems one under the other, a
 /// skill's before its supports, each with its picture, name and level.
 let private group (m : Model) (g : GemGroup) : Node<Msg> =
-    let spirit = g.Gems |> List.sumBy (fun x -> if m.Dropped.Contains x.Key then 0.0 else x.Spirit)
+    let spirit = g.Gems |> List.sumBy (fun x -> if m.Dropped.Contains x.Key then 0.0 else x.Reserved)
     let reserved = sprintf "%.0f Spirit" spirit
     section {
         Dom.Class "group"
