@@ -575,9 +575,9 @@ let private warming (m : Model) : string =
 
 // ---- the fight's picture ----
 
-/// How much of the fight a second of showing covers: a short fight is shown slowly, over
-/// four seconds (not more: a fight that is one hit is mostly the wait for it).
-let private pace (m : Model) = max 0.1 (min 1.0 (m.Lasts / 4.0))
+/// How much of the fight a second of showing covers: all of it, the fight is shown as fast
+/// as it is fought.
+let private pace (m : Model) = 1.0
 
 let private disc (c : V2d) (r : float) (z : float) : V3f list =
     let n = 20
