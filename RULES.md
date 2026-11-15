@@ -257,7 +257,7 @@ Checked against PoB's defensive numbers for 131 public characters (`tools/corpus
 | Spirit per corrupted item | "increased Spirit for each Corrupted Item Equipped" counts the equipped corrupted items | game item text | data |
 | Not modelled | "Reservation Efficiency of Skills per Idol in your Equipment" | | todo |
 | Over budget | only reported: the API doesn't say which persistent gems are switched on or bound to one weapon set, so every socketed one is simulated as active | - | guess |
-| Minion counts | each persistent minion gem has its free minions plus what the Spirit left by everything else pays for (shared evenly between several minion gems) | the player chooses this in game; the API doesn't say | guess |
+| Minion counts | a gem has as many minions as the player says ("count|group|gem|minions", on the gem's panel of the page; "Best minion counts" there fights the full splits of the Spirit left and keeps the best). Where nothing is said: each persistent minion gem has its free minions plus what the Spirit left by everything else pays for (shared evenly between several minion gems) | the player chooses this in game; the API doesn't say | guess |
 
 ### Incoming damage in detail
 

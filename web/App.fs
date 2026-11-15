@@ -1832,8 +1832,8 @@ let private gem (m : Model) (g : Gem) : Node<Msg> =
     let kind = if g.Support then "gem support" elif g.Persistent then "gem persistent" else "gem"
     let level = "Level " + string g.Level
     let quality = "+" + string g.Quality + "% quality"
-    let spirit = if g.Minions > 0 then sprintf "%d minions, %.0f Spirit each" g.Minions g.Spirit else sprintf "reserves %.0f Spirit" g.Spirit
     let minions = string g.Minions + (if g.Minions = 1 then " minion" else " minions")
+    let spirit = if g.Minions > 0 then sprintf "%s, %.0f Spirit each" minions g.Spirit else sprintf "reserves %.0f Spirit" g.Spirit
     let turn = if off then "Turn on" else "Turn off"
     // (a skill's own picture; a support's gem)
     let picture = if g.Support then g.Own else g.Icon
