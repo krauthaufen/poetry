@@ -1961,7 +1961,7 @@ module Behaviours =
                 // Ancestral Bond: "Totems reserve 75 Spirit each": a totem gem takes its share of the
                 // Spirit that is left like a gem of persistent minions does, so much for each totem
                 | Some d when d.Types.Contains "SummonsTotem" && Mods.flag Ctx.empty (Named "AncestralBond") charMods ->
-                    Some { Gem = gem.Name; Flat = 0.0; PerMinion = Constants.ancestralBondSpirit; FreeMinions = 0; LifePercent = 0.0 }
+                    Some { Gem = gem.Name; Flat = 0.0; PerMinion = Constants.ancestralBondSpirit; FreeMinions = 0; Chosen = gem.Count; LifePercent = 0.0 }
                 | _ -> None))
 
     /// How many minions each persistent minion gem has: the free ones, plus what the Spirit
