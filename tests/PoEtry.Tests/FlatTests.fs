@@ -1222,7 +1222,7 @@ let run (test: string -> (unit -> unit) -> unit) =
         same (Fight.single enemy player 20.0) seeds)
 
     test "flat: recovery at the rates of the moment (life on low life, while ignited, energy shield on low energy shield)" (fun () ->
-        let sheet = { PlayerStats.basic 1000.0 150.0 with EnergyShield = 400.0; EnergyShieldRecharge = 50.0; ManaRegen = 3.0; LifeRegen = 1.0; StartLife = 0.3; RegenOnStun = 8.0; StunThreshold = 300.0 }
+        let sheet = { PlayerStats.basic 1000.0 150.0 with EnergyShield = 400.0; EnergyShieldRecharge = 50.0; ManaRegen = 3.0; LifeRegen = 1.0; StartLife = 0.3; RegenOnStun = 8.0; StunThreshold = 300.0; Armour = 2000.0; RecoupPreventedLife = 20.0 }
         let at (b: Map<string, int>) =
             { sheet with
                 LifeRegen = sheet.LifeRegen + (if b.ContainsKey "LowLife" then 40.0 else 0.0) + (if b.ContainsKey "DamagingAilment" then 25.0 else 0.0)

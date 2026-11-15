@@ -6609,6 +6609,12 @@ module Flat =
                         else
                             let prevented = max 0.0 ((Map.tryFind Physical unmitigated |> Option.defaultValue 0.0) - (Map.tryFind Physical taken |> Option.defaultValue 0.0))
                             prevented * v.RecoupPreventedPerPower / 100.0 * MonsterPower.ofRarity e.Def.Rarity * v.ESRecoveryRate
+                    // "X% of Physical Damage prevented Recouped as Life" (`Sim.attackPlayer`)
+                    let preventedLife =
+                        if v.RecoupPreventedLife <= 0.0 then 0.0
+                        else
+                            let prevented = max 0.0 ((Map.tryFind Physical unmitigated |> Option.defaultValue 0.0) - (Map.tryFind Physical taken |> Option.defaultValue 0.0))
+                            prevented * v.RecoupPreventedLife / 100.0 * v.LifeRecoveryRate
                     // "x% of Damage from Hits is taken from your Companion's Life before you": the
                     // first minion that does so and is alive takes its share, as much as it has
                     let taken =
@@ -6627,6 +6633,7 @@ module Flat =
                             taken |> Map.map (fun _ d -> d * (1.0 - k))
                     takeDamage s true pools taken
                     if preventedRecoup > 0.0 then s.Recoups <- (s.Time + v.RecoupSeconds, preventedRecoup / v.RecoupSeconds, PES) :: s.Recoups
+                    if preventedLife > 0.0 then s.Recoups <- (s.Time + v.RecoupSeconds, preventedLife / v.RecoupSeconds, PLife) :: s.Recoups
                     s.LastHit <- s.Time
                     gainRage s p.RageWhenHit
                     if p.FirstSkill >= 0 then react s rng p.WhenHit "" p.FirstSkill index

@@ -3367,6 +3367,12 @@ module Sim =
                         else
                             let prevented = max 0.0 ((Map.tryFind Physical unmitigated |> Option.defaultValue 0.0) - (Map.tryFind Physical taken |> Option.defaultValue 0.0))
                             prevented * v.RecoupPreventedPerPower / 100.0 * MonsterPower.ofRarity e.Def.Rarity * v.ESRecoveryRate
+                    // "X% of Physical Damage prevented Recouped as Life"
+                    let preventedLife =
+                        if v.RecoupPreventedLife <= 0.0 then 0.0
+                        else
+                            let prevented = max 0.0 ((Map.tryFind Physical unmitigated |> Option.defaultValue 0.0) - (Map.tryFind Physical taken |> Option.defaultValue 0.0))
+                            prevented * v.RecoupPreventedLife / 100.0 * v.LifeRecoveryRate
                     // "x% of Damage from Hits is taken from your Companion's Life before you": the
                     // first minion that does so and is alive takes its share, as much as it has
                     let taken, w =
@@ -3388,6 +3394,10 @@ module Sim =
                     let w =
                         if preventedRecoup > 0.0 then
                             { w with Player = w.Player |> Option.map (fun p -> { p with Recoups = (w.Time + v.RecoupSeconds, preventedRecoup / v.RecoupSeconds, "ES") :: p.Recoups }) }
+                        else w
+                    let w =
+                        if preventedLife > 0.0 then
+                            { w with Player = w.Player |> Option.map (fun p -> { p with Recoups = (w.Time + v.RecoupSeconds, preventedLife / v.RecoupSeconds, "Life") :: p.Recoups }) }
                         else w
                     let w = (let _, _, _, whenHit, _ = env.Rage in gainRage env whenHit w)
                     let w = (match env.Fight.Player.Skills |> List.tryHead with Some any -> react env rng env.Fight.Player WhenHit any (Some name) w | None -> w)

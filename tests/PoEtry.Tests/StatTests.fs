@@ -575,6 +575,7 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         same (fight 40.0 [ Spell ]) seeds
         for id in [ "curse_effect_on_self_+%"; "damage_+%_per_active_curse_on_self"; "armour_break_taken_+%"; "deflected_hits_cannot_inflict_bleeding_on_self"
                     "enemies_in_presence_life_regeneration_+%"; "enemies_in_presence_cooldown_recovery_+%"; "heist_enchantment_resistance_mod_effect_+%"
+                    "enemies_cursed_by_you_have_life_regeneration_rate_+%"; "bleeding_enemies_cannot_regenerate_life"
                     // (the player stands: what holds while it moves or sprints never does)
                     "projectile_attacks_%_chance_to_fire_2_additional_projectiles_while_moving"; "evasion_rating_+%_if_sprinting"
                     "deflection_rating_+%_while_moving"; "life_loss_%_per_minute_while_sprinting" ] do
@@ -1361,3 +1362,14 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         // three augments that are not idols: +6% to each
         near (Map.find Fire plain.Vitals.Resist + 6.0) (Map.find Fire c.Vitals.Resist)
         equal (box [ OfOwner(PerStack("SocketedIdols", 1.0)); SkillIs(Tag "Companion") ]) (box (mods "companion_damage_+%_per_socketed_idol" 10.0 |> List.collect (fun m -> m.Conds))))
+
+    test "physical damage prevented recouped as life: what armour kept off a hit comes back as life over 4 s" (fun () ->
+        let sheet = { PlayerStats.basic 1000.0 100.0 with Armour = 1000.0; RecoupPreventedLife = 50.0; StartLife = 0.5 }
+        let monster = { EnemyDef.atLevel 83 1e12 with Mods = []; Position = Vec.make 5.0 0.0; Attack = Some { Interval = 10.0; Damage = Map.ofList [ Physical, 100.0 ]; Accuracy = 1e9; Range = 10.0; CritChance = 0.0; Melee = true } }
+        let idle = { Skill.make "Wait" [ Spell ] with Hits = []; Cooldown = Some 100.0 }
+        let player = { Actor.make "Player" [] [ idle ] with Vitals = Some sheet }
+        let o = Sim.run { Fight.single monster player 8.0 with MaxTime = 8.0 } 1u
+        // (the life itself is not in the outcome: the fast engine is held to the reference's way of it)
+        if o.DamageTaken <= 0.0 then failwith "never hit"
+        same { Fight.single monster player 8.0 with MaxTime = 8.0 } seeds
+        equal (box [ Mod.base' (Named "RecoupPreventedPhysicalAsLife") 7.0 ]) (box (mods "physical_damage_prevented_recouped_as_life_%" 7.0)))

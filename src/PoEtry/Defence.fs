@@ -332,7 +332,8 @@ module Defence =
           StunRecovery = max 0.01 (Mods.mult c [ Named "StunRecovery" ] db)
           // "You cannot Recover Energy Shield to above Armour"
           ESRecoverCap = (if flag "ESRecoveryCappedAtArmour" then armour else infinity)
-          RecoupPreventedPerPower = named "RecoupPreventedPhysicalAsESPerPower" }
+          RecoupPreventedPerPower = named "RecoupPreventedPhysicalAsESPerPower"
+          RecoupPreventedLife = named "RecoupPreventedPhysicalAsLife" }
 
     let compute bases sheet = computeWith Map.empty bases sheet
 

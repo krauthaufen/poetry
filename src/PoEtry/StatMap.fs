@@ -1008,6 +1008,8 @@ module StatMap =
         | "minion_damage_increases_and_reductions_also_affects_you" -> one (Mod.flag (Named "MinionDamageAffectsYou"))
         | "companion_damage_increases_and_reductions_also_affects_you" -> one (Mod.flag (Named "CompanionDamageAffectsYou"))
         | "additive_modifiers_to_minion_attack_speed_also_affect_you" -> one (Mod.flag (Named "MinionAttackSpeedAffectsYou"))
+        // "X% of Physical Damage prevented Recouped as Life": of a monster's hit
+        | "physical_damage_prevented_recouped_as_life_%" -> one (Mod.base' (Named "RecoupPreventedPhysicalAsLife") v)
         // "Companions deal X% increased damage per Idol in your Equipment", "+X% to all Elemental
         // Resistances per non-Idol Augment in your Equipment": counted when the character is read
         | "companion_damage_+%_per_socketed_idol" ->
@@ -1726,6 +1728,9 @@ module StatMap =
           "deflected_hits_cannot_directly_inflict_maim_on_self"; "deflected_hits_cannot_inflict_bleeding_on_self"
           // "Enemies in your Presence have X% reduced Life Regeneration rate / Cooldown Recovery Rate"
           "enemies_in_presence_life_regeneration_+%"; "enemies_in_presence_cooldown_recovery_+%"
+          // "Targets Cursed by you have X% increased Life Regeneration Rate", "Bleeding Enemies /
+          // Enemies with Broken Armour cannot Regenerate Life"
+          "enemies_cursed_by_you_have_life_regeneration_rate_+%"; "bleeding_enemies_cannot_regenerate_life"; "broken_armour_enemies_cannot_regenerate_life"
           // the player is never Heavily Stunned (RULES.md, "Heavy stun on the player"), and of the
           // damaging ailments only Ignite is ever on it: "increased Attack Damage if you have been
           // Heavy Stunned Recently", "Cannot be Heavy Stunned while Sprinting", "Damaging Ailments
