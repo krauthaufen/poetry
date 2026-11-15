@@ -1358,6 +1358,21 @@ module StatMap =
             Some(Mods [ Mod.more (Damage AllDamage) v |> Mod.whenever (EnemyHas "Frozen"); Mod.flag (Named "Takes:Frozen") ])
         | "support_gem_consume_enemy_fully_broken_armour_to_gain_damage_+%_final" ->
             Some(Mods [ Mod.more (Damage AllDamage) v |> Mod.whenever (EnemyHas "FullyBrokenArmour"); Mod.flag (Named "Takes:FullyBrokenArmour") ])
+        // life costs (Sim.splitCost, Behaviours.lifeCost): "X% of Mana Costs Converted to Life
+        // Costs" (of a support's skill, of spells), "Skills gain a Base Life Cost equal to Base
+        // Mana Cost", "Non-Channelling Spells cost an additional X% of your maximum Life",
+        // "increased Life Cost Efficiency"
+        | "base_skill_cost_life_instead_of_mana_%" -> one (Mod.base' (Named "CostAsLife") v)
+        | "spells_cost_life_instead_of_mana_%" -> one (Mod.base' (Named "CostAsLife") v |> Mod.whenever (SkillIs Spell))
+        | "skill_cost_base_life_equal_to_base_mana" -> one (Mod.base' (Named "LifeCostEqualToMana") 1.0)
+        | "base_life_cost_+_with_non_channelling_spells_%_maximum_life" ->
+            one (Mod.base' (Named "LifeCostPercentOfLife") v |> Mod.whenever (SkillIs Spell) |> Mod.whenever (Not(SkillIs Channelling)))
+        | "base_life_cost_efficiency_+%" -> one (Mod.inc (Named "LifeCostEfficiency") v)
+        // what a skill that costs life gets
+        | "spells_gain_%_physical_damage_if_they_cost_life" ->
+            Some(Mods [ for t in DamageType.all -> Mod.base' (GainAs(t, Physical)) v |> Mod.whenever (SkillIs Spell) |> Mod.whenever (SkillIs(Tag "CostsLife")) ])
+        | "spell_damage_+%_with_spells_that_cost_life" -> one (Mod.inc (Damage AllDamage) v |> Mod.whenever (SkillIs Spell) |> Mod.whenever (SkillIs(Tag "CostsLife")))
+        | "gain_%_of_damage_as_physical_per_20_life_cost_up_to_40_%" -> one (Mod.base' (Named "GainPhysicalPer20LifeCost") v)
         // "Culling Strike" under its other id
         | "kill_enemy_on_hit_if_under_10%_life" -> one (Mod.flag (Named "CullingStrike"))
         | "cannot_break_armour" -> one (Mod.more (Named "ArmourBreakAmount") -100.0)

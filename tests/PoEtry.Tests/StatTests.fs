@@ -2023,3 +2023,42 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         near (90.0 + float hits * 100.0) total
         same (fight rules 101.0) seeds
         same (fight rules 90.0) seeds)
+
+    test "life costs: a share of the mana cost paid with life, a life cost equal to the mana cost, a share of maximum life; what a skill that costs life gets" (fun () ->
+        equal (box (Named "CostAsLife")) (box (mods "base_skill_cost_life_instead_of_mana_%" 50.0).Head.Stat)
+        equal (box [ SkillIs Spell ]) (box (mods "spells_cost_life_instead_of_mana_%" 30.0).Head.Conds)
+        // a bolt that costs 40 mana, with 100 life and 200 mana and nothing that recovers either:
+        // five bolts as it is. A life cost that would leave less than 1 life is not paid
+        let bolt = { Skill.make "Bolt" [ Spell ] with BaseDamage = Map.ofList [ Fire, Range.fixedAt 100.0 ]; BaseCrit = 0.0; Cost = 40.0 }
+        let fight (ms: Mod list) =
+            let player =
+                { Actor.make "Player" ms [ bolt ] with
+                    Rotation = [ Actor.always "Bolt" ]
+                    Vitals = Some { PlayerStats.basic 100.0 200.0 with ManaRegen = 0.0 } }
+            Fight.single { EnemyDef.atLevel 83 1e9 with Mods = []; Attack = None } player 20.5
+        let uses ms = count (Sim.run (fight ms) 1u) "uses:Bolt"
+        equal 5 (uses [])
+        // "50% of Mana Costs Converted to Life Costs": 20 mana and 20 life: the mana is enough
+        // for ten, the life for four (100, 80, 60, 40, 20)
+        equal 4 (uses (mods "base_skill_cost_life_instead_of_mana_%" 50.0))
+        // "25% of ...": 30 mana and 10 life: six for the mana
+        equal 6 (uses (mods "base_skill_cost_life_instead_of_mana_%" 25.0))
+        // "Skills gain a Base Life Cost equal to Base Mana Cost": 40 of each, two bolts (100, 60,
+        // 20); with 25% increased Life Cost Efficiency 32 life, three (100, 68, 36, 4)
+        equal 2 (uses (mods "skill_cost_base_life_equal_to_base_mana" 1.0))
+        equal 3 (uses (mods "skill_cost_base_life_equal_to_base_mana" 1.0 @ mods "base_life_cost_efficiency_+%" 25.0))
+        // "Non-Channelling Spells cost an additional 30% of your maximum Life": 30 life beside
+        // the 40 mana, three bolts (100, 70, 40, 10)
+        equal 3 (uses (mods "base_life_cost_+_with_non_channelling_spells_%_maximum_life" 30.0))
+        for ms in [ []; mods "base_skill_cost_life_instead_of_mana_%" 50.0; mods "skill_cost_base_life_equal_to_base_mana" 1.0
+                    mods "base_life_cost_+_with_non_channelling_spells_%_maximum_life" 30.0 ] do
+            same (fight ms) seeds
+        // what a skill that costs life gets: the tag, and 5% of damage as physical per 20 life of
+        // its cost, up to 40% (a cost of 100, half of it life: 50 life, 2 x 5%)
+        let costly = { bolt with Cost = 100.0; Mods = mods "base_skill_cost_life_instead_of_mana_%" 50.0 @ mods "gain_%_of_damage_as_physical_per_20_life_cost_up_to_40_%" 5.0 }
+        let built = Behaviours.lifeCost ModDb.empty costly
+        equal (box true) (box (built.Tags.Contains(Tag "CostsLife")))
+        equal (box [ 10.0 ]) (box (built.Mods |> List.choose (fun m -> if m.Stat = GainAs(Fire, Physical) then Some m.Value else None)))
+        equal (box false) (box ((Behaviours.lifeCost ModDb.empty bolt).Tags.Contains(Tag "CostsLife")))
+        let gains = mods "spells_gain_%_physical_damage_if_they_cost_life" 12.0
+        equal (box true) (box (gains |> List.forall (fun m -> List.contains (SkillIs(Tag "CostsLife")) m.Conds && List.contains (SkillIs Spell) m.Conds))))

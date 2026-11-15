@@ -663,6 +663,10 @@ module Flat =
     let private qExtraCost = site MSkill Base (named "ExtraCostPercentOfMaxMana")
     let private qManaCost = siteMult MSkill [ ManaCost ]
     let private qCostEfficiency = site MSkill Inc [ ManaCostEfficiency ]
+    let private qCostAsLife = site MSkill Base (named "CostAsLife")
+    let private qLifeCostEqual = site MSkill Base (named "LifeCostEqualToMana")
+    let private qLifeCostOfLife = site MSkill Base (named "LifeCostPercentOfLife")
+    let private qLifeCostEfficiency = site MSkill Inc (named "LifeCostEfficiency")
     let private qSkipConsume = site MEmpty Base (named "ChargeSkipConsume")
     let private qConsumeEvery = site MEmpty Base (named "ConsumeChargeEveryMs")
     let private qConsumeCount = site MEmpty Base (named "ConsumeChargeCount")
@@ -1121,6 +1125,8 @@ module Flat =
               Banners: (Banner * int * int)[]
               HasSigil: bool
               CSigil: int
+              /// Whether anything of the actor's makes a skill cost life (`Sim.splitCost`).
+              LifeCosts: bool
               /// Whether any meta gem gains energy from hits.
               MetaHits: bool
               /// What a full Infernal Flame burns, percent of maximum life and energy shield.
@@ -2185,6 +2191,9 @@ module Flat =
                       Builders = builders
                       Banners = banners
                       HasSigil = sigils.Count > 0
+                      LifeCosts =
+                        (let named (m: Mod) = match m.Stat with Named ("CostAsLife" | "LifeCostEqualToMana" | "LifeCostPercentOfLife") -> true | _ -> false
+                         actor.Mods |> List.exists named || actor.Skills |> List.exists (fun sk -> sk.Mods |> List.exists named))
                       MetaHits = metas |> Array.exists (fun m -> m.FromHits)
                       CSigil = count "sigil stage"
                       InfernalBurn = Mods.sumBase Ctx.empty [ Named "InfernalFlameBurn" ] sheet
@@ -4946,6 +4955,22 @@ module Flat =
                 (if s.A.LastUsed = sid then 0.0 else ownCost) + skill.CostPerSecond * seconds
         (ownCost + extraCost) * costMult / efficiency
 
+    /// What of a use's cost is left for mana, and what is paid with life (`Sim.splitCost`).
+    let private splitCost (s: State) (sid: int) (pools: PlayerStats) (cost: float) : struct (float * float) =
+        if not s.P.LifeCosts then struct (cost, 0.0)
+        else
+            let ev = acquire s sid
+            keepAnswers s ev sid -1 2
+            let share = sumQ ev qCostAsLife
+            let equal = sumQ ev qLifeCostEqual
+            let ofLife = sumQ ev qLifeCostOfLife
+            let efficiency = incQ ev qLifeCostEfficiency
+            release s
+            if share = 0.0 && equal = 0.0 && ofLife = 0.0 then struct (cost, 0.0)
+            else
+                let k = min 1.0 (max 0.0 (share / 100.0))
+                struct (cost * (1.0 - k), (cost * k + (if equal > 0.0 then cost else 0.0) + pools.Life * ofLife / 100.0) / efficiency)
+
     /// The actor uses the skill now, for so long, and is free again after it (and after
     /// reloading, where the last bolt of a load was shot).
     let private useNow (s: State) (rng: Rng) (sid: int) (t: float) =
@@ -5036,11 +5061,12 @@ module Flat =
                             costed <- sid
                             costedAt <- costOf s sid nan
                             costedAt <= 0.0 || s.Life - costedAt >= 1.0
-                        | Some _ ->
+                        | Some pools ->
                             costed <- sid
                             costedAt <- costOf s sid nan
+                            let struct (mana, life) = splitCost s sid pools costedAt
                             // (enough within rounding: a wait for mana ends with exactly the cost, give or take the last bit)
-                            not (s.Mana < costedAt - 1e-9 * max 1.0 costedAt)
+                            not (s.Mana < mana - 1e-9 * max 1.0 mana) && (life <= 0.0 || s.Life - life >= 1.0)
                         | None -> true
                     if affordable then choice <- sid
         let choice = if choice >= 0 then choice else firstUsable
@@ -5065,7 +5091,13 @@ module Flat =
             match (if main then p.Vitals else None) with
             | None -> useNow s rng sid t
             | Some pools ->
-                if pools.CostsLife then
+                // what of the cost is paid with life (`Sim.onReadyUnlocked`)
+                let struct (cost, lifeCost) = if pools.CostsLife || pools.CostsInfernalFlame then struct (cost, 0.0) else splitCost s sid pools cost
+                if lifeCost > 0.0 && s.Life - lifeCost < 1.0 then
+                    let wait = max Constants.serverTick 0.25
+                    s.Starved <- s.Starved + wait
+                    schedule s (s.Time + wait) EReady 0 0 0.0 0.0
+                elif pools.CostsLife then
                     // Blood Magic: the cost is paid with life; a skill that would kill waits
                     if s.Life - cost >= 1.0 || cost <= 0.0 then
                         s.Life <- s.Life - cost
@@ -5102,6 +5134,7 @@ module Flat =
                     schedule s (s.Time + wait) EReady 0 0 0.0 0.0
                 else
                     s.Mana <- max 0.0 (s.Mana - cost)
+                    if lifeCost > 0.0 then s.Life <- s.Life - lifeCost
                     if p.HasSigil then sigilSpend s cost pools.Mana
                     useNow s rng sid t
         else

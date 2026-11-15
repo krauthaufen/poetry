@@ -467,7 +467,7 @@ module Setup =
                         @ Behaviours.oilGround db charMods setup s @ Behaviours.whirlwind db setup s
                     let rules = cryRules @ biteRules @ (match lasting with Some (_, rs) -> rs | None -> []) @ Behaviours.useRules db charMods setup s.Name o.Pickup @ Behaviours.buffRules db charMods setup s @ Behaviours.totemPlacement db charMods setup s @ curseRules
                     let grants = Behaviours.verisiumGrant db charMods setup
-                    let s = Behaviours.applyObserved s
+                    let s = Behaviours.applyObserved s |> Behaviours.lifeCost charMods
                     // Entangle: the vines are a skill of their own, on a clock, against what a fissure hit
                     let vines = Behaviours.entangle db charMods setup s
                     let s = match vines with Some (main, _, _, _) -> main | None -> s

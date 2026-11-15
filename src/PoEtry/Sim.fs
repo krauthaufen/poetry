@@ -2311,6 +2311,19 @@ module Sim =
         // "+1 second to Total Cast Time": added after speed
         own.BaseTime / speed * (1.0 + Constants.longerPerRepeat * repeats) + Mods.sumBase ctx [ Named "FixedUseTime" ] db
 
+    /// What of a use's cost is paid with life, and what is left for mana: "X% of Mana Costs
+    /// Converted to Life Costs" (that share of the cost), "Skills gain a Base Life Cost equal
+    /// to Base Mana Cost" (the cost once more, in life), "cost an additional X% of your maximum
+    /// Life"; the life part over "increased Life Cost Efficiency". Returns (mana, life).
+    let private splitCost (pools: PlayerStats) (ctx: Ctx) (db: ModDb) (cost: float) : float * float =
+        let share = Mods.sumBase ctx [ Named "CostAsLife" ] db
+        let equal = Mods.sumBase ctx [ Named "LifeCostEqualToMana" ] db
+        let ofLife = Mods.sumBase ctx [ Named "LifeCostPercentOfLife" ] db
+        if share = 0.0 && equal = 0.0 && ofLife = 0.0 then cost, 0.0
+        else
+            let k = min 1.0 (max 0.0 (share / 100.0))
+            cost * (1.0 - k), (cost * k + (if equal > 0.0 then cost else 0.0) + pools.Life * ofLife / 100.0) / Mods.inc ctx [ Named "LifeCostEfficiency" ] db
+
     let private onReadyUnlocked env (rng: Rng) name (w: World) =
         let actor = actorDef env name
         let st = Map.find name w.Actors
@@ -2338,7 +2351,9 @@ module Sim =
             | Some pools, Some p when pools.CostsInfernalFlame -> true
             | Some pools, Some p when pools.CostsLife -> (let c = costOf skill in c <= 0.0 || p.Life - c >= 1.0)
             // (enough within rounding: a wait for mana ends with exactly the cost, give or take the last bit)
-            | Some _, Some p -> (let cost = costOf skill in not (p.Mana < cost - 1e-9 * max 1.0 cost))
+            | Some pools, Some p ->
+                let cost, life = splitCost pools { Ctx.empty with SkillTags = skill.Tags; SkillName = skill.Name } (skillDb env actor skill st) (costOf skill)
+                not (p.Mana < cost - 1e-9 * max 1.0 cost) && (life <= 0.0 || p.Life - life >= 1.0)
             | _ -> true
         // the first step that is ready and can be paid for; if none can be paid, wait for the first
         let choice =
@@ -2458,7 +2473,16 @@ module Sim =
                                      Mana = min (max p.Mana manaMax) (p.Mana + f.Amount * f.Instant) })
                         Counts = bump "flask:mana" w.Counts }
                 | _ -> w
+            // what of the cost is paid with life (after the flask, which goes by the whole cost)
+            let cost, lifeCost =
+                match actor.Vitals with
+                | Some v when not v.CostsLife && not v.CostsInfernalFlame -> splitCost v costCtx db cost
+                | _ -> cost, 0.0
             match actor.Vitals, w.Player with
+            | Some _, Some p when lifeCost > 0.0 && p.Life - lifeCost < 1.0 ->
+                // a life cost that would kill: the skill waits
+                let wait = max Constants.serverTick 0.25
+                { w with Player = Some { p with Starved = p.Starved + wait } } |> schedule (w.Time + wait) (Ready name)
             | Some v, Some p when v.CostsLife ->
                 // Blood Magic: the cost is paid with life; a skill that would kill waits
                 if p.Life - cost >= 1.0 || cost <= 0.0 then
@@ -2492,7 +2516,7 @@ module Sim =
                 let wait = max Constants.serverTick (if rate > 0.0 then (cost - p.Mana) / rate else 1.0)
                 { w with Player = Some { p with Starved = p.Starved + wait } } |> schedule (w.Time + wait) (Ready name)
             | Some v, Some p ->
-                { w with Player = Some { p with Mana = max 0.0 (p.Mana - cost) } } |> sigilSpend name cost v.Mana |> go
+                { w with Player = Some { p with Mana = max 0.0 (p.Mana - cost); Life = p.Life - lifeCost } } |> sigilSpend name cost v.Mana |> go
             | _ -> go w
         | None ->
             // Nothing usable: wait for the next cooldown, or a server tick.

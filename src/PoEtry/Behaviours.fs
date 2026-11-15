@@ -789,6 +789,29 @@ module Behaviours =
                     IfBuff(buff, AttachPustule(part, stat "base_skill_detonation_time" / 1000.0, stat "toxic_pustule_burst_1%_more_damage_per_x_stored_poison",
                                                stat "toxic_pustule_max_burst_damage_+%_final_from_stored_poison")) } ]
 
+    /// A skill that costs life: the tag "CostsLife" the character's lines ask about ("Spells
+    /// which cost Life Gain X% of Damage as Extra Physical Damage", "increased Spell Damage
+    /// with Spells that cost Life"), on the skill and its parts; and "Supported Skills Gain X%
+    /// of Damage as extra Physical Damage per 20 Life cost, up to 40%", by what a use costs in
+    /// life (as `Sim.splitCost` works it out; "an additional X% of your maximum Life" is not
+    /// counted in, the character's life is not known where the skill is built).
+    let lifeCost (charMods: ModDb) (skill: Skill) : Skill =
+        let ctx = { Ctx.empty with SkillTags = skill.Tags; SkillName = skill.Name }
+        let db = ModDb.ofList (ModDb.toList charMods @ skill.Mods)
+        let share, equal = Mods.sumBase ctx [ Named "CostAsLife" ] db, Mods.sumBase ctx [ Named "LifeCostEqualToMana" ] db
+        let ofLife = Mods.sumBase ctx [ Named "LifeCostPercentOfLife" ] db
+        let all = Mods.flag ctx (Named "BloodMagic") db
+        if skill.Cost <= 0.0 || not (all || share > 0.0 || equal > 0.0 || ofLife > 0.0) then skill
+        else
+            let cost = skill.Cost * Mods.mult ctx [ ManaCost ] db / Mods.inc ctx [ ManaCostEfficiency ] db
+            let k = if all then 1.0 else min 1.0 (max 0.0 (share / 100.0))
+            let life = (cost * k + (if equal > 0.0 && not all then cost else 0.0)) / (if all then 1.0 else Mods.inc ctx [ Named "LifeCostEfficiency" ] db)
+            let per20 = Mods.sumBase ctx [ Named "GainPhysicalPer20LifeCost" ] db
+            let gain = min 40.0 (per20 * floor (life / 20.0))
+            let gained = if gain > 0.0 then [ for t in DamageType.all -> Mod.base' (GainAs(t, Physical)) gain |> Mod.from "life cost" ] else []
+            let tag (s: Skill) = { s with Tags = Set.add (Tag "CostsLife") s.Tags; Mods = s.Mods @ gained }
+            { tag skill with Parts = skill.Parts |> List.map tag }
+
     /// What culling an enemy with the skill gives. A kill by a hit of the skill of an enemy that
     /// was within Culling Strike's reach for its rarity is a cull (the skills these lines are on
     /// have Culling Strike, or it comes with the support):
