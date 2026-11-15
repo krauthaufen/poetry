@@ -665,6 +665,11 @@ module StatMap =
         | "marked_enemy_accuracy_rating_+%" -> one (Mod.inc (Named "MarkedEnemyAccuracy") v)
         | "defend_with_%_armour_against_ranged_attacks" -> one (Mod.base' (Named "DefendWithArmourVsProjectiles") v)
         | "defend_with_%_armour_against_critical_strikes" -> one (Mod.base' (Named "DefendWithArmourVsCrits") v)
+        // "Defend with X% of Armour while not on Low Energy Shield", "... while on Low Energy Shield",
+        // "... while you have Energy Shield": against every hit, while it holds
+        | "defend_with_%_of_armour_while_not_on_low_energy_shield" -> one (Mod.base' (Named "DefendWithArmour") v |> Mod.whenever (Not(WhileBuff "LowEnergyShield")))
+        | "defend_with_%_armour_when_low_energy_shield" -> one (Mod.base' (Named "DefendWithArmour") v |> Mod.whenever (WhileBuff "LowEnergyShield"))
+        | "defend_with_%_armour_while_you_have_energy_shield" -> one (Mod.base' (Named "DefendWithArmour") v |> Mod.whenever (WhileBuff "HasEnergyShield"))
         | "mark_use_speed_+%" -> one (Mod.inc Speed v |> Mod.whenever (SkillIs(Tag "Type:Mark")))
         | "base_mana_cost_efficiency_+%_of_mark_skills" -> one (Mod.inc ManaCostEfficiency v |> Mod.whenever (SkillIs(Tag "Type:Mark")))
         | "summon_totem_cast_speed_+%" -> one (Mod.inc Speed v |> Mod.whenever (SkillIs(Tag "Type:SummonsTotem")))

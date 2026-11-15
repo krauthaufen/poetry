@@ -1146,6 +1146,33 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         near ((at []).StunThreshold * 1.2) (at [ "Surrounded", 1 ]).StunThreshold
         near ((at []).AilmentThreshold * 1.2) (at [ "Surrounded", 1 ]).AilmentThreshold)
 
+    test "Low Energy Shield is a state; Defend with X% of Armour while not on Low Energy Shield" (fun () ->
+        let c = load { blank with ExtraLines = [ "+1000 to Armour"; "+100 to maximum Energy Shield"; "Defend with 200% of Armour while not on Low Energy Shield" ] } Options.defaults
+        let p = Setup.player c Options.defaults [] None
+        let at st = (p.VitalsAt.Value (Map.ofList st)).ArmourDefend
+        near 2.0 (at [])
+        near 1.0 (at [ "LowEnergyShield", 1 ])
+        // in a fight: a physical brute takes the shield down, the player is then on Low Energy Shield
+        let bolt = { Skill.make "Bolt" [ Spell ] with BaseDamage = Map.ofList [ Cold, { Min = 100.0; Max = 100.0 } ]; BaseTime = 0.5; BaseCrit = 0.0 }
+        let brute hit =
+            { EnemyDef.make Rarity.defaults 70 Magic "brute" (Vec.make 5.0 0.0) with
+                Life = 1e9
+                Attack = Some { Interval = 1.0; Damage = Map.ofList [ Physical, hit ]; Accuracy = 1e9; Range = 20.0; CritChance = 0.0; Melee = true } }
+        let fight hit defend =
+            let player =
+                { Actor.make "Player" ([ Mod.more (Damage AllDamage) 100.0 |> Mod.whenever (WhileBuff "LowEnergyShield") ] @ defend) [ bolt ] with
+                    Vitals = Some { PlayerStats.basic 1e6 0.0 with EnergyShield = 100.0; Armour = 1000.0; StunThreshold = 1e12; AilmentThreshold = 1e12; ESRechargeDelay = 1e9 } }
+            Fight.single (brute hit) player 6.0
+        let hit (o: Outcome) = Map.tryFind "Bolt (hit)" o.DamageBy |> Option.defaultValue 0.0
+        if hit (Sim.run (fight 500.0 []) 1u) <= hit (Sim.run (fight 0.0 []) 1u) * 1.2 then failwith "never on Low Energy Shield"
+        same (fight 500.0 []) seeds
+        // armour that counts double takes less of a hit (the fight's own vitals, with ArmourDefend 2)
+        let twice =
+            let f = fight 500.0 []
+            { f with Player = { f.Player with Vitals = f.Player.Vitals |> Option.map (fun v -> { v with ArmourDefend = 2.0 }) } }
+        if (Sim.run twice 1u).DamageTaken >= (Sim.run (fight 500.0 []) 1u).DamageTaken then failwith "armour defended with no more"
+        same twice seeds)
+
     // ---- Wind Dancer ----
 
     test "Wind Dancer: stages build up, a hit on the player with one held sets off Gale Force with the group's supports, which takes them" (fun () ->

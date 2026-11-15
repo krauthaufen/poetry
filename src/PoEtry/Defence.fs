@@ -265,6 +265,7 @@ module Defence =
           MarkedEnemyAccuracyMult = max 0.0 (Mods.inc c [ Named "MarkedEnemyAccuracy" ] db)
           ArmourVsProjectiles = (match named "DefendWithArmourVsProjectiles" with 0.0 -> 1.0 | v -> v / 100.0)
           ArmourVsCrits = (match named "DefendWithArmourVsCrits" with 0.0 -> 1.0 | v -> v / 100.0)
+          ArmourDefend = (match named "DefendWithArmour" with 0.0 -> 1.0 | v -> v / 100.0)
           StunThreshold = stunThreshold
           AilmentThreshold = ailmentThreshold
           FreezeThreshold = (ailmentThreshold + es * named "FreezeThresholdFromES" / 100.0) * Mods.mult c [ Named "FreezeThreshold" ] db

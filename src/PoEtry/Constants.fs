@@ -158,6 +158,9 @@ module Constants =
         | _ -> 0.0, 0.0
     /// A chill is at least this strong (keyword text; PoB ailmentData.Chill.min).
     let chillMinEffect = 30.0
+    /// "Low" Life, Mana, Energy Shield: at most this share of the maximum (GameConstants
+    /// DefaultLowStatusThresholdPercent).
+    let lowStatusShare = gc "DefaultLowStatusThresholdPercent" / 100.0
     /// Seconds a light stun interrupts the player. GUESS (no player constant in the data).
     let playerLightStunDuration = 0.35
 

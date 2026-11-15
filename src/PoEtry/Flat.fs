@@ -1312,7 +1312,7 @@ module Flat =
                 yield "AtMaximum" + kind + "Charges"
                 yield "No" + kind + "Charges"
                 yield "YouHaveNo" + kind + "Charges" ]
-        @ [ "Ignited"; "DamagingAilment" ]
+        @ [ "Ignited"; "DamagingAilment"; "LowEnergyShield" ]
 
     let private derivedStatuses =
         [ "Moving"; "Cullable"; "AnyAilment"; "Cursed"; "Marked"; "Immobilised"; "ElementalAilments"; "Exposed"; "RareOrUnique"; "LowLife"; "FullLife" ]
@@ -6536,7 +6536,7 @@ module Flat =
                     // a critical hit is tested against evasion once more: evaded, it is an ordinary hit
                     let crit = rng.Chance(atk.CritChance * v.EnemyCritChanceMult * (if blinded then v.BlindedEnemyCritMult else 1.0)) && not (hitChance < 100.0 && rng.Chance(100.0 - hitChance))
                     // "Defend with X% of Armour against Projectile Attacks / Critical Hits"
-                    let armourShare = (if atk.Melee then 1.0 else v.ArmourVsProjectiles) * (if crit then v.ArmourVsCrits else 1.0)
+                    let armourShare = (if atk.Melee then 1.0 else v.ArmourVsProjectiles) * (if crit then v.ArmourVsCrits else 1.0) * v.ArmourDefend
                     let critMult = if crit then 1.0 + Constants.monsterBaseCritBonus / 100.0 * (1.0 - v.LessCritDamageTaken / 100.0) else 1.0
                     let shocked =
                         if (at s.A.BHas p.BShocked) && (at s.A.BExpires p.BShocked) > s.Time then (at s.A.BMods p.BShocked) |> List.sumBy (fun m -> m.Value) else 0.0
@@ -6744,6 +6744,7 @@ module Flat =
         let ignited = s.Burning |> List.exists (fun (until, _, t) -> t = Fire && until > s.Time)
         setState s 19 ignited
         setState s 20 ignited
+        setState s 21 (v.EnergyShield > 0.0 && s.Shield <= Constants.lowStatusShare * v.EnergyShield)
 
     /// What is planted in or beside the enemies (`Sim.step`): seeds set off by the damage
     /// their enemy has taken (or its death: the blast then strikes the enemy aimed at), gone

@@ -3270,7 +3270,7 @@ module Sim =
                     // a critical hit is tested against evasion once more: evaded, it is an ordinary hit
                     let crit = rng.Chance(atk.CritChance * v.EnemyCritChanceMult * (if st.ContainsKey "Blinded" then v.BlindedEnemyCritMult else 1.0)) && not (hitChance < 100.0 && rng.Chance(100.0 - hitChance))
                     // "Defend with X% of Armour against Projectile Attacks / Critical Hits"
-                    let armourShare = (if atk.Melee then 1.0 else v.ArmourVsProjectiles) * (if crit then v.ArmourVsCrits else 1.0)
+                    let armourShare = (if atk.Melee then 1.0 else v.ArmourVsProjectiles) * (if crit then v.ArmourVsCrits else 1.0) * v.ArmourDefend
                     let critMult = if crit then 1.0 + Constants.monsterBaseCritBonus / 100.0 * (1.0 - v.LessCritDamageTaken / 100.0) else 1.0
                     let playerSt = Map.find env.Fight.Player.Name w.Actors
                     let shocked =
@@ -3841,7 +3841,9 @@ module Sim =
                           // the player's own ailments: Ignite is the only damaging one a monster's hit or the
                           // character itself puts on it (Shocked, Chilled, Frozen, Stunned are buffs of their own)
                           "Ignited", p.Dots |> List.exists (fun (until, _, t) -> t = Fire && until > w.Time)
-                          "DamagingAilment", p.Dots |> List.exists (fun (until, _, t) -> t = Fire && until > w.Time) ]
+                          "DamagingAilment", p.Dots |> List.exists (fun (until, _, t) -> t = Fire && until > w.Time)
+                          // on Low Energy Shield: at most 35% of its maximum (DefaultLowStatusThresholdPercent); none without any
+                          "LowEnergyShield", v.EnergyShield > 0.0 && p.EnergyShield <= Constants.lowStatusShare * v.EnergyShield ]
                     // charge states: "while at maximum Power Charges", "while you have no Frenzy Charges"
                     let playerSt = Map.find env.Fight.Player.Name w.Actors
                     let states =
