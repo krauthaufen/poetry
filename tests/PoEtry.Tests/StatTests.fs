@@ -2471,3 +2471,43 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         equal (box true) (box (hits (fight [] true) < 8 && hits (fight sure false) < 8))
         same (fight sure true) seeds
         same (fight sure false) seeds)
+
+    test "what an ailment scales from besides its own damage type, or in its place" (fun () ->
+        let foe = { EnemyDef.atLevel 83 1e15 with Mods = []; Attack = None }
+        let fight (t: DamageType) (dmg: float) (ms: Mod list) =
+            let bolt = { Skill.make "Bolt" [ Spell ] with BaseDamage = Map.ofList [ t, Range.fixedAt dmg ]; BaseCrit = 0.0 }
+            Fight.single foe { Actor.make "Player" ms [ bolt ] with Rotation = [ Actor.always "Bolt" ] } 5.2
+        let run t dmg ms = Sim.run (fight t dmg ms) 1u
+        let has (o: Outcome) k = count o ("inflict:" + k) > 0
+        // a fire hit of far more than the ailment threshold Ignites and does not Shock; with "Fire
+        // Damage from Hits Contributes to Shock Chance instead of Flammability and Ignite
+        // Magnitudes" it Shocks and never Ignites
+        let plain, shocking = run Fire 1e9 [], run Fire 1e9 (mods "unique_fire_damage_shocks" 1.0)
+        equal (box (true, false)) (box (has plain "Ignite", has plain "Shock"))
+        equal (box (false, true)) (box (has shocking "Ignite", has shocking "Shock"))
+        // cold: Chill and Freeze; with "Contributes to Flammability and Ignite Magnitudes instead
+        // of Chill Magnitude or Freeze Buildup" an Ignite and neither
+        let cold, burning = run Cold 1e9 [], run Cold 1e9 (mods "unique_cold_damage_ignites" 1.0)
+        equal (box (false, true)) (box (has cold "Ignite", has cold "Chill" || has cold "Freeze"))
+        equal (box (true, false)) (box (has burning "Ignite", has burning "Chill" || has burning "Freeze"))
+        // lightning: Shock; with "Contributes to Freeze Buildup instead of Shock Chance" a Freeze and no Shock
+        let lightning, freezing = run Lightning 1e9 [], run Lightning 1e9 (mods "unique_lightning_damage_freezes" 1.0)
+        equal (box (true, false)) (box (has lightning "Shock", has lightning "Freeze"))
+        equal (box (false, true)) (box (has freezing "Shock", has freezing "Freeze"))
+        // chaos shocks only where "Chaos Damage from Hits also Contributes to Shock Chance"
+        equal (box (false, true)) (box (has (run Chaos 1e9 []) "Shock", has (run Chaos 1e9 (mods "chaos_damage_can_shock" 1.0)) "Shock"))
+        // "Elemental Damage also Contributes to Bleeding Magnitude": a fire hit that always
+        // inflicts Bleeding makes the Bleeding a physical hit of the same damage makes
+        let bleeds = [ Mod.base' (AilmentChance Bleed) 100.0 ]
+        let bleeding (o: Outcome) = Map.tryFind "Bleed" o.DamageBy |> Option.defaultValue 0.0
+        near 0.0 (bleeding (run Fire 1000.0 bleeds))
+        let fromFire = bleeding (run Fire 1000.0 (bleeds @ mods "elemental_damage_can_inflict_bleeding" 1.0))
+        equal (box true) (box (fromFire > 0.0))
+        near (bleeding (run Physical 1000.0 bleeds)) fromFire
+        // the line that makes every element count for the ailments of all three
+        let all = mods "elemental_damage_also_contributes_to_flammability_ignite_chill_freeze_and_shock" 1.0
+        let o = run Fire 1e9 all
+        equal (box (true, true, true)) (box (has o "Ignite", has o "Shock", has o "Chill" || has o "Freeze"))
+        for f in [ fight Fire 1e9 (mods "unique_fire_damage_shocks" 1.0); fight Cold 1e9 (mods "unique_cold_damage_ignites" 1.0); fight Lightning 1e9 (mods "unique_lightning_damage_freezes" 1.0)
+                   fight Fire 1000.0 (bleeds @ mods "elemental_damage_can_inflict_bleeding" 1.0); fight Fire 1e9 all; fight Physical 1e9 (mods "physical_damage_from_hits_also_contributes_to_chill_and_freeze" 1.0) ] do
+            same f seeds)

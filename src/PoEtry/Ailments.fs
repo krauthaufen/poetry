@@ -93,14 +93,33 @@ module Ailments =
     let private chanceMods (ctx: Ctx) mods a =
         Mods.sumBase ctx [ AilmentChance a ] mods, Mods.mult ctx [ AilmentChance a ] mods
 
+    /// Damage types an ailment can be made to scale from besides its own ("Fire Damage from
+    /// Hits Contributes to Shock Chance", "Elemental Damage also Contributes to Bleeding
+    /// Magnitude"), and its own types it can be made not to scale from ("... instead of
+    /// Flammability and Ignite Magnitudes"). Each is a flag of the attacker
+    /// (`alsoFromStat`, `notFromStat`); `sourcesChanged` is set with any of them.
+    let alsoFrom =
+        [ Shock, Fire; Shock, Cold; Shock, Chaos; Ignite, Cold; Ignite, Lightning; Freeze, Lightning; Freeze, Fire; Freeze, Physical
+          Chill, Physical; Chill, Fire; Chill, Lightning; Bleed, Fire; Bleed, Cold; Bleed, Lightning ]
+    let notFrom = [ Ignite, Fire; Chill, Cold; Freeze, Cold; Shock, Lightning ]
+    let alsoFromStat (a: Ailment) (t: DamageType) = "AilmentAlsoFrom:" + Ailment.name a + ":" + DamageType.name t
+    let notFromStat (a: Ailment) (t: DamageType) = "AilmentNotFrom:" + Ailment.name a + ":" + DamageType.name t
+    let sourcesChanged = "AilmentSourcesChanged"
+
     /// Damage types an ailment scales from for this attacker ("All damage can ignite" etc.).
     let scalesFromWith (ctx: Ctx) mods a =
         let all flag = Mods.flag ctx (Named flag) mods
-        match a with
-        | Ignite when all "AllDamageIgnites" -> DamageType.all
-        | Chill when all "AllDamageChills" -> DamageType.all
-        | Shock when all "AllDamageShocks" -> DamageType.all
-        | _ -> scalesFrom a
+        let basic =
+            match a with
+            | Ignite when all "AllDamageIgnites" -> DamageType.all
+            | Chill when all "AllDamageChills" -> DamageType.all
+            | Shock when all "AllDamageShocks" -> DamageType.all
+            | _ -> scalesFrom a
+        if not (all sourcesChanged) then basic
+        else
+            DamageType.all |> List.filter (fun t ->
+                (List.contains t basic || (List.contains (a, t) alsoFrom && all (alsoFromStat a t)))
+                && not (List.contains (a, t) notFrom && all (notFromStat a t)))
 
     /// Chance in percent that this hit inflicts the ailment.
     let chance (ctx: Ctx) mods defender (hit: HitResult) a =

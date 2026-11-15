@@ -1055,6 +1055,12 @@ module StatMap =
 
     let private explicit (id: string) (v: float) : Meaning option =
         let one m = Some(Mods [ m ])
+        // types an ailment scales from besides its own, and own types it no longer scales from
+        let ailmentSources (also: (Ailment * DamageType) list) (notFrom: (Ailment * DamageType) list) =
+            Some(Mods(
+                    Mod.flag (Named Ailments.sourcesChanged)
+                    :: (also |> List.map (fun (a, t) -> Mod.flag (Named(Ailments.alsoFromStat a t))))
+                    @ (notFrom |> List.map (fun (a, t) -> Mod.flag (Named(Ailments.notFromStat a t))))))
         match id with
         | id when readWhereBuilt.Contains id -> Some Structural
         // (a support's "more / less life" for the minions of its gem: Behaviours.minions)
@@ -1504,6 +1510,15 @@ module StatMap =
         | "ancestral_boosted_attack_damage_+%" -> one (Mod.inc (Damage AllDamage) v |> Mod.whenever (SkillIs Attack) |> Mod.whenever (WhileBuff "EmpoweredAttacks:Ancestral Boost"))
         | "ancestral_boosted_area_of_effect_+%" -> one (Mod.inc AreaOfEffect v |> Mod.whenever (SkillIs Attack) |> Mod.whenever (WhileBuff "EmpoweredAttacks:Ancestral Boost"))
         | "next_attack_is_ancestrally_boosted_for_x_seconds_on_heavy_stunning_unique_or_rare_enemy" -> one (Mod.base' (Named "AncestralBoostOnHeavyStun") v)
+        // what an ailment scales from besides its own damage, or in its place (Ailments.scalesFromWith)
+        | "unique_fire_damage_shocks" -> ailmentSources [ Shock, Fire ] [ Ignite, Fire ]
+        | "unique_cold_damage_ignites" -> ailmentSources [ Ignite, Cold ] [ Chill, Cold; Freeze, Cold ]
+        | "unique_lightning_damage_freezes" -> ailmentSources [ Freeze, Lightning ] [ Shock, Lightning ]
+        | "elemental_damage_can_inflict_bleeding" -> ailmentSources [ Bleed, Fire; Bleed, Cold; Bleed, Lightning ] []
+        | "chaos_damage_can_shock" -> ailmentSources [ Shock, Chaos ] []
+        | "physical_damage_from_hits_also_contributes_to_chill_and_freeze" -> ailmentSources [ Chill, Physical; Freeze, Physical ] []
+        | "elemental_damage_also_contributes_to_flammability_ignite_chill_freeze_and_shock" ->
+            ailmentSources [ Ignite, Cold; Ignite, Lightning; Chill, Fire; Chill, Lightning; Freeze, Fire; Freeze, Lightning; Shock, Fire; Shock, Cold ] []
         // "Your Hits cannot be Evaded by Pinned Enemies"
         | "pinned_enemies_cannot_evade_your_attacks" -> one (Mod.override' HitChance 100.0 |> Mod.whenever (EnemyHas "Pinned"))
         // Puppet Master and Archon of Undeath (Behaviours.puppetMaster, archonOfUndeath)

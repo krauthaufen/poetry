@@ -585,6 +585,11 @@ module Flat =
     let private qAllIgnites = site MSkill Flag (named "AllDamageIgnites")
     let private qAllChills = site MSkill Flag (named "AllDamageChills")
     let private qAllShocks = site MSkill Flag (named "AllDamageShocks")
+    /// What an ailment scales from besides, or no longer (`Ailments.alsoFrom`, `notFrom`): asked
+    /// only where something changes it.
+    let private qSourcesChanged = site MSkill Flag (named Ailments.sourcesChanged)
+    let private qSourceAlso = Ailments.alsoFrom |> List.map (fun (a, t) -> a, t, site MSkill Flag (named (Ailments.alsoFromStat a t))) |> Array.ofList
+    let private qSourceNot = Ailments.notFrom |> List.map (fun (a, t) -> a, t, site MSkill Flag (named (Ailments.notFromStat a t))) |> Array.ofList
     let private qAilChance = perAilment (fun a -> site MSkill Base [ AilmentChance a ])
     let private qAilChanceMult = perAilment (fun a -> siteMult MSkill [ AilmentChance a ])
     let private qFaster = site MSkill Inc (named "FasterAilments")
@@ -5540,9 +5545,24 @@ module Flat =
             | Shock when flagQ ev qAllShocks -> allTypes
             | _ -> (at scalesOf (ailmentIndex a))
         let mutable sum = 0.0
-        for place in 0 .. types.Length - 1 do
-            let t = at types place
-            sum <- sum + (at un t)
+        if flagQ ev qSourcesChanged then
+            for i in 0 .. damageTypes.Length - 1 do
+                let dt = damageTypes.[i]
+                let t = typeIndex dt
+                let mutable counts = false
+                for place in 0 .. types.Length - 1 do
+                    if at types place = t then counts <- true
+                if not counts then
+                    for (b, u, q) in qSourceAlso do
+                        if b = a && u = dt && flagQ ev q then counts <- true
+                if counts then
+                    for (b, u, q) in qSourceNot do
+                        if b = a && u = dt && flagQ ev q then counts <- false
+                if counts then sum <- sum + (at un t)
+        else
+            for place in 0 .. types.Length - 1 do
+                let t = at types place
+                sum <- sum + (at un t)
         sum
 
     let private ailmentDuration (ev: Ev) (a: Ailment) =
