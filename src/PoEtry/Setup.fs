@@ -258,6 +258,11 @@ module Setup =
                 let one = sheet.Weapons |> List.filter (fun w -> not (List.contains (Tag "WeaponSet2") w.Tags)) |> List.sumBy strength
                 let two = sheet.Weapons |> List.filter (fun w -> List.contains (Tag "WeaponSet2") w.Tags) |> List.sumBy strength
                 two > one)
+        // Wind Dancer's stages build up by themselves: full on the sheet and when a fight starts
+        let maxResources, startResources =
+            match Behaviours.windDancerStages db sheet build with
+            | Some n -> Map.add "WindDancerStage" n maxResources, Map.add "WindDancerStage" (if o.StartEmpty then 0 else n) startResources
+            | None -> maxResources, startResources
         let vitals = Defence.computeWith (if sheetSetTwo then Map.add "WeaponSetTwo" 1 startResources else startResources) bases sheet
         let vitals = if o.LowLife && vitals.Life > 1.0 then { vitals with StartLife = 0.35 } else vitals
         // life reserved by skills ("Reserve Life instead of Spirit") and by stats: what is left is all
@@ -744,8 +749,6 @@ module Setup =
                    if not spammed.IsEmpty && spammed |> List.forall onTheMove && (gains sheet.Mods || used |> List.exists (fun (_, p) -> gains p.Skill.Mods)) then [ "Moving", 1 ]
                    else [])
                 @ (if frenzy.IsSome then [ "CombatFrenzyReady", 1 ] else [])
-                // Wind Dancer's stages build up before the fight, by themselves
-                @ (match windDancer with Some (_, _, _, most) when not o.StartEmpty -> [ "WindDancerStage", most ] | _ -> [])
                 // a Whirlwind the character builds is built up before the fight (it lasts while
                 // the character stands in it), like a charge that needs no kill
                 @ (let stages = Behaviours.whirlwindStages db c.Build
@@ -770,7 +773,7 @@ module Setup =
                 Map.fold (fun m k v -> Map.add k v m) c.MaxResources infusionMaxima |> (if frenzy.IsSome then Map.add "CombatFrenzyReady" 1 else id)
                 |> (let stages = Behaviours.whirlwindStages db c.Build
                     if stages > 0 then Map.add "Whirlwind" stages else id)
-                |> (match windDancer with Some (_, _, _, most) -> Map.add "WindDancerStage" most | None -> id)
+
             ResourceDurations = Map.fold (fun m k v -> Map.add k v m) (Behaviours.chargeDurations sheet) (Behaviours.infusionDurations db sheet c.Build)
             KeptChargesPause = o.KeptChargesPause
             // user: stored uses are "just two cooldowns"

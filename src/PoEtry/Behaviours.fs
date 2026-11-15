@@ -95,6 +95,19 @@ module Behaviours =
     /// deals `wind_dancer_damage_+%_final_per_stage` more and has
     /// `wind_dancer_area_of_effect_+%_final_per_stage` more area per stage, and takes them all.
     /// Returns the skill, its rules, the periodic that grants stages, and the most stages.
+    /// Wind Dancer's most stages, where a build has the gem: what the sheet and a fight start with.
+    let windDancerStages (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) : int option =
+        let mods = ModDb.ofList sheet.Mods
+        build.Groups |> List.filter (fun g -> g.Enabled) |> List.collect (fun g -> g.Gems)
+        |> List.filter (fun x -> x.Enabled && not x.IsSupport)
+        |> List.tryPick (fun gem ->
+            if Map.tryFind gem.Name db.Gems |> Option.exists (fun gd -> gd.AdditionalEffects |> List.contains "TriggeredWindDancerPlayer") then
+                let raw = Gems.rawStats db mods { Gem = gem.Name; Level = gem.Level; Quality = gem.Quality; StatSet = 1; Supports = [] }
+                match raw |> List.filter (fun (k, _) -> k = "wind_dancer_maximum_number_of_stages") |> List.sumBy snd with
+                | 0.0 -> None
+                | n -> Some(int n)
+            else None)
+
     let windDancer (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) : (Skill list * Rule list * Periodic list * int) option =
         let mods = ModDb.ofList sheet.Mods
         build.Groups |> List.filter (fun g -> g.Enabled)
