@@ -500,8 +500,8 @@ module Setup =
                     let empowered, empRules, empGrants = Behaviours.empowerNext db charMods (Gems.chooseWeapon db setup.Gem sheet.Weapons) setup s
                     let cryRules, cryGrants = cryRules @ empRules, cryGrants @ empGrants
                     // Fist of War, Ancestral Call: an Ancestral Boost every few seconds
-                    let s, boostClock, boostRules = Behaviours.ancestralBoost db charMods setup s
-                    let empowered, cryRules = empowered @ boostClock, cryRules @ boostRules
+                    let s, boostRules = Behaviours.ancestralBoost db charMods setup s
+                    let cryRules = cryRules @ boostRules
                     let tipped = Behaviours.iceTipped db charMods (Gems.chooseWeapon db setup.Gem sheet.Weapons) setup s
                     let cryRules = cryRules @ (match tipped with Some (_, rs, _) -> rs | None -> [])
                     let cryGrants = cryGrants @ (match tipped with Some (_, _, ms) -> ms | None -> [])
@@ -758,7 +758,6 @@ module Setup =
         let heraldSkills = heraldSkills @ (thorns |> Option.map fst |> Option.toList)
         // "X% to gain Archon of Undeath when you create an Offering"
         let undeath = Behaviours.archonOfUndeath sheet "ArchonOfUndeathOnOffering" (WithTag(Tag "Type:Offering"))
-        let heraldSkills = heraldSkills @ (undeath |> Option.map fst |> Option.toList)
         // Arctic Armour: the burst a melee hit on the player sets off
         let arctic = Behaviours.arcticArmour db sheet c.Build
         let heraldSkills = heraldSkills @ (match arctic with Some (s, _, _, _) -> [ s ] | None -> [])
@@ -839,7 +838,7 @@ module Setup =
                 @ Behaviours.totemRecently sheet pressedSkills
                 @ Behaviours.recentStates sheet pressedSkills @ Behaviours.intimidateOnImmobilise sheet @ Behaviours.ancestralBoostOnStun sheet @ Behaviours.debilitateOnWarcry sheet @ Behaviours.fearIncarnate sheet pressedSkills
                 @ (thorns |> Option.map snd |> Option.toList)
-                @ (undeath |> Option.map snd |> Option.defaultValue [])
+                @ undeath
                 @ (match arctic with Some (_, r, _, _) -> r | None -> [])
                 @ Behaviours.scavengedPlating db sheet c.Build
                 @ Behaviours.fullBreakRules pressedSkills

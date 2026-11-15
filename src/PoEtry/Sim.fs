@@ -127,6 +127,10 @@ type Reaction =
     /// buff for each (`RareMods.buffName`), a new one of a name starting its time again ("When
     /// you kill a Rare monster, you gain its Modifiers for 60 seconds").
     | GainRareMods of duration: float
+    /// At most once every `seconds`: if the time since this was last done is over, do this and
+    /// start the time again. The time is the actor's own, by `key`; it is no cooldown (cooldown
+    /// recovery does not shorten it) and no buff (nothing makes it expire faster).
+    | Every of key: string * seconds: float * then': Reaction
 
 /// "Enemies you sufficiently Overkill ... cause an explosion that Ignites nearby enemies
 /// based on the Overkill damage dealt" (Herald of Ash). `Skill` is the explosion among the
@@ -1112,7 +1116,7 @@ module Sim =
         let rec inReaction (r: Reaction) =
             match r with
             | IfBuff (b, next) -> b = name || inReaction next
-            | SpendStack (_, next) | IfEnemyHas (_, next) -> inReaction next
+            | SpendStack (_, next) | IfEnemyHas (_, next) | Every (_, _, next) -> inReaction next
             | WithCorpse (a, b) -> inReaction a || inReaction b
             | _ -> false
         let rec skill (s: Skill) = inMods s.Mods || s.Parts |> List.exists skill
@@ -1565,7 +1569,7 @@ module Sim =
                     let rec find reaction =
                         match reaction with
                         | ApplyCurse (n, d, _) when n = k || "Curse:" + n = k -> Some d
-                        | IfEnemyHas (_, next) | IfBuff (_, next) | SpendStack (_, next) -> find next
+                        | IfEnemyHas (_, next) | IfBuff (_, next) | SpendStack (_, next) | Every (_, _, next) -> find next
                         | _ -> None
                     find r.Reaction)
                 |> Option.forall (fun d -> x.Expires - now <= d / 2.0)))
@@ -1749,6 +1753,13 @@ module Sim =
                           match Map.tryFind buff (Map.find actor.Name w.Actors).Buffs with
                           | Some e when e.Stacks > 0 && e.Expires > w.Time -> perform next w
                           | _ -> w
+                      | Every (key, seconds, next) ->
+                          let k = "Every:" + key
+                          if w.Time >= (Map.tryFind k (Map.find actor.Name w.Actors).Energy |> Option.defaultValue -infinity) - 1e-9 then
+                              { w with Counts = bump ("every:" + key) w.Counts }
+                              |> updateActor actor.Name (fun st -> { st with Energy = Map.add k (w.Time + seconds) st.Energy })
+                              |> perform next
+                          else w
                       | IfEnemyHas (st, next) ->
                           match target with
                           | Some t when w.Enemies.[t].Life > 0.0 && (status w.Enemies.[t]).ContainsKey st -> perform next w
@@ -1792,7 +1803,7 @@ module Sim =
                         | Some t when w.Enemies.[t].Life > 0.0 -> f t
                         | _ -> w
                      match reaction with
-                     | SpendStack _ | SetStacks _ | Empower _ | IfEnemyHas _ | IfBuff _ | WithCorpse _ | IgniteSelf _ | RegenES _ | NoReaction -> w
+                     | SpendStack _ | SetStacks _ | Empower _ | IfEnemyHas _ | IfBuff _ | Every _ | WithCorpse _ | IgniteSelf _ | RegenES _ | NoReaction -> w
                      | SummonEmpowered (pool, count, duration, first) -> summonWith env pool count duration first w
                      | SummonPerCorpse (pool, duration, deadMinions) ->
                          let size = env.Fight.Minions |> List.filter (fun m -> m.Pool = Some pool) |> List.length

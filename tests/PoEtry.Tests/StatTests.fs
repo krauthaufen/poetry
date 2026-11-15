@@ -2398,18 +2398,27 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         // 0.9 s, 20.2 s: 14 of 28 and 11 of 22 hits fall into the ten seconds
         let undeath = Behaviours.archonOfUndeath (sheet (mods "chance_%_to_gain_archon_of_undeath_on_using_command_skill" 100.0)) "ArchonOfUndeathOnCommand" (WithTag(Tag "Command"))
         match undeath with
-        | Some (skill, rules) ->
-            near 30.0 skill.Cooldown.Value
-            let commander = { Actor.make "Mage" sure [ hit "Mage: Bomb" 100.0 0.7 [ Spell; Tag "Command" ]; skill ] with Rotation = [ Actor.always "Mage: Bomb" ]; Rules = rules }
-            let follower = { Actor.make "Warrior" sure [ hit "Warrior: Slash" 100.0 0.9 [ Attack ] ] with Rotation = [ Actor.always "Warrior: Slash" ] }
-            let f = { Fight.single foe idle 20.2 with Minions = [ commander; follower ] }
+        | [ { Reaction = Every (_, every, GrantMinionBuff (_, lasts, _)) } ] as rules ->
+            near 30.0 every
+            near 10.0 lasts
+            let fightWith (more: Mod list) =
+                let commander = { Actor.make "Mage" (sure @ more) [ hit "Mage: Bomb" 100.0 0.7 [ Spell; Tag "Command" ] ] with Rotation = [ Actor.always "Mage: Bomb" ]; Rules = rules }
+                let follower = { Actor.make "Warrior" sure [ hit "Warrior: Slash" 100.0 0.9 [ Attack ] ] with Rotation = [ Actor.always "Warrior: Slash" ] }
+                { Fight.single foe idle 20.2 with Minions = [ commander; follower ] }
+            let f = fightWith []
             let o = Sim.run f 1u
-            equal 1 (count o "trigger:Archon of Undeath")
+            equal 1 (count o "every:Archon of Undeath")
             near (14.0 * 125.0 + 14.0 * 100.0) (dealt o "Mage: Bomb (hit)")
             near (11.0 * 125.0 + 11.0 * 100.0) (dealt o "Warrior: Slash (hit)")
             same f seeds
-        | None -> failwith "no Archon of Undeath"
-        equal (box true) (box (Behaviours.archonOfUndeath (sheet []) "ArchonOfUndeathOnCommand" AnySkill).IsNone)
+            // the recovery is no cooldown: with 100% increased cooldown recovery (it would be over
+            // after 15 s, and a second Archon would come) there is still one, and the same damage
+            let quick = fightWith [ Mod.inc CooldownRecovery 100.0 ]
+            equal 1 (count (Sim.run quick 1u) "every:Archon of Undeath")
+            near (14.0 * 125.0 + 14.0 * 100.0) (dealt (Sim.run quick 1u) "Mage: Bomb (hit)")
+            same quick seeds
+        | other -> failwithf "no Archon of Undeath: %A" other
+        equal (box true) (box (Behaviours.archonOfUndeath (sheet []) "ArchonOfUndeathOnCommand" AnySkill).IsEmpty)
         equal (box (Named "ArchonOfUndeathOnOffering")) (box (mods "chance_%_to_gain_archon_of_undeath_when_you_create_an_offering" 20.0).Head.Stat)
         equal (box (Mod.inc (Named "PuppetMasterDuration") 30.0)) (box (mods "puppet_master_duration_+%" 30.0).Head))
 
@@ -2418,17 +2427,34 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         let slam = { Skill.make "Slam" [ Attack; Melee; Slam ] with BaseDamage = Map.ofList [ Physical, Range.fixedAt 100.0 ]; BaseCrit = 0.0 }
         // a slam a second, a boost every 2.5 s: the first slam is boosted, then those that
         // start at 3, 6 and 9. 12 slams, 4 of them at 130
-        let boosted (s: Skill) =
-            let clock = { Skill.make "Slam: Ancestral Boost" [ Triggered ] with BaseCrit = 0.0; Hits = []; Cooldown = Some 2.5 }
-            let rules =
-                [ { Hook = OnUse; Filter = Called "Slam"; Chance = 100.0; Reaction = RemoveBuff Behaviours.ancestralBoostBuff }
-                  { Hook = OnUse; Filter = Called "Slam"; Chance = 100.0; Reaction = TriggerSkill clock.Name }
-                  { Hook = OnUse; Filter = Called clock.Name; Chance = 100.0; Reaction = SetStacks(Behaviours.ancestralBoostBuff, 1) } ]
-            let player = { Actor.make "Player" [ Mod.base' (Named "Accuracy") 1e9 ] [ s; clock ] with Rotation = [ Actor.always "Slam" ]; Rules = rules } |> Behaviours.ancestralBoosted
+        let boostedWith (more: Mod list) (s: Skill) =
+            let rules = [ { Hook = OnUse; Filter = Called "Slam"; Chance = 100.0; Reaction = Every("Ancestral Boost:Slam", 2.5, SetStacks(Behaviours.ancestralBoostReady, 1)) } ]
+            let player = { Actor.make "Player" ([ Mod.base' (Named "Accuracy") 1e9 ] @ more) [ s ] with Rotation = [ Actor.always "Slam" ]; Rules = rules } |> Behaviours.ancestralBoosted
             Fight.single foe player 12.2
+        let boosted = boostedWith []
         let dealt f = (Sim.run f 1u).DamageBy |> Map.toList |> List.sumBy snd
         near (8.0 * 100.0 + 4.0 * 130.0) (dealt (boosted slam))
         same (boosted slam) seeds
+        // the time between boosts is no cooldown: 100% increased cooldown recovery changes nothing
+        // (as a cooldown it would be 1.25 s: the slams starting at 0, 2, 4, ... 10, six of them)
+        near (8.0 * 100.0 + 4.0 * 130.0) (dealt (boostedWith [ Mod.inc CooldownRecovery 100.0 ] slam))
+        same (boostedWith [ Mod.inc CooldownRecovery 100.0 ] slam) seeds
+        // a boost is of a whole use: a slam of two hits, the first at half its time. The boost
+        // is there for both hits of the slams that start at 0, 3, 6 and 9: 8 hits of 24 at 130
+        let twice = { slam with Hits = [ 0.5, 1.0; 1.0, 1.0 ] }
+        near (16.0 * 100.0 + 8.0 * 130.0) (dealt (boosted twice))
+        same (boosted twice) seeds
+        // "The next Attack you use within 4 seconds after Heavy Stunning a Rare or Unique Enemy":
+        // a slam of two hits a second whose every hit Heavy Stuns (a status put on by rule here).
+        // The first slam is not boosted, its second hit neither, though the first hit has stunned;
+        // every slam after it is, with both hits: 2 at 100 and 22 at 130
+        let stunning =
+            let rules =
+                [ { Hook = OnHit; Filter = Called "Slam"; Chance = 100.0; Reaction = GrantBuff(Behaviours.ancestralBoostReady, 4.0, 1, []) } ]
+            let player = { Actor.make "Player" [ Mod.base' (Named "Accuracy") 1e9 ] [ twice ] with Rotation = [ Actor.always "Slam" ]; Rules = rules } |> Behaviours.ancestralBoosted
+            Fight.single foe player 12.2
+        near (2.0 * 100.0 + 22.0 * 130.0) (dealt stunning)
+        same stunning seeds
         // a strike gains nothing of it but what "Ancestrally Boosted Attacks" have: 50% increased damage
         let strike = { slam with Tags = Set.ofList [ Attack; Melee; Strike ] }
         near (12.0 * 100.0) (dealt (boosted strike))
@@ -2441,9 +2467,10 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
             | Some p -> p
             | None -> failwith "Earthquake cannot be pressed"
         let one, three = pressedWith "Fist of War I", pressedWith "Fist of War III"
-        let clockOf (p: Setup.Pressed) = p.Extra |> List.find (fun s -> s.Name = "Earthquake: Ancestral Boost")
-        near 6.0 (clockOf one).Cooldown.Value
-        near 14.0 (clockOf three).Cooldown.Value
+        let clockOf (p: Setup.Pressed) = p.Rules |> List.pick (fun r -> match r.Reaction with Every ("Ancestral Boost:Earthquake", s, SetStacks (b, 1)) when b = Behaviours.ancestralBoostReady -> Some s | _ -> None)
+        near 6.0 (clockOf one)
+        near 14.0 (clockOf three)
+        equal (box true) (box (one.Extra |> List.forall (fun s -> s.Cooldown.IsNone)))
         let more (p: Setup.Pressed) = p.Skill.Mods |> List.filter (fun m -> m.Source = "Ancestral Boost" && m.Kind = More) |> List.map (fun m -> m.Value)
         equal 0 (more one).Length
         near (100.0 * (1.6 / 1.3 - 1.0)) (more three).Head
@@ -2451,7 +2478,7 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         let c = load blank Options.defaults
         match Behaviours.ancestralBoostOnStun { c.Sheet with Mods = mods "next_attack_is_ancestrally_boosted_for_x_seconds_on_heavy_stunning_unique_or_rare_enemy" 6.0 } with
         | [ { Hook = OnInflict HeavyStun; Reaction = IfEnemyHas ("RareOrUnique", GrantBuff (b, seconds, 1, [])) } ] ->
-            equal (box Behaviours.ancestralBoostBuff) (box b)
+            equal (box Behaviours.ancestralBoostReady) (box b)
             near 6.0 seconds
         | other -> failwithf "unexpected %A" other)
 

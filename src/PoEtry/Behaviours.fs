@@ -1339,6 +1339,7 @@ module Behaviours =
                 | DropRemnant (name, d, x) -> DropRemnant(c name, d, x)
                 | SpendStack (b, next) -> SpendStack(b, reaction next)
                 | IfBuff (b, next) -> IfBuff(b, reaction next)
+                | Every (key, seconds, next) -> Every(key, seconds, reaction next)
                 | IfEnemyHas (st, next) -> IfEnemyHas(st, reaction next)
                 | WithCorpse (next, otherwise) -> WithCorpse(reaction next, reaction otherwise)
                 | other -> other
@@ -1375,6 +1376,7 @@ module Behaviours =
                 | ChargeBuff (name, charge, perStack, seconds, double) -> ChargeBuff(name, charge, perStack, seconds / k, double)
                 | SpendStack (b, next) -> SpendStack(b, scale next)
                 | IfBuff (b, next) -> IfBuff(b, scale next)
+                | Every (key, seconds, next) -> Every(key, seconds, scale next)
                 | IfEnemyHas (st, next) -> IfEnemyHas(st, scale next)
                 | WithCorpse (next, otherwise) -> WithCorpse(scale next, scale otherwise)
                 | other -> other
@@ -2123,12 +2125,13 @@ module Behaviours =
     /// Command skills have 200% more cooldown recovery, x increased Archon effect, for an
     /// Archon's 10 seconds (x increased Archon duration); then no Archon can be gained for the
     /// recovery period (20 s, see `elementalArchon`). Gained by chance "when you use a Command
-    /// Skill" or "when you create an Offering". The skill that stands for gaining it has the
-    /// buff's time and the recovery as its cooldown; its use puts the buff on every minion.
-    let archonOfUndeath (sheet: CharacterSheet) (stat: string) (filter: SkillFilter) : (Skill * Rule list) option =
+    /// Skill" or "when you create an Offering": the buff on every minion, at most once in the
+    /// buff's time and the recovery (a time of its own: no cooldown, so cooldown recovery does
+    /// not shorten it).
+    let archonOfUndeath (sheet: CharacterSheet) (stat: string) (filter: SkillFilter) : Rule list =
         let db = ModDb.ofList sheet.Mods
         let chance = Mods.sumBase Ctx.empty [ Named stat ] db
-        if chance <= 0.0 then None
+        if chance <= 0.0 then []
         else
             let effect = Mods.inc Ctx.empty [ Named "ArchonEffect" ] db
             let seconds = 10.0 * Mods.inc Ctx.empty [ Named "ArchonDuration" ] db / buffExpiry sheet
@@ -2136,11 +2139,7 @@ module Behaviours =
             let mods =
                 [ Mod.more (Damage AllDamage) (25.0 * effect); Mod.more CooldownRecovery (200.0 * effect) |> Mod.whenever (SkillIs(Tag "Command")) ]
                 |> List.map (Mod.from archonOfUndeathName)
-            let skill = { Skill.make archonOfUndeathName [ Triggered ] with BaseCrit = 0.0; Hits = []; Cooldown = Some(seconds + recovery) }
-            Some(
-                skill,
-                [ { Hook = OnUse; Filter = filter; Chance = min 100.0 chance; Reaction = TriggerSkill archonOfUndeathName }
-                  { Hook = OnUse; Filter = Called archonOfUndeathName; Chance = 100.0; Reaction = GrantMinionBuff(archonOfUndeathName, seconds, mods) } ])
+            [ { Hook = OnUse; Filter = filter; Chance = min 100.0 chance; Reaction = Every(archonOfUndeathName, seconds + recovery, GrantMinionBuff(archonOfUndeathName, seconds, mods)) } ]
 
     let minions (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) : Actor list * string list =
         let charMods = ModDb.ofList sheet.Mods
@@ -2277,11 +2276,8 @@ module Behaviours =
                     // minions: the player commands them together)
                     let commands = ordered |> List.exists (fun s -> s.Tags.Contains(Tag "Command"))
                     let rules = if commands then rules @ puppetMaster sheet else rules
-                    let archon = if commands then archonOfUndeath sheet "ArchonOfUndeathOnCommand" (WithTag(Tag "Command")) else None
-                    let withArchon (i: int) (a: Actor) =
-                        match archon with
-                        | Some (skill, rs) when i = 1 -> { a with Skills = a.Skills @ [ skill ]; Rules = a.Rules @ rs }
-                        | _ -> a
+                    let archon = if commands then archonOfUndeath sheet "ArchonOfUndeathOnCommand" (WithTag(Tag "Command")) else []
+                    let withArchon (i: int) (a: Actor) = if i = 1 then { a with Rules = a.Rules @ archon } else a
                     // a minion without any damaging skill (a healer) simply doesn't fight
                     if ordered.IsEmpty then [], []
                     else
@@ -2328,19 +2324,14 @@ module Behaviours =
             // an Archon of Undeath and its recovery are the player's: of all the minions that could
             // roll for it, the first does (the others' commands roll for nothing)
             let named =
-                let carries (a: Actor) = a.Skills |> List.exists (fun s -> s.Name = archonOfUndeathName)
+                let gains (r: Rule) = match r.Reaction with Every (n, _, _) when n = archonOfUndeathName -> true | _ -> false
+                let carries (a: Actor) = a.Rules |> List.exists gains
                 match named |> List.tryFindIndex carries with
                 | None -> named
                 | Some first ->
                     named |> List.mapi (fun i a ->
                         if i = first || not (carries a) then a
-                        else
-                            { a with
-                                Skills = a.Skills |> List.filter (fun s -> s.Name <> archonOfUndeathName)
-                                Rules = a.Rules |> List.filter (fun r ->
-                                    match r.Reaction with
-                                    | TriggerSkill n | GrantMinionBuff (n, _, _) when n = archonOfUndeathName -> false
-                                    | _ -> true) })
+                        else { a with Rules = a.Rules |> List.filter (gains >> not) })
             named, List.concat notes
 
     /// What summons a build's temporary minions (the pools `minions` makes), as rules and
@@ -2687,9 +2678,12 @@ module Behaviours =
                     Parts = skill.Parts |> List.map (fun p -> if p.Name.EndsWith ": Explosion" then { p with Mods = p.Mods @ [ Mod.base' (Named "PartDelay") seconds |> Mod.from "detonation time" ] } else p) }
         | _ -> skill
 
-    /// The state of an attack that is Ancestrally Boosted: stacks are the attacks to come that
-    /// are (an attack uses one up, as an empowerment of a warcry: the engines).
-    let ancestralBoostBuff = "EmpoweredAttacks:Ancestral Boost"
+    /// The state of the player while the attack it is making is Ancestrally Boosted: from the
+    /// start of that use until the next attack it uses itself begins.
+    let ancestralBoostBuff = "AncestrallyBoosted"
+
+    /// The next attack the player uses itself is Ancestrally Boosted.
+    let ancestralBoostReady = "AncestralBoostReady"
 
     /// "An Ancestrally Boosted Slam has 30% more damage and 25% increased area of effect".
     let private boostMods (times: float) =
@@ -2700,43 +2694,52 @@ module Behaviours =
     /// few seconds": every `ancestral_slam_interval_duration`; III: "Ancestral Boost has double
     /// effect on Supported Skills") and Ancestral Call (Strikes, every
     /// `ancestral_call_spirit_strike_interval_ms`). A use of the skill that starts when the
-    /// time since the last boost is over is Ancestrally Boosted. Gives the
-    /// skill (with what a double effect adds), the skill that keeps the time, and the rules.
-    let ancestralBoost (db: GameDb) (charMods: ModDb) (setup: GemSetup) (skill: Skill) : Skill * Skill list * Rule list =
+    /// time since the last boost is over is Ancestrally Boosted (the time is no cooldown:
+    /// cooldown recovery does not shorten it). Gives the skill (with what a double effect
+    /// adds) and the rule.
+    let ancestralBoost (db: GameDb) (charMods: ModDb) (setup: GemSetup) (skill: Skill) : Skill * Rule list =
         let raw = Gems.rawStats db charMods setup
         let sum id = raw |> List.filter (fun (k, _) -> k = id) |> List.sumBy snd
         let seconds = (sum "ancestral_slam_interval_duration" + sum "ancestral_call_spirit_strike_interval_ms") / 1000.0
-        if seconds <= 0.0 || not (skill.Tags.Contains Attack) then skill, [], []
+        if seconds <= 0.0 || not (skill.Tags.Contains Attack) then skill, []
         else
-            let gate = skill.Name + ": Ancestral Boost"
-            let clock = { Skill.make gate [ Triggered ] with BaseCrit = 0.0; Hits = []; Cooldown = Some seconds }
             // twice the effect: 60% more in all and 50% increased area, for this skill and its parts
             let rec doubled (s: Skill) = { s with Mods = s.Mods @ boostMods 2.0; Parts = s.Parts |> List.map doubled }
             (if sum "double_ancestral_boost_effect" > 0.0 then doubled skill else skill),
-            [ clock ],
-            // (as a use of the skill starts, what is left of an earlier boost goes: a channelled
-            // slam does not use it up the way other attacks do; then, the time being over, this
-            // use is boosted)
-            [ { Hook = OnUse; Filter = Called skill.Name; Chance = 100.0; Reaction = RemoveBuff ancestralBoostBuff }
-              { Hook = OnUse; Filter = Called skill.Name; Chance = 100.0; Reaction = TriggerSkill gate }
-              { Hook = OnUse; Filter = Called gate; Chance = 100.0; Reaction = SetStacks(ancestralBoostBuff, 1) } ]
+            // (the use that starts when the time is over is the next attack: `ancestralBoosted`)
+            [ { Hook = OnUse; Filter = Called skill.Name; Chance = 100.0; Reaction = Every("Ancestral Boost:" + skill.Name, seconds, SetStacks(ancestralBoostReady, 1)) } ]
 
     /// "The next Attack you use within N seconds after Heavy Stunning a Rare or Unique Enemy is
     /// Ancestrally Boosted".
     let ancestralBoostOnStun (sheet: CharacterSheet) : Rule list =
         match Mods.sumBase Ctx.empty [ Named "AncestralBoostOnHeavyStun" ] (ModDb.ofList sheet.Mods) with
         | seconds when seconds > 0.0 ->
-            [ { Hook = OnInflict HeavyStun; Filter = AnySkill; Chance = 100.0; Reaction = IfEnemyHas("RareOrUnique", GrantBuff(ancestralBoostBuff, seconds, 1, [])) } ]
+            [ { Hook = OnInflict HeavyStun; Filter = AnySkill; Chance = 100.0; Reaction = IfEnemyHas("RareOrUnique", GrantBuff(ancestralBoostReady, seconds, 1, [])) } ]
         | _ -> []
 
-    /// An actor that can be Ancestrally Boosted (a rule of its says so) has what the boost gives.
+    /// An actor that can be Ancestrally Boosted (a rule of its says so) has what the boost
+    /// gives, and the rules by which an attack it uses itself is boosted: a boost is of a
+    /// whole use, decided as the use begins. The attack that begins while the next one is to
+    /// be boosted is, and takes that with it; one that begins without is not, whatever happens
+    /// while it lasts (the Heavy Stun its first hit inflicts boosts the next attack, not the
+    /// hits of this one that are still to land). These rules come after all the others, so
+    /// that a boost given as the use begins (Fist of War's) is this use's.
     let ancestralBoosted (a: Actor) : Actor =
         let rec boosts (r: Reaction) =
             match r with
-            | SetStacks (b, _) | GrantBuff (b, _, _, _) -> b = ancestralBoostBuff
-            | IfEnemyHas (_, next) | IfBuff (_, next) | SpendStack (_, next) -> boosts next
+            | SetStacks (b, _) | GrantBuff (b, _, _, _) -> b = ancestralBoostReady
+            | IfEnemyHas (_, next) | IfBuff (_, next) | SpendStack (_, next) | Every (_, _, next) -> boosts next
             | _ -> false
-        if a.Rules |> List.exists (fun r -> boosts r.Reaction) then { a with Mods = a.Mods @ boostMods 1.0 } else a
+        if a.Rules |> List.exists (fun r -> boosts r.Reaction) then
+            let used = WithTags([ Attack ], [ Triggered; Warcry ])
+            { a with
+                Mods = a.Mods @ boostMods 1.0
+                Rules =
+                    a.Rules
+                    @ [ { Hook = OnUse; Filter = used; Chance = 100.0; Reaction = RemoveBuff ancestralBoostBuff }
+                        { Hook = OnUse; Filter = used; Chance = 100.0; Reaction = IfBuff(ancestralBoostReady, SetStacks(ancestralBoostBuff, 1)) }
+                        { Hook = OnUse; Filter = used; Chance = 100.0; Reaction = RemoveBuff ancestralBoostReady } ] }
+        else a
 
     /// "Skills deal X% increased Damage per Connected Red Support Gem", "X% increased Skill Speed
     /// per Connected Green Support Gem", "X% increased Critical Hit Chance per Connected Blue

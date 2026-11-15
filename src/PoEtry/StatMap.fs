@@ -1511,8 +1511,8 @@ module StatMap =
         // Ancestral Boost (Behaviours.ancestralBoost): "Ancestrally Boosted Attacks deal X%
         // increased Damage / have X% increased Area of Effect", "The next Attack you use within N
         // seconds after Heavy Stunning a Rare or Unique Enemy is Ancestrally Boosted"
-        | "ancestral_boosted_attack_damage_+%" -> one (Mod.inc (Damage AllDamage) v |> Mod.whenever (SkillIs Attack) |> Mod.whenever (WhileBuff "EmpoweredAttacks:Ancestral Boost"))
-        | "ancestral_boosted_area_of_effect_+%" -> one (Mod.inc AreaOfEffect v |> Mod.whenever (SkillIs Attack) |> Mod.whenever (WhileBuff "EmpoweredAttacks:Ancestral Boost"))
+        | "ancestral_boosted_attack_damage_+%" -> one (Mod.inc (Damage AllDamage) v |> Mod.whenever (SkillIs Attack) |> Mod.whenever (WhileBuff "AncestrallyBoosted"))
+        | "ancestral_boosted_area_of_effect_+%" -> one (Mod.inc AreaOfEffect v |> Mod.whenever (SkillIs Attack) |> Mod.whenever (WhileBuff "AncestrallyBoosted"))
         | "next_attack_is_ancestrally_boosted_for_x_seconds_on_heavy_stunning_unique_or_rare_enemy" -> one (Mod.base' (Named "AncestralBoostOnHeavyStun") v)
         // what an ailment scales from besides its own damage, or in its place (Ailments.scalesFromWith)
         | "unique_fire_damage_shocks" -> ailmentSources [ Shock, Fire ] [ Ignite, Fire ]

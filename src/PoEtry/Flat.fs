@@ -724,6 +724,8 @@ module Flat =
         | RSetStacks of buff: int * stacks: int
         | RIfEnemyHas of status: int * next: Re
         | RIfBuff of buff: int * next: Re
+        /// At most once every `seconds` (see `Reaction.Every`); `key`: where the actor keeps the time.
+        | REvery of key: string * seconds: float * count: int * next: Re
         | RRegenES of perSecond: float * duration: float * count: int
         /// The player becomes Ignited (see `Reaction.IgniteSelf`).
         | RIgniteSelf of percentPerSecond: float
@@ -1423,6 +1425,7 @@ module Flat =
         | SetStacks _ -> "SetStacks"
         | IfEnemyHas _ -> "IfEnemyHas"
         | IfBuff _ -> "IfBuff"
+        | Every _ -> "Every"
         | RegenES _ -> "RegenES"
         | IgniteSelf _ -> "IgniteSelf"
         | Empower _ -> "Empower"
@@ -1508,7 +1511,7 @@ module Flat =
                 | GrantMinionBuff (_, _, mods) -> mods
                 | SummonEmpowered (_, _, _, first) -> first
                 | WithCorpse (next, otherwise) -> ofReaction next @ ofReaction otherwise
-                | SpendStack (_, next) | IfEnemyHas (_, next) | IfBuff (_, next) -> ofReaction next
+                | SpendStack (_, next) | IfEnemyHas (_, next) | IfBuff (_, next) | Every (_, _, next) -> ofReaction next
                 | _ -> []
             actors |> List.collect (fun a -> a.Rules |> List.collect (fun r -> ofReaction r.Reaction))
         // the minions of each pool, by their places among the actors
@@ -1665,6 +1668,7 @@ module Flat =
                 | SetStacks (b, n) -> RSetStacks(buff b, n)
                 | IfEnemyHas (st, next) -> RIfEnemyHas(statuses.Id st, reaction next)
                 | IfBuff (b, next) -> RIfBuff(buffs.Id b, reaction next)
+                | Every (key, seconds, next) -> REvery("Every:" + key, seconds, counts.Id("every:" + key), reaction next)
                 | RegenES (rate, duration) -> RRegenES(rate, duration, counts.Id "regen:ES")
                 | IgniteSelf percent -> RIgniteSelf percent
                 | GainEnergy (meta, amount) -> RGainEnergy((match actor.Metas |> List.tryFindIndex (fun m -> m.Name = meta) with Some i -> i | None -> -1), amount)
@@ -2182,6 +2186,7 @@ module Flat =
                         | RSpendStack (b, next) -> RSpendStack(b, fix next)
                         | RIfEnemyHas (st, next) -> RIfEnemyHas(st, fix next)
                         | RIfBuff (b, next) -> RIfBuff(b, fix next)
+                        | REvery (key, seconds, count, next) -> REvery(key, seconds, count, fix next)
                         | RWithCorpse (next, otherwise) -> RWithCorpse(fix next, fix otherwise)
                         | other -> other
                     { r with Re = fix r.Re }
@@ -2302,7 +2307,7 @@ module Flat =
                                 let rec find (reaction: Reaction) =
                                     match reaction with
                                     | ApplyCurse (n, d, _) when n = k || "Curse:" + n = k -> Some d
-                                    | IfEnemyHas (_, next) | IfBuff (_, next) | SpendStack (_, next) -> find next
+                                    | IfEnemyHas (_, next) | IfBuff (_, next) | SpendStack (_, next) | Every (_, _, next) -> find next
                                     | _ -> None
                                 match actor.Rules |> List.tryPick (fun r -> find r.Reaction) with
                                 | Some d -> d / 2.0
@@ -4421,6 +4426,11 @@ module Flat =
                 setBuff s pick 1 (s.Time + duration) []
                 expireAt s (s.Time + duration)
         | RIfBuff (b, next) -> if held s b then perform s rng sid target next
+        | REvery (key, seconds, count, next) ->
+            if s.Time >= (Map.tryFind key s.A.Energy |> Option.defaultValue -infinity) - 1e-9 then
+                bump s count
+                s.A.Energy <- Map.add key (s.Time + seconds) s.A.Energy
+                perform s rng sid target next
         | RGainRareMods (buffs, duration, count) ->
             // (the enemy is dead: what it carried is read all the same)
             if target >= 0 then
