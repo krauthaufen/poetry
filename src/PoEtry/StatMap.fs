@@ -744,6 +744,7 @@ module StatMap =
         | "base_mana_gained_on_enemy_death" -> one (Mod.base' ManaOnKill v)
         | "recover_%_maximum_mana_on_kill" -> one (Mod.base' (Named "ManaPercentOnKill") v)
         | "recover_x%_of_maximum_mana_when_you_consume_a_power_charge" -> one (Mod.base' (Named "ManaPercentOnConsumePower") v)
+        | "recover_%_life_per_endurance_charge_consumed" -> one (Mod.base' (Named "LifePercentPerEnduranceConsumed") v)
         | "base_mana_leech_from_physical_attack_damage_permyriad" -> one (Mod.base' ManaLeech (v / 100.0) |> Mod.whenever (SkillIs Attack))
         | "base_damage_removed_from_mana_before_life_%" -> one (Mod.base' (Named "DamageRemovedFromManaFirst") v)
         // ---- resistances ----

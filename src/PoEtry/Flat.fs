@@ -6333,6 +6333,13 @@ module Flat =
                 bump s p.CMinionHit
                 hurtMinion s rng who taken
 
+    /// Life for each Endurance Charge consumed (`Sim.enduranceLife`); the player is entered.
+    let private enduranceLife (s: State) (n: int) =
+        match s.P.Vitals with
+        | Some v when s.Main.Vitals.IsSome && n > 0 && v.LifePerEnduranceConsumed > 0.0 && v.Life > 1.0 ->
+            s.Life <- min (max s.Life v.Life) (s.Life + v.LifePerEnduranceConsumed * float n)
+        | _ -> ()
+
     /// After a use's hits: the skill consumes its charges, unless they are kept (`Sim.step`).
     let private onConsume (s: State) (rng: Rng) (charge: int) (sid: int) =
         let p = s.P
@@ -6365,6 +6372,9 @@ module Flat =
                         put s.A.BPaused charge (newUntil)
                         expireAt s expires
             else
+                if charge = (at p.BCharges 2) then
+                    let had = if (at s.A.BHas charge) then (at s.A.BStacks charge) else 0
+                    enduranceLife s (if count > 0 && had > count then count else had)
                 // one charge, a set number, or all of them (0)
                 if (at s.A.BHas charge) && count > 0 && (at s.A.BStacks charge) > count then setBuff s charge ((at s.A.BStacks charge) - count) (at s.A.BExpires charge) (at s.A.BMods charge)
                 else removeBuff s charge
@@ -6468,6 +6478,7 @@ module Flat =
                     if rng.Chance p.SheetSkip then bump s (at p.CKeptOf r)
                     else
                         setStacks s false r (have - 1)
+                        if r = (at p.BCharges 2) then enduranceLife s 1
                         bump s (at p.CLostOf r)
 
     /// A monster's hit at the player: evasion, deflection, armour, resistances, then energy

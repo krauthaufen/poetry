@@ -281,6 +281,8 @@ module Defence =
             |> List.map (fun a -> a, max 0.0 (Mods.mult c [ Named("SelfDuration:" + a) ] db) / max 0.01 (Mods.mult c [ Named "DebuffExpiry" ] db))
             |> Map.ofList
           LifeOnKill = if ci || onlyLeech then 0.0 else (named "LifeOnKill" + life * named "LifePercentOnKill" / 100.0) * lifeRecovery
+          // "Recover X% of maximum Life for each Endurance Charge consumed"
+          LifePerEnduranceConsumed = if ci || onlyLeech then 0.0 else life * named "LifePercentPerEnduranceConsumed" / 100.0 * lifeRecovery
           ESOnKill = es * named "ESPercentOnKill" / 100.0 * esRecovery
           LifeOnBlock = if ci || onlyLeech then 0.0 else named "LifeOnBlock" * lifeRecovery
           ManaOnBlock = named "ManaOnBlock" * manaRecovery

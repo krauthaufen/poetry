@@ -1070,6 +1070,25 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         near 0.0 v.ESRegen
         near 0.0 v.EnergyShieldRecharge)
 
+    // ---- charges ----
+
+    test "Recover X% of maximum Life for each Endurance Charge consumed" (fun () ->
+        let v = (load { blank with ExtraLines = [ "Recover 3% of maximum Life for each Endurance Charge consumed" ] } Options.defaults).Vitals
+        near (v.Life * 0.03) v.LifePerEnduranceConsumed
+        // a slam paid with 200 life that consumes the two charges each use brings, 30 life back for
+        // each: the two engines agree (what the fight shows of life is only the lowest it fell to
+        // under hits, so the amount is not read back here)
+        let slam = { Skill.make "Slam" [ Attack ] with BaseDamage = Map.ofList [ Physical, { Min = 10.0; Max = 10.0 } ]; BaseTime = 1.0; BaseCrit = 0.0; Cost = 200.0; Consumes = Some "EnduranceCharge"; Mods = [ Mod.base' (Named "ConsumeChargeCount") 2.0 ] }
+        let fight per =
+            let player =
+                { Actor.make "Player" [] [ slam ] with
+                    Vitals = Some { PlayerStats.basic 1000.0 100.0 with CostsLife = true; LifePerEnduranceConsumed = per }
+                    Rules = [ { Hook = OnUse; Filter = AnySkill; Chance = 100.0; Reaction = GainResource("EnduranceCharge", 2) } ]
+                    MaxResources = Map.ofList [ "EnduranceCharge", 3 ] }
+            Fight.single { EnemyDef.atLevel 83 1e9 with Mods = []; Attack = None } player 3.5
+        equal (box 3) (box (count (Sim.run (fight 30.0) 1u) "consumed:EnduranceCharge"))
+        same (fight 30.0) seeds)
+
     // ---- Flame Breath ----
 
     test "Empowered Flame Breath: a use with a Power Charge to consume gains 50% of its damage as lightning" (fun () ->

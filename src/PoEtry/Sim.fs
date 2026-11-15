@@ -3488,6 +3488,13 @@ module Sim =
     let private conduit (actor: Actor) (r: string) =
         r.EndsWith "Charge" && Mods.flag Ctx.empty (Named("Conduit:" + r)) (ModDb.ofList actor.Mods)
 
+    /// "Recover X% of maximum Life for each Endurance Charge consumed": the player's, for so many.
+    let private enduranceLife (actor: Actor) (n: int) (w: World) =
+        match actor.Vitals, w.Player with
+        | Some v, Some p when n > 0 && v.LifePerEnduranceConsumed > 0.0 && v.Life > 1.0 ->
+            { w with Player = Some { p with Life = min (max p.Life v.Life) (p.Life + v.LifePerEnduranceConsumed * float n) } }
+        | _ -> w
+
     let private onPeriodic env (rng: Rng) actorName periodicName (w: World) =
         let actor = actorDef env actorName
         match actor.Periodics |> List.tryFind (fun p -> p.Name = periodicName) with
@@ -3555,7 +3562,9 @@ module Sim =
                                     gainMana v "consume" (v.Mana * Mods.sumBase Ctx.empty [ Named "ManaPercentOnConsumePower" ] (ModDb.ofList actor.Mods) / 100.0) w
                                 | _ -> w
                             if rng.Chance skip then { w with Counts = bump ("kept:" + r) w.Counts }
-                            else setStacksWith env actorName false r (stacksOf st r - 1) w |> fun w -> { w with Counts = bump ("lost:" + r) w.Counts })
+                            else
+                                setStacksWith env actorName false r (stacksOf st r - 1) w |> fun w -> { w with Counts = bump ("lost:" + r) w.Counts }
+                                |> fun w -> if r = "EnduranceCharge" then enduranceLife actor 1 w else w)
                     w
 
     /// Whether an enemy that died of damage over time at `at` is the player's kill: some damage
@@ -3921,6 +3930,8 @@ module Sim =
                     else
                         // one charge, a set number, or all of them (0)
                         let count = int (Mods.sumBase Ctx.empty [ Named "ConsumeChargeCount" ] (skillDb env actor (skillOf actor skillName) st))
+                        let had = match Map.tryFind charge st.Buffs with Some e -> e.Stacks | None -> 0
+                        let w = if charge = "EnduranceCharge" then enduranceLife actor (if count > 0 && had > count then count else had) w else w
                         updateActor name (fun st ->
                             match Map.tryFind charge st.Buffs with
                             | Some e when count > 0 && e.Stacks > count -> { st with Buffs = Map.add charge { e with Stacks = e.Stacks - count } st.Buffs }

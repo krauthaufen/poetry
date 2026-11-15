@@ -116,6 +116,8 @@ type PlayerStats =
       SelfEffect: Map<string, float>
       SelfDuration: Map<string, float>
       LifeOnKill: float
+      /// Life recovered for each Endurance Charge consumed.
+      LifePerEnduranceConsumed: float
       ESOnKill: float
       LifeOnBlock: float
       ManaOnBlock: float
@@ -149,7 +151,7 @@ module PlayerStats =
           ESRechargeDelay = 4.0; ESRegen = 0.0; ManaBeforeLife = 0.0; BypassES = 0.0; ArmourAppliesTo = Map.empty
           TakenMult = Map.empty; FlatPhysicalTaken = 0.0; LessCritDamageTaken = 0.0; EnemyCritChanceMult = 1.0; BlindedEnemyCritMult = 1.0; MarkedEnemyAccuracyMult = 1.0; DeferPrevent = 0.0; DeferLose = 0.0; ArmourVsProjectiles = 1.0; ArmourVsCrits = 1.0; StunThreshold = life
           AilmentThreshold = life / 2.0; FreezeThreshold = life / 2.0; AvoidStun = 0.0; Avoid = Map.empty
-          SelfEffect = Map.empty; SelfDuration = Map.empty; LifeOnKill = 0.0; ESOnKill = 0.0; LifeOnBlock = 0.0
+          SelfEffect = Map.empty; SelfDuration = Map.empty; LifeOnKill = 0.0; LifePerEnduranceConsumed = 0.0; ESOnKill = 0.0; LifeOnBlock = 0.0
           ManaOnBlock = 0.0; Recoup = []; RecoupSeconds = 4.0; LifeRecoveryRate = 1.0; ManaRecoveryRate = 1.0
           ESRecoveryRate = 1.0; LifeFlask = None; CostsLife = false; LifeRecharge = 0.0; UnluckyEvade = false
           LuckyDeflect = false; LifeLeechRate = 1.0; DeflectEffect = 40.0; StartLife = 1.0; LifeReserved = 0.0; LifeFrozenWithES = false; SurroundedAt = 5; StunRecovery = 1.0; ESRecoverCap = infinity; RecoupPreventedPerPower = 0.0 }
