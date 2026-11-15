@@ -147,7 +147,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | Requiem (The Last Lament) | `rapidshot_requiem_active_duration_ms`, `_base_buff_count_requirement`, `_number_of_stacks_per_minute`, `crossbow_ammo_has_no_ammo`, the shot's two radii; wiki Requiem ("fixed duration of 12 seconds that cannot be scaled"); charged at the start and no anguish while it runs are guesses | data / guess |
 | Hailstorm Rounds | `crossbow_ammo_skill_has_passive_reloading`, `base_number_of_crossbow_bolts`, the shot's two radii, description; full at the start and uniform landing are guesses | data / guess |
 | Twister | `twister_base_movement_speed`, `twister_hit_interval_ms`, `minimum_per_projectile_spread_angle_degrees`, description ("Twisters fired at the same time can Hit the same target no more than once every 0.66 seconds"); how far it strays is a guess | data / guess |
-| Whirlwind | gem data, description; one stage per use and the start are guesses (the data says neither) | data / guess |
+| Whirlwind | gem data and description; poe2db and the community wiki ("can gain stages by being used again on top of an existing Whirlwind"); forum thread 3758963 for the duration; the start is our assumption | data / guess |
 | Wind skills boosted by elemental ground | stat descriptions; which one counts without the multiple line is a guess | data / guess |
 | Ball Lightning | `ball_lightning_base_hit_frequency_ms`; game table Projectiles (BallLightningPlayer 400), read as 40 units per second | data / guess |
 | Living Bomb | `living_bomb_damage_threshold_%_of_ailment_threshold`, `living_bomb_base_number_of_bombs_allowed`; that it fizzles when its time is up is a reading of the description | data / guess |
