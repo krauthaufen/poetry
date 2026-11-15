@@ -258,6 +258,51 @@
         return new Promise((done) => { a.waiters.push(done); told(a); });
       };
 
+      // "__sim?op=minions&scenario=..": how many minions each persistent minion gem should
+      // have, for the scene that is looked at. What minions deal mostly adds up, so the best
+      // is mostly all the Spirit on one gem: those splits are fought first, then from the
+      // best of them (or the split as it is) one minion at a time is given up for as many of
+      // another gem as that pays for, while that gains. Every split is full: nothing left
+      // that pays for one more. Answered with the best as gem edits:
+      // { best ("": as it is), tried, gain (percent) }
+      const tune = async (request) => {
+        const { op, scenario, seeds, ...rest } = request;
+        let info = { gems: [], spirit: 0 };
+        try { info = JSON.parse(await ask({ ...rest, op: "minions" }, "", true)); } catch {}
+        const gems = info.gems || [], n = gems.length;
+        if (n < 2) return JSON.stringify({ best: "", tried: n, gain: 0 });
+        const least = gems.map((g) => Math.max(1, g.free));
+        const cost = (c) => c.reduce((a, k, i) => a + Math.max(0, k - gems[i].free) * gems[i].each, 0);
+        // (as many more as the Spirit pays for, of the gems in this order)
+        const fill = (c, order) => { order.forEach((i) => { while (cost(c) + gems[i].each <= info.spirit + 1e-9) c[i]++; }); return c; };
+        const cheap = gems.map((_, i) => i).sort((a, b) => gems[a].each - gems[b].each);
+        const scene = scenes(1).find((s) => s[0] === scenario) || scenes(1)[0];
+        const fought = (extra, seed) => ({ ...rest, ...extra, op: "fight", scenario: scene[0], time: scene[1], runs: 1, seed, ...(scene[2] ? { life: scene[2] } : scene[4] ? { least: scene[4] } : {}) });
+        const k = scaleOf(await ask(fought({}, 1), "analyse"));
+        const edits = (c) => c.map((x, i) => "count|" + gems[i].at + "|" + x).join(";");
+        const known = new Map();
+        const worth = (c) => {
+          const key = c.join(",");
+          if (!known.has(key)) known.set(key, Promise.all(Array.from({ length: seeds || 4 }, (_, i) => ask({ ...fought({ gems: rest.gems ? rest.gems + ";" + edits(c) : edits(c) }, i + 1), scale: k }, "analyse").then(measure(scene))))
+            .then((xs) => (xs.some((x) => x == null) ? -1 : mean(xs))));
+          return known.get(key);
+        };
+        const best = async (cs) => { const ws = await Promise.all(cs.map(worth)); let at = 0; ws.forEach((w, i) => { if (w > ws[at]) at = i; }); return [cs[at], ws[at]]; };
+        const start = gems.map((g, i) => Math.max(least[i], g.count));
+        const now = await worth(start);
+        let [here, w] = await best([start, ...gems.map((_, i) => fill([...least], [i, ...cheap]))]);
+        for (let round = 0; round < 12; round++) {
+          const next = [];
+          gems.forEach((_, a) => gems.forEach((_, b) => { if (a !== b && here[a] > least[a]) { const c = [...here]; c[a]--; next.push(fill(c, [b, ...cheap.filter((i) => i !== a), a])); } }));
+          if (!next.length) break;
+          const [c, x] = await best(next);
+          if (x <= w * 1.003) break;
+          here = c; w = x;
+        }
+        if (now <= 0 || w <= now * 1.005 || here.join(",") === start.join(",")) return JSON.stringify({ best: "", tried: known.size, gain: 0 });
+        return JSON.stringify({ best: edits(here), tried: known.size, gain: (w / now - 1) * 100 });
+      };
+
       const builds = new Map();
       const plain = window.fetch.bind(window);
       const answer = (text, status = 200) => new Response(text, { status, headers: { "content-type": "application/json" } });
@@ -422,6 +467,7 @@
         if (request.op === "fight" && all && small) return answer(JSON.stringify({ error: "not ahead on a phone" }));
         if (request.op === "compare") return answer(await compare(request));
         if (request.op === "analyse") return answer(await analyse(key, request));
+        if (request.op === "minions") return answer(await tune(request));
         // (a question about the character goes before the fights that wait)
         return answer(await (request.op === "fight" ? fight(key, request, all) : ask(request, "", true)));
       };

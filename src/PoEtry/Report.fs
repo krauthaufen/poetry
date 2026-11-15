@@ -523,6 +523,22 @@ module Report =
             | [ "new"; name; level; quality ] -> { b with Groups = b.Groups @ [ { Label = ""; Slot = ""; Enabled = true; Gems = [ gem name (n level) (n quality) false ] } ] }
             | _ -> b) b
 
+    /// What the Spirit that is left can be spent on one by one: the persistent minion gems (and
+    /// whatever else is paid for so), each with where it is ("group|gem", as "count|group|gem|n"
+    /// names it), what one costs, how many are free and how many there are; and the Spirit
+    /// there is for them. `groups`: where the gems are.
+    let minionGems (groups: PobGroup list) (c: Loaded) : Json =
+        let place name =
+            groups |> List.indexed |> List.tryPick (fun (i, g) ->
+                if not g.Enabled then None
+                else g.Gems |> List.indexed |> List.tryPick (fun (k, x) -> if x.Enabled && not x.IsSupport && x.Name = name then Some (sprintf "%d|%d" (i + 1) k) else None))
+        let counts = Behaviours.minionCounts c.Spirit c.SpiritUses
+        obj [ "spirit", num (c.Spirit - (c.SpiritUses |> List.sumBy (fun u -> u.Flat)))
+              "gems", JArr(c.SpiritUses |> List.filter (fun u -> u.PerMinion > 0.0) |> List.choose (fun u ->
+                          place u.Gem |> Option.map (fun at ->
+                              obj [ "name", JStr u.Gem; "at", JStr at; "each", num u.PerMinion; "free", num (float u.FreeMinions)
+                                    "count", num (float (Map.tryFind u.Gem counts |> Option.defaultValue 1)) ]))) ]
+
     /// Lines taken out of items: "<the item's place>\n<the line>", several apart by a line "====".
     /// The first line of the item that reads so goes (a line of a rune with it: it is one line).
     let stripLines (text: string) (b: PobBuild) : PobBuild =
@@ -748,6 +764,9 @@ type Session(read: string -> string) =
                         r
                 Report.write (Report.fought r j)
             | Some "calcs" -> Report.write (Report.calcs (this.Load(build, j)))
+            | Some "minions" ->
+                let c = this.Load(build, j)
+                Report.write (Report.minionGems c.Build.Groups c)
             | Some "gems" ->
                 let at = Json.numField "group" j |> Option.map int |> Option.defaultValue 0
                 Report.write (Report.gems db.Value ((edited ()).Groups |> List.tryItem (at - 1) |> Option.map (fun g -> g.Gems) |> Option.defaultValue []))

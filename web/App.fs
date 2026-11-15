@@ -123,6 +123,9 @@ type Msg =
     /// What every line and gem is worth is asked for, and comes back bit by bit.
     | Analyse
     | Analysed of Fetched
+    /// How many minions each gem should have is asked for (the best of every full split of the Spirit).
+    | Tune
+    | Tuned of Fetched
     /// What is pressed is put in another order: ("up" | "down" | "drop" | "add" | "auto", the gem).
     | Order of string * string
     /// The enemies ("level" | "eres" | "cres", the value typed) and lines of modifiers of one's own.
@@ -229,6 +232,9 @@ type Model =
       Probe : string
       ProbeRound : int
       Probing : bool
+      /// The question of the best minion counts that is out ("": none), and what came of the last.
+      Tuning : string
+      TuneSaid : string
       Probed : string
       Worth : (string * float) list
       /// What is pressed as the fight had it, the order chosen here ([]: by skill type), and
@@ -388,7 +394,7 @@ type Model =
 let init : Model =
     { Build = ""; Scenario = "boss"; Status = "locating"; Title = ""; Class = ""; Ascendancy = ""; Tab = "character"
       Pools = []; Guards = []; Survival = []; Defences = []; Resistances = []; Minions = []
-      NotUnderstood = 0; Fighting = false; Gem = ""; Dps = []; Shares = []; Groups = []; Items = []; Bag = []; Swapped = Map.empty; Wearing = []; Equip = ""; Aim = ""; Pasting = false; Draft = ""; Dropped = Set.empty; GemEdits = []; Picker = ""; Offers = []; Wanted = ""; Offered = []; Probe = ""; ProbeRound = 0; Probing = false; Probed = ""; Worth = []; Play = []; Rotation = []; Pressable = []; EnemyLevel = ""; EnemyEle = ""; EnemyChaos = ""; CustomDraft = ""; Custom = ""; Calcs = []; CanLogin = false; Asked = false; Player = ""; Characters = []; Running = []; Lasting = []; Going = ""; Kept = ""; Restored = false; Notes = ""; NotesWere = ""; NodeWorth = Map.empty; Among = ""; CalcShown = []; Pinned = ""; Deltas = []; DeltaOf = ""; Ask = ""; AskMore = ""; Anointed = Set.empty; Types = []; Counts = []; Start = Map.empty; Switches = Set.empty
+      NotUnderstood = 0; Fighting = false; Gem = ""; Dps = []; Shares = []; Groups = []; Items = []; Bag = []; Swapped = Map.empty; Wearing = []; Equip = ""; Aim = ""; Pasting = false; Draft = ""; Dropped = Set.empty; GemEdits = []; Picker = ""; Offers = []; Wanted = ""; Offered = []; Probe = ""; ProbeRound = 0; Probing = false; Tuning = ""; TuneSaid = ""; Probed = ""; Worth = []; Play = []; Rotation = []; Pressable = []; EnemyLevel = ""; EnemyEle = ""; EnemyChaos = ""; CustomDraft = ""; Custom = ""; Calcs = []; CanLogin = false; Asked = false; Player = ""; Characters = []; Running = []; Lasting = []; Going = ""; Kept = ""; Restored = false; Notes = ""; NotesWere = ""; NodeWorth = Map.empty; Among = ""; CalcShown = []; Pinned = ""; Deltas = []; DeltaOf = ""; Ask = ""; AskMore = ""; Anointed = Set.empty; Types = []; Counts = []; Start = Map.empty; Switches = Set.empty
       Passives = [||]; Ascendancies = []; Shown = []; AscendancyWeb = Data.pack (Data.ofList ([] : V3f list)); Path = Data.pack (Data.ofList ([] : V3f list))
       Loaded = false; Capacity = 0
       WebUv = Data.pack (Data.ofList ([] : V2f list)); AscendancyWebUv = Data.pack (Data.ofList ([] : V2f list)); PathUv = Data.pack (Data.ofList ([] : V2f list)); Art = ""; Links = [||]; Neighbours = Map.empty; Web = Data.pack (Data.ofList ([] : V3f list)); Allocated = Set.empty; Edited = false
@@ -1463,6 +1469,15 @@ let rec private step (msg : Msg) (m : Model) : Model =
     | Rank | Analyse ->
         let ask = probeOf m
         { m with Probe = ask; ProbeRound = 0; Probing = true; Probed = "asking ..."; Worth = [] }
+    | Tune -> { m with Tuning = "__sim?op=minions&scenario=" + m.Scenario + fightKnobs m + knobs m + passives m + "&build=" + m.Build; TuneSaid = "" }
+    | Tuned r when r.Url <> m.Tuning -> m
+    | Tuned r ->
+        (match r.Status, Native.parseJson r.Text with
+         | 200, Ok j when Json.string (Json.field "error" j) = "" ->
+            let best, tried = Json.string (Json.field "best" j), Json.int (Json.field "tried" j)
+            if best = "" then { m with Tuning = ""; TuneSaid = (if tried < 2 then "nothing to choose" else sprintf "best as it is (%d tried)" tried) }
+            else afresh { m with Tuning = ""; TuneSaid = sprintf "+%.1f%% (%d tried)" (Json.number (Json.field "gain" j)) tried; GemEdits = m.GemEdits @ [ best ]; Pressing = "" }
+         | _ -> { m with Tuning = ""; TuneSaid = "did not come back" })
     | Analysed r when m.Probe = "" || not (r.Url.StartsWith m.Probe) -> m
     | Analysed r ->
         (match r.Status, Native.parseJson r.Text with
@@ -1739,7 +1754,7 @@ let update (msg : Msg) (m : Model) : Model =
     // (what is kept between visits: after anything but the pointer, a frame, an answer)
     let n =
         match msg with
-        | PointerDown _ | PointerMove _ | PointerUp _ | Zoom _ | Sized _ | Tick _ | Fought _ | Warmed _ | Compared _ | Analysed _ | Sources _ | Saved _ | TreeData _ | Sheet _ | Picked _ -> n
+        | PointerDown _ | PointerMove _ | PointerUp _ | Zoom _ | Sized _ | Tick _ | Fought _ | Warmed _ | Compared _ | Analysed _ | Tuned _ | Sources _ | Saved _ | TreeData _ | Sheet _ | Picked _ -> n
         | _ when not n.Restored -> n
         | _ -> (let k = kept n in if k = n.Kept then n else { n with Kept = k })
     // (what the passive looked at would take or give back, drawn on the tree)
@@ -2441,6 +2456,8 @@ let view (m : Model) : Node<Msg> =
     // element that holds it is taken away)
     let headline = match m.Dps with | d :: _ when d.Label = "DPS" -> d.Value + " DPS" | d :: _ -> "dead in " + d.Value | [] -> ""
     let undo = "Undo (" + string m.GemEdits.Length + ")"
+    let hasMinions = m.Groups |> List.exists (fun g -> g.Gems |> List.exists (fun x -> x.Minions > 0))
+    let tune = if m.Tuning <> "" then "Trying minion counts ..." else "Best minion counts"
     let here = m.Characters |> List.exists (fun (_, _, url) -> url = m.Build)
     let found = if m.Sought.Trim().Length >= 2 then string m.Hits + " found" else ""
     let analysing = if m.Probing then "Analysing " + m.Probed else "Analyse"
@@ -2460,6 +2477,7 @@ let view (m : Model) : Node<Msg> =
             if warming m <> "" then span { Dom.Fetch (fightOf m (warming m) "&wait=1", Warmed) }
             if (m.Tab = "tree" || m.Tab = "items") && m.Ask <> "" then span { Dom.Fetch (m.Ask, Compared) }
             if m.Probing then span { Dom.Fetch (probeUrl m, Analysed) }
+            if m.Tuning <> "" then span { Dom.Fetch (m.Tuning, Tuned) }
             if m.Build <> "" then span { Dom.Fetch (restoreUrl m, Restore) }
             if m.Going <> "" then span { Dom.Fetch ("__poe?op=" + m.Going, Saved) }
             if m.Restored && m.Kept <> "" then span { Dom.Fetch (saveUrl m, Saved) }
@@ -2552,6 +2570,8 @@ let view (m : Model) : Node<Msg> =
                     Dom.Class "actions gem-acts"
                     button { Dom.Class "act"; Dom.OnClick (fun _ -> Pick "new"); "+ skill" }
                     if not m.GemEdits.IsEmpty then button { Dom.Class "act"; Dom.OnClick (fun _ -> UndoGems); undo }
+                    if hasMinions then button { Dom.Class "act"; Dom.OnClick (fun _ -> Tune); tune }
+                    if m.TuneSaid <> "" then span { Dom.Class "depth"; m.TuneSaid }
                 }
                 if m.Picker <> "" then picker m
                 for g in m.Groups do
