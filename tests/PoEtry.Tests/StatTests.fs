@@ -2737,3 +2737,27 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         let cursed = fight { Hook = OnKillOf "Cursed"; Filter = AnySkill; Chance = 100.0; Reaction = Explode(25.0, Chaos, 20.0) }
         equal 0 (count (Sim.run cursed 1u) "explosion")
         same cursed seeds)
+
+    test "a chance for mace strikes to deal Splash Damage" (fun () ->
+        let chance v = mods "your_mace_strike_melee_splash_chance_%" v
+        equal (box [ Named "SplashChance", 40.0 ]) (box (chance 40.0 |> List.map (fun m -> m.Stat, m.Value)))
+        let holds tags = Mod.eval { Ctx.empty with SkillTags = Set.ofList tags } (chance 40.0).Head
+        equal (box (Some 40.0)) (box (holds [ Attack; Melee; Strike; Mace ]))
+        equal (box None) (box (holds [ Attack; Melee; Slam; Mace ]))
+        equal (box None) (box (holds [ Attack; Melee; Strike; Quarterstaff ]))
+        equal (box None) (box (holds [ Attack; Melee; Strike; Mace; Triggered ]))
+        // ten strikes of 100 at "a"; "b" stands 1 m from it (within the 1.5 m of Splash), "c" 4 m:
+        // without the chance only a is hit; with 100% a and b every time; c never
+        let strike = { Skill.make "Strike" [ Attack; Melee; Strike; Mace ] with BaseDamage = Map.ofList [ Physical, Range.fixedAt 100.0 ]; BaseCrit = 0.0 }
+        let foe name x = { EnemyDef.atLevel 83 1e9 with Name = name; Position = Vec.make 10.0 x; Size = 2.0; Mods = []; Attack = None }
+        let fight (ms: Mod list) =
+            let player = { Actor.make "Player" ms [ strike ] with Rotation = [ Actor.always "Strike" ] }
+            { Fight.single (foe "a" 0.0) player 10.2 with Enemies = [ foe "a" 0.0; foe "b" 10.0; foe "c" 40.0 ]; Targeting = Nearest }
+        let dealt f = (Sim.run f 1u).DamageBy |> Map.toList |> List.sumBy snd
+        near 1000.0 (dealt (fight []))
+        near 2000.0 (dealt (fight (chance 100.0)))
+        same (fight (chance 100.0)) seeds
+        // by chance: between the two, and the fast engine rolls the same
+        let some = dealt (fight (chance 50.0))
+        equal (box true) (box (some > 1000.0 && some < 2000.0))
+        same (fight (chance 50.0)) seeds)

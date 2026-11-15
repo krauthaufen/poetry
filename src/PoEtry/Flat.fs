@@ -653,6 +653,7 @@ module Flat =
     let private qForkAngle = site MSkill Inc (named "ForkAngle")
     let private qForkedDamage = siteMult MSkill (named "ForkedDamage")
     let private qAftershock = site MSkill Base (named "AftershockChance")
+    let private qSplashChance = site MSkill Base (named "SplashChance")
     let private qLaunchesBolt = site MSkill Flag (named "LaunchesBolt")
     let private qNovaBoltSpeed = site MSkill Base (named "NovaOnBoltSpeed")
     let private qNovaBoltLife = site MSkill Base (named "NovaOnBoltLife")
@@ -6524,7 +6525,13 @@ module Flat =
                             // where the projectile is by now, on its way towards where it was aimed
                             let spot = Vec.scale (pr.Speed * elapsed) (Vec.ofAngle (Vec.angle primaryDef.Position))
                             alive |> List.filter (Geometry.within spot (Geometry.radius pr.Passing areaMult)) |> List.map (fun e -> e.Name) |> hitAll
-                        | Single -> hitEnemy s rng impact mult primary
+                        | Single ->
+                            // "X% chance to deal Splash Damage" (`Sim`)
+                            let c = sumQ ev qSplashChance
+                            if c > 0.0 && rng.Chance c then
+                                let hit, _ = Geometry.targetsParted rng p.Fight.Walls p.Fight.Reach (AreaAtTarget Constants.splashRadius) areaMult primaryDef alive
+                                hitAll hit
+                            else hitEnemy s rng impact mult primary
                         | _ ->
                             let hit, forked = Geometry.targetsParted rng p.Fight.Walls p.Fight.Reach delivery areaMult primaryDef alive
                             hitAll hit

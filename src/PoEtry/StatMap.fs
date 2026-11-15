@@ -1083,6 +1083,9 @@ module StatMap =
         | "support_minion_defensive_stance_minion_damage_taken_+%_final" -> Some Structural
         // Splash: read into what the strike hits (Gems.buildSet)
         | "melee_splash" | "minion_melee_splash" -> Some Structural
+        // "Strike Skills you use yourself with Maces have X% chance to deal Splash Damage" (the engines: a strike that does hits the others around its target)
+        | "your_mace_strike_melee_splash_chance_%" ->
+            one (Mod.base' (Named "SplashChance") v |> Mod.whenever (SkillIs Strike) |> Mod.whenever (SkillIs Mace) |> Mod.whenever (Not(SkillIs Triggered)))
         // what culling with the skill gives (Behaviours.cullRules)
         | "support_thrill_of_the_kill_buff_grant_%_added_lightning_attack_damage" | "support_thrill_of_the_kill_buff_base_duration_ms"
         | "support_thrill_of_the_kill_buff_shock_chance_+%" | "support_culling_strike_threshold_+%_on_cull_for_seconds_from_code"

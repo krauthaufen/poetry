@@ -3491,6 +3491,12 @@ module Sim =
                         living |> List.filter (Geometry.within at (Geometry.radius p.Passing areaMult)) |> List.map (fun e -> e.Name)
                         |> List.fold (fun w target -> hitEnemy env rng actor sk mult target w) w
                     | _ ->
+                        // "X% chance to deal Splash Damage": a strike that does also hits the
+                        // others around the one it hit, as one with Splash
+                        let delivery =
+                            match delivery with
+                            | Single when (let c = Mods.sumBase ctx [ Named "SplashChance" ] mods in c > 0.0 && rng.Chance c) -> AreaAtTarget Constants.splashRadius
+                            | d -> d
                         // forked projectiles: "Forked Projectiles deal N% less damage" (Fork)
                         let forkMult = mult * Mods.mult ctx [ Named "ForkedDamage" ] mods
                         let hit, forked, w =
