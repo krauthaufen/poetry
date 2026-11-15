@@ -1143,8 +1143,19 @@ module Behaviours =
         let db = ModDb.ofList sheet.Mods
         let flag name = Mods.flag Ctx.empty (Named name) db
         let minions, companions, speed = flag "MinionDamageAffectsYou", flag "CompanionDamageAffectsYou", flag "MinionAttackSpeedAffectsYou"
-        if not (minions || companions || speed) then []
+        // "Increases and Reductions to Spell damage also apply to Attacks": every increase the
+        // character has for spells is one for attacks too
+        let spellsToAttacks =
+            if not (flag "SpellDamageAppliesToAttacks") then []
+            else
+                sheet.Mods |> List.choose (fun m ->
+                    match m.Stat, m.Kind with
+                    | Damage _, Inc when List.contains (SkillIs Spell) m.Conds ->
+                        Some { m with Conds = m.Conds |> List.map (fun c -> if c = SkillIs Spell then SkillIs Attack else c); Source = m.Source + " (as spell damage)" }
+                    | _ -> None)
+        if not (minions || companions || speed) then spellsToAttacks
         else
+            spellsToAttacks @
             let companion = SkillIs(Tag "Companion")
             sheet.Mods |> List.choose (fun m ->
                 let named = List.contains companion m.Conds
@@ -2407,6 +2418,10 @@ module Behaviours =
           "FrozenInLast8Seconds", (fun s -> rule s (OnInflict Freeze) AnySkill 8.0 (most s 40.0))
           // "for each time you've been Hit by an Enemy Recently, up to 100%"
           "TimesHitRecently", (fun s -> rule s WhenHit AnySkill Constants.recentlySeconds (most s 100.0))
+          // "if you've Shocked / Ignited an Enemy Recently", "if you have Blocked Recently"
+          "ShockedEnemyRecently", (fun s -> rule s (OnInflict Shock) AnySkill Constants.recentlySeconds 1)
+          "IgnitedEnemyRecently", (fun s -> rule s (OnInflict Ignite) AnySkill Constants.recentlySeconds 1)
+          "BlockedRecently", (fun s -> rule s OnBlock AnySkill Constants.recentlySeconds 1)
           // "if you've Hit with Projectile Attack Damage in the past eight seconds" (Advancing Assault)
           "ProjectileAttackHitInPast8Seconds", (fun s -> rule s OnHit (WithTags([ Attack; Projectile ], [])) 8.0 1) ]
         |> List.filter (fun (state, _) -> asked.Contains state)
@@ -2460,9 +2475,16 @@ module Behaviours =
                         | _ -> 1
                 let n = max 1 (min 200 n)
                 let lasts = if duration > 0.0 then duration else float n * dt
+                // "Limit N" (the gem's own, "+1 to Limit" of a support or of the character for
+                // skills of its kind): so many stand at once, each for its whole time. It is
+                // cast again a limit-th of that time after the last one, so there are never
+                // more than the limit and, once the first have been put down, always that many
+                let limit =
+                    let extra = if d.Types.Contains "Limit" then int (Mods.sumBase ctx [ Named "SkillLimit" ] (ModDb.ofList (ModDb.toList charMods @ skill.Mods))) else 0
+                    max 1 ((Gems.limitOf own |> Option.defaultValue 1) + extra)
                 Some(
                     [ for k in 1 .. n -> After(float k * dt), 1.0 ],
-                    (if stands then [ { Hook = OnUse; Filter = Called skill.Name; Chance = 100.0; Reaction = GrantBuff(skill.Name + " buff", lasts, 1, []) } ] else []))
+                    (if stands then [ { Hook = OnUse; Filter = Called skill.Name; Chance = 100.0; Reaction = GrantBuff(skill.Name + " buff", lasts / float limit, 1, []) } ] else []))
             | _ -> None
         | _ -> None
 

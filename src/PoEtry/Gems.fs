@@ -204,14 +204,39 @@ module Gems =
             | _ -> gemMeaning id v
         | _ -> gemMeaning id v
 
-    /// Turn game stats into mods, sorting out what we couldn't use.
-    let private interpret (prefix: string option) (stats: (string * float) list) =
+    /// "Limit N" of what stands where it was cast (see `limitOf`).
+    let private standingLimitStat (k: string) =
+        k.EndsWith "_max_number_of_storms" || k.EndsWith "_maximum_number_of_storms" || k.EndsWith "_base_maximum_number_of_orbs"
+        || k.EndsWith "_maximum_number_of_spheres" || k.EndsWith "_ground_limit"
+        || List.contains k [ "number_of_tornados_allowed"; "base_number_of_ice_volcanos_allowed"; "volcano_base_number_of_geysers_allowed"
+                             "base_number_of_awakened_forests_allowed"; "base_number_of_overcharged_spears_allowed" ]
+
+    /// A gem's own stats that are no modifiers but numbers read by how their ids end, where the
+    /// skill is built, for a skill of the type that is built so: the stages of a staged channel
+    /// and what a stage adds (`buildSet`), how often and how many times a skill that keeps
+    /// hitting hits and how many of it can stand (Behaviours.sustained), volleys, the time
+    /// between the charges a channel takes, and how long something falls (`buildSet`).
+    let private readByEnding (types: Set<string>) (id: string) =
+        let ends (es: string list) = es |> List.exists (fun (e: string) -> id.EndsWith e)
+        (types.Contains "Channel"
+         && ends [ "_maximum_stages"; "_max_stages"; "_max_number_of_stages"; "_maximum_number_of_stages"; "damage_+%_final_per_stage"; "damage_+%_final_per_stack"
+                   "damage_+%_final_per_additional_stage"; "all_damage_%_to_gain_as_fire_per_stage"; "radius_+_per_stage"
+                   "_initial_explosion_number_of_additional_projectiles_per_additional_stage" ])
+        || (types.Contains "Sustained"
+            && (ends [ "_frequency_ms"; "_pulse_delay_ms"; "_pulse_interval_ms"; "_every_x_ms"; "_fireball_delay_ms"; "_hit_interval_ms"; "_maximum_number_of_hits"; "_number_of_pulses" ]
+                || standingLimitStat id))
+        || ends [ "_number_of_volleys"; "_volley_delay_ms"; "_consume_power_charge_per_X_ms"; "_fall_time_ms" ]
+
+    /// Turn game stats into mods, sorting out what we couldn't use. `own`: the skill types of
+    /// the gem whose own stats these are (None: a support's).
+    let private interpret (own: Set<string> option) (prefix: string option) (stats: (string * float) list) =
         stats
         |> List.fold
             (fun (mods, cov: Coverage) (id, v) ->
                 match baseDamageStat id with
                 | Some _ -> mods, cov
                 | None when deliveryStats.Contains id || id.EndsWith "_number_of_projectiles_per_power_charge" -> mods, cov
+                | None when (match own with Some types -> readByEnding types id | None -> false) -> mods, cov
                 | None ->
                     match gemMeaningWith prefix id v with
                     | Mods ms -> mods @ ms, cov
@@ -343,6 +368,36 @@ module Gems =
               "CommandableMinion"; "MinionsAreUndamagable"; "TargetsDestructibleCorpses"; "IceCrystal"; "Wall"; "Detonator"
               "GeneratesCharges"; "ComboStacking" ]
 
+    /// Skill types that say what a skill does, for the skills that are played as the type
+    /// says (each with its row in RULES.md); for every other skill of the type it stays "not
+    /// modelled". An empty list: the type is played, or changes nothing, for every skill.
+    let private playedTypes : Map<string, string list> =
+        Map.ofList
+            [ // "Skills that keep hitting", "Fuses", and the limit of an orb ("Limits")
+              "Orb", []
+              // "Spearfield": the spears go off where an enemy stands on them
+              "Hazard", [ "Spearfield" ]
+              // "Chained attacks": the last strike of the chain is its own stat set
+              "PerformsFinalStrike", [ "Ice Strike"; "Primal Strikes"; "Shred"; "Tempest Flurry" ]
+              // "Parts that need something", "Parts for one state of the enemy", "Consumed states"
+              "SkillConsumesParried", [ "Disengage"; "Fangs of Frost" ]
+              "SkillConsumesShock", [ "Primal Strikes"; "Siphoning Strike"; "Shockchain Arrow" ]
+              "SkillConsumesFreeze", [ "Fragmentation Rounds"; "Glacial Cascade"; "Icestorm"; "Snipe" ]
+              "SkillConsumesBleeding", [ "Blood Hunt"; "Herald of Blood" ]
+              // "Tempest Bell": the bell stands for its number of hits; "Flame Breath", "Tempest
+              // Bell": when the cooldown starts
+              "ObjectDurability", [ "Tempest Bell" ]
+              "ManualCooldownConsumption", [ "Flame Breath"; "Tempest Bell"; "Demon Form" ]
+              // "What empowered attacks get", "Ice-Tipped Arrows", "Triskelion": the next attacks are empowered
+              "EmpowersOtherSkill", [ "Seismic Cry"; "Infernal Cry"; "Ancestral Cry"; "Fortifying Cry"; "Ice-Tipped Arrows"; "Triskelion Cascade" ]
+              // "Entangle", "More parts of one use", "Detonation": the fissure is the skill's own part
+              "CreatesFissure", [ "Entangle"; "Molten Crash"; "Forge Hammer"; "Starborn Onslaught" ]
+              // "Minion Instability": which minions the support's explosion is for
+              "MinionsCanExplode", []
+              // what a support can be socketed with, what a line can name, where a projectile
+              // starts and what the skill can be used with: nothing a fight plays
+              "CanBecomeArrowRain", []; "CreatesDemonMinion", []; "NoDualWield", []; "ProjectilesNotFromUser", [] ]
+
     /// What a gem's skill does that the simulator has no model for: its skill types that are
     /// neither descriptive nor modelled ("Channel", "GainsStages", "Shapeshift", "Rain"...).
     let unmodelledTypes (db: GameDb) name =
@@ -354,8 +409,15 @@ module Gems =
             let fused = d.Types.Contains "Grenade" || d.Name = "Frost Bomb"
             // (what Grim Pillars and Oil Barrage leave on the ground is played: Ice Crystals, Oil Ground)
             let grounded = d.Name = "Grim Pillars" || d.Name = "Oil Barrage"
-            d.Types |> Set.filter (fun t -> not (descriptiveTypes.Contains t) && not (modelledTypes.Contains t) && not (fused && t = "DetonatesAfterTime") && not (grounded && t = "CreatesGroundEffect")) |> Set.toList)
+            let played t = match Map.tryFind t playedTypes with Some [] -> true | Some names -> List.contains d.Name names | None -> false
+            d.Types |> Set.filter (fun t -> not (descriptiveTypes.Contains t) && not (modelledTypes.Contains t) && not (played t) && not (fused && t = "DetonatesAfterTime") && not (grounded && t = "CreatesGroundEffect")) |> Set.toList)
         |> Option.defaultValue []
+
+    /// "Limit N" of a skill whose effect stands where it was cast (a storm, an orb, a sphere, a
+    /// volcano, a patch of ground): the gem's own stat for it. So many can stand at once; one
+    /// more takes the oldest away.
+    let limitOf (raw: (string * float) list) : int option =
+        raw |> List.tryPick (fun (k, v) -> if v > 0.0 && standingLimitStat k then Some(int v) else None)
 
     let isPersistentBuff (db: GameDb) name =
         skillOfGem db name |> Option.exists (fun d -> d.Types.Contains "Persistent" && d.Types.Contains "Buff")
@@ -568,10 +630,10 @@ module Gems =
         let ownStats = statsWith altQuality data set level quality
         // the skill's internal name, from all its stat sets
         let prefix = skillPrefix (data.StatSets |> List.collect (fun st -> st.Stats @ (st.ConstantStats |> List.map fst)))
-        let ownMods, ownCov = interpret prefix ownStats
+        let ownMods, ownCov = interpret (Some data.Types) prefix ownStats
         // the skill's own conversion is the first of the two conversion steps
         let ownMods = ownMods |> List.map (fun m -> match m.Stat with Convert (a, b) -> { m with Stat = SkillConvert(a, b) } | _ -> m)
-        let supportMods, supportCov = interpret None supportStats
+        let supportMods, supportCov = interpret None None supportStats
         let mods, cov = ownMods @ supportMods, Coverage.merge ownCov supportCov
         let isAttack = data.Types.Contains "Attack"
         // Shield attacks (Resonating Shield, Shield Charge, Raise Shield, Parry) hit with the

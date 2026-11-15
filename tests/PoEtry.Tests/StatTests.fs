@@ -1882,3 +1882,75 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
             (Setup.pressed c Options.defaults "Shockwave Totem").Value.Rules |> List.pick (fun r -> match r.Reaction with GrantBuff (n, s, _, _) when n.EndsWith " buff" -> Some s | _ -> None)
         let t = load { blank with Groups = [ group [ gem "Shockwave Totem" ] ] } Options.defaults
         near (1.2 * seconds t) (seconds { t with Sheet = { t.Sheet with Mods = t.Sheet.Mods @ mods "totem_duration_+%" 20.0 } }))
+
+    // ---- round 15: the word lists, limits, what is read by its ending ----
+
+    test "word lists: no bare word makes a stat a non-combat one; what the words caught is mapped or reported" (fun () ->
+        // loot stays loot; what scales with it, a charm's spirit and a light stun are no loot
+        equal (box NotOffensive) (box (StatMap.meaning "base_item_found_rarity_+%" 10.0))
+        equal (box NotOffensive) (box (StatMap.meaning "light_radius_+%" 10.0))
+        equal (box Unmapped) (box (StatMap.meaning "damage_+%_per_1%_increased_item_found_quantity" 1.0))
+        equal (box (Unsimulated "charms")) (box (StatMap.meaning "charm_possesed_by_bear_spirit_for_x_seconds_when_used" 10.0))
+        equal (box (Unsimulated "charges")) (box (StatMap.meaning "gain_spirit_charge_on_kill_%_chance" 10.0))
+        equal (box (Unsimulated "stun / ailment threshold")) (box (StatMap.meaning "always_light_stun" 1.0))
+        equal (box Unmapped) (box (StatMap.meaning "despair_no_reservation" 1.0))
+        equal (box Unmapped) (box (StatMap.meaning "witchhunter_up_to_damage_+%_final_against_targets_with_missing_focus" 30.0))
+        // "Arrows Pierce an additional Target", "Projectiles Pierce 2 additional Targets"
+        let arrow = (mods "arrow_base_number_of_targets_to_pierce" 1.0).Head
+        equal (box Pierce) (box arrow.Stat)
+        equal (box [ SkillIs Bow ]) (box arrow.Conds)
+        near 2.0 (mods "projectile_base_number_of_targets_to_pierce" 2.0).Head.Value
+        // "30% less Freeze duration on you while a Supported Skill is active"
+        let freeze = (mods "support_freeze_protection_spirit_cost_freeze_duration_on_self_+%_final" -30.0).Head
+        equal (box (Named "SelfDuration:Freeze", More, -30.0)) (box (freeze.Stat, freeze.Kind, freeze.Value)))
+
+    test "limits: a standing skill is cast again a limit-th of its time after the last; +1 to Limit" (fun () ->
+        let stands (c: Loaded) name =
+            (Setup.pressed c Options.defaults name).Value.Rules |> List.pick (fun r -> match r.Reaction with GrantBuff (n, s, _, _) when n.EndsWith " buff" -> Some s | _ -> None)
+        let c = load { blank with Groups = [ group [ gem "Firestorm" ]; group [ gem "Icestorm" ] ] } Options.defaults
+        let duration name = (Setup.pressed c Options.defaults name).Value.Skill.Duration
+        // Firestorm: "Limit 1 Firestorm"; Icestorm: icestorm_max_number_of_storms 3
+        near (duration "Firestorm") (stands c "Firestorm")
+        near (duration "Icestorm" / 3.0) (stands c "Icestorm")
+        // "+1 to Limit for Elemental Skills": two firestorms, four icestorms
+        let more = { c with Sheet = { c.Sheet with Mods = c.Sheet.Mods @ mods "elemental_skill_limit_+" 1.0 } }
+        near (duration "Firestorm" / 2.0) (stands more "Firestorm")
+        near (duration "Icestorm" / 4.0) (stands more "Icestorm"))
+
+    test "gem stats read by their ending are not listed as not understood; skill types played for a skill" (fun () ->
+        let cov name =
+            match Gems.skill db.Value ModDb.empty None { Gem = name; Level = 20; Quality = 0; StatSet = 1; Supports = [] } with
+            | Ok (_, cov) -> (cov.Unmapped |> List.map fst) @ (cov.Unsimulated |> List.map fst)
+            | Error e -> failwith e
+        let volcano, orb = cov "Volcano", cov "Orb of Storms"
+        for id in [ "volcano_fires_projectiles_every_x_ms"; "volcano_maximum_number_of_stages"; "volcano_base_number_of_geysers_allowed"
+                    "volcano_initial_explosion_damage_+%_final_per_additional_stage" ] do
+            equal (box false) (box (List.contains id volcano))
+        for id in [ "orb_of_storms_base_bolt_frequency_ms"; "orb_of_storms_maximum_number_of_hits"; "orb_of_storms_base_maximum_number_of_orbs"
+                    "orb_of_storms_minimum_placement_range_%"; "skill_can_add_multiple_charges_per_action" ] do
+            equal (box false) (box (List.contains id orb))
+        // what the engine does not read stays listed
+        equal (box true) (box (List.contains "volcano_delay_between_slams_ms" volcano))
+        equal (box false) (box (List.contains "Hazard" (Gems.unmodelledTypes db.Value "Spearfield")))
+        equal (box true) (box (List.contains "DetonatesAfterTime" (Gems.unmodelledTypes db.Value "Explosive Spear")))
+        equal (box false) (box (List.contains "Orb" (Gems.unmodelledTypes db.Value "Orb of Storms"))))
+
+    test "stats: elemental conversion, consumed states, culling under its other id, states of a while ago, spell increases for attacks" (fun () ->
+        let cold = mods "non_skill_base_elemental_damage_%_to_convert_to_cold" 50.0
+        equal (box (set [ Convert(Fire, Cold); Convert(Lightning, Cold) ])) (box (cold |> List.map (fun m -> m.Stat) |> Set.ofList))
+        let frozen = mods "support_active_skill_consume_enemy_freeze_to_gain_damage_+%_final" 40.0
+        equal (box [ Damage AllDamage; Named "Takes:Frozen" ]) (box (frozen |> List.map (fun m -> m.Stat)))
+        equal (box [ EnemyHas "Frozen" ]) (box frozen.Head.Conds)
+        equal (box (Named "CullingStrike")) (box (mods "kill_enemy_on_hit_if_under_10%_life" 1.0).Head.Stat)
+        equal (box NotOffensive) (box (StatMap.meaning "damage_against_undead_+%" 20.0))
+        equal (box NotOffensive) (box (StatMap.meaning "projectile_ballistic_angle_from_target_distance" 1.0))
+        let c = load blank Options.defaults
+        let sheet = { c.Sheet with Mods = c.Sheet.Mods @ mods "elemental_damage_+%_if_enemy_shocked_recently" 25.0 @ mods "attack_speed_+%_if_have_blocked_recently" 10.0 }
+        let states = Behaviours.recentStates sheet [] |> List.choose (fun r -> match r.Hook, r.Reaction with h, GrantBuff (n, s, 1, _) -> Some(n, h, s) | _ -> None)
+        equal (box true) (box (List.contains ("ShockedEnemyRecently", OnInflict Shock, 4.0) states))
+        equal (box true) (box (List.contains ("BlockedRecently", OnBlock, 4.0) states))
+        // "Increases and Reductions to Spell damage also apply to Attacks": 30% for spells is 30% for attacks too
+        let wand = { c.Sheet with Mods = [ Mod.inc (Damage AllDamage) 30.0 |> Mod.whenever (SkillIs Spell); Mod.inc (Damage(OfType Fire)) 10.0 ] @ mods "additive_spell_damage_modifiers_apply_to_attack_damage" 1.0 }
+        match Behaviours.minionIncreasesOnYou wand with
+        | [ m ] -> equal (box (Damage AllDamage, Inc, 30.0, [ SkillIs Attack ])) (box (m.Stat, m.Kind, m.Value, m.Conds))
+        | other -> failwithf "unexpected %A" other)
