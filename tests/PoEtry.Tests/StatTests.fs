@@ -967,6 +967,25 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         if poison out <= poison (Sim.run (fight false) 1u) + 1.0 then failwith "the poison did not go on"
         same (fight true) seeds)
 
+    test "a kill by damage over time gives what a killing hit gives: mana on kill, remnants" (fun () ->
+        // 10 mana and 2% of 1000 on kill; a cast of 300 makes room for it; each kill a ward remnant
+        let bolt = { Skill.make "Bolt" [ Spell ] with BaseDamage = Map.ofList [ Chaos, { Min = 1.0; Max = 1.0 } ]; BaseTime = 0.25; BaseCrit = 0.0; Cost = 300.0; Mods = [ Mod.base' (AilmentChance Poison) 100.0; Mod.more (AilmentMagnitude(Some Poison)) 10000.0 ] }
+        let foe = { EnemyDef.atLevel 83 30.0 with Mods = []; Attack = None }
+        let fight =
+            let player =
+                { Actor.make "Player" [ Mod.base' ManaOnKill 10.0; Mod.base' (Named "ManaPercentOnKill") 2.0 ] [ bolt ] with
+                    Vitals = Some(PlayerStats.basic 1e6 1000.0)
+                    WardRemnants = Some { OnKillChance = 100.0; OnStunChance = 0.0; StunCooldown = 1.0; WardPerRemnant = 10.0; ExtraChance = 0.0; Delay = 0.5; Overflow = 1.0 }
+                    Rotation = [ { Use = "Bolt"; When = fun v -> v.Time < 0.1 } ] }
+            Fight.single foe player 6.0
+        let out = Sim.run fight 1u
+        equal (box 1) (box out.Kills.Length)
+        // the hit of 1 did not kill: the poison did
+        if (Map.tryFind "Poison" out.DamageBy |> Option.defaultValue 0.0) < 29.0 then failwith "not killed by its poison"
+        near 30.0 (Map.tryFind "kill" out.ManaGained |> Option.defaultValue 0.0)
+        equal (box 1) (box (count out "ward remnant"))
+        same fight seeds)
+
     // ---- life loss from hits put off ----
 
     test "Amanamu's Defiance and life lost over 4 seconds instead: a share of a hit's life loss prevented, a share lost over 4 s" (fun () ->

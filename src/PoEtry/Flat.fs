@@ -1177,6 +1177,9 @@ module Flat =
               RageDelay: float
               RageWhenHit: float
               RageOnKill: float
+              /// Mana on kill, flat and % of maximum, of the character's own (kills by damage over time).
+              ManaOnKill: float
+              ManaPercentOnKill: float
               BerserkLoss: float
               /// The debuffs an enemy has while it is in the player's Presence (`Fight.PresenceAuras`).
               /// (with whether it is an exposure: as strong as the enemy lets exposure be)
@@ -2230,6 +2233,8 @@ module Flat =
                       RageDelay = Constants.rageLossDelay + Mods.sumBase Ctx.empty [ Named "RageLossDelay" ] sheet
                       RageWhenHit = Mods.sumBase Ctx.empty [ Named "RageWhenHit" ] sheet
                       RageOnKill = Mods.sumBase Ctx.empty [ Named "RageOnKill" ] sheet
+                      ManaOnKill = Mods.sumBase Ctx.empty [ ManaOnKill ] sheet
+                      ManaPercentOnKill = Mods.sumBase Ctx.empty [ Named "ManaPercentOnKill" ] sheet
                       BerserkLoss = Mods.sumBase Ctx.empty [ Named "LifeLossPercentPerMinutePerRage" ] sheet
                       CharmKeep = Mods.sumBase Ctx.empty [ Named "CharmKeepCharges" ] sheet
                       PresenceAuras = fight.PresenceAuras |> List.map (fun (name, stacks, mods) -> statuses.Id name, stacks, mods, name.StartsWith "Exposure:") |> Array.ofList
@@ -2471,7 +2476,9 @@ module Flat =
           Of: DamageType
           Dps: float
           Until: float
-          Most: int }
+          Most: int
+          /// The agent whose it is (`DotInstance.Owner`).
+          By: int }
 
     /// What a hit asks of an enemy as a defender (see `numsFor`): NaN where not asked yet.
     type private DefNums =
@@ -3842,7 +3849,7 @@ module Flat =
         let p = s.P
         match i with
         | Dot (a, t, dps, duration, maxStacks) ->
-            let d = { Ailing = Some a; Label = (at p.AilmentSource (ailmentIndex a)); Of = t; Dps = dps; Until = s.Time + duration; Most = maxStacks }
+            let d = { Ailing = Some a; Label = (at p.AilmentSource (ailmentIndex a)); Of = t; Dps = dps; Until = s.Time + duration; Most = maxStacks; By = s.Cur }
             addDot e (at p.OneOfAilment (ailmentIndex a)) d
             if not (d.Until >= e.Soonest) then e.Soonest <- d.Until
             expireAt s d.Until
@@ -5667,7 +5674,7 @@ module Flat =
                                 if o.Life > 0.0 && o.Index <> e.Index && Vec.dist o.Def.Position def0.Position <= radius + o.Def.Size then
                                     bump s b.Ignited
                                     // (an ignite, counted as the explosion's damage)
-                                    let d = { Ailing = Some Ignite; Label = b.Label; Of = Fire; Dps = dps; Until = s.Time + seconds; Most = 1 }
+                                    let d = { Ailing = Some Ignite; Label = b.Label; Of = Fire; Dps = dps; Until = s.Time + seconds; Most = 1; By = s.Cur }
                                     o.Dots <- d :: o.Dots
                                     if not (d.Until >= o.Soonest) then o.Soonest <- d.Until
                                     expireAt s d.Until)
@@ -5775,7 +5782,7 @@ module Flat =
                         let dps =
                             if info.SpellDot then perSecond * multQ ev (at qDamage ti) * multQ ev qSpellDotDamage
                             else perSecond * multQ ev (at qDotDamageAs ti) * multQ ev qDotDamage
-                        let d = { Ailing = None; Label = label; Of = t; Dps = dps; Until = s.Time + duration; Most = 1 }
+                        let d = { Ailing = None; Label = label; Of = t; Dps = dps; Until = s.Time + duration; Most = 1; By = s.Cur }
                         e.Dots <- d :: (e.Dots |> List.filter (fun x -> x.Label <> label || x.Dps > dps))
                         if not (d.Until >= e.Soonest) then e.Soonest <- d.Until
                         expireAt s d.Until
@@ -6788,6 +6795,48 @@ module Flat =
                     prune s
             enter s 0
 
+    /// What a kill by damage over time gives besides the rules for kills (`Sim.dotKillGains`);
+    /// the player is the agent entered.
+    let private dotKillGains (s: State) (rng: Rng) (e: Foe) (mine: bool) =
+        let p = s.P
+        let rarity = e.Def.Rarity
+        (match (if s.Main.Vitals.IsSome then p.Vitals else None) with
+         | Some v when mine ->
+            let per = RarityCharges.flaskChargesPerKill rarity
+            (match p.Actor.ManaFlask with Some f -> s.FlaskCharges <- min f.MaxCharges (s.FlaskCharges + per * f.ChargeGainMult) | None -> ())
+            (match v.LifeFlask with Some f -> s.LifeFlaskCharges <- min f.MaxCharges (s.LifeFlaskCharges + per * f.ChargeGainMult) | None -> ())
+            s.Life <- min (max s.Life v.Life) (s.Life + v.LifeOnKill)
+            s.Shield <- min (max s.Shield (min v.EnergyShield v.ESRecoverCap)) (s.Shield + v.ESOnKill)
+            gainMana s v 5 ((p.ManaOnKill + v.Mana * p.ManaPercentOnKill / 100.0) * v.ManaRecoveryRate)
+         | _ -> ())
+        (match p.WardRemnants with
+         | Some r when mine && s.Main.Vitals.IsSome && rng.Chance r.OnKillChance ->
+            let count = if rng.Chance r.ExtraChance then 2.0 else 1.0
+            bump s p.CWardRemnant
+            schedule s (s.Time + r.Delay) EWard 0 0 (r.WardPerRemnant * count) 0.0
+         | _ -> ())
+        (match p.ManaRemnants with
+         | Some r when mine && s.Main.Vitals.IsSome ->
+            refreshStatus s e
+            let had (a: Ailment) = at e.SHas (at p.AilmentStatus (ailmentIndex a))
+            let ailing = had Ignite || had Chill || had Freeze || had Shock || had Electrocute
+            if ailing && rng.Chance r.OnKillChance then
+                let count = if rng.Chance r.ExtraChance then 2.0 else 1.0
+                bump s p.CManaRemnant
+                let most = match p.Vitals with Some v -> v.Mana | None -> 0.0
+                schedule s (s.Time + r.Delay) EMana 0 0 ((r.ManaPerRemnant + r.PercentOfMaxMana / 100.0 * most) * count) 0.0
+         | _ -> ())
+        if s.Main.Charms.Length > 0 then
+            if s.Main.Vitals.IsSome then
+                for place in 0 .. s.Main.Charms.Length - 1 do
+                    let c = at s.Main.Charms place
+                    let gain = (MonsterPower.ofRarity rarity / 2.0 + (if rng.Chance c.Charm.ChargeOnKillChance then 1.0 else 0.0)) * c.Charm.ChargeGainMult
+                    put s.CharmCharges c.CBuff (min c.Charm.MaxCharges ((at s.CharmCharges c.CBuff) + gain))
+            if rarity = Rare || rarity = Unique then charm s rng "KillRare" |> ignore
+        if mine then
+            gainRage s p.RageOnKill
+            mark s p.BKilled 4.0
+
     /// The earliest event happens (`Sim.step`).
     let private step (s: State) =
         let q = s.Queue
@@ -6851,15 +6900,19 @@ module Flat =
             let p = s.P
             let killsBefore = s.Kills.Count
             advance s t
-            // kills by damage over time set off the player's rules for kills (`Sim.step`)
+            // the player's kills by damage over time set off the player's rules for kills and
+            // give what a kill gives (`Sim.step`, `Sim.dotKillGains`)
             if s.Kills.Count > killsBefore then
                 for k in killsBefore .. s.Kills.Count - 1 do
-                    let (name, _, _) = s.Kills.[k]
+                    let (name, _, when') = s.Kills.[k]
                     let e = at s.Foes s.FoeIds.[name]
-                    reactDot s rng p.OnKill "" -1
-                    if p.HasKillOf then
-                        refreshStatus s e
-                        statusMap p e.SHas e.SStacks |> Map.iter (fun k _ -> reactDot s rng p.OnKillOf k e.Index)
+                    let mine = e.Dots |> List.exists (fun d -> d.By = 0 && d.Until >= when')
+                    if mine then
+                        reactDot s rng p.OnKill "" -1
+                        if p.HasKillOf then
+                            refreshStatus s e
+                            statusMap p e.SHas e.SStacks |> Map.iter (fun k _ -> reactDot s rng p.OnKillOf k e.Index)
+                    dotKillGains s rng e mine
             syncPresence s
             recover s dt
             if s.AliveCount > 0 && alive s then

@@ -3558,6 +3558,67 @@ module Sim =
                             else setStacksWith env actorName false r (stacksOf st r - 1) w |> fun w -> { w with Counts = bump ("lost:" + r) w.Counts })
                     w
 
+    /// Whether an enemy that died of damage over time at `at` is the player's kill: some damage
+    /// over time of the player's was on it then (one only of minions is theirs, as their hits are).
+    let private playersDotKill env (e: EnemyState) at =
+        e.Dots |> List.exists (fun d -> d.Owner = env.Fight.Player.Name && d.Expires >= at)
+
+    /// What a kill by damage over time gives besides the rules for kills: what a killing hit gives
+    /// where the game does not tie it to a hit. The player's kill: flask charges, life, energy
+    /// shield and mana on kill (the character's own, no skill's), Runic Ward and Mana Remnants, Rage
+    /// on kill, killed recently; any kill: charm charges and what kills of rare monsters set off.
+    /// Meta energy from kills is from melee attack kills only (Reaper's Invocation), never these.
+    let private dotKillGains env (rng: Rng) (e: EnemyState) mine (w: World) =
+        let player = env.Fight.Player
+        let w =
+            match player.Vitals, w.Player with
+            | Some v, Some p when mine ->
+                let per = RarityCharges.flaskChargesPerKill e.Def.Rarity
+                let w =
+                    { w with
+                        Player =
+                            Some
+                                { p with
+                                    FlaskCharges = (match player.ManaFlask with Some f -> min f.MaxCharges (p.FlaskCharges + per * f.ChargeGainMult) | None -> p.FlaskCharges)
+                                    LifeFlaskCharges = (match v.LifeFlask with Some f -> min f.MaxCharges (p.LifeFlaskCharges + per * f.ChargeGainMult) | None -> p.LifeFlaskCharges)
+                                    Life = min (max p.Life v.Life) (p.Life + v.LifeOnKill)
+                                    EnergyShield = min (max p.EnergyShield (min v.EnergyShield v.ESRecoverCap)) (p.EnergyShield + v.ESOnKill) } }
+                let sheet = ModDb.ofList player.Mods
+                gainMana v "kill" ((Mods.sumBase Ctx.empty [ ManaOnKill ] sheet + v.Mana * Mods.sumBase Ctx.empty [ Named "ManaPercentOnKill" ] sheet / 100.0) * v.ManaRecoveryRate) w
+            | _ -> w
+        let w =
+            match player.WardRemnants, w.Player with
+            | Some r, Some _ when mine && rng.Chance r.OnKillChance ->
+                let count = if rng.Chance r.ExtraChance then 2.0 else 1.0
+                { w with Counts = bump "ward remnant" w.Counts } |> schedule (w.Time + r.Delay) (WardArrives(r.WardPerRemnant * count))
+            | _ -> w
+        let w =
+            match player.ManaRemnants, w.Player with
+            | Some r, Some _ when mine ->
+                let ailing = [ "Ignited"; "Chilled"; "Frozen"; "Shocked"; "Electrocuted" ] |> List.exists (status e).ContainsKey
+                if ailing && rng.Chance r.OnKillChance then
+                    let count = if rng.Chance r.ExtraChance then 2.0 else 1.0
+                    { w with Counts = bump "mana remnant" w.Counts } |> schedule (w.Time + r.Delay) (ManaArrives((r.ManaPerRemnant + r.PercentOfMaxMana / 100.0 * (player.Vitals |> Option.map (fun v -> v.Mana) |> Option.defaultValue 0.0)) * count))
+                else w
+            | _ -> w
+        let w =
+            if player.Charms.IsEmpty then w
+            else
+                let w =
+                    { w with
+                        Player =
+                            w.Player |> Option.map (fun p ->
+                                { p with
+                                    CharmCharges =
+                                        player.Charms |> List.fold (fun (m: Map<string, float>) c ->
+                                            let gain = (MonsterPower.ofRarity e.Def.Rarity / 2.0 + (if rng.Chance c.ChargeOnKillChance then 1.0 else 0.0)) * c.ChargeGainMult
+                                            Map.add c.Buff (min c.MaxCharges ((Map.tryFind c.Buff m |> Option.defaultValue 0.0) + gain)) m) p.CharmCharges }) }
+                if e.Def.Rarity = Rare || e.Def.Rarity = Unique then fst (charm env rng "KillRare" w) else w
+        if not mine then w
+        else
+            let _, _, _, _, onKill = env.Rage
+            gainRage env onKill w |> markRecently player.Name false false true
+
     let private step env rng (w: World) =
         let (KeyValue ((t, sq), ev)) = Seq.head w.Queue
         let dt = t - w.Time
@@ -3602,17 +3663,23 @@ module Sim =
         let w = { w with Queue = Map.remove (t, sq) w.Queue }
         let killsBefore = w.Kills.Length
         let w = advance t w
-        // kills by damage over time (and recorded damage) set off the player's rules for kills,
-        // as by a skill that is neither attack nor spell
+        // the player's kills by damage over time set off the player's rules for kills, as by a
+        // skill that is neither attack nor spell, and give what a kill gives (`dotKillGains`)
         let w =
             let n = w.Kills.Length - killsBefore
             if n <= 0 then w
             else
                 let player = env.Fight.Player
                 w.Kills |> List.truncate n |> List.rev
-                |> List.fold (fun w (name, _, _) ->
-                    let w = react env rng player OnKill dotKiller None w
-                    status w.Enemies.[name] |> Map.fold (fun w k _ -> react env rng player (OnKillOf k) dotKiller (Some name) w) w) w
+                |> List.fold (fun w (name, _, at) ->
+                    let e = w.Enemies.[name]
+                    let mine = playersDotKill env e at
+                    let w =
+                        if not mine then w
+                        else
+                            let w = react env rng player OnKill dotKiller None w
+                            status w.Enemies.[name] |> Map.fold (fun w k _ -> react env rng player (OnKillOf k) dotKiller (Some name) w) w
+                    dotKillGains env rng w.Enemies.[name] mine w) w
         let w = w |> syncPresence env.Fight |> recover env.Fight.Player.Vitals env.Fight.Player.ManaFlask env.Fight.Player.Charms dt
         if allDead w || (w.Player |> Option.exists (fun p -> p.Died.IsSome)) then
             w
