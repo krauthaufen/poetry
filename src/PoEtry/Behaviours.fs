@@ -2718,6 +2718,21 @@ module Behaviours =
             | _ -> false
         if a.Rules |> List.exists (fun r -> boosts r.Reaction) then { a with Mods = a.Mods @ boostMods 1.0 } else a
 
+    /// "Skills deal X% increased Damage per Connected Red Support Gem", "X% increased Skill Speed
+    /// per Connected Green Support Gem", "X% increased Critical Hit Chance per Connected Blue
+    /// Support Gem": the supports socketed in the skill's gem, by their colour.
+    let connectedSupports (db: GameDb) (charMods: ModDb) (setup: GemSetup) (skill: Skill) : Skill =
+        let per name = Mods.sumBase Ctx.empty [ Named name ] charMods
+        let count (colour: int) = setup.Supports |> List.filter (fun (name, _) -> Gems.data db name |> Option.exists (fun d -> d.Color = colour)) |> List.length |> float
+        let mods =
+            [ Damage AllDamage, per "DamagePerRedSupport" * count 1; Speed, per "SpeedPerGreenSupport" * count 2; CritChance, per "CritPerBlueSupport" * count 3 ]
+            |> List.filter (fun (_, v) -> v <> 0.0)
+            |> List.map (fun (stat, v) -> Mod.inc stat v |> Mod.from "connected supports")
+        if mods.IsEmpty then skill
+        else
+            let rec add (s: Skill) = { s with Mods = s.Mods @ mods; Parts = s.Parts |> List.map add }
+            add skill
+
     /// "for each different Warcry you've used Recently", "for each different Spell you've Cast
     /// in the last eight seconds", "for every different Grenade fired in the past 8 seconds",
     /// "for each type of Ammunition fired in the past 10 seconds": a modifier that counts them

@@ -2559,3 +2559,25 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         let ctx tags = { Ctx.empty with SkillTags = Set.ofList tags; Buffs = Map.ofList [ "AccuracyUpTo:2000", some ] }
         equal (box (Some 8.0)) (box (Mod.eval (ctx [ Attack ]) m))
         equal (box None) (box (Mod.eval (ctx [ Spell ]) m)))
+
+    test "increased damage, skill speed and critical hit chance per connected support gem of a colour" (fun () ->
+        let names = [ "Pierce I"; "Controlled Destruction"; "Rapid Attacks I"; "Brutality I" ]
+        let colour (name: string) = match Gems.data db.Value name with Some d -> d.Color | None -> failwithf "no support %s" name
+        let n c = names |> List.filter (fun s -> colour s = c) |> List.length |> float
+        // (the four are of more than one colour, and each is red, green or blue)
+        near 4.0 (n 1 + n 2 + n 3)
+        equal (box true) (box (n 1 < 4.0 && n 2 < 4.0 && n 3 < 4.0))
+        let charMods =
+            ModDb.ofList
+                (mods "skills_gain_damage_+%_per_sockted_or_adjacent_red_support_gem" 5.0
+                 @ mods "skills_gain_skill_speed_+%_per_sockted_or_adjacent_green_support_gem" 3.0
+                 @ mods "skills_gain_critical_strike_chance_+%_per_sockted_or_adjacent_blue_support_gem" 10.0)
+        let setup = { Gem = "Spark"; Level = 20; Quality = 0; StatSet = 1; Supports = names |> List.map (fun s -> s, 1) }
+        let part = Skill.make "Bolt: Burst" [ Spell ]
+        let skill = Behaviours.connectedSupports db.Value charMods setup { Skill.make "Bolt" [ Spell ] with Parts = [ part ] }
+        let expected = [ Damage AllDamage, 5.0 * n 1; Speed, 3.0 * n 2; CritChance, 10.0 * n 3 ] |> List.filter (fun (_, v) -> v <> 0.0)
+        equal (box expected) (box (skill.Mods |> List.map (fun m -> m.Stat, m.Value)))
+        equal (box expected) (box (skill.Parts.Head.Mods |> List.map (fun m -> m.Stat, m.Value)))
+        equal (box true) (box (skill.Mods |> List.forall (fun m -> m.Kind = Inc)))
+        // a character without the lines: the skill as it was
+        equal 0 (Behaviours.connectedSupports db.Value ModDb.empty setup (Skill.make "Bolt" [ Spell ])).Mods.Length)

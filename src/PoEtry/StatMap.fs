@@ -1526,6 +1526,12 @@ module StatMap =
         // "X% increased Attack Speed per 400 Accuracy Rating, up to 20%" (Setup.fight counts the Accuracy Rating)
         | "attack_speed_+%_per_200_accuracy_rating" when v > 0.0 ->
             one (Mod.inc Speed v |> Mod.whenever (SkillIs Attack) |> Mod.whenever (PerStack(sprintf "AccuracyUpTo:%d" (400 * int (floor (20.0 / v + 1e-9))), 400.0)))
+        // "Skills deal X% increased Damage per Connected Red Support Gem", "... increased Skill Speed
+        // per Connected Green Support Gem", "... increased Critical Hit Chance per Connected Blue
+        // Support Gem" (Behaviours.connectedSupports)
+        | "skills_gain_damage_+%_per_sockted_or_adjacent_red_support_gem" -> one (Mod.base' (Named "DamagePerRedSupport") v)
+        | "skills_gain_skill_speed_+%_per_sockted_or_adjacent_green_support_gem" -> one (Mod.base' (Named "SpeedPerGreenSupport") v)
+        | "skills_gain_critical_strike_chance_+%_per_sockted_or_adjacent_blue_support_gem" -> one (Mod.base' (Named "CritPerBlueSupport") v)
         // "Your Hits cannot be Evaded by Pinned Enemies"
         | "pinned_enemies_cannot_evade_your_attacks" -> one (Mod.override' HitChance 100.0 |> Mod.whenever (EnemyHas "Pinned"))
         // Puppet Master and Archon of Undeath (Behaviours.puppetMaster, archonOfUndeath)
