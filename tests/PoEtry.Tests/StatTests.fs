@@ -945,6 +945,16 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
             | Error e -> failwith e
         let t = storm []
         equal (box (Storm, 30.0, 8.0, 1, 0.0)) (box (t.Kind, t.Radius, t.Seconds, t.Limit, t.Speed))
+        // a copy behind a meta gem goes by another name, and counts against the same limit
+        let copy =
+            let setup = { Gem = "Tornado"; Level = 20; Quality = 0; StatSet = 1; Supports = [] }
+            match Gems.skill db.Value ModDb.empty None setup with
+            | Ok (skill, _) ->
+                match Behaviours.storm db.Value ModDb.empty setup { skill with Name = "Tornado (Cast on Dodge #2)" } with
+                | [ { Reaction = LayGround g } ] -> g
+                | other -> failwithf "%A" other
+            | Error e -> failwith e
+        equal (box ("Tornado", "Tornado (Cast on Dodge #2)", "Tornado")) (box (t.Shared, copy.Skill, copy.Shared))
         equal (box [ Fire; Cold; Lightning ]) (box (t.Absorbs |> List.map fst))
         for (_, dps) in t.Absorbs do
             near (17530.0 / 60.0) dps

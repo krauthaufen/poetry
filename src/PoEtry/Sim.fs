@@ -45,6 +45,9 @@ type Ground =
       Seconds: float
       /// How many of the skill there are at once (one more takes the oldest away); 0: any number.
       Limit: int
+      /// Whose limit it counts against: the gem's name, the same for every copy of the gem
+      /// (one pressed, one behind a meta gem).
+      Shared: string
       /// Oil: what an enemy in it has, monster side (its slow, the Flammability it takes).
       Mods: Mod list
       /// Oil, and Ignited Ground that was Oil: the Exposure of an enemy in it, percent of
@@ -69,7 +72,7 @@ module Ground =
     let exposed = "Exposure:Oil"
     let dotLabel (skill: string) (t: DamageType) = sprintf "%s (%s over time)" skill ((DamageType.name t).ToLowerInvariant())
     let make skill kind radius seconds =
-        { Skill = skill; Kind = kind; Radius = radius; GrowPerSecond = 0.0; GrowMax = 0.0; Seconds = seconds; Limit = 0; Mods = []; Exposure = 0.0
+        { Skill = skill; Kind = kind; Radius = radius; GrowPerSecond = 0.0; GrowMax = 0.0; Seconds = seconds; Limit = 0; Shared = skill; Mods = []; Exposure = 0.0
           Ignite = 0.0; IgniteSeconds = Constants.igniteDuration; Absorbs = []; Speed = 0.0 }
 
 type SkillFilter =
@@ -2010,13 +2013,13 @@ module Sim =
                               | None ->
                                   // "Limit N": one more takes the oldest of the skill away
                                   let live =
-                                      let mine = live |> List.filter (fun x -> x.Spec.Skill = g.Skill && x.Owner = actor.Name)
+                                      let mine = live |> List.filter (fun x -> x.Spec.Shared = g.Shared && x.Owner = actor.Name)
                                       if g.Limit <= 0 || mine.Length < g.Limit then live
                                       else
                                           let gone = mine.Length - g.Limit + 1
                                           live
                                           |> List.fold (fun (kept, seen) x ->
-                                              if x.Spec.Skill = g.Skill && x.Owner = actor.Name then (if seen < gone then kept, seen + 1 else x :: kept, seen + 1)
+                                              if x.Spec.Shared = g.Shared && x.Owner = actor.Name then (if seen < gone then kept, seen + 1 else x :: kept, seen + 1)
                                               else x :: kept, seen) ([], 0)
                                           |> fst |> List.rev
                                   let laid =

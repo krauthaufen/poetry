@@ -1793,6 +1793,7 @@ module Behaviours =
             let ground =
                 { Ground.make skill.Name Storm radius seconds with
                     Limit = int limit + int (Mods.sumBase ctx [ Named "SkillLimit" ] mods)
+                    Shared = setup.Gem
                     Absorbs = [ for t in [ Fire; Cold; Lightning ] -> t, perSecond * Hit.damageMult dotCtx mods t * Mods.mult dotCtx [ Named "DotDamage" ] mods ]
                     IgniteSeconds = Ailments.duration ctx mods Ignite
                     Speed =

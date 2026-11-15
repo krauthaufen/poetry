@@ -4599,11 +4599,11 @@ module Flat =
                     if g.Limit > 0 then
                         let mutable mine = 0
                         for x in live do
-                            if x.Spec.Skill = g.Skill && x.By = s.Cur then mine <- mine + 1
+                            if x.Spec.Shared = g.Shared && x.By = s.Cur then mine <- mine + 1
                         let mutable gone = if mine >= g.Limit then mine - g.Limit + 1 else 0
                         let mutable i = 0
                         while gone > 0 && i < live.Count do
-                            if live.[i].Spec.Skill = g.Skill && live.[i].By = s.Cur then
+                            if live.[i].Spec.Shared = g.Shared && live.[i].By = s.Cur then
                                 live.RemoveAt i
                                 gone <- gone - 1
                             else i <- i + 1
