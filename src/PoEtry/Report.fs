@@ -225,6 +225,9 @@ module Report =
                      "esRegen", num v.ESRegen ])
               "recovery", obj [ "lifeRegen", num v.LifeRegen; "manaRegen", num v.ManaRegen; "energyShieldRecharge", num v.EnergyShieldRecharge ]
               "pressable", strs (Setup.pressable c)
+              // what a rotation's conditions can ask about: the states an enemy can have in this
+              // character's fights ("has:", "lacks:"), its skills that leave something standing ("up:", "down:")
+              "conditions", (let states, skills = Setup.conditions c Options.defaults in obj [ "states", strs states; "skills", strs skills ])
               "groups",
               JArr
                   [ for (i, g) in List.indexed groups do
@@ -369,7 +372,11 @@ module Report =
         // target), otherwise whenever its cooldown is over; those at the end that have no
         // cooldown are pressed in turn
         // (an entry may say when itself, after an "@": "ready", "buff" (kept up), "curse" (kept
-        // on the enemy), "below:<resource>:<count>")
+        // on the enemy), "below:<resource>:<count>"; "has:<State>" / "lacks:<State>": the enemy
+        // aimed at has the state, or has it not; "up:<Skill>" / "down:<Skill>": something the
+        // skill left stands (ground, a storm, a totem), or nothing of it does. Several, joined
+        // by "+", must all hold: "Flameblast@has:Oil+lacks:Ignite". A state or a skill that
+        // nothing goes by is never had and never up)
         let chosen =
             (s "rotation" "").Split('|') |> Array.map (fun x -> x.Trim()) |> Array.filter (fun x -> x <> "") |> List.ofArray
             |> List.map (fun x -> match x.IndexOf '@' with | -1 -> x, "" | k -> x.Substring(0, k), x.Substring(k + 1))
@@ -380,19 +387,35 @@ module Report =
             | [] -> usual |> List.map (fun p -> p, "")
             | _ ->
                 let special g = usual |> List.tryFind (fun p -> match p with | Spam _ | Cycle _ -> false | _ -> Setup.gemOf p = [ g ])
-                let said (g: string, code: string) =
+                let alone (g: string) (code: string) =
                     match code.Split(':') with
                     | [| "ready" |] -> Some(OnCooldown g)
                     | [| "buff" |] -> Some(KeepBuff g)
                     | [| "curse" |] -> Some(KeepCurse g)
                     | [| "below"; r; n |] -> Some(WhileBelow(r, (match System.Int32.TryParse n with | true, v -> v | _ -> 1), g))
                     | _ -> None
+                // (what a part asks of what the player sees; None: a word that says nothing)
+                let asks (g: string) (part: string) : (View -> bool) option =
+                    let rest (word: string) = part.Substring(word.Length + 1).Trim()
+                    if part.StartsWith "has:" then (let keys = Setup.stateKeys (rest "has") in Some(fun (v: View) -> keys |> List.exists v.EnemyStatus.ContainsKey))
+                    elif part.StartsWith "lacks:" then (let keys = Setup.stateKeys (rest "lacks") in Some(fun (v: View) -> not (keys |> List.exists v.EnemyStatus.ContainsKey)))
+                    elif part.StartsWith "up:" then Some(Setup.standing c o (rest "up"))
+                    elif part.StartsWith "down:" then (let up = Setup.standing c o (rest "down") in Some(fun (v: View) -> not (up v)))
+                    else alone g part |> Option.map (Setup.condition c o)
+                let said (g: string, code: string) =
+                    match code.Split('+') |> Array.map (fun x -> x.Trim()) |> Array.filter (fun x -> x <> "") |> List.ofArray with
+                    | [ one ] when (alone g one).IsSome -> alone g one
+                    | parts ->
+                        match parts |> List.choose (asks g) with
+                        | [] -> None
+                        | conds -> Some(When((fun (v: View) -> conds |> List.forall (fun cond -> cond v)), g))
                 let waits (g, code) = code <> "" || special g |> Option.isSome || (Setup.pressed c o g |> Option.exists (fun p -> (p.Skill.Cooldown |> Option.defaultValue 0.0) > 0.0))
                 let tail = chosen |> List.rev |> List.takeWhile (fun x -> not (waits x)) |> List.rev
-                let tail = if tail.IsEmpty then [ List.last chosen ] else tail
+                // (the last is pressed whenever nothing before it is, unless it says when itself)
+                let tail = if tail.IsEmpty && (said (List.last chosen)).IsNone then [ List.last chosen ] else tail
                 let before = chosen |> List.take (chosen.Length - tail.Length)
                 (before |> List.map (fun (g, code) -> (said (g, code) |> Option.orElse (special g) |> Option.defaultValue (OnCooldown g)), (if (said (g, code)).IsSome then code else "")))
-                @ [ (match tail with [ (one, _) ] -> Spam one | many -> Cycle(many |> List.map fst)), "" ]
+                @ (match tail with [] -> [] | [ (one, _) ] -> [ Spam one, "" ] | many -> [ Cycle(many |> List.map fst), "" ])
         let player = Setup.player c o (steps |> List.map fst) None
         // where the enemies begin: in a melee player's face; one who presses something else (or
         // lets minions fight) stands back twice as far (the distances are this page's choice)

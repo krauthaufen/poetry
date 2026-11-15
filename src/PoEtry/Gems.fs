@@ -220,7 +220,7 @@ module Gems =
         let ends (es: string list) = es |> List.exists (fun (e: string) -> id.EndsWith e)
         (types.Contains "Channel"
          && ends [ "_maximum_stages"; "_max_stages"; "_max_number_of_stages"; "_maximum_number_of_stages"; "damage_+%_final_per_stage"; "damage_+%_final_per_stack"
-                   "damage_+%_final_per_additional_stage"; "all_damage_%_to_gain_as_fire_per_stage"; "radius_+_per_stage"
+                   "damage_+%_final_per_additional_stage"; "all_damage_%_to_gain_as_fire_per_stage"; "radius_+_per_stage"; "damaging_ailment_effect_per_stage_+%_final"
                    "_initial_explosion_number_of_additional_projectiles_per_additional_stage" ])
         || (types.Contains "Sustained"
             && (ends [ "_frequency_ms"; "_pulse_delay_ms"; "_pulse_interval_ms"; "_every_x_ms"; "_fireball_delay_ms"; "_hit_interval_ms"; "_maximum_number_of_hits"; "_number_of_pulses" ]
@@ -400,7 +400,9 @@ module Gems =
               "MinionsCanExplode", []
               // what a support can be socketed with, what a line can name, where a projectile
               // starts and what the skill can be used with: nothing a fight plays
-              "CanBecomeArrowRain", []; "CreatesDemonMinion", []; "NoDualWield", []; "ProjectilesNotFromUser", [] ]
+              "CanBecomeArrowRain", []; "CreatesDemonMinion", []; "NoDualWield", []; "ProjectilesNotFromUser", []
+              // "Tornado": it takes up the Ignited Ground it overlaps
+              "InteractsWithElementalGround", [ "Tornado" ] ]
 
     /// What a gem's skill does that the simulator has no model for: its skill types that are
     /// neither descriptive nor modelled ("Channel", "GainsStages", "Shapeshift", "Rain"...).
@@ -411,8 +413,8 @@ module Gems =
         |> Option.map (fun d ->
             // (a detonation after a time is played for grenades and Frost Bomb: their hit's delay)
             let fused = d.Types.Contains "Grenade" || d.Name = "Frost Bomb" || lodged.Contains d.Name
-            // (what Grim Pillars and Oil Barrage leave on the ground is played: Ice Crystals, Oil Ground)
-            let grounded = d.Name = "Grim Pillars" || d.Name = "Oil Barrage"
+            // (what Grim Pillars, Oil Barrage and Oil Grenade leave on the ground is played: Ice Crystals, Oil Ground)
+            let grounded = d.Name = "Grim Pillars" || d.Name = "Oil Barrage" || d.Name = "Oil Grenade"
             let played t = match Map.tryFind t playedTypes with Some [] -> true | Some names -> List.contains d.Name names | None -> false
             d.Types |> Set.filter (fun t -> not (descriptiveTypes.Contains t) && not (modelledTypes.Contains t) && not (played t) && not (fused && t = "DetonatesAfterTime") && not (grounded && t = "CreatesGroundEffect")) |> Set.toList)
         |> Option.defaultValue []
@@ -577,7 +579,7 @@ module Gems =
     let private impactIsSecondary = set [ "Thunderstorm", "Thunderstorm" ]
 
     /// Skills whose `base_secondary_skill_effect_duration` is read where their mechanic is built.
-    let private secondaryDurationRead = set [ "Freezing Mark"; "Frost Bomb"; "Kelari's Malediction" ]
+    let private secondaryDurationRead = set [ "Freezing Mark"; "Frost Bomb"; "Kelari's Malediction"; "Oil Grenade" ]
 
     let private conditionMods (skill: string) (label: string) (isMain: bool) : Mod list =
         (Map.tryFind (skill, label) partConditions |> Option.defaultValue [])
@@ -762,8 +764,13 @@ module Gems =
             else
                 let more = perStage [ "damage_+%_final_per_stage"; "damage_+%_final_per_stack" ] * stages + perStage [ "damage_+%_final_per_additional_stage" ] * (stages - 1.0)
                 let gainFire = perStage [ "all_damage_%_to_gain_as_fire_per_stage" ] * stages
+                // "X% more Magnitude of Damaging Ailments per Stage" (Flameblast's quality)
+                let ailing = perStage [ "damaging_ailment_effect_per_stage_+%_final" ] * stages
                 [ yield Mod.base' (Named "ChannelStages") stages |> Mod.from "stages"
                   if more <> 0.0 then yield Mod.more (Damage AllDamage) more |> Mod.from "stages"
+                  if ailing <> 0.0 then
+                      for a in Ailment.damaging do
+                          yield Mod.more (AilmentMagnitude(Some a)) ailing |> Mod.from "stages"
                   if gainFire > 0.0 then
                       for t in DamageType.all do
                           yield Mod.base' (GainAs(t, Fire)) gainFire |> Mod.from "stages" ]

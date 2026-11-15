@@ -355,9 +355,20 @@ module StatMap =
         | "support_consume_X_endurance_charges_on_use" -> Some Structural
         // "Enemies you Curse are Hindered, with 15% reduced Movement Speed" (Behaviours.curseOf)
         | "enemies_you_curse_have_15%_hinder" -> one (Mod.flag (Named "CursesHinder"))
-        // Oil Ground's exposure and slow: read by Behaviours.oilGround; how it ignites (an Ignite
-        // from Ignited Ground or a Detonator) is not modelled
-        | "skill_base_oil_exposure_-_to_total_elemental_resistance" | "skill_base_oil_movement_speed_+%_final_to_apply" -> Some Structural
+        // Oil Ground's exposure and slow, and how a ground surface grows (Encroaching Ground): read
+        // by Behaviours.oilGround
+        | "skill_base_oil_exposure_-_to_total_elemental_resistance" | "skill_base_oil_movement_speed_+%_final_to_apply"
+        | "support_ground_effect_area_of_effect_+%_final_per_second" | "support_ground_effect_area_of_effect_+%_final_per_second_max" -> Some Structural
+        // "X% increased Ground Effect Duration" (Persistent Ground): the Oil Ground's time
+        | "ground_effect_duration_+%" -> one (Mod.inc (Named "GroundDuration") v)
+        // Tornado: "Limit N Tornadoes", how fast it moves with Advancing Storm ("Supported Skills
+        // originate from the player and move towards the target location"): read by Behaviours.storm.
+        // Its pull (strength, interval, how hard it pushes, the time after a pull that failed) and
+        // its slow move the enemies about inside and towards it: who is in it is who stands in
+        // its radius, so they change nothing here (RULES.md "Tornado")
+        | "number_of_tornados_allowed" | "tornado_movement_speed_+%_final" | "storm_skills_spawn_at_initiator_location" | "support_storm_base_movement_speed"
+        | "self_targeted_storm_skills_target_a_location_instead"
+        | "tornado_pull_strength_%" | "tornado_pull_interval_ms" | "tornado_pushiness" | "tornado_failled_pull_cooldown_ms" | "tornado_slow_%_at_max_range" -> Some Structural
         // Ice Bite's buff on freezing an enemy: read by Behaviours.iceBite
         | "support_ice_bite_buff_grant_%_added_cold_attack_damage" | "support_ice_bite_base_buff_duration" -> Some Structural
         // "Casting Ice Nova targeting near a Frostbolt Projectile will cause it to originate from

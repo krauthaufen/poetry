@@ -756,6 +756,8 @@ module Flat =
         /// A pustule on the enemy hit, if it has none (see `Reaction.AttachPustule`).
         | RAttachPustule of part: int * seconds: float * poisonPerPercent: float * capPercent: float * count: int
         | RNone
+        /// `LayGround`: the ground, where its damage over time goes (by `Ground.Absorbs`), and its counts (laid, lit, absorbed).
+        | RLayGround of ground: Ground * dots: int[] * laid: int * lit: int * absorbed: int
 
     /// What happens on its own every few seconds, with its names as numbers (see `PeriodicAction`).
     type private PAction =
@@ -1316,6 +1318,11 @@ module Flat =
               AilmentResistant: int[]
               CInflict: int[]
               ExposureStatus: int[]
+              /// The statuses of an enemy in Oil, on Ignited Ground, and its Exposure there; the count of the Ignites the ground inflicts.
+              SOiled: int
+              SOnFire: int
+              SOilExposure: int
+              CGroundIgnite: int
               // buffs and statuses the engine itself reads and writes
               BRage: int
               BHit: int
@@ -1426,6 +1433,7 @@ module Flat =
         | GrantOneOf _ -> "GrantOneOf"
         | AttachPustule _ -> "AttachPustule"
         | NoReaction -> "NoReaction"
+        | LayGround _ -> "LayGround"
         | RemoveDebuff _ -> "RemoveDebuff"
         | InflictStatus _ -> "InflictStatus"
         | SpreadPoison _ -> "SpreadPoison"
@@ -1631,6 +1639,7 @@ module Flat =
             let ailmentSource = allAilments |> List.map (fun a -> sources.Id(Ailment.name a)) |> Array.ofList
             let cInflict = allAilments |> List.map (fun a -> counts.Id("inflict:" + Ailment.name a)) |> Array.ofList
             let exposureStatus = DamageType.all |> List.map (fun t -> statuses.Id("Exposure:" + DamageType.name t)) |> Array.ofList
+            let sOiled, sOnFire, sOilExposure = statuses.Id Ground.oiled, statuses.Id Ground.ignited, statuses.Id Ground.exposed
             for n in derivedStatuses do
                 statuses.Id n |> ignore
             let sArmourBreak = statuses.Id "ArmourBreak"
@@ -1694,6 +1703,8 @@ module Flat =
                     let most = max 1 (int (floor (min cap power / max 1.0 perPower)))
                     REmpower(buff b, perPower, cap, Array.init (most + 1) (fun n -> counts.Id("empowered:" + string n)))
                 | NoReaction -> RNone
+                | LayGround g ->
+                    RLayGround(g, [| for (t, _) in g.Absorbs -> sources.Id(Ground.dotLabel g.Skill t) |], counts.Id("ground:" + g.Skill), counts.Id("lit:" + g.Skill), counts.Id("absorbed:" + g.Skill))
                 | GrantMinionBuff (name, duration, mods) ->
                     checkMods mods
                     RGrantMinionBuff(buff name, duration, mods)
@@ -1708,9 +1719,6 @@ module Flat =
                 | GainRareMods duration ->
                     RGainRareMods(enemies |> Array.map (fun e -> e.Affixes |> List.map (fun id -> buff (RareMods.buffName id)) |> Array.ofList), duration, counts.Id "rare modifiers gained")
                 | AttachPustule (part, seconds, per, cap) -> RAttachPustule((match skillIds.TryGetValue part with | true, i -> i | _ -> -1), seconds, per, cap, counts.Id "pustule")
-                | other ->
-                    reject ("the reaction " + reactionName other)
-                    RNone
             // (a charge buff is up when the fight starts, if fights start prepared, whatever its rule's hook is)
             let startCharged =
                 if fight.BankedInvocations <= 0.0 then []
@@ -2397,6 +2405,10 @@ module Flat =
                       AilmentResistant = ailmentResistant
                       CInflict = cInflict
                       ExposureStatus = exposureStatus
+                      SOiled = sOiled
+                      SOnFire = sOnFire
+                      SOilExposure = sOilExposure
+                      CGroundIgnite = counts.Id "ground ignite"
                       BRage = bRage
                       BHit = (at bRecently 0)
                       BNonCrit = (at bRecently 1)
@@ -2603,7 +2615,9 @@ module Flat =
           Until: float
           Most: int
           /// The agent whose it is (`DotInstance.Owner`).
-          By: int }
+          By: int
+          /// `DotInstance.Carried`.
+          Carried: float }
 
     /// What a hit asks of an enemy as a defender (see `numsFor`): NaN where not asked yet.
     type private DefNums =
@@ -2618,7 +2632,10 @@ module Flat =
           mutable Armour: float
           mutable PhysFlat: float
           mutable Threshold: float
-          mutable Flam: float }
+          mutable Flam: float
+          /// What Flammability inflicted on it is multiplied by, and whether it is covered in Oil (1 or 0).
+          mutable FlamTaken: float
+          mutable Oiled: float }
 
     type private Foe =
         { Info: EnemyInfo
@@ -2830,6 +2847,23 @@ module Flat =
           /// Its evasion entropy.
           Dodge: Entropy }
 
+    /// A ground surface or storm as it is in a fight (`Sim.GroundState`).
+    type private FGround =
+        { Spec: Ground
+          By: int
+          ExposureEffect: float
+          From: Vec
+          To: Vec
+          Born: float
+          mutable Until: float
+          mutable Kind: GroundKind
+          mutable Carried: float
+          mutable Ignite: float
+          /// Where its damage over time goes, by `Ground.Absorbs`; its counts.
+          DotLabels: int[]
+          CLit: int
+          CAbsorbed: int }
+
     type private State =
         { /// The actor that acts now, its program and its place; all of them.
           mutable P: Program
@@ -2874,6 +2908,8 @@ module Flat =
           /// Ice Crystals beside an enemy: owner, explosion part, enemy, the enemy's life when
           /// they appeared, life of one crystal, how many, gone at. Newest first.
           mutable Crystals: (int * int * int * float * float * int * float) list
+          /// What skills have left on the ground, oldest first (`Sim.World.Grounds`).
+          mutable Grounds: FGround list
           /// Crystals on their way (what a `EPlant` event names by its place here): how many,
           /// the life of one, the most at once, the seconds they last.
           Plants: ResizeArray<int * float * int * float>
@@ -3662,6 +3698,10 @@ module Flat =
                     | _ -> ()
             s.Time <- t
 
+    let private standing (s: State) : Map<string, int> =
+        if s.Grounds.IsEmpty then Map.empty
+        else s.Grounds |> List.filter (fun g -> g.Until > s.Time) |> List.countBy (fun g -> g.Spec.Skill) |> Map.ofList
+
     /// Auras on enemies in the player's Presence come and go with where the enemies are
     /// (`Sim.syncPresence`).
     let private syncPresence (s: State) =
@@ -4040,12 +4080,146 @@ module Flat =
         elif not beaten then
             e.Dots <- d :: (if beats then e.Dots |> List.filter (fun x -> x.Label <> d.Label || not (x.Dps < d.Dps && x.Until <= d.Until)) else e.Dots)
 
+    /// What lies on the ground and the storms (`Sim.syncGround`, in its order).
+    let private syncGround (s: State) =
+        if not s.Grounds.IsEmpty then
+            let now = s.Time
+            let p = s.Main
+            let gs = s.Grounds |> List.filter (fun g -> g.Until > now) |> Array.ofList
+            let n = gs.Length
+            let radius = gs |> Array.map (fun g -> Sim.groundRadius g.Spec (now - g.Born))
+            let centre = gs |> Array.map (fun g -> Sim.groundCentre g.Spec g.From g.To (now - g.Born))
+            let inside (i: int) (e: Foe) = Vec.dist e.Def.Position (at centre i) - e.Def.Size <= (at radius i)
+            let touch (i: int) (j: int) = Vec.dist (at centre i) (at centre j) <= (at radius i) + (at radius j)
+            // the Ignite an enemy has, as Oil would burn with it (-1: it is not Ignited)
+            let burns (e: Foe) =
+                let mutable dps = -1.0
+                let mutable carried = -1.0
+                for d in e.Dots do
+                    if d.Ailing = Some Ignite && d.Until > now && (d.Dps > dps || (d.Dps = dps && d.Carried > carried)) then
+                        dps <- d.Dps
+                        carried <- d.Carried
+                carried
+            // Oil catches fire: round after round, each from what burned in the round before
+            let lit = ResizeArray<int>()
+            let mutable go = gs |> Array.exists (fun g -> g.Kind = Oil)
+            while go do
+                let burning = gs |> Array.map (fun g -> g.Kind = Burning)
+                let carried = gs |> Array.map (fun g -> g.Carried)
+                let before = lit.Count
+                for i in 0 .. n - 1 do
+                    let g = at gs i
+                    if g.Kind = Oil then
+                        let mutable by = -1.0
+                        for j in 0 .. n - 1 do
+                            if (at burning j) && touch i j && (at carried j) > by then by <- (at carried j)
+                        if by < 0.0 then
+                            for live in 0 .. s.Live.Length - 1 do
+                                let e = at s.Foes (at s.Live live)
+                                if e.Life > 0.0 && inside i e then by <- max by (burns e)
+                        if by >= 0.0 then
+                            g.Kind <- Burning
+                            g.Carried <- by
+                            g.Ignite <- by + g.Spec.Ignite
+                            g.Until <- now + g.Spec.Seconds
+                            lit.Add i
+                go <- lit.Count > before
+            for k in 0 .. lit.Count - 1 do
+                let g = at gs lit.[k]
+                (match s.Tell with Some tell -> tell now "Ground" g.Spec.Skill "lit" g.Ignite | None -> ())
+                bump s g.CLit
+                expireAt s g.Until
+            // a storm takes up the Ignited Ground it overlaps
+            for i in 0 .. n - 1 do
+                let g = at gs i
+                if g.Kind = Storm && not (g.Ignite > 0.0) && not g.Spec.Absorbs.IsEmpty then
+                    let mutable best = -1
+                    for j in 0 .. n - 1 do
+                        if (at gs j).Kind = Burning && touch i j && (best < 0 || (at gs j).Ignite > (at gs best).Ignite) then best <- j
+                    if best >= 0 && (at gs best).Ignite > 0.0 then
+                        (match s.Tell with Some tell -> tell now "Ground" g.Spec.Skill "absorbed" (at gs best).Ignite | None -> ())
+                        g.Ignite <- (at gs best).Ignite
+                        g.Carried <- (at gs best).Carried
+                        bump s g.CAbsorbed
+            s.Grounds <- List.ofArray gs
+            // the enemies: what each has of where it stands
+            let igniteLabel = at p.AilmentSource (ailmentIndex Ignite)
+            for live in 0 .. s.Live.Length - 1 do
+                let e = at s.Foes (at s.Live live)
+                if e.Life > 0.0 then
+                    let mutable oil = -1
+                    let mutable onFire = false
+                    let mutable exposure = 0.0
+                    let mutable ignite = 0.0
+                    let mutable carried = 0.0
+                    let mutable seconds = 0.0
+                    let mutable owner = 0
+                    let mutable dots : (int * DamageType * float * int) list = []
+                    for i in 0 .. n - 1 do
+                        let g = at gs i
+                        if inside i e then
+                            match g.Kind with
+                            | Oil ->
+                                if oil < 0 then oil <- i
+                                exposure <- max exposure (g.Spec.Exposure * g.ExposureEffect)
+                            | Burning ->
+                                onFire <- true
+                                exposure <- max exposure (g.Spec.Exposure * g.ExposureEffect)
+                                if g.Ignite > ignite then
+                                    ignite <- g.Ignite
+                                    carried <- g.Carried
+                                    seconds <- g.Spec.IgniteSeconds
+                                    owner <- g.By
+                            | Storm ->
+                                if g.Ignite > 0.0 then
+                                    if g.Ignite > ignite then
+                                        ignite <- g.Ignite
+                                        carried <- g.Carried
+                                        seconds <- g.Spec.IgniteSeconds
+                                        owner <- g.By
+                                    let mutable k = 0
+                                    for (t, dps) in g.Spec.Absorbs do
+                                        if t = Fire && dps > 0.0 then
+                                            let label = at g.DotLabels k
+                                            let mutable beaten = false
+                                            for (l, _, d, _) in dots do
+                                                if l = label && d >= dps then beaten <- true
+                                            if not beaten then
+                                                let by = g.By
+                                                dots <- (label, t, dps, by) :: (dots |> List.filter (fun (l, _, _, _) -> l <> label))
+                                        k <- k + 1
+                    // what is on it while it stands there, and goes when it does not
+                    let set (id: int) (wanted: bool) (mods: Mod list) =
+                        let held = (at e.Has id) && System.Double.IsPositiveInfinity(at e.Expires id)
+                        if wanted then (if not (held && (at e.DMods id) = mods) then setDebuff e id 1 infinity mods)
+                        elif held then removeDebuff e id
+                    set p.SOiled (oil >= 0) (if oil >= 0 then (at gs oil).Spec.Mods else [])
+                    set p.SOnFire onFire []
+                    set p.SOilExposure (exposure > 0.0) (if exposure > 0.0 then [ Mod.base' (Resist Fire) (-exposure * e.Info.ExposureK) ] else [])
+                    // the storm's damage of the element it took up
+                    let wanted = dots
+                    let stays (d: FDot) = not (d.Ailing.IsNone && System.Double.IsPositiveInfinity d.Until) || wanted |> List.exists (fun (l, _, dps, _) -> l = d.Label && dps = d.Dps)
+                    let kept = if e.Dots |> List.forall stays then e.Dots else e.Dots |> List.filter stays
+                    let fresh =
+                        wanted |> List.rev |> List.filter (fun (l, _, _, _) -> not (kept |> List.exists (fun d -> d.Ailing.IsNone && d.Label = l && System.Double.IsPositiveInfinity d.Until)))
+                        |> List.map (fun (l, t, dps, by) -> { Ailing = None; Label = l; Of = t; Dps = dps; Until = infinity; Most = 1; By = by; Carried = 0.0 })
+                    let kept = if fresh.IsEmpty then kept else fresh @ kept
+                    if not (obj.ReferenceEquals(kept, e.Dots)) then e.Dots <- kept
+                    // the Ignite of the ground, where the enemy has none as strong
+                    let strong = ignite
+                    if ignite > 0.0 && not (e.Dots |> List.exists (fun d -> d.Ailing = Some Ignite && d.Label = igniteLabel && d.Until > now && d.Dps >= strong)) then
+                        let d = { Ailing = Some Ignite; Label = igniteLabel; Of = Fire; Dps = ignite; Until = now + seconds; Most = 1; By = owner; Carried = carried }
+                        addDot e (at p.OneOfAilment (ailmentIndex Ignite)) d
+                        if not (d.Until >= e.Soonest) then e.Soonest <- d.Until
+                        bump s p.CGroundIgnite
+                        expireAt s d.Until
+
     /// What a hit inflicts comes onto the enemy (`Sim.inflict`).
     let private inflict (s: State) (e: Foe) (i: Inflict) =
         let p = s.P
         match i with
         | Dot (a, t, dps, duration, maxStacks) ->
-            let d = { Ailing = Some a; Label = (at p.AilmentSource (ailmentIndex a)); Of = t; Dps = dps; Until = s.Time + duration; Most = maxStacks; By = s.Cur }
+            let d = { Ailing = Some a; Label = (at p.AilmentSource (ailmentIndex a)); Of = t; Dps = dps; Until = s.Time + duration; Most = maxStacks; By = s.Cur; Carried = dps }
             addDot e (at p.OneOfAilment (ailmentIndex a)) d
             if not (d.Until >= e.Soonest) then e.Soonest <- d.Until
             expireAt s d.Until
@@ -4396,6 +4570,61 @@ module Flat =
             bump s (at counts n)
             setBuff s b n infinity []
         | RNone -> ()
+        | RLayGround (g, dots, cLaid, cLit, cAbsorbed) ->
+            // where the enemy concerned is (if it has just died: where it was)
+            let spot = if target >= 0 then target else aimed s
+            if spot >= 0 then
+                let pos = (at s.Foes spot).Def.Position
+                let live = ResizeArray<FGround>()
+                for x in s.Grounds do
+                    if x.Until > s.Time then live.Add x
+                let from = if g.Speed > 0.0 then Vec.zero else pos
+                (match s.Tell with Some tell -> tell s.Time "Ground" g.Skill "laid" g.Radius | None -> ())
+                // (a patch poured where one of the skill lies already is that patch, for its time anew)
+                let mutable merged = false
+                if g.Kind <> Storm then
+                    let mutable i = 0
+                    while not merged && i < live.Count do
+                        let x = live.[i]
+                        if x.Spec.Skill = g.Skill && x.By = s.Cur && x.Kind <> Storm && x.To = pos && x.From = from then
+                            x.Until <- s.Time + g.Seconds
+                            merged <- true
+                        i <- i + 1
+                if merged then
+                    s.Grounds <- List.ofSeq live
+                    bump s cLaid
+                    expireAt s (s.Time + g.Seconds)
+                else
+                    // "Limit N": one more takes the oldest of the skill away
+                    if g.Limit > 0 then
+                        let mutable mine = 0
+                        for x in live do
+                            if x.Spec.Skill = g.Skill && x.By = s.Cur then mine <- mine + 1
+                        let mutable gone = if mine >= g.Limit then mine - g.Limit + 1 else 0
+                        let mutable i = 0
+                        while gone > 0 && i < live.Count do
+                            if live.[i].Spec.Skill = g.Skill && live.[i].By = s.Cur then
+                                live.RemoveAt i
+                                gone <- gone - 1
+                            else i <- i + 1
+                    let laid : FGround =
+                        { Spec = g
+                          By = s.Cur
+                          ExposureEffect = s.P.ExposureEffect
+                          From = from
+                          To = pos
+                          Born = s.Time
+                          Until = s.Time + g.Seconds
+                          Kind = g.Kind
+                          Carried = (if g.Kind = Burning then g.Ignite else 0.0)
+                          Ignite = (if g.Kind = Burning then g.Ignite else 0.0)
+                          DotLabels = dots
+                          CLit = cLit
+                          CAbsorbed = cAbsorbed }
+                    live.Add laid
+                    s.Grounds <- List.ofSeq live
+                    bump s cLaid
+                    expireAt s laid.Until
         | RWithCorpse (next, otherwise) ->
             if corpses s > 0 then
                 s.CorpsesUsed <- s.CorpsesUsed + 1
@@ -5024,6 +5253,7 @@ module Flat =
           EnemyLifeFraction = (if t >= 0 then (at s.Foes t).Life / (at s.Foes t).Def.Life else 0.0)
           EnemyRarity = (if t >= 0 then (at s.Foes t).Def.Rarity else Normal)
           EnemiesAlive = s.AliveCount
+          Standing = standing s
           Energy = energyMap s
           LastUsed = (if s.A.LastUsed >= 0 then (at s.P.Skills s.A.LastUsed).Skill.Name else "") }
 
@@ -5322,6 +5552,8 @@ module Flat =
             n.PhysFlat <- nan
             n.Threshold <- nan
             n.Flam <- nan
+            n.FlamTaken <- nan
+            n.Oiled <- nan
         e
 
     let private nMaxRes (e: Foe) (t: int) =
@@ -5573,6 +5805,14 @@ module Flat =
         crit
 
     let private flammabilityStat = Named "Flammability"
+    let private flamTakenStat = Named Ailments.flammabilityTaken
+    let private oiledStat = Named Ailments.coveredInOil
+
+    /// What Flammability inflicted on the enemy is multiplied by (Oil: "200% more").
+    let private flamTaken (n: Foe) : float =
+        let own = n.Nums
+        if System.Double.IsNaN own.FlamTaken then own.FlamTaken <- dmore n flamTakenStat 1.0
+        own.FlamTaken
 
     let private total5 (xs: float[]) = 0.0 + (at xs 0) + (at xs 1) + (at xs 2) + (at xs 3) + (at xs 4)
 
@@ -5629,11 +5869,15 @@ module Flat =
             | Ignite ->
                 // (the reference adds what earlier hits left first and the enemy's own after:
                 // the same number unless the enemy has several of its own, then the same but for rounding)
-                let left =
-                    let own = n.Nums
-                    if System.Double.IsNaN own.Flam then own.Flam <- dsum n Base flammabilityStat 0.0
-                    if flammable > 0.0 then flammable + own.Flam else own.Flam
-                (source ev a un / threshold * Constants.igniteChanceMultiplier + baseChance) * mult + left
+                let own = n.Nums
+                if System.Double.IsNaN own.Oiled then own.Oiled <- (if dsum n Base oiledStat 0.0 > 0.0 then 1.0 else 0.0)
+                // (a Detonator's hit is sure to Ignite an enemy covered in Oil)
+                if own.Oiled > 0.0 && ev.Tags.Contains Ailments.detonator then 100.0
+                else
+                    let left =
+                        if System.Double.IsNaN own.Flam then own.Flam <- dsum n Base flammabilityStat 0.0
+                        if flammable > 0.0 then flammable + own.Flam else own.Flam
+                    (source ev a un / threshold * Constants.igniteChanceMultiplier + baseChance) * mult * flamTaken n + left
             | Shock -> (source ev a un / threshold * Constants.shockChanceMultiplier + baseChance) * mult
             | _ -> baseChance * mult
         min 100.0 (max 0.0 c)
@@ -5864,7 +6108,7 @@ module Flat =
                 (ev.Crit <- crit
                  let fire = source ev Ignite un
                  if fire > 0.0 then
-                    let f = min 100.0 (max 0.0 ((fire / nThreshold nums * Constants.igniteChanceMultiplier + sumQ ev (at qAilChance 0)) * multQ ev (at qAilChanceMult 0)))
+                    let f = min 100.0 (max 0.0 ((fire / nThreshold nums * Constants.igniteChanceMultiplier + sumQ ev (at qAilChance 0)) * multQ ev (at qAilChanceMult 0) * flamTaken nums))
                     if f > 0.0 then
                         if e.FlamTo = e.FlamValue.Length then
                             // (what is gone makes room, or the arrays grow)
@@ -5971,7 +6215,7 @@ module Flat =
                                 if o.Life > 0.0 && o.Index <> e.Index && Vec.dist o.Def.Position def0.Position <= radius + o.Def.Size then
                                     bump s b.Ignited
                                     // (an ignite, counted as the explosion's damage)
-                                    let d = { Ailing = Some Ignite; Label = b.Label; Of = Fire; Dps = dps; Until = s.Time + seconds; Most = 1; By = s.Cur }
+                                    let d = { Ailing = Some Ignite; Label = b.Label; Of = Fire; Dps = dps; Until = s.Time + seconds; Most = 1; By = s.Cur; Carried = dps }
                                     o.Dots <- d :: o.Dots
                                     if not (d.Until >= o.Soonest) then o.Soonest <- d.Until
                                     expireAt s d.Until)
@@ -6088,7 +6332,7 @@ module Flat =
                         let dps =
                             if info.SpellDot then perSecond * multQ ev (at qDamage ti) * multQ ev qSpellDotDamage
                             else perSecond * multQ ev (at qDotDamageAs ti) * multQ ev qDotDamage
-                        let d = { Ailing = None; Label = label; Of = t; Dps = dps; Until = s.Time + duration; Most = 1; By = s.Cur }
+                        let d = { Ailing = None; Label = label; Of = t; Dps = dps; Until = s.Time + duration; Most = 1; By = s.Cur; Carried = 0.0 }
                         e.Dots <- d :: (e.Dots |> List.filter (fun x -> x.Label <> label || x.Dps > dps))
                         if not (d.Until >= e.Soonest) then e.Soonest <- d.Until
                         expireAt s d.Until
@@ -7332,6 +7576,7 @@ module Flat =
                             statusMap p e.SHas e.SStacks |> Map.iter (fun k _ -> reactDot s rng p.OnKillOf k e.Index)
                     dotKillGains s rng e mine
             syncPresence s
+            syncGround s
             recover s dt
             if s.AliveCount > 0 && alive s then
                 pruneAll s
@@ -7455,6 +7700,10 @@ module Flat =
                             else removeBuff s a
                          | _ -> ())
                         enter s 0
+            // and the ground again: what the event left or lit is there at once (`Sim.step`)
+            if not s.Grounds.IsEmpty then
+                enter s 0
+                syncGround s
 
     /// What a runner keeps from one run to the next (see `runner`): the queue's arrays and
     /// the scratch of the hits, emptied for every run, and the defences per set of buffs
@@ -7518,7 +7767,7 @@ module Flat =
               Nums =
                 { Version = -1; X = 0.0; MaxRes = Array.create 5 nan; Res = Array.create 5 nan; Taken = Array.create 5 nan
                   TakenInc = Array.create 5 nan; TakenMore = Array.create 5 nan
-                  Poise = Array.create 13 nan; Armour = nan; PhysFlat = nan; Threshold = nan; Flam = nan }
+                  Poise = Array.create 13 nan; Armour = nan; PhysFlat = nan; Threshold = nan; Flam = nan; FlamTaken = nan; Oiled = nan }
               DefVersion = 0
               DStat = [||]
               DCode = [||]
@@ -7677,6 +7926,7 @@ module Flat =
               OtherSeen = false
               Pustules = []
               Crystals = []
+              Grounds = []
               Plants = ResizeArray()
               Revival = None
               NoRoom = Array.create progs.Length false
