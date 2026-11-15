@@ -2891,12 +2891,12 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         near 3.1 (flameblast 0.0).BaseTime
         near 3.1 (flameblast 12.0).BaseTime
         // a character whose mana does not pay for ten stages holds it for those it pays for:
-        // the last number of stages n with 57.5 x (0.25 n + 0.6) less what regenerates meanwhile within the pool
+        // the last number of stages n with 57.5 x 0.25 n (the release costs nothing) less what regenerates meanwhile within the pool
         let c = load { blank with Groups = [ group [ gem "Flameblast" ] ] } Options.defaults
         match Setup.pressed c Options.defaults "Flameblast" with
         | Some p ->
             let n = p.Skill.Mods |> List.pick (fun m -> if m.Stat = Named "ChannelStages" then Some m.Value else None)
-            let short k = 3450.0 / 60.0 * (0.25 * k + 0.6) - c.Vitals.ManaRegen * (0.25 * k + 0.6) - c.Vitals.Mana
+            let short k = 3450.0 / 60.0 * (0.25 * k) - c.Vitals.ManaRegen * (0.25 * k + 0.6) - c.Vitals.Mana
             equal (box true) (box (n >= 1.0 && n < 10.0))
             equal (box true) (box (short n <= 0.0 && short (n + 1.0) > 0.0))
             near (0.25 * n + 0.6) p.Skill.BaseTime

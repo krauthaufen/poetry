@@ -767,6 +767,8 @@ module Gems =
                 // "X% more Magnitude of Damaging Ailments per Stage" (Flameblast's quality)
                 let ailing = perStage [ "damaging_ailment_effect_per_stage_+%_final" ] * stages
                 [ yield Mod.base' (Named "ChannelStages") stages |> Mod.from "stages"
+                  // (the release after the channel: it takes time and costs nothing)
+                  yield Mod.base' (Named "ChannelRelease") ((statOf "channel_skill_end_animation_duration_override_ms" |> Option.defaultValue 0.0) / 1000.0) |> Mod.from "stages"
                   if more <> 0.0 then yield Mod.more (Damage AllDamage) more |> Mod.from "stages"
                   if ailing <> 0.0 then
                       for a in Ailment.damaging do

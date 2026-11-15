@@ -451,7 +451,7 @@ module Setup =
                             let mods = ModDb.ofList (sheet.Mods @ x.Mods)
                             let ctx = { Ctx.empty with SkillTags = x.Tags; SkillName = x.Name }
                             let took = x.BaseTime / max 0.01 (Mods.mult ctx [ Speed ] mods)
-                            let seconds = if x.Mods |> List.exists (fun m -> m.Stat = Named "CostOverTimeWithSpeed") then x.BaseTime else took
+                            let seconds = if x.Mods |> List.exists (fun m -> m.Stat = Named "CostOverTimeWithSpeed") then Channel.paidSeconds x else took
                             let cost = (x.Cost + x.CostPerSecond * seconds) * Mods.mult ctx [ ManaCost ] mods / Mods.inc ctx [ ManaCostEfficiency ] mods
                             cost - c.Vitals.ManaRegen * took <= c.Vitals.Mana
                         let rec held (x: Skill) =

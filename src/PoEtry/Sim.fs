@@ -65,6 +65,12 @@ type Ground =
       /// units a second; 0: it is where it was aimed from the start).
       Speed: float }
 
+module Channel =
+    /// The unhurried seconds a cost by the second is paid for: a staged channel's time without
+    /// its release ("Modifiers to Cast Speed also affect this skill's cost").
+    let paidSeconds (skill: Skill) =
+        skill.BaseTime - (skill.Mods |> List.tryPick (fun m -> if m.Stat = Named "ChannelRelease" then Some m.Value else None) |> Option.defaultValue 0.0)
+
 module Ground =
     /// The debuffs of an enemy in Oil, of one on Ignited Ground, and the Exposure both have.
     let oiled = "Covered in Oil"
@@ -2730,7 +2736,7 @@ module Sim =
                 if skill.CostPerSecond <= 0.0 then ownCost
                 // ("Modifiers to Cast / Attack Speed also affect this Skill's cost": so much more
                 // a second as the skill is faster, which is what its unhurried time costs)
-                else (if st.LastUsed = skill.Name then 0.0 else ownCost) + skill.CostPerSecond * (if partFlag skill "CostOverTimeWithSpeed" then skill.BaseTime else max Constants.serverTick (useTime env actor skill w))
+                else (if st.LastUsed = skill.Name then 0.0 else ownCost) + skill.CostPerSecond * (if partFlag skill "CostOverTimeWithSpeed" then Channel.paidSeconds skill else max Constants.serverTick (useTime env actor skill w))
             (ownCost + extraCost) * Mods.mult costCtx [ ManaCost ] db / Mods.inc costCtx [ ManaCostEfficiency ] db
         let affordable (skill: Skill) =
             match actor.Vitals, w.Player with
@@ -2806,7 +2812,7 @@ module Sim =
                 elif skill.Clip > 0 && not (st.LoadDue.Contains skill.Name) then 0.0 else skill.Cost
             let ownCost =
                 if skill.CostPerSecond <= 0.0 then ownCost
-                else (if st.LastUsed = skill.Name then 0.0 else ownCost) + skill.CostPerSecond * (if partFlag skill "CostOverTimeWithSpeed" then skill.BaseTime else t)
+                else (if st.LastUsed = skill.Name then 0.0 else ownCost) + skill.CostPerSecond * (if partFlag skill "CostOverTimeWithSpeed" then Channel.paidSeconds skill else t)
             let cost = (ownCost + extraCost) * Mods.mult costCtx [ ManaCost ] db / Mods.inc costCtx [ ManaCostEfficiency ] db
             // after the last bolt of a load: reload (attack speed and reload speed shorten it;
             // PoB: increases add up, more multiplies), unless the reload is instant
