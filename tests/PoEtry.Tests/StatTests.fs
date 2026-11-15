@@ -2511,3 +2511,33 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         for f in [ fight Fire 1e9 (mods "unique_fire_damage_shocks" 1.0); fight Cold 1e9 (mods "unique_cold_damage_ignites" 1.0); fight Lightning 1e9 (mods "unique_lightning_damage_freezes" 1.0)
                    fight Fire 1000.0 (bleeds @ mods "elemental_damage_can_inflict_bleeding" 1.0); fight Fire 1e9 all; fight Physical 1e9 (mods "physical_damage_from_hits_also_contributes_to_chill_and_freeze" 1.0) ] do
             same f seeds)
+
+    test "enemies one marks cannot deal critical hits; enemies one blinds have no critical damage bonus" (fun () ->
+        let v = (load { blank with ExtraLines = [ "Enemies you Mark cannot deal Critical Hits" ] } Options.defaults).Vitals
+        near 0.0 v.MarkedEnemyCritMult
+        near 1.0 v.BlindedEnemyCritBonusMult
+        equal (box (Mod.flag (Named "BlindedEnemyNoCritBonus"))) (box (mods "enemies_you_blind_have_no_crit_bonus_for_x_seconds" 4.0).Head)
+        // a monster that always crits, 10 a hit, one hit a second for ten seconds
+        let brute =
+            { EnemyDef.make Rarity.defaults 70 Unique "brute" (Vec.make 5.0 0.0) with
+                Life = 1e9; Mods = []
+                Attack = Some { Interval = 1.0; Damage = Map.ofList [ Physical, 10.0 ]; Accuracy = 1e9; Range = 20.0; CritChance = 100.0; Melee = true } }
+        let bolt (ms: Mod list) = { Skill.make "Bolt" [ Spell ] with BaseDamage = Map.ofList [ Chaos, { Min = 1.0; Max = 1.0 } ]; BaseTime = 0.25; BaseCrit = 0.0; Mods = ms }
+        let fight (vitals: PlayerStats) (skill: Skill) (rules: Rule list) =
+            Fight.single brute { Actor.make "Player" [] [ skill ] with Vitals = Some { vitals with StunThreshold = 1e9; AilmentThreshold = 1e9 }; Rules = rules } 10.0
+        let basic = PlayerStats.basic 1e6 0.0
+        // marked by every use: no critical hit once it is marked (the first hit may come before)
+        let marking = [ { Hook = OnUse; Filter = AnySkill; Chance = 100.0; Reaction = ApplyCurse("Mark:Test", 100.0, []) } ]
+        let crits f = count (Sim.run f 1u) "enemy:crit"
+        equal (box true) (box (crits (fight basic (bolt []) marking) >= 5))
+        equal (box true) (box (crits (fight { basic with MarkedEnemyCritMult = 0.0 } (bolt []) marking) <= 1))
+        equal (box true) (box (crits (fight { basic with MarkedEnemyCritMult = 0.0 } (bolt []) []) >= 5))
+        same (fight { basic with MarkedEnemyCritMult = 0.0 } (bolt []) marking) seeds
+        // blinded by every hit: its critical hits deal what an ordinary hit deals
+        let blinding = bolt [ Mod.base' (AilmentChance Blind) 100.0 ]
+        let o = Sim.run (fight { basic with BlindedEnemyCritBonusMult = 0.0 } blinding []) 1u
+        let full = Sim.run (fight basic blinding []) 1u
+        let extra = Constants.monsterBaseCritBonus / 100.0
+        equal (box true) (box (full.DamageTaken > o.DamageTaken * (1.0 + 0.5 * extra)))
+        equal (box true) (box (o.DamageTaken <= full.DamageTaken / (1.0 + extra) + 10.0 * extra + 1e-6))
+        same (fight { basic with BlindedEnemyCritBonusMult = 0.0 } blinding []) seeds)

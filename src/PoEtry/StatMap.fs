@@ -746,6 +746,10 @@ module StatMap =
         // what the monsters one blinds or marks do to the character with their hits
         | "enemies_you_blind_have_critical_strike_chance_+%" -> one (Mod.inc (Named "BlindedEnemyCritChance") v)
         | "marked_enemy_accuracy_rating_+%" -> one (Mod.inc (Named "MarkedEnemyAccuracy") v)
+        // "Enemies you Mark cannot deal Critical Hits"; "Enemies have no Critical Damage Bonus for N
+        // seconds after you Blind them" (while they are Blinded)
+        | "marked_enemies_cannot_deal_critical_strikes" -> one (Mod.inc (Named "MarkedEnemyCritChance") -100.0)
+        | "enemies_you_blind_have_no_crit_bonus_for_x_seconds" -> one (Mod.flag (Named "BlindedEnemyNoCritBonus"))
         | "defend_with_%_armour_against_ranged_attacks" -> one (Mod.base' (Named "DefendWithArmourVsProjectiles") v)
         | "defend_with_%_armour_against_critical_strikes" -> one (Mod.base' (Named "DefendWithArmourVsCrits") v)
         // "Defend with X% of Armour while not on Low Energy Shield", "... while on Low Energy Shield",
