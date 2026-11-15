@@ -18,7 +18,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
    whose description or behaviour changed.
 5. Go through the lists below; the wiki's version history of a skill says what changed.
 
-## Rules (159)
+## Rules (160)
 
 ### Hit damage
 
@@ -58,6 +58,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | Rule | Source, and what is guessed | Confidence |
 |---|---|---|
 | Rare monster modifiers | Mods.dat (Monster mods of domain 3 with SpawnWeight, Families), generated into RareModsData.fs by `tools/gamefiles/gen_rare_mods.py`; "Rare Monsters have up to 4 by default" (poe2db Monster Modifiers); how many of the four: guess | data; count: guess; on the monster: missing |
+| Enemies that explode when killed | stat descriptions | data; the radius (2 m), and that nothing of the character's scales the damage: guess |
 | Projectiles | — | guess (geometry), data (counts) |
 | Default spread | — | guess |
 | Fork | poe2db keyword text (Fork, Chain); the angle: the first game's wiki ("two new projectile travel ... at a 120º angle", via poedb); the remaining range and straight flight are guesses | data / guess |
@@ -142,13 +143,13 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | A random element | stat description; the average in place of the choice | guess |
 | Additional Remnants | stat descriptions; adding the two up is a guess | guess |
 | Using them up | game rule | guess |
-| Ancestral Boost | poe2db Keywords (Ancestral Boost); gem data | data; that the time is not shortened by cooldown recovery is not so here (the clock is a cooldown): guess |
 | Marked and Blinded monsters' critical hits | stat descriptions; that the N seconds are the time it is Blinded | data; the time: guess |
 | Herald of Plague | gem description, `herald_of_agony_poison_spread_on_kill_radius_base_magnitude_to_grant` (its description: a radius in tenths of a metre) | data / guess |
 | Kills by damage over time | game: "on kill" effects are not limited to hits unless they say so; the owner rule is a simplification | guess |
 | Chains | game rule (recollection) | guess |
 | Herald of Ash | gem description + data | data; the ignite takes no further modifiers (guess); in the damage shares it is the herald's, not "Ignite" |
 | Item modifier magnitudes | item text as the API gives it | guess |
+| A cost by the second and the pool | the game ends a channel when its cost can no longer be paid; that the player then releases with the stages reached, and that every channel is held as long as the mana allows, is a play-style assumption | data; the stages held: guess |
 | Counting different skills used | stat descriptions; that the use being made counts itself | data; counting itself: guess |
 | Tempest Bell | `bell_hit_limit`, `bell_shockwave_cooldown_ms`; description | data / guess |
 | Lightning Warp | description ("Can also be used on Ball Lightning Projectiles", "Creates a Lightning Infusion on successful use") | guess |
@@ -229,11 +230,12 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 |---|---|---|
 | Ward remnants | data; overflow: user | data + user + guess |
 
-## Constants (10)
+## Constants (11)
 
 | Constant | Value | What it stands for |
 |---|---|---|
 | `unarmedAttacksPerSecond` | `1.2` | Unarmed attacks per second and base critical hit chance: PoE1's numbers (its unarmed damage rolls, 2 to 5-8 by class, are PoE2's too). A guess. |
+| `explodeOnKillRadius` | `20.0` | How far the explosion of a killed enemy reaches ("Enemies you Kill Explode"): the data has no radius for it; 2 m is our guess. |
 | `crowdedWait` | `0.25` | A melee minion without room at the enemy looks again after this long. A guess. |
 | `playerLightStunDuration` | `0.35` | Seconds a light stun interrupts the player. GUESS (no player constant in the data). |
 | `orbPulseInterval` | `0.25` | Seconds between the pulses of a Frost Bomb (its exposure grows with each): not in the data; 0.25 s lets one bomb reach its cap just as it detonates. A guess. |
