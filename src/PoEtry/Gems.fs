@@ -629,6 +629,24 @@ module Gems =
         (support.RequireTypes.IsEmpty || typesMatch support.RequireTypes types)
         && not (not support.ExcludeTypes.IsEmpty && typesMatch support.ExcludeTypes types)
 
+    /// The setup of a skill that comes with a gem (a support's triggered skill, a gem's second
+    /// effect): the gem's level and quality, and of its supports those that can support a
+    /// skill of these types (Spell Cascade needs a Cascadable spell: the curse, not the Doom
+    /// Blast it sets off).
+    let granted (db: GameDb) (setup: GemSetup) (id: string) : GemSetup =
+        match Map.tryFind id db.Skills with
+        | Some d ->
+            { setup with
+                Gem = id
+                Supports =
+                    setup.Supports |> List.filter (fun (name, _) ->
+                        // (the support that grants the skill is the skill's)
+                        let grants = db.GemVariants |> Map.tryFind name |> Option.defaultValue [] |> List.exists (fun g -> List.contains id g.AdditionalEffects)
+                        match supportOfGem db name with
+                        | Some s when not grants -> canSupport s d.Types
+                        | _ -> true) }
+        | None -> { setup with Gem = id }
+
     let private buildSet altQuality (data: SkillData) (set: StatSetData) name tags level quality (supportStats: (string * float) list) (weapon: Weapon option) (shieldArmour: float, shieldEvasion: float) (stageCap: float) =
         let gemLevel = Map.tryFind level data.Levels
         let ownStats = statsWith altQuality data set level quality

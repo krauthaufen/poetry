@@ -25,6 +25,7 @@ Confidence levels:
 | Increased / more | (1 + Σinc/100) × Π(1 + more/100), scopes: all, elemental, the type itself | CalcOffence.lua `calcDamage` | pob |
 | Crit chance | (base + flat) × inc × more, capped 0–100 | CalcOffence.lua ~3713 | pob |
 | A spell's base critical hit chance set by a line | "Base Critical Hit Chance for Spells is X%": the base of every spell the player uses or triggers is that, whatever its gem says (a totem's or a minion's spell keeps its own) | stat text | data; totems: partial |
+| A curse does not crit | a spell whose gem has no critical hit chance (a curse: it reaches its targets, it does not hit them) keeps none under "Base Critical Hit Chance for Spells is X%" | a curse deals no hit; its gem data has no critical hit chance | data |
 | Crit damage | × (1 + (100 + flat bonus) × inc × more / 100); player base bonus 100% | Character.ot `base_critical_hit_damage_bonus` | data |
 | Double damage | chance per hit to deal ×2 | — | guess |
 
@@ -633,6 +634,7 @@ The game's standard buffs and debuffs, with the numbers of its keyword text. Sta
 | Mechanic | Rule | Source | Confidence |
 |---|---|---|---|
 | Impending Doom | "trigger an explosion when the curse ends": casting the curse on an enemy that already has it ends the old one and triggers Doom Blast (the support's granted skill at the curse gem's level, with the group's supports). A curse running out by itself is not modelled | gem data `trigger_vicious_hex_explosion_when_curse_ends`, additionalGrantedEffectId1 | data; "recast ends the curse" is game knowledge |
+| Supports of a skill that comes with a gem | a skill a support grants (Doom Blast) or a gem's further effect (a shockwave, a combustion) is supported by the supports in the link that can support a skill of its own types (the support's `requireSkillTypes` / `excludeSkillTypes` against the skill's types), and by the support that grants it: Spell Cascade needs a Cascadable spell, so the curse cascades and its Doom Blast does not (it hit three times) | skills.json skill types of DoomBlastPlayer and SupportSpellCascadePlayer; that a support applies only to the skills it can support is the game's rule for every link | data |
 | Other support-granted skills (Doedre's Undoing, ...) | not modelled | - | missing |
 | Ice Bite | "Gain 30% of Damage as Cold Damage for 6 seconds on Freezing an enemy with Supported Skills": a buff on the character, for everything it does, whenever the supported skill (a part of it, its infused form) freezes an enemy; a new freeze starts the time again; the time is a skill duration | stat description, support description ("infuses your damage with Cold damage"). The stat's id says "added cold attack damage": that it is for attacks only is not what the text says, so it is for all damage | data; all damage is a guess |
 | Rules for a bar that fills | "on Freezing / Electrocuting / Heavily Stunning / Pinning an enemy" happens once, with the hit that fills the bar, not with hits on an enemy that already is | engine | data |

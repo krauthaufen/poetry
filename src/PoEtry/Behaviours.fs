@@ -732,7 +732,7 @@ module Behaviours =
                 gd.AdditionalEffects |> List.tryPick (fun id -> if Map.containsKey id db.Skills then Some id else None)
             | _ -> None)
         |> Option.bind (fun blastId ->
-            match Gems.skill db charMods None { setup with Gem = blastId } with
+            match Gems.skill db charMods None (Gems.granted db setup blastId) with
             | Ok (s, _) ->
                 let name = skill.Name + ": " + s.Name
                 Some(
@@ -928,7 +928,7 @@ module Behaviours =
             let combust =
                 Map.tryFind setup.Gem db.Gems |> Option.map (fun g -> g.AdditionalEffects) |> Option.defaultValue []
                 |> List.tryPick (fun id ->
-                    match Gems.skill db charMods weapon { setup with Gem = id } with
+                    match Gems.skill db charMods weapon (Gems.granted db setup id) with
                     | Ok (s, _) -> Some { s with Name = skill.Name + ": " + s.Name; Tags = s.Tags.Add Triggered; Cost = 0.0; Cooldown = None }
                     | Error _ -> None)
             match combust with
@@ -1019,7 +1019,7 @@ module Behaviours =
         |> List.tryPick (fun id ->
             match Map.tryFind id db.Skills with
             | Some d when d.StatSets |> List.exists (fun st -> st.Stats |> List.contains "triggered_by_charged_staff") ->
-                (match Gems.skill db charMods weapon { setup with Gem = id } with
+                (match Gems.skill db charMods weapon (Gems.granted db setup id) with
                  | Ok (s, _) -> Some(id, s)
                  | Error _ -> None)
             | _ -> None)
@@ -1048,7 +1048,7 @@ module Behaviours =
             let repeatable = Tag "Type:Barrageable"
             Map.tryFind setup.Gem db.Gems |> Option.map (fun g -> g.AdditionalEffects) |> Option.defaultValue []
             |> List.tryPick (fun id ->
-                match Gems.skill db charMods weapon { setup with Gem = id } with
+                match Gems.skill db charMods weapon (Gems.granted db setup id) with
                 | Ok (s, _) -> Some(id, s)
                 | Error _ -> None)
             |> Option.map (fun (id, s) ->

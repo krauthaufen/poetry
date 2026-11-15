@@ -821,7 +821,8 @@ module Setup =
         let spellBaseCrit (skills: Skill list) =
             match Mods.sumBase Ctx.empty [ Named "SpellBaseCritOverride" ] (ModDb.ofList sheet.Mods) with
             | v when v > 0.0 ->
-                let rec set (s: Skill) = { (if s.Tags.Contains Spell then { s with BaseCrit = v } else s) with Parts = s.Parts |> List.map set }
+                // (a spell whose gem has no critical hit chance does not hit: a curse reaches its targets and that is all)
+                let rec set (s: Skill) = { (if s.Tags.Contains Spell && s.BaseCrit > 0.0 then { s with BaseCrit = v } else s) with Parts = s.Parts |> List.map set }
                 skills |> List.map set
             | _ -> skills
         { Actor.make "Player" (sheet.Mods @ (used |> List.collect (fun (_, p) -> p.Grants))) (spellBaseCrit << comboConsumed << gloryGeneration << onBolts <| (pressedSkills @ (metas |> List.collect (fun (_, s, _) -> s)) @ (consumers |> List.map (fun (_, _, cp) -> cp)) @ heraldSkills @ (used |> List.collect (fun (_, p) -> p.Extra)))) with

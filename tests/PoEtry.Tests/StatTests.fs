@@ -2629,3 +2629,23 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         // a cost that is not by the second and above the pool: never used
         let dear = { beam with CostPerSecond = 0.0; Cost = 200.0 }
         equal 0 (count (Sim.run (channel dear 30.5) 1u) "uses:Beam"))
+
+    test "a skill that comes with a gem has the supports that can support it; a curse does not crit" (fun () ->
+        // Despair with Impending Doom and Spell Cascade: Spell Cascade "Supports Cascadable
+        // Spells"; the curse is one, the Doom Blast it sets off is not: one blast, not three
+        let c = load { blank with Groups = [ group [ gem "Despair"; support "Impending Doom"; support "Spell Cascade" ] ] } Options.defaults
+        let cascades (s: Skill) = Mods.sumBase Ctx.empty [ Named "CascadesPerSide" ] (ModDb.ofList s.Mods)
+        let skills (c: Loaded) = (Setup.player c Options.defaults [ Spam "Despair" ] None).Skills
+        let despair = skills c |> List.find (fun s -> s.Name = "Despair")
+        let blast = skills c |> List.find (fun s -> s.Name = "Despair: Doom Blast")
+        near 1.0 (cascades despair)
+        near 0.0 (cascades blast)
+        // (what a support that fits does is there: Spell Cascade's 30% less damage is not, the blast's own damage is)
+        near 1.0 (Mods.mult { Ctx.empty with SkillTags = blast.Tags } [ Damage AllDamage ] (ModDb.ofList blast.Mods))
+        equal (box false) (box blast.BaseDamage.IsEmpty)
+        let setup = { Gem = "Despair"; Level = 20; Quality = 0; StatSet = 1; Supports = [ "Impending Doom", 1; "Spell Cascade", 1 ] }
+        equal (box [ "Impending Doom", 1 ]) (box (Gems.granted db.Value setup "DoomBlastPlayer").Supports)
+        // "Base Critical Hit Chance for Spells is 15%": the blast's, not the curse's, which has none and does not hit
+        let set = { c with Sheet = { c.Sheet with Mods = c.Sheet.Mods @ mods "base_spell_critical_strike_chance_override_permyriad" 1500.0 } }
+        near 0.0 (skills set |> List.find (fun s -> s.Name = "Despair")).BaseCrit
+        near 15.0 (skills set |> List.find (fun s -> s.Name = "Despair: Doom Blast")).BaseCrit)
