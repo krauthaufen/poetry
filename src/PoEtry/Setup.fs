@@ -443,6 +443,25 @@ module Setup =
                 let g' = { g with Gems = g.Gems |> List.filter (fun x -> x.IsSupport || x.Name = gemName) |> List.map pick }
                 match Pob.groupSkill db sheet g' |> List.tryHead with
                 | Some (Ok (s, _)) ->
+                    // a staged channel paid by the second is held while the mana lasts: for the
+                    // stages that maximum mana, and what regenerates meanwhile, pay for
+                    let s =
+                        let stages (x: Skill) = x.Mods |> List.tryPick (fun m -> if m.Stat = Named "ChannelStages" then Some m.Value else None) |> Option.defaultValue 0.0
+                        let pays (x: Skill) =
+                            let mods = ModDb.ofList (sheet.Mods @ x.Mods)
+                            let ctx = { Ctx.empty with SkillTags = x.Tags; SkillName = x.Name }
+                            let took = x.BaseTime / max 0.01 (Mods.mult ctx [ Speed ] mods)
+                            let seconds = if x.Mods |> List.exists (fun m -> m.Stat = Named "CostOverTimeWithSpeed") then x.BaseTime else took
+                            let cost = (x.Cost + x.CostPerSecond * seconds) * Mods.mult ctx [ ManaCost ] mods / Mods.inc ctx [ ManaCostEfficiency ] mods
+                            cost - c.Vitals.ManaRegen * took <= c.Vitals.Mana
+                        let rec held (x: Skill) =
+                            let n = stages x
+                            if n <= 1.0 || pays x then x
+                            else
+                                match Pob.groupSkill db { sheet with Mods = sheet.Mods @ [ Mod.base' (Named "StageCap") (n - 1.0) ] } g' |> List.tryHead with
+                                | Some (Ok (x', _)) when stages x' < n -> held x'
+                                | _ -> x
+                        if s.CostPerSecond > 0.0 && not c.Vitals.CostsLife && not c.Vitals.CostsInfernalFlame then held s else s
                     let supports = g.Gems |> List.filter (fun x -> x.IsSupport && x.Enabled) |> List.map (fun x -> x.Name, x.Level)
                     let setup = { Gem = gem.Name; Level = gem.Level; Quality = gem.Quality; StatSet = 1; Supports = supports }
                     let copy =

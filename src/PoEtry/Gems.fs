@@ -629,7 +629,7 @@ module Gems =
         (support.RequireTypes.IsEmpty || typesMatch support.RequireTypes types)
         && not (not support.ExcludeTypes.IsEmpty && typesMatch support.ExcludeTypes types)
 
-    let private buildSet altQuality (data: SkillData) (set: StatSetData) name tags level quality (supportStats: (string * float) list) (weapon: Weapon option) (shieldArmour: float, shieldEvasion: float) =
+    let private buildSet altQuality (data: SkillData) (set: StatSetData) name tags level quality (supportStats: (string * float) list) (weapon: Weapon option) (shieldArmour: float, shieldEvasion: float) (stageCap: float) =
         let gemLevel = Map.tryFind level data.Levels
         let ownStats = statsWith altQuality data set level quality
         // the skill's internal name, from all its stat sets
@@ -735,6 +735,8 @@ module Gems =
                     if [ "_maximum_stages"; "_max_stages"; "_max_number_of_stages"; "_maximum_number_of_stages" ] |> List.exists (fun (e: string) -> id.EndsWith e) then Some v else None)
                 |> Option.defaultValue 0.0
         let staged = stages > 1.0
+        // (held for fewer stages where the mana does not pay for all of them: `Setup.pressed`)
+        let stages = if staged && stageCap >= 1.0 then min stages stageCap else stages
         let perStage (endings: string list) =
             ownStats |> List.filter (fun (id, _) -> endings |> List.exists (fun (e: string) -> id.EndsWith e)) |> List.sumBy snd
         let stageMods =
@@ -742,7 +744,8 @@ module Gems =
             else
                 let more = perStage [ "damage_+%_final_per_stage"; "damage_+%_final_per_stack" ] * stages + perStage [ "damage_+%_final_per_additional_stage" ] * (stages - 1.0)
                 let gainFire = perStage [ "all_damage_%_to_gain_as_fire_per_stage" ] * stages
-                [ if more <> 0.0 then yield Mod.more (Damage AllDamage) more |> Mod.from "stages"
+                [ yield Mod.base' (Named "ChannelStages") stages |> Mod.from "stages"
+                  if more <> 0.0 then yield Mod.more (Damage AllDamage) more |> Mod.from "stages"
                   if gainFire > 0.0 then
                       for t in DamageType.all do
                           yield Mod.base' (GainAs(t, Fire)) gainFire |> Mod.from "stages" ]
@@ -1142,7 +1145,8 @@ module Gems =
                 let supportStats = List.concat supportStats
                 let alt = Mods.flag ctx (Named "AltQuality") characterMods
                 let shield = Mods.sumBase Ctx.empty [ Named "ShieldArmour" ] characterMods, Mods.sumBase Ctx.empty [ Named "ShieldEvasion" ] characterMods
-                let main, cov = buildSet alt data set data.Name tags level quality supportStats weapon shield
+                let stageCap = Mods.sumBase ctx [ Named "StageCap" ] characterMods
+                let main, cov = buildSet alt data set data.Name tags level quality supportStats weapon shield stageCap
                 let parts, partCov =
                     data.StatSets
                     // a set shown with the main one, or the one that does the damage when the main
@@ -1154,7 +1158,7 @@ module Gems =
                             || (set.Stats |> List.contains "base_deal_no_damage" && not (s.Label.EndsWith "-Infused")
                                 && set.ConstantStats |> List.exists (fun (k, _) -> k = "dps_display_statset_index"))))
                     |> List.map (fun s ->
-                        let p, c = buildSet alt data s (data.Name + ": " + s.Label) tags level quality supportStats weapon shield
+                        let p, c = buildSet alt data s (data.Name + ": " + s.Label) tags level quality supportStats weapon shield stageCap
                         { p with Consumes = None }, c)
                     // a spell set whose own damage is nothing at this level (Exsanguinate's "Damage over
                     // Time": 0 to 0; its damage over time is the Bleeding) is not a hit

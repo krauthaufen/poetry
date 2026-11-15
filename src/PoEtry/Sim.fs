@@ -1253,7 +1253,7 @@ module Sim =
                         let absorbed = min (d * (1.0 - bypass)) (es / k)
                         es - absorbed * k, rest + d - absorbed)
                     (p.EnergyShield, 0.0)
-            let fromMana = min p.Mana (rest * pools.ManaBeforeLife / 100.0)
+            let fromMana = min (max 0.0 p.Mana) (rest * pools.ManaBeforeLife / 100.0)
             let rest = rest - fromMana
             let toLife = min (max 0.0 (p.Life - 1.0)) rest
             let rest = rest - toLife
@@ -1330,7 +1330,8 @@ module Sim =
             // leech: each instance is recovered over one second (keyword text)
             let leech = stream "LeechMana"
             let regen = r.ManaRegen * dt
-            let mana = min v.Mana (max 0.0 (p.Mana + regen + leech))
+            // (mana below nothing: a channel's cost that regeneration is still to cover, `manaNeeded`)
+            let mana = min v.Mana (max (min 0.0 p.Mana) (p.Mana + regen + leech))
             let es =
                 (if w.Time - p.LastHit >= r.ESRechargeDelay then p.EnergyShield + r.EnergyShieldRecharge * dt else p.EnergyShield)
                 + r.ESRegen * dt + stream "ES" + stream "ShroudES"
@@ -2022,7 +2023,7 @@ module Sim =
                 match actor.Vitals, w.Player with
                 | Some v, Some p when loseLifeES > 0.0 && useTime > 0.0 ->
                     { w with
-                        Player = Some { p with Life = max (min 1.0 p.Life) (p.Life - loseLifeES * v.Life); EnergyShield = max 0.0 (p.EnergyShield - loseLifeES * v.EnergyShield); Mana = max 0.0 (p.Mana - lose * v.Mana) }
+                        Player = Some { p with Life = max (min 1.0 p.Life) (p.Life - loseLifeES * v.Life); EnergyShield = max 0.0 (p.EnergyShield - loseLifeES * v.EnergyShield); Mana = max (min 0.0 p.Mana) (p.Mana - lose * v.Mana) }
                         Counts = bump "pool loss on use" w.Counts }
                 | _ -> w
             let pattern =
@@ -2392,6 +2393,17 @@ module Sim =
             let k = min 1.0 (max 0.0 (share / 100.0))
             cost * (1.0 - k), (cost * k + (if equal > 0.0 then cost else 0.0) + pools.Life * ofLife / 100.0) / Mods.inc ctx [ Named "LifeCostEfficiency" ] db
 
+    /// The mana a use needs to begin, and how far below nothing paying for it may leave the
+    /// mana. A cost by the second is paid while the channel goes on, and mana regenerates
+    /// meanwhile: the use needs what regeneration will not have covered by its end, and never
+    /// more than a full pool (a channel is held as long as the mana lasts); what regenerates
+    /// meanwhile is spent before it is there, so the mana is below nothing until then.
+    let private manaNeeded (pools: PlayerStats) (skill: Skill) (seconds: float) (cost: float) : float * float =
+        if skill.CostPerSecond <= 0.0 then cost, 0.0
+        else
+            let flows = max 0.0 (pools.ManaRegen * seconds)
+            min pools.Mana (max 0.0 (cost - flows)), flows
+
     let private onReadyUnlocked env (rng: Rng) name (w: World) =
         let actor = actorDef env name
         let st = Map.find name w.Actors
@@ -2423,6 +2435,7 @@ module Sim =
             // (enough within rounding: a wait for mana ends with exactly the cost, give or take the last bit)
             | Some pools, Some p ->
                 let cost, life = splitCost pools { Ctx.empty with SkillTags = skill.Tags; SkillName = skill.Name } (skillDb env actor skill st) (costOf skill)
+                let cost = if skill.CostPerSecond <= 0.0 then cost else fst (manaNeeded pools skill (max Constants.serverTick (useTime env actor skill w)) cost)
                 not (p.Mana < cost - 1e-9 * max 1.0 cost) && (life <= 0.0 || p.Life - life >= 1.0)
             | _ -> true
         // the first step that is ready and can be paid for; if none can be paid, wait for the first
@@ -2573,20 +2586,22 @@ module Sim =
                         |> takeDamage false v (Map.ofList [ Fire, burn ])
                     else { w with Player = Some { p with InfernalFlame = flame } }
                 go w
-            | Some v, Some p when p.Mana < cost - 1e-9 * max 1.0 cost && cost > v.Mana ->
+            | Some v, Some p when p.Mana < cost - 1e-9 * max 1.0 cost && cost > v.Mana && skill.CostPerSecond <= 0.0 ->
                 // costs more than the whole mana pool: this skill can never be used
+                // (a cost by the second is paid as far as the pool goes: `manaNeeded`)
                 { w with Counts = bump ("cannot afford:" + skill.Name) w.Counts }
                 |> updateActor name (fun st -> { st with Cooldowns = Map.add skill.Name infinity st.Cooldowns })
                 |> schedule (w.Time + Constants.serverTick) (Ready name)
-            | Some v, Some p when p.Mana < cost - 1e-9 * max 1.0 cost ->
+            | Some v, Some p when (let need = fst (manaNeeded v skill t cost) in p.Mana < need - 1e-9 * max 1.0 need) ->
                 // not enough mana: wait until regeneration and leech have covered it
+                let cost = fst (manaNeeded v skill t cost)
                 let rate =
                     v.ManaRegen + (p.Recoups |> List.sumBy (fun (until, rate, pool) -> if pool = "LeechMana" && until > w.Time then rate else 0.0))
                     + (if w.Time < p.FlaskUntil then p.FlaskRate else 0.0)
                 let wait = max Constants.serverTick (if rate > 0.0 then (cost - p.Mana) / rate else 1.0)
                 { w with Player = Some { p with Starved = p.Starved + wait } } |> schedule (w.Time + wait) (Ready name)
             | Some v, Some p ->
-                { w with Player = Some { p with Mana = max 0.0 (p.Mana - cost); Life = p.Life - lifeCost } }
+                { w with Player = Some { p with Mana = max (-(snd (manaNeeded v skill t cost))) (p.Mana - cost); Life = p.Life - lifeCost } }
                 |> (if lifeCost > 0.0 then drinkLifeFlask v else id) |> sigilSpend name cost v.Mana |> go
             | _ -> go w
         | None ->

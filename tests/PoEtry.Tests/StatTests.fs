@@ -2582,3 +2582,50 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         equal (box true) (box (skill.Mods |> List.forall (fun m -> m.Kind = Inc)))
         // a character without the lines: the skill as it was
         equal 0 (Behaviours.connectedSupports db.Value ModDb.empty setup (Skill.make "Bolt" [ Spell ])).Mods.Length)
+
+    // ---- round 17 ----
+
+    test "a cost by the second is paid as far as the mana goes: a staged channel is held for the stages the mana pays for" (fun () ->
+        // Flameblast: 10 stages of 0.25 s and a 0.6 s release, 75% more a stage; held for 6: 2.1 s, 450% more
+        let flameblast cap =
+            match Gems.skill db.Value (ModDb.ofList [ Mod.base' (Named "StageCap") cap ]) None { Gem = "Flameblast"; Level = 20; Quality = 0; StatSet = 1; Supports = [] } with
+            | Ok (s, _) -> s
+            | Error e -> failwith e
+        near (6.0 * 0.25 + 0.6) (flameblast 6.0).BaseTime
+        near 5.5 (Mods.mult { Ctx.empty with SkillTags = (flameblast 6.0).Tags } [ Damage AllDamage ] (ModDb.ofList (flameblast 6.0).Mods))
+        near 3.1 (flameblast 0.0).BaseTime
+        near 3.1 (flameblast 12.0).BaseTime
+        // a character whose mana does not pay for ten stages holds it for those it pays for:
+        // the last number of stages n with 57.5 x (0.25 n + 0.6) less what regenerates meanwhile within the pool
+        let c = load { blank with Groups = [ group [ gem "Flameblast" ] ] } Options.defaults
+        match Setup.pressed c Options.defaults "Flameblast" with
+        | Some p ->
+            let n = p.Skill.Mods |> List.pick (fun m -> if m.Stat = Named "ChannelStages" then Some m.Value else None)
+            let short k = 3450.0 / 60.0 * (0.25 * k + 0.6) - c.Vitals.ManaRegen * (0.25 * k + 0.6) - c.Vitals.Mana
+            equal (box true) (box (n >= 1.0 && n < 10.0))
+            equal (box true) (box (short n <= 0.0 && short (n + 1.0) > 0.0))
+            near (0.25 * n + 0.6) p.Skill.BaseTime
+        | None -> failwith "no Flameblast"
+        // a channel of 100 mana a second that takes 2 s, 100 mana and 30 a second coming in: 200 a
+        // use, of which 60 comes in meanwhile; more than the pool, so it begins with a full pool
+        // and leaves nothing at its end. 100 / 30 s later the pool is full again: a use every
+        // 5.33 s, 6 in 30.5 s (it was never used)
+        let beam = { Skill.make "Beam" [ Spell; Channelling ] with BaseDamage = Map.ofList [ Fire, Range.fixedAt 100.0 ]; BaseCrit = 0.0; BaseTime = 2.0; CostPerSecond = 100.0 }
+        let foe = { EnemyDef.atLevel 83 1e9 with Mods = []; Attack = None }
+        let channel (skill: Skill) seconds =
+            let player =
+                { Actor.make "Player" [] [ skill ] with
+                    Rotation = [ Actor.always "Beam" ]
+                    Vitals = Some { PlayerStats.basic 100.0 100.0 with ManaRegen = 30.0 } }
+            Fight.single foe player seconds
+        equal 6 (count (Sim.run (channel beam 30.5) 1u) "uses:Beam")
+        equal 0 (count (Sim.run (channel beam 30.5) 1u) "cannot afford:Beam")
+        same (channel beam 30.5) seeds
+        // 50 a second: 100 a use, 60 of it coming in meanwhile: in the long run what comes in
+        // is what is spent, a use every 100 / 30 s; the first 100 are there: 1 + floor(98.5 x 30 / 100) uses begun in 100.5 s
+        let cheap = { beam with CostPerSecond = 50.0 }
+        equal 31 (count (Sim.run (channel cheap 100.5) 1u) "uses:Beam")
+        same (channel cheap 100.5) seeds
+        // a cost that is not by the second and above the pool: never used
+        let dear = { beam with CostPerSecond = 0.0; Cost = 200.0 }
+        equal 0 (count (Sim.run (channel dear 30.5) 1u) "uses:Beam"))

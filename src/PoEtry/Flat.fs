@@ -3695,7 +3695,7 @@ module Flat =
                             let absorbed = min (d * (1.0 - bypass)) (es / k)
                             es - absorbed * k, rest + d - absorbed)
                         (s.Shield, 0.0)
-                let fromMana = min s.Mana (rest * pools.ManaBeforeLife / 100.0)
+                let fromMana = min (max 0.0 s.Mana) (rest * pools.ManaBeforeLife / 100.0)
                 let rest = rest - fromMana
                 let toLife = min (max 0.0 (s.Life - 1.0)) rest
                 let rest = rest - toLife
@@ -3839,7 +3839,7 @@ module Flat =
             let streams = s.Streams
             let leech = at streams PLeechMana
             let regen = r.ManaRegen * dt
-            let mana = min v.Mana (max 0.0 (s.Mana + regen + leech))
+            let mana = min v.Mana (max (min 0.0 s.Mana) (s.Mana + regen + leech))
             let es =
                 (if s.Time - s.LastHit >= r.ESRechargeDelay then s.Shield + r.EnergyShieldRecharge * dt else s.Shield)
                 + r.ESRegen * dt + (at streams PES) + (at streams PShroudES)
@@ -4592,7 +4592,7 @@ module Flat =
                 if loseLifeES > 0.0 && useTime > 0.0 then
                     s.Life <- max (min 1.0 s.Life) (s.Life - loseLifeES * v.Life)
                     s.Shield <- max 0.0 (s.Shield - loseLifeES * v.EnergyShield)
-                    s.Mana <- max 0.0 (s.Mana - lose * v.Mana)
+                    s.Mana <- max (min 0.0 s.Mana) (s.Mana - lose * v.Mana)
                     bump s p.CPoolLoss
              | _ -> ())
             // (what the use reads of the buffs as they were when it began)
@@ -5021,6 +5021,13 @@ module Flat =
                 (if s.A.LastUsed = sid then 0.0 else ownCost) + skill.CostPerSecond * seconds
         (ownCost + extraCost) * costMult / efficiency
 
+    /// The mana a use needs to begin, and how far below nothing paying may leave it (`Sim.manaNeeded`).
+    let private manaNeeded (pools: PlayerStats) (skill: Skill) (seconds: float) (cost: float) : struct (float * float) =
+        if skill.CostPerSecond <= 0.0 then struct (cost, 0.0)
+        else
+            let flows = max 0.0 (pools.ManaRegen * seconds)
+            struct (min pools.Mana (max 0.0 (cost - flows)), flows)
+
     /// What of a use's cost is left for mana, and what is paid with life (`Sim.splitCost`).
     let private splitCost (s: State) (sid: int) (pools: PlayerStats) (cost: float) : struct (float * float) =
         if not s.P.LifeCosts then struct (cost, 0.0)
@@ -5131,6 +5138,7 @@ module Flat =
                             costed <- sid
                             costedAt <- costOf s sid nan
                             let struct (mana, life) = splitCost s sid pools costedAt
+                            let mana = if info.Skill.CostPerSecond <= 0.0 then mana else (let struct (need, _) = manaNeeded pools info.Skill (max Constants.serverTick (useTime s sid)) mana in need)
                             // (enough within rounding: a wait for mana ends with exactly the cost, give or take the last bit)
                             not (s.Mana < mana - 1e-9 * max 1.0 mana) && (life <= 0.0 || s.Life - life >= 1.0)
                         | None -> true
@@ -5186,13 +5194,14 @@ module Flat =
                         takeDamage s false pools (Map.ofList [ Fire, burn ])
                     else s.InfernalFlame <- flame
                     useNow s rng sid t
-                elif s.Mana < cost - 1e-9 * max 1.0 cost && cost > pools.Mana then
+                elif s.Mana < cost - 1e-9 * max 1.0 cost && cost > pools.Mana && info.Skill.CostPerSecond <= 0.0 then
                     // costs more than the whole mana pool: this skill can never be used
                     bump s info.CCannotAfford
                     put s.A.Cooldowns sid (infinity)
                     schedule s (s.Time + Constants.serverTick) EReady 0 0 0.0 0.0
-                elif s.Mana < cost - 1e-9 * max 1.0 cost then
+                elif (let struct (need, _) = manaNeeded pools info.Skill t cost in s.Mana < need - 1e-9 * max 1.0 need) then
                     // not enough mana: wait until regeneration and leech have covered it
+                    let struct (cost, _) = manaNeeded pools info.Skill t cost
                     let rate =
                         pools.ManaRegen + (s.Recoups |> List.sumBy (fun (until, rate, pool) -> if pool = PLeechMana && until > s.Time then rate else 0.0))
                         + (if s.Time < s.FlaskUntil then s.FlaskRate else 0.0)
@@ -5200,7 +5209,8 @@ module Flat =
                     s.Starved <- s.Starved + wait
                     schedule s (s.Time + wait) EReady 0 0 0.0 0.0
                 else
-                    s.Mana <- max 0.0 (s.Mana - cost)
+                    let struct (_, flows) = manaNeeded pools info.Skill t cost
+                    s.Mana <- max (-flows) (s.Mana - cost)
                     if lifeCost > 0.0 then
                         s.Life <- s.Life - lifeCost
                         drinkLifeFlask s pools
