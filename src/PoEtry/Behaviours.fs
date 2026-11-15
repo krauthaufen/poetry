@@ -1064,6 +1064,9 @@ module Behaviours =
             |> List.filter (fun m -> m.Stat = Named "Has:UnholyMight")
             |> List.collect (fun m -> snd (keywordEffect db "UnholyMight") |> List.map (fun k -> { k with Conds = m.Conds @ k.Conds }))
         has
+        // Arcane Surge's 20% more mana regeneration (x its effect), or life regeneration instead
+        @ [ (if Mods.flag Ctx.empty (Named "ArcaneSurgeRegenToLife") db then LifeRegen else ManaRegen)
+            |> fun stat -> Mod.more stat (Constants.arcaneSurgeRegen * Mods.inc Ctx.empty [ Named "ArcaneSurgeEffect" ] db) |> Mod.whenever (WhileBuff "ArcaneSurge") |> Mod.from "Arcane Surge" ]
         @ [ Mod.inc Evasion (10.0 * Mods.inc Ctx.empty [ Named "TailwindEffect" ] db) |> Mod.whenever (PerStack("Tailwind", 1.0)) |> Mod.from "Tailwind"
             Mod.base' CritChance 0.5 |> Mod.whenever (PerEnemyStack("CriticalWeakness", 1.0)) |> Mod.from "Critical Weakness" ]
 

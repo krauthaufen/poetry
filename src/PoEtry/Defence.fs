@@ -304,6 +304,8 @@ module Defence =
           LuckyDeflect = flag "LuckyDeflect"
           LifeLeechRate = max 0.05 (Mods.mult c [ Named "LifeLeechRate" ] db)
           DeflectEffect = min 100.0 (Vitals.deflectEffect + named "DeflectEffect")
+          // regeneration, as life regeneration is: its rate modifiers and recovery rate; none where life is not regenerated
+          RegenOnStun = if ci || regenToES || onlyLeech then 0.0 else named "RegenLifeOnStun" * Mods.mult c [ LifeRegen ] db * lifeRecovery
           // A build made for low life starts there, when something keeps it there: nothing
           // regenerates its life, or its life cannot change while it has energy shield.
           StartLife =

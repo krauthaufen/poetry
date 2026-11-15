@@ -683,6 +683,8 @@ module Sim =
           /// it was last asked with: the same buffs (the very same map) give the same mods, and
           /// a use asks many times.
           WithBuffs: System.Collections.Generic.Dictionary<string, System.Collections.Generic.Dictionary<string, Map<string, Effect> * ModDb>>
+          /// The player's defences by its buffs and their stacks, written out (`vitalsNow`).
+          VitalsSeen: System.Collections.Generic.Dictionary<string, PlayerStats>
           /// Percent of maximum life lost per minute per Rage (Berserk).
           BerserkLoss: float
           /// Chance (%) for a charm that is used to keep its charges.
@@ -893,6 +895,22 @@ module Sim =
 
     /// A context with the owner's buffs in it.
     let private owned (env: Env) (w: World) (ctx: Ctx) = { ctx with Owner = ownerStacks env w }
+
+    /// The player's defences and recovery with its buffs, charges and states of the moment
+    /// (`Actor.VitalsAt`; None: the player has no pools, or none that change). Remembered by
+    /// all its buffs and their stacks: the same buffs, the same answer.
+    let private vitalsNow (env: Env) (w: World) : PlayerStats option =
+        match env.Fight.Player.Vitals, env.Fight.Player.VitalsAt with
+        | Some _, Some at ->
+            let buffs = buffStacks (Map.find env.Fight.Player.Name w.Actors)
+            let key = buffs |> Map.fold (fun (acc: System.Text.StringBuilder) k n -> acc.Append(k).Append('=').Append(n).Append(';')) (System.Text.StringBuilder()) |> string
+            match env.VitalsSeen.TryGetValue key with
+            | true, v -> Some v
+            | _ ->
+                let v = at buffs
+                env.VitalsSeen.[key] <- v
+                Some v
+        | v, _ -> v
 
     /// Buff stacks as a skill sees them: a skill that consumes charges counts as consuming
     /// "N additional" ones too ("50% more damage per Power Charge Consumed").
@@ -1133,8 +1151,10 @@ module Sim =
             | _ -> { w with Player = Some p }
         | _ -> w
 
-    /// Recovery and damage over time on the player during dt (ending now).
-    let private recover (stats: PlayerStats option) (flask: ManaFlask option) (charms: Charm list) dt (w: World) =
+    /// Recovery and damage over time on the player during dt (ending now). The pools are the
+    /// sheet's (`stats`); how fast they recover is of the moment (`rates`: the defences with
+    /// the buffs and states that held during dt).
+    let private recover (stats: PlayerStats option) (rates: PlayerStats option) (flask: ManaFlask option) (charms: Charm list) dt (w: World) =
         let w =
             match w.Player with
             | Some p when dt > 0.0 && charms |> List.exists (fun c -> c.ChargesPerSecond > 0.0) ->
@@ -1153,6 +1173,7 @@ module Sim =
             | _ -> w
         match stats, w.Player with
         | Some v, Some p when dt > 0.0 && p.Died.IsNone ->
+            let r = rates |> Option.defaultValue v
             let t0 = w.Time - dt
             let overlap until = max 0.0 (min w.Time until - t0)
             let stream (pool: string) =
@@ -1161,11 +1182,11 @@ module Sim =
                 if pool.StartsWith "Leech" then (if parts.IsEmpty then 0.0 else List.max parts) else List.sum parts
             // leech: each instance is recovered over one second (keyword text)
             let leech = stream "LeechMana"
-            let regen = v.ManaRegen * dt
+            let regen = r.ManaRegen * dt
             let mana = min v.Mana (max 0.0 (p.Mana + regen + leech))
             let es =
-                (if w.Time - p.LastHit >= v.ESRechargeDelay then p.EnergyShield + v.EnergyShieldRecharge * dt else p.EnergyShield)
-                + v.ESRegen * dt + stream "ES" + stream "ShroudES"
+                (if w.Time - p.LastHit >= r.ESRechargeDelay then p.EnergyShield + r.EnergyShieldRecharge * dt else p.EnergyShield)
+                + r.ESRegen * dt + stream "ES" + stream "ShroudES"
                 |> min (max p.EnergyShield (min v.EnergyShield v.ESRecoverCap))
             let flask = p.FlaskRate * overlap p.FlaskUntil
             let recouped = stream "Mana"
@@ -1174,8 +1195,8 @@ module Sim =
                 p.ManaGained |> addf "regen" (min regen (v.Mana - p.Mana)) |> addf "leech" leech |> addf "flask" flask
                 |> (if recouped > 0.0 then addf "recoup" recouped else id)
             let lifeLeech = stream "LeechLife"
-            let lifeRecharge = if v.LifeRecharge > 0.0 && w.Time - p.LastHit >= v.ESRechargeDelay then v.LifeRecharge * dt else 0.0
-            let lifeGain = v.LifeRegen * dt + lifeLeech + lifeRecharge + p.LifeFlaskRate * overlap p.LifeFlaskUntil + stream "Life"
+            let lifeRecharge = if r.LifeRecharge > 0.0 && w.Time - p.LastHit >= r.ESRechargeDelay then r.LifeRecharge * dt else 0.0
+            let lifeGain = r.LifeRegen * dt + lifeLeech + lifeRecharge + p.LifeFlaskRate * overlap p.LifeFlaskUntil + stream "Life"
             let lifeCharges =
                 match v.LifeFlask with
                 | Some f -> min f.MaxCharges (p.LifeFlaskCharges + f.ChargesPerSecond * f.ChargeGainMult * dt)
@@ -1193,7 +1214,7 @@ module Sim =
                                 EnergyShield = es
                                 Life = min (max p.Life v.Life) (p.Life + lifeGain)
                                 LifeFlaskCharges = lifeCharges
-                                Ward = (if p.Ward >= v.Ward then p.Ward else min v.Ward (p.Ward + v.WardRegen * dt))
+                                Ward = (if p.Ward >= v.Ward then p.Ward else min v.Ward (p.Ward + r.WardRegen * dt))
                                 Recoups = p.Recoups |> List.filter (fun (until, _, _) -> until > w.Time)
                                 Dots = p.Dots |> List.filter (fun (until, _, _) -> until > w.Time)
                                 // damage over time keeps energy shield from recharging
@@ -3446,7 +3467,15 @@ module Sim =
                             // players are not heavily stunned by ordinary hits (only while raising a shield,
                             // parrying or mounted: not modelled)
                             if stunChance >= Constants.playerLightStunMinimum && rng.Chance stunChance && not (rng.Chance v.AvoidStun) then
-                                w |> unlessCharm "Stunned" (lock (Constants.playerLightStunDuration / v.StunRecovery) "Stunned")
+                                w |> unlessCharm "Stunned" (fun w ->
+                                    lock (Constants.playerLightStunDuration / v.StunRecovery) "Stunned" w
+                                    // "if you've been Stunned Recently"; "Regenerate X% of maximum Life over 1 second when Stunned"
+                                    |> markStatus env.Fight.Player.Name "StunnedRecently"
+                                    |> fun w ->
+                                        if v.RegenOnStun <= 0.0 then w
+                                        else
+                                            let rate = v.RegenOnStun / 100.0 * pools.Life / Constants.stunRegenSeconds
+                                            { w with Player = w.Player |> Option.map (fun p -> { p with Recoups = (w.Time + Constants.stunRegenSeconds, rate, "Life") :: p.Recoups }) })
                             else w
                     let w =
                         { w with
@@ -3736,7 +3765,8 @@ module Sim =
             else
                 w.Kills |> List.truncate n |> List.rev
                 |> List.fold (fun w (name, _, at) -> killedOverTime env rng name (playersDotKill env w.Enemies.[name] at) w) w
-        let w = w |> syncPresence env.Fight |> recover env.Fight.Player.Vitals env.Fight.Player.ManaFlask env.Fight.Player.Charms dt
+        let w = w |> syncPresence env.Fight
+        let w = w |> recover env.Fight.Player.Vitals (vitalsNow env w) env.Fight.Player.ManaFlask env.Fight.Player.Charms dt
         if allDead w || (w.Player |> Option.exists (fun p -> p.Died.IsSome)) then
             w
         else
@@ -4042,6 +4072,7 @@ module Sim =
           BerserkLoss = Mods.sumBase Ctx.empty [ Named "LifeLossPercentPerMinutePerRage" ] (ModDb.ofList fight.Player.Mods)
           CharmKeep = Mods.sumBase Ctx.empty [ Named "CharmKeepCharges" ] (ModDb.ofList fight.Player.Mods)
           WithBuffs = System.Collections.Generic.Dictionary()
+          VitalsSeen = System.Collections.Generic.Dictionary()
           SkillDbs =
             Map.ofList
                 [ for a in fight.Player :: fight.Minions do

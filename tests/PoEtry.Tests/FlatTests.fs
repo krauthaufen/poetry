@@ -1221,6 +1221,24 @@ let run (test: string -> (unit -> unit) -> unit) =
         let enemy = { boss 1e12 with Attack = Some { Interval = 0.8; Damage = Map.ofList [ Physical, 30.0 ]; Accuracy = 800.0; Range = 6.0; CritChance = 5.0; Melee = true }; Position = Vec.make 8.0 0.0 }
         same (Fight.single enemy player 20.0) seeds)
 
+    test "flat: recovery at the rates of the moment (life on low life, while ignited, energy shield on low energy shield)" (fun () ->
+        let sheet = { PlayerStats.basic 1000.0 150.0 with EnergyShield = 400.0; EnergyShieldRecharge = 50.0; ManaRegen = 3.0; LifeRegen = 1.0; StartLife = 0.3; RegenOnStun = 8.0; StunThreshold = 300.0 }
+        let at (b: Map<string, int>) =
+            { sheet with
+                LifeRegen = sheet.LifeRegen + (if b.ContainsKey "LowLife" then 40.0 else 0.0) + (if b.ContainsKey "DamagingAilment" then 25.0 else 0.0)
+                ManaRegen = sheet.ManaRegen * (if b.ContainsKey "Rally" then 3.0 else 1.0)
+                EnergyShieldRecharge = sheet.EnergyShieldRecharge * (if b.ContainsKey "LowEnergyShield" then 2.0 else 1.0)
+                ESRechargeDelay = (if b.ContainsKey "FullLife" then 4.0 elif b.ContainsKey "StunnedRecently" then 1.0 else 2.0) }
+        let call = { Skill.make "Call" [ Spell ] with Hits = []; Cooldown = Some 3.0 }
+        let player =
+            { Actor.make "Player" [ noIgnite ] [ call; { spell "Bolt" Fire 40.0 90.0 with Cost = 25.0 } ] with
+                Rotation = [ Actor.always "Call"; Actor.always "Bolt" ]
+                Vitals = Some sheet
+                VitalsAt = Some at
+                Rules = [ { Hook = OnUse; Filter = Called "Call"; Chance = 100.0; Reaction = GrantBuff("Rally", 1.5, 1, []) }; { Hook = OnCrit; Filter = AnySkill; Chance = 50.0; Reaction = IgniteSelf 2.0 } ] }
+        let enemy = { boss 1e12 with Attack = Some { Interval = 0.9; Damage = Map.ofList [ Physical, 120.0; Fire, 60.0 ]; Accuracy = 800.0; Range = 6.0; CritChance = 5.0; Melee = true }; Position = Vec.make 8.0 0.0 }
+        same (Fight.single enemy { player with Skills = player.Skills |> List.map (fun s -> { s with BaseCrit = 30.0 }) } 25.0) seeds)
+
     test "flat: poisons of an actor that lets several count beside those of one that lets one count" (fun () ->
         // (the weaker poisons of the one are kept: they count once the other's hit lets more stack)
         let venom = Mod.base' (AilmentChance Poison) 100.0

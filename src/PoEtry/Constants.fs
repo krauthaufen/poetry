@@ -11,6 +11,10 @@ module Constants =
 
     /// Onslaught: 20% increased skill speed (game keyword text).
     let onslaughtSpeed = 20.0
+    /// Arcane Surge: 20% more mana regeneration rate (game keyword text; wiki Arcane Surge).
+    let arcaneSurgeRegen = 20.0
+    /// "Regenerate X% of maximum Life over 1 second when Stunned": over this many seconds.
+    let stunRegenSeconds = 1.0
 
     // ---- crit ----
     /// Rage is lost at this rate per second once none has been gained for the delay

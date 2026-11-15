@@ -749,6 +749,22 @@ module StatMap =
         // the player stands: what holds while moving does not (the pools' recovery is worked out
         // for the standing character; RULES.md, "While stationary")
         | "mana_regeneration_rate_+%_while_moving" -> Some NotOffensive
+        // recovery that holds in some state of the player: read at the moment (RULES.md, "Recovery of the moment")
+        | "life_regeneration_rate_per_minute_%_while_affected_by_damaging_ailment" -> one (Mod.base' LifeRegenPercent (v / 60.0) |> Mod.whenever (WhileBuff "DamagingAilment"))
+        | "life_regeneration_rate_per_minute_%_when_on_low_life" -> one (Mod.base' LifeRegenPercent (v / 60.0) |> Mod.whenever (WhileBuff "LowLife"))
+        | "life_regeneration_rate_per_minute_%_while_surrounded" -> one (Mod.base' LifeRegenPercent (v / 60.0) |> Mod.whenever (WhileBuff "Surrounded"))
+        | "life_regeneration_rate_per_minute_%_if_have_been_hit_recently" -> one (Mod.base' LifeRegenPercent (v / 60.0) |> Mod.whenever (WhileBuff "BeenHitRecently"))
+        | "life_regeneration_rate_+%_while_on_low_life" -> one (Mod.inc LifeRegen v |> Mod.whenever (WhileBuff "LowLife"))
+        | "life_regeneration_rate_+%_while_shapeshifted" -> one (Mod.inc LifeRegen v |> Mod.whenever (WhileBuff "Shapeshifted"))
+        | "life_regeneration_rate_+%_while_using_life_flask" -> one (Mod.inc LifeRegen v |> Mod.whenever (WhileBuff "LifeFlaskEffect"))
+        | "mana_regeneration_rate_+%_on_full_life" -> one (Mod.inc ManaRegen v |> Mod.whenever (WhileBuff "FullLife"))
+        | "djinn_ascendancy_energy_shield_recharge_rate_+%_final_on_low_energy_shield" -> one (Mod.more (Named "ESRechargeRate") v |> Mod.whenever (WhileBuff "LowEnergyShield"))
+        | "energy_shield_delay_-%_when_not_on_full_life" -> one (Mod.inc (Named "ESRechargeFaster") v |> Mod.whenever (Not(WhileBuff "FullLife")))
+        | "energy_shield_delay_-%_if_stunned_recently" -> one (Mod.inc (Named "ESRechargeFaster") v |> Mod.whenever (WhileBuff "StunnedRecently"))
+        // "Regenerate X% of maximum Life over 1 second when Stunned"
+        | "regenerate_%_life_over_1_second_when_stunned" -> one (Mod.base' (Named "RegenLifeOnStun") v)
+        // "Arcane Surge grants more Life Regeneration Rate instead of Mana Regeneration Rate"
+        | "arcane_surge_mana_regen_modifier_on_you_applies_to_life_regen_instead" -> one (Mod.flag (Named "ArcaneSurgeRegenToLife"))
         | "life_regeneration_rate_+%_while_stationary" -> one (Mod.inc LifeRegen v |> Mod.whenever (Not(WhileBuff "Moving")))
         | "life_regeneration_rate_per_minute_%_while_stationary" -> one (Mod.base' LifeRegenPercent (v / 60.0) |> Mod.whenever (Not(WhileBuff "Moving")))
         | "mana_regeneration_rate_+%_while_stationary" -> one (Mod.inc ManaRegen v |> Mod.whenever (Not(WhileBuff "Moving")))

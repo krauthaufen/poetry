@@ -1118,6 +1118,7 @@ module Flat =
               CWardRemnant: int
               CManaRemnant: int
               BMinionDied: int
+              BStunnedRecently: int
               BEmpowered: int
               CMinionDied: int
               CMinionRevived: int
@@ -2089,6 +2090,7 @@ module Flat =
                 buffs.Id("Resonance:" + DamageType.name t) |> ignore
             buffs.Id "Resonance" |> ignore
             buffs.Id "MinionDiedRecently" |> ignore
+            buffs.Id "StunnedRecently" |> ignore
             buffs.Id "Empowered" |> ignore
             actor.ActiveWhile |> Option.iter (fun name -> buffs.Id name |> ignore)
 
@@ -2166,6 +2168,7 @@ module Flat =
                       CWardRemnant = count "ward remnant"
                       CManaRemnant = count "mana remnant"
                       BMinionDied = buffs.Id "MinionDiedRecently"
+                      BStunnedRecently = buffs.Id "StunnedRecently"
                       BEmpowered = buffs.Id "Empowered"
                       CMinionDied = count "minion:died"
                       CMinionRevived = count "minion:revived"
@@ -3642,6 +3645,32 @@ module Flat =
                 else put sums pool ((at sums pool) + part)
                 rest <- rest.Tail
 
+    /// The player's defences with the buffs and charges of the moment (`Actor.VitalsAt`; the
+    /// player is the actor entered). They are a function of the buffs: the same buffs, the
+    /// same defences, and working them out is most of what a monster's hit costs.
+    let private vitalsNow (s: State) (pools: PlayerStats) : PlayerStats =
+        let p = s.P
+        match p.Fight.Player.VitalsAt with
+        | Some at ->
+            match s.VitalsLast with
+            | Some v when s.VitalsOf = s.A.VitalsVersion -> v
+            | _ ->
+                // the buffs written out: which there are, and their stacks
+                let mutable key = ""
+                for id in p.VitalsOn do
+                    if s.A.BHas.[id] then key <- key + string id + "=" + string s.A.BStacks.[id] + ";"
+                let v =
+                    match s.VitalsSeen.TryGetValue key with
+                    | true, v -> v
+                    | _ ->
+                        let v = at (buffMap s)
+                        s.VitalsSeen.[key] <- v
+                        v
+                s.VitalsOf <- s.A.VitalsVersion
+                s.VitalsLast <- Some v
+                v
+        | None -> pools
+
     /// The player's recovery and the damage over time on it during dt, ending now (`Sim.recover`).
     let private recover (s: State) (dt: float) =
         match s.P.Vitals with
@@ -3658,15 +3687,18 @@ module Flat =
         | _ -> ()
         match s.P.Vitals with
         | Some v when dt > 0.0 && alive s ->
+            // (the pools are the sheet's; how fast they recover is of the moment, `Sim.recover`)
+            enter s 0
+            let r = vitalsNow s v
             let t0 = s.Time - dt
             recouped s t0
             let streams = s.Streams
             let leech = at streams PLeechMana
-            let regen = v.ManaRegen * dt
+            let regen = r.ManaRegen * dt
             let mana = min v.Mana (max 0.0 (s.Mana + regen + leech))
             let es =
-                (if s.Time - s.LastHit >= v.ESRechargeDelay then s.Shield + v.EnergyShieldRecharge * dt else s.Shield)
-                + v.ESRegen * dt + (at streams PES) + (at streams PShroudES)
+                (if s.Time - s.LastHit >= r.ESRechargeDelay then s.Shield + r.EnergyShieldRecharge * dt else s.Shield)
+                + r.ESRegen * dt + (at streams PES) + (at streams PShroudES)
                 |> min (max s.Shield (min v.EnergyShield v.ESRecoverCap))
             let flask = s.FlaskRate * max 0.0 (min s.Time s.FlaskUntil - t0)
             let recouped = at streams PMana
@@ -3676,8 +3708,8 @@ module Flat =
             addGained s 2 flask
             if recouped > 0.0 then addGained s 3 recouped
             let lifeLeech = at streams PLeechLife
-            let lifeRecharge = if v.LifeRecharge > 0.0 && s.Time - s.LastHit >= v.ESRechargeDelay then v.LifeRecharge * dt else 0.0
-            let lifeGain = v.LifeRegen * dt + lifeLeech + lifeRecharge + s.LifeFlaskRate * max 0.0 (min s.Time s.LifeFlaskUntil - t0) + (at streams PLife)
+            let lifeRecharge = if r.LifeRecharge > 0.0 && s.Time - s.LastHit >= r.ESRechargeDelay then r.LifeRecharge * dt else 0.0
+            let lifeGain = r.LifeRegen * dt + lifeLeech + lifeRecharge + s.LifeFlaskRate * max 0.0 (min s.Time s.LifeFlaskUntil - t0) + (at streams PLife)
             let lifeCharges =
                 match v.LifeFlask with
                 | Some f -> min f.MaxCharges (s.LifeFlaskCharges + f.ChargesPerSecond * f.ChargeGainMult * dt)
@@ -3686,7 +3718,7 @@ module Flat =
             s.Shield <- es
             s.Life <- min (max s.Life v.Life) (s.Life + lifeGain)
             s.LifeFlaskCharges <- lifeCharges
-            s.Ward <- (if s.Ward >= v.Ward then s.Ward else min v.Ward (s.Ward + v.WardRegen * dt))
+            s.Ward <- (if s.Ward >= v.Ward then s.Ward else min v.Ward (s.Ward + r.WardRegen * dt))
             if not s.Recoups.IsEmpty && s.Recoups |> List.exists (fun (until, _, _) -> not (until > s.Time)) then
                 s.Recoups <- s.Recoups |> List.filter (fun (until, _, _) -> until > s.Time)
             // (life lost over time down to nothing: dead)
@@ -3808,32 +3840,6 @@ module Flat =
             enter s was
             prevented
         | _ -> false
-
-    /// The player's defences with the buffs and charges of the moment (`Actor.VitalsAt`; the
-    /// player is the actor entered). They are a function of the buffs: the same buffs, the
-    /// same defences, and working them out is most of what a monster's hit costs.
-    let private vitalsNow (s: State) (pools: PlayerStats) : PlayerStats =
-        let p = s.P
-        match p.Fight.Player.VitalsAt with
-        | Some at ->
-            match s.VitalsLast with
-            | Some v when s.VitalsOf = s.A.VitalsVersion -> v
-            | _ ->
-                // the buffs written out: which there are, and their stacks
-                let mutable key = ""
-                for id in p.VitalsOn do
-                    if s.A.BHas.[id] then key <- key + string id + "=" + string s.A.BStacks.[id] + ";"
-                let v =
-                    match s.VitalsSeen.TryGetValue key with
-                    | true, v -> v
-                    | _ ->
-                        let v = at (buffMap s)
-                        s.VitalsSeen.[key] <- v
-                        v
-                s.VitalsOf <- s.A.VitalsVersion
-                s.VitalsLast <- Some v
-                v
-        | None -> pools
 
     /// Exposure on an enemy: the strongest applies (`Sim.expose`).
     let private expose (s: State) (target: int) (dt: DamageType) (amount: float) (duration: float) =
@@ -6678,7 +6684,12 @@ module Flat =
                             |> fun d -> if atk.Melee then d * (1.0 + Constants.monsterMeleeStunMore / 100.0) else d
                         let stunChance = min 100.0 (stunDamage / max 1.0 v.StunThreshold * 100.0)
                         if stunChance >= Constants.playerLightStunMinimum && rng.Chance stunChance && not (rng.Chance v.AvoidStun) then
-                            unlessCharm "Stunned" (lock (Constants.playerLightStunDuration / v.StunRecovery) p.CPlayerStunned)
+                            unlessCharm "Stunned" (fun () ->
+                                lock (Constants.playerLightStunDuration / v.StunRecovery) p.CPlayerStunned ()
+                                // "if you've been Stunned Recently"; life regenerated over a second (`Sim.attackPlayer`)
+                                markStatus s p.BStunnedRecently
+                                if v.RegenOnStun > 0.0 then
+                                    s.Recoups <- (s.Time + Constants.stunRegenSeconds, v.RegenOnStun / 100.0 * pools.Life / Constants.stunRegenSeconds, PLife) :: s.Recoups)
                     bump s p.CEnemyHit
                     if deflected then bump s p.CDeflected
                     if blocked then

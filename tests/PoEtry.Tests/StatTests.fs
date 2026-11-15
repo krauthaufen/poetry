@@ -1284,3 +1284,26 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         let c = load { blank with Groups = [ group [ gem "Herald of Ash" ] ]; ExtraLines = [ "+100 to Spirit" ] } Options.defaults
         let p = Setup.player c Options.defaults [] None
         if not (p.Resources |> List.exists (fun (k, _) -> k = "AffectedByAHerald")) then failwith "no herald state")
+
+    test "recovery of the moment: regeneration in some state, Arcane Surge's mana or life regeneration, life regenerated when stunned" (fun () ->
+        let at lines (st: (string * int) list) =
+            let c = load { blank with ExtraLines = lines } Options.defaults
+            let p = Setup.player c Options.defaults [] None
+            p.VitalsAt.Value (Map.ofList st)
+        // "Regenerate 2% of maximum Life per second while affected by any Damaging Ailment"
+        let line = [ "Regenerate 2% of maximum Life per second while affected by any Damaging Ailment" ]
+        let plain, ailing = at line [], at line [ "DamagingAilment", 1 ]
+        near (plain.LifeRegen + 0.02 * plain.Life) ailing.LifeRegen
+        // "40% more Energy Shield Recharge Rate while on Low Energy Shield"
+        let es = [ "+200 to maximum Energy Shield"; "40% more Energy Shield Recharge Rate while on Low Energy Shield" ]
+        near ((at es []).EnergyShieldRecharge * 1.4) (at es [ "LowEnergyShield", 1 ]).EnergyShieldRecharge
+        // Arcane Surge: 20% more mana regeneration, or life regeneration instead
+        near ((at [] []).ManaRegen * 1.2) (at [] [ "ArcaneSurge", 1 ]).ManaRegen
+        let regen = [ "Regenerate 10 Life per second"; "Arcane Surge grants more Life Regeneration Rate instead of Mana Regeneration Rate" ]
+        near ((at regen []).LifeRegen * 1.2) (at regen [ "ArcaneSurge", 1 ]).LifeRegen
+        near (at regen []).ManaRegen (at regen [ "ArcaneSurge", 1 ]).ManaRegen
+        // "Regenerate 10% of maximum Life over 1 second when Stunned", with 20% increased life regeneration rate
+        near 12.0 (at [ "Regenerate 10% of maximum Life over 1 second when Stunned"; "20% increased Life Regeneration rate" ] []).RegenOnStun
+        // "50% faster start of Energy Shield Recharge if you've been Stunned Recently"
+        let delay = [ "50% faster start of Energy Shield Recharge if you've been Stunned Recently" ]
+        near ((at delay []).ESRechargeDelay / 1.5) (at delay [ "StunnedRecently", 1 ]).ESRechargeDelay)

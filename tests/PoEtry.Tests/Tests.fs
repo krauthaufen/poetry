@@ -855,6 +855,21 @@ let main _ =
         let stats = StatMap.meaning "support_rageforged_consumes_X_rage_to_enrage_skill_use" 10.0, StatMap.meaning "support_rageforged_enraged_damage_+%_final" 35.0, StatMap.meaning "rage_skip_consume_chance_%" 30.0
         equal (box (Mods [ Mod.base' (Named "RageforgedSpend") 10.0 ], Mods [ Mod.base' (Named "RageforgedMore") 35.0 ], Mods [ Mod.base' (Named "RageSkipChance") 30.0 ])) (box stats))
 
+    test "recovery is of the moment: mana regenerates at the rate the player's buffs and states give it now" (fun () ->
+        // the sheet regenerates nothing; with Rally the player regenerates 10 mana a second
+        let sheet = PlayerStats.basic 1000.0 100.0
+        let bolt = { fireSpell 100.0 with Cost = 100.0 }
+        let player rally =
+            { Actor.make "Player" [ noIgnite ] [ bolt ] with
+                Vitals = Some sheet
+                VitalsAt = Some(fun b -> { sheet with ManaRegen = (if Map.containsKey "Rally" b then 10.0 else 0.0) })
+                Resources = (if rally then [ "Rally", 1 ] else []) }
+        let run rally = Sim.run { Fight.single { boss 1e12 with Attack = None } (player rally) 5.0 with MaxTime = 5.0 } 1u
+        let gained (o: Outcome) = Map.tryFind "regen" o.ManaGained |> Option.defaultValue 0.0
+        near 0.0 (gained (run false))
+        // the bolt at 0 s spends it all; 10 a second from then on, up to the last event
+        if gained (run true) < 40.0 || gained (run true) > 50.0 + 1e-9 then failwithf "regenerated %g" (gained (run true)))
+
     test "a minion's mod read off the player's buffs: 50% increased damage while the player has Rally" (fun () ->
         // the player gives itself Rally for 3 s at 0 s; the minion's own Rally is not the player's
         let call = { Skill.make "Call" [ Spell ] with Hits = []; Cooldown = Some 100.0 }
