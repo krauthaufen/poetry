@@ -1724,3 +1724,19 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         // a cast every 0.9 s: 11 in 10 s
         equal 11 (count out "hits:Entangle")
         same fight seeds)
+
+    test "secondary radius as a width or an impact: Entangle's fissure and Primal Strikes' charge are strips, a Thunderstorm strike has its impact radius" (fun () ->
+        let built gems name =
+            let c = load { blank with Groups = [ group gems ]; Items = [ "Weapon 1", "Rarity: Normal\nHardwood Spear\n" ] } Options.defaults
+            match Setup.pressed c Options.defaults name with
+            | Some p -> p.Skill
+            | None -> failwithf "%s not built" name
+        // "Fissure length is 8 metres", vines within 1.5 metres to either side
+        equal (box (Cone(80.0, 0.0, 30.0))) (box (built [ gem "Entangle" ] "Entangle").Delivery)
+        // "Storm radius is 2.3 metres", "+0.8 metres to Impact radius": a strike hits what is within 0.8 m of its target
+        equal (box (AreaAtTarget 8.0)) (box (built [ gem "Thunderstorm" ] "Thunderstorm").Delivery)
+        // "Charge length is 8.6 metres", "Charge width is 1.8 metres"
+        let primal = built [ gem "Primal Strikes" ] "Primal Strikes"
+        match primal.Parts |> List.tryFind (fun p -> p.Name.EndsWith "Spirits") with
+        | Some spirits -> equal (box (Cone(86.0, 0.0, 18.0))) (box spirits.Delivery)
+        | None -> failwithf "no Spirits part: %A" (primal.Parts |> List.map (fun p -> p.Name)))

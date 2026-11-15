@@ -498,6 +498,18 @@ module Gems =
               // consumes it (Behaviours.whirlwind)
               ("Whirling Slash", "Whirlwind"), [ "NoHit" ] ]
 
+    /// Stat sets whose two radii are a length and a width ("Fissure length is", "Charge length
+    /// is / Charge width is", "Explosion length is"): a strip from the player towards the enemy
+    /// aimed at, so long and so wide. The width as a multiple of the secondary radius: the
+    /// charge's is its width; Entangle's fissure is taken to be as wide as its vines reach to
+    /// either side ("Attaches Vines to enemies within 1.5 metres"); Shield Wall's has no text
+    /// and is taken for the width too.
+    let private strips = Map.ofList [ ("Entangle", "Fissures"), 2.0; ("Primal Strikes", "Spirits"), 1.0; ("Shield Wall", "Shield Wall"), 1.0 ]
+
+    /// Stat sets that strike one enemy in their area with an impact of the secondary radius
+    /// ("Storm radius is", "to Impact radius"; "Hits one target every X second").
+    let private impactIsSecondary = set [ "Thunderstorm", "Thunderstorm" ]
+
     /// Skills whose `base_secondary_skill_effect_duration` is read where their mechanic is built.
     let private secondaryDurationRead = set [ "Freezing Mark"; "Frost Bomb"; "Kelari's Malediction" ]
 
@@ -774,6 +786,8 @@ module Gems =
                 // a part whose only radius is the skill's secondary one ("Explosion radius is",
                 // "Shockwave radius is" in its own description): that is its area
                 match radius |> Option.orElse secondary with
+                | Some r when secondary.IsSome && strips.ContainsKey(data.Name, set.Label) -> Cone(r, 0.0, strips.[data.Name, set.Label] * secondary.Value)
+                | Some _ when secondary.IsSome && impactIsSecondary.Contains(data.Name, set.Label) -> AreaAtTarget secondary.Value
                 // a nova is around the caster (Ice Nova too: it is cast on a Frostbolt only when one
                 // is flying, user observation), unless Astral Projection puts it at the target
                 | Some r when data.Types.Contains "Nova" && flagAny "nova_skills_cast_at_target_location" -> AreaAtTarget r
@@ -877,7 +891,7 @@ module Gems =
                 || (match delivery with
                     | Projectiles { Rain = Some _ } -> true
                     | Projectiles _ -> false
-                    | _ -> radius.IsNone))
+                    | _ -> radius.IsNone || strips.ContainsKey(data.Name, set.Label) || impactIsSecondary.Contains(data.Name, set.Label)))
          let cov = if used then { cov with Unsimulated = cov.Unsimulated |> List.filter (fun (k, _) -> k <> "active_skill_base_secondary_area_of_effect_radius") } else cov
          // the secondary duration is read where the skill's mechanic is built: Freezing Mark's
          // buff (Behaviours.markBuff), Frost Bomb's exposure (useRules), the time between Kelari's
