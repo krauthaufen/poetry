@@ -286,6 +286,9 @@ module Constants =
     /// dealt" (poe2db Keywords).
     let intimidateTaken = 10.0
     let intimidateDealt = 10.0
+    /// "Debilitate inflicts 20% reduced movement speed and 10% reduced damage dealt" (poe2db Keywords).
+    let debilitateSlow = 20.0
+    let debilitateDealt = 10.0
     /// "Maximum of 10 Jade stacks" (poe2db Keywords).
     let jadeStacks = 10
 

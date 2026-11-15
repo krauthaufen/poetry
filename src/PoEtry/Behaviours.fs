@@ -1431,12 +1431,33 @@ module Behaviours =
           if has "Blinded" then yield "Blinded", 1, []
           // "Intimidate is a Debuff that inflicts 10% increased damage taken and 10% reduced damage dealt"
           if has "Intimidated" then yield "Intimidated", 1, intimidated
+          // "Enemies in your Presence Gain X% of Damage as Extra Chaos Damage" (Vitals.withExtraChaos)
+          let chaos = Mods.sumBase Ctx.empty [ Named "PresenceEnemyGainAsChaos" ] db
+          if chaos <> 0.0 then yield "Presence: Extra Chaos Damage", 1, [ Mod.base' (Named "GainAsChaos") chaos |> Mod.from "Presence" ]
           if has "Exposure" then
               let k = Mods.inc Ctx.empty [ Named "ExposureEffect" ] db
               for t in DamageType.elemental -> "Exposure:" + DamageType.name t, 1, [ Mod.base' (Resist t) (-Constants.exposureMagnitude * k) |> Mod.from "Presence" ]
           if fire <> 0.0 then yield "Presence: Fire Resistance", 1, [ Mod.base' (Resist Fire) fire |> Mod.from "Presence" ]
           // "Enemies in your Presence Resist Elemental Damage based on their Lowest Resistance" (Hit.effectiveResist)
           if has "LowestResist" then yield "Presence: Lowest Resistance", 1, [ Mod.base' (Named "ResistByLowest") 1.0 |> Mod.from "Presence" ] ]
+
+    /// "Unwithered enemies are Withered for X seconds when they enter your Presence": one
+    /// stack of Withered for so long, on an enemy that has none as it comes in.
+    let presenceEntry (sheet: CharacterSheet) : (string * int * Mod list * float) list =
+        let db = ModDb.ofList sheet.Mods
+        match Mods.sumBase Ctx.empty [ Named "WitherOnEnteringPresence" ] db with
+        | seconds when seconds > 0.0 -> [ "Withered", 1, snd (keywordEffect db "Withered"), seconds ]
+        | _ -> []
+
+    /// "Warcries Debilitate Enemies": "Debilitate inflicts 20% reduced movement speed and 10%
+    /// reduced damage dealt" (the game's keyword text), for the stat's second, on the enemy the
+    /// warcry is aimed at (the others in its area are not looked at).
+    let debilitateOnWarcry (sheet: CharacterSheet) : Rule list =
+        match Mods.sumBase Ctx.empty [ Named "DebilitateOnWarcry" ] (ModDb.ofList sheet.Mods) with
+        | seconds when seconds > 0.0 ->
+            let mods = [ Mod.more (Named "MovementSpeed") -Constants.debilitateSlow |> Mod.from "Debilitated"; Mod.more (Named "DamageDealt") -Constants.debilitateDealt |> Mod.from "Debilitated" ]
+            [ { Hook = OnUse; Filter = WithTag Warcry; Chance = 100.0; Reaction = ApplyDebuff("Debilitated", seconds, 1, mods) } ]
+        | _ -> []
 
     /// Charms from the equipped items (API layout: "Flask: Lasts N Seconds", "Flask: Consumes N
     /// of M Charges on use", "Utility: <effect>", "Used when you ..."). Returns the charms and

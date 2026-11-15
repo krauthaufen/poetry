@@ -779,7 +779,7 @@ module Setup =
                 @ Behaviours.selfIgnite sheet
                 @ Behaviours.rareModsOnKill sheet
                 @ Behaviours.totemRecently sheet pressedSkills
-                @ Behaviours.recentStates sheet pressedSkills @ Behaviours.intimidateOnImmobilise sheet
+                @ Behaviours.recentStates sheet pressedSkills @ Behaviours.intimidateOnImmobilise sheet @ Behaviours.debilitateOnWarcry sheet
                 @ (thorns |> Option.map snd |> Option.toList)
                 @ (match arctic with Some (_, r, _, _) -> r | None -> [])
                 @ Behaviours.scavengedPlating db sheet c.Build
@@ -948,6 +948,7 @@ module Setup =
             @ (if auraMods.IsEmpty then [] else [ "Overwhelming Presence", 1, auraMods ])
             @ Behaviours.presenceAuras c.Sheet
             @ (if asksPresence then [ "InPresence", 1, [] ] else [])
+          PresenceEntry = Behaviours.presenceEntry c.Sheet
           Player = player
           // a totem uses its skill with the character's modifiers, so it also counts with the
           // character's numbers ("per 100 maximum Mana", "per 15 Strength", socketed gem colours)

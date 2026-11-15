@@ -443,6 +443,10 @@ type Fight =
       /// into it; looked at whenever something happens in the fight.
       Presence: float
       PresenceAuras: (string * int * Mod list) list
+      /// What an enemy gets once as it comes into the Presence, if it has none of it then
+      /// ("Unwithered enemies are Withered for X seconds when they enter your Presence"): name,
+      /// stacks, monster-side mods per stack, seconds. Again only after it has been out of it.
+      PresenceEntry: (string * int * Mod list * float) list
       /// A dead enemy is replaced by a new one of its kind that walks in from further out
       /// (a pack that never ends: the fight lasts until MaxTime).
       Replace: bool
@@ -462,6 +466,7 @@ module Fight =
           EnemyAuras = []
           Presence = infinity
           PresenceAuras = []
+          PresenceEntry = []
           Replace = false
           MaxTime = maxTime }
 
@@ -1165,7 +1170,7 @@ module Sim =
     /// into the Presence, and loses them when it is out of it again. (One that is put on an
     /// enemy by something else under the same name and runs out is the aura's again.)
     let private syncPresence (fight: Fight) (w: World) =
-        if fight.PresenceAuras.IsEmpty then w
+        if fight.PresenceAuras.IsEmpty && fight.PresenceEntry.IsEmpty then w
         else
             alive w
             |> List.fold
@@ -1183,7 +1188,23 @@ module Sim =
                                 | Some x when not inside && System.Double.IsPositiveInfinity x.Expires -> Map.remove name ds
                                 | _ -> ds)
                             e.Debuffs
-                    if obj.ReferenceEquals(debuffs, e.Debuffs) then w else { w with Enemies = Map.add e.Def.Name { e with Debuffs = debuffs } w.Enemies })
+                    // what an enemy gets once as it comes in: a mark says it is inside, and is
+                    // taken off when it is out again
+                    let debuffs, expiries =
+                        fight.PresenceEntry
+                        |> List.fold
+                            (fun (ds: Map<string, Effect>, ex: float list) (name, stacks, mods, seconds) ->
+                                let mark = "Entered: " + name
+                                match Map.containsKey mark ds with
+                                | false when inside ->
+                                    let ds = Map.add mark { Name = mark; Mods = []; Stacks = 1; Expires = infinity } ds
+                                    if Map.tryFind name ds |> Option.exists (fun x -> x.Expires > w.Time) then ds, ex
+                                    else Map.add name { Name = name; Mods = mods; Stacks = stacks; Expires = w.Time + seconds } ds, (w.Time + seconds) :: ex
+                                | true when not inside -> Map.remove mark ds, ex
+                                | _ -> ds, ex)
+                            (debuffs, [])
+                    let w = if obj.ReferenceEquals(debuffs, e.Debuffs) then w else { w with Enemies = Map.add e.Def.Name { e with Debuffs = debuffs } w.Enemies }
+                    List.foldBack (fun t w -> schedule t Expire w) expiries w)
                 w
 
     /// Mana recovery while time passes: regeneration, leech (rate-capped), ES recharge, life regen.
@@ -2854,8 +2875,13 @@ module Sim =
                         let leechMult = Mods.mult ctx [ Named "ManaLeechAmount" ] mods
                         let extra = extra * leechMult
                         // life: leech from physical attack damage (same one-enemy rule), gain per hit
+                        // (of physical damage; "Life Leech recovers based on your Lightning / Elemental
+                        // damage as well as Physical damage", "... on your Chaos damage instead of Physical damage")
+                        let leechBase =
+                            let also t = if Mods.flag ctx (Named("LeechFrom:" + DamageType.name t)) mods then Dmg.get t hit.Dealt else 0.0
+                            (if Mods.flag ctx (Named "LeechNotFromPhysical") mods then 0.0 else Dmg.get Physical hit.Dealt) + also Lightning + also Cold + also Fire + also Chaos
                         let lifeLeechFull =
-                            min (Dmg.get Physical hit.Dealt) Constants.effectiveMaxDamageForLeech * Mods.sumBase ctx [ Named "LifeLeech" ] mods / 100.0
+                            min leechBase Constants.effectiveMaxDamageForLeech * Mods.sumBase ctx [ Named "LifeLeech" ] mods / 100.0
                             * Mods.mult ctx [ Named "LifeLeechAmount" ] mods * v.LifeRecoveryRate
                         let lifeLeech = max 0.0 (lifeLeechFull - p.StrikeLifeLeech)
                         let onHit = Mods.sumBase ctx [ Named "LifeOnHit" ] mods * v.LifeRecoveryRate
@@ -3455,7 +3481,7 @@ module Sim =
             let debuffs = (defender e).Mods
             let actionSpeed = max 0.1 (Mods.more Ctx.empty [ Named "ActionSpeed" ] debuffs)
             let dealt = max 0.0 (Mods.more Ctx.empty [ Named "DamageDealt" ] debuffs)
-            let atk = { atk with Damage = atk.Damage |> Map.map (fun _ d -> d * dealt) }
+            let atk = { atk with Damage = atk.Damage |> Map.map (fun _ d -> d * dealt) |> Vitals.withExtraChaos (Mods.sumBase Ctx.empty [ Named "GainAsChaos" ] debuffs) }
             let next = atk.Interval / max 0.1 (1.0 - chill / 100.0) / actionSpeed
             let w = schedule (w.Time + next) (EnemyAttack name) w
             let inRange = Vec.length e.Def.Position - e.Def.Size <= atk.Range + 1e-6
@@ -3473,6 +3499,11 @@ module Sim =
                 if not landed then
                     { w with Counts = bump "enemy:evaded" w.Counts }
                 else
+                    // "Recover X% of Missing Life before being Hit by an Enemy"
+                    let w =
+                        match w.Player with
+                        | Some p when v.MissingLifeBeforeHit > 0.0 && p.Life < v.Life -> { w with Player = Some { p with Life = p.Life + (v.Life - p.Life) * v.MissingLifeBeforeHit / 100.0 } }
+                        | _ -> w
                     let blockRoll () = rng.Chance v.Block
                     let blocked = blockRoll () || (v.LuckyBlock && blockRoll ())
                     let deflectChance =
@@ -3689,6 +3720,7 @@ module Sim =
         let debuffs = (defender e).Mods
         let actionSpeed = max 0.1 (Mods.more Ctx.empty [ Named "ActionSpeed" ] debuffs)
         let dealt = max 0.0 (Mods.more Ctx.empty [ Named "DamageDealt" ] debuffs)
+        let atk = { atk with Damage = Vitals.withExtraChaos (Mods.sumBase Ctx.empty [ Named "GainAsChaos" ] debuffs) atk.Damage }
         let next = atk.Interval / max 0.1 (1.0 - chill / 100.0) / actionSpeed
         let w = schedule (w.Time + next) (EnemyAttack name) w
         if stopped then { w with Counts = bump "enemy:stopped" w.Counts }

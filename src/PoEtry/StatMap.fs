@@ -454,6 +454,31 @@ module StatMap =
         | "base_enemies_in_your_presence_are_hindered" -> one (Mod.flag (Named "PresenceAura:Hindered"))
         | "enemies_in_presence_are_blinded" -> one (Mod.flag (Named "PresenceAura:Blinded"))
         | "enemies_in_presence_are_intimidated" -> one (Mod.flag (Named "PresenceAura:Intimidated"))
+        | "enemies_in_presence_non_skill_base_all_damage_%_to_gain_as_chaos" -> one (Mod.base' (Named "PresenceEnemyGainAsChaos") v)
+        // "Unwithered enemies are Withered for X seconds when they enter your Presence" (Behaviours.presenceEntry)
+        | "inflict_withered_for_x_seconds_on_unwithered_enemies_when_they_enter_your_presence" -> one (Mod.base' (Named "WitherOnEnteringPresence") v)
+        // "Warcries Debilitate Enemies" (Behaviours.debilitateOnWarcry; the id's second)
+        | "warcries_debilitate_enemies_for_1_second" -> one (Mod.base' (Named "DebilitateOnWarcry") 1.0)
+        // "Recover X% of Missing Life before being Hit by an Enemy" (the engines' monster hit)
+        | "missing_life_%_gained_as_life_before_hit" -> one (Mod.base' (Named "MissingLifeBeforeHit") v)
+        // leech: "Leech Life X% faster"; what life leech goes by beside physical damage, or in
+        // its place; "X% of Spell Damage Leeched as Life": of every type a spell deals
+        | "base_life_leech_rate_+%" -> one (Mod.inc (Named "LifeLeechRate") v)
+        | "life_leech_also_recovers_based_on_lightning_damage" -> one (Mod.flag (Named "LeechFrom:Lightning"))
+        | "life_leech_also_recovers_based_on_elemental_damage_types" -> Some(Mods [ for t in DamageType.elemental -> Mod.flag (Named("LeechFrom:" + DamageType.name t)) ])
+        | "life_leech_recovers_based_on_your_chaos_damage_instead_of_physical_damage" -> Some(Mods [ Mod.flag (Named "LeechFrom:Chaos"); Mod.flag (Named "LeechNotFromPhysical") ])
+        | "base_life_leech_from_all_spell_damage_permyriad" ->
+            Some(Mods(
+                    (Mod.base' (Named "LifeLeech") (v / 100.0) |> Mod.whenever (SkillIs Spell))
+                    :: [ for t in [ Fire; Cold; Lightning; Chaos ] -> Mod.flag (Named("LeechFrom:" + DamageType.name t)) |> Mod.whenever (SkillIs Spell) ]))
+        // "Life Leeched by Supported Skills is not removed at full Life": no leech is, here
+        // (RULES.md, "Leech")
+        | "life_leech_from_source_not_removed_at_full_life" -> Some Structural
+        // "Hits against you have X% reduced Critical Damage Bonus per socketed Rune or Soul Core"
+        | "base_self_critical_strike_multiplier_-%_per_rune_or_soul_core" -> one (Mod.base' (Named "LessCritDamageTaken") v |> Mod.whenever (PerStack("NonIdolAugments", 1.0)))
+        | "deflect_chance_is_lucky_while_on_low_life" -> one (Mod.flag (Named "LuckyDeflect") |> Mod.whenever (WhileBuff "LowLife"))
+        // "Enemies you Curse have -X% to Chaos Resistance"
+        | "enemies_chaos_resistance_%_while_cursed" -> one (Mod.base' (Named "EnemyResist:Chaos") v |> Mod.whenever (EnemyHas "Cursed"))
         // "Enemies are Intimidated for X seconds when you Immobilise them" (Behaviours.intimidateOnImmobilise)
         | "enemies_intimidated_x_seconds_when_pinned_heavy_stunned_frozen_or_electrocuted" -> one (Mod.base' (Named "IntimidateOnImmobilise") v)
         // the player's physical damage reduction beside its armour's (Vitals.physicalLeft): "X%

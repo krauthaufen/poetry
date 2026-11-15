@@ -277,6 +277,7 @@ module Defence =
           PhysicalReduction = named "AdditionalPhysicalReduction"
           PhysicalReductionCap = (if flag "PhysicalReductionCap50" then 50.0 else 90.0)
           ESAsArmour = named "ESAsArmour"
+          MissingLifeBeforeHit = (if ci then 0.0 else named "MissingLifeBeforeHit")
           LessCritDamageTaken = named "LessCritDamageTaken"
           EnemyCritChanceMult = max 0.0 (Mods.inc c [ Named "EnemyCritChanceAgainstSelf" ] db)
           BlindedEnemyCritMult = max 0.0 (Mods.inc c [ Named "BlindedEnemyCritChance" ] db)

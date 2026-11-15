@@ -2108,3 +2108,58 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         let applies = mods "x%_of_armour_applies_to_elemental_damage_while_shapeshifted" 30.0
         equal 3 applies.Length
         equal (box [ WhileBuff "Shapeshifted" ]) (box applies.Head.Conds))
+
+    test "Presence: Withered on entering it; monsters in it gain extra chaos damage; missing life recovered before a hit; what leech goes by" (fun () ->
+        // (the walker of the Presence test: inside after 2.75 s; 100 chaos damage every 0.5 s)
+        let bolt = { Skill.make "Bolt" [ Spell ] with BaseDamage = Map.ofList [ Chaos, { Min = 100.0; Max = 100.0 } ]; BaseTime = 0.5; BaseCrit = 0.0 }
+        let walker =
+            { EnemyDef.make Rarity.defaults 70 Normal "walker" (Vec.make 100.0 0.0) with
+                Life = 1e9; Mods = []; Size = 5.0; Speed = 20.0
+                Attack = Some { Interval = 1.0; Damage = Map.ofList [ Physical, 1.0 ]; Accuracy = 100.0; Range = 6.0; CritChance = 0.0; Melee = true } }
+        let player = { Actor.make "Player" [] [ bolt ] with Vitals = Some(PlayerStats.basic 1e6 0.0) }
+        let weakened = [ Mod.inc (DamageTaken AllDamage) 100.0 ]
+        let entering seconds = { Fight.single walker player 5.2 with Presence = 40.0; PresenceEntry = [ "Weakened", 1, weakened, seconds ] }
+        let dealt f = (Sim.run f 1u).DamageBy |> Map.toList |> List.sumBy snd
+        // for 1.4 s from when it is inside: the hits at 3.0, 3.5 and 4.0 s deal double, and it
+        // does not come again while the monster stays inside
+        near (7.0 * 100.0 + 3.0 * 200.0) (dealt (entering 1.4))
+        near (5.0 * 100.0 + 5.0 * 200.0) (dealt (entering 60.0))
+        same (entering 1.4) seeds
+        // on a character: one stack of Withered for the line's seconds
+        let c = load { blank with ExtraLines = [ "Unwithered enemies are Withered for 8 seconds when they enter your Presence" ] } Options.defaults
+        match Behaviours.presenceEntry c.Sheet with
+        | [ "Withered", 1, [ m ], seconds ] ->
+            near 8.0 seconds
+            equal (box (DamageTaken(OfType Chaos), Inc, 5.0)) (box (m.Stat, m.Kind, m.Value))
+        | other -> failwithf "unexpected %A" other
+        // a monster's hit of 60 physical and 20 cold with 50% of damage gained as extra chaos: 40 more
+        let foe = { EnemyDef.atLevel 83 1e9 with Mods = []; Attack = Some { Interval = 0.7; Damage = Map.ofList [ Physical, 60.0; Cold, 20.0 ]; Accuracy = 1e9; Range = 40.0; CritChance = 0.0; Melee = false } }
+        let hitFight (v: PlayerStats) auras = { Fight.single foe { player with Rotation = [ Actor.always "Bolt" ]; Vitals = Some v } 12.5 with PresenceAuras = auras }
+        let chaos = [ "Presence: Extra Chaos Damage", 1, [ Mod.base' (Named "GainAsChaos") 50.0 ] ]
+        let basic = PlayerStats.basic 1e6 0.0
+        let took f = (Sim.run f 1u).DamageTaken
+        near (1.5 * took (hitFight basic [])) (took (hitFight basic chaos))
+        same (hitFight basic chaos) seeds
+        equal (box (Named "PresenceEnemyGainAsChaos")) (box (mods "enemies_in_presence_non_skill_base_all_damage_%_to_gain_as_chaos" 10.0).Head.Stat)
+        // "Recover 50% of Missing Life before being Hit": 5000 life, hits of 80: 5000, 4920, then
+        // half of what is missing comes back before each hit; never below 4840 (twice a hit under full)
+        let healed = { PlayerStats.basic 5000.0 0.0 with MissingLifeBeforeHit = 50.0 }
+        let hits = took (hitFight (PlayerStats.basic 5000.0 0.0) []) / 80.0
+        near (1.0 - 80.0 * hits / 5000.0) (Sim.run (hitFight (PlayerStats.basic 5000.0 0.0) []) 1u).MinLife
+        let low = (Sim.run (hitFight healed []) 1u).MinLife
+        equal (box true) (box (low > 4840.0 / 5000.0 && low < 4850.0 / 5000.0))
+        same (hitFight healed []) seeds
+        // leech: of physical damage; with "also recovers based on Lightning damage" of that too
+        let leech = mods "base_life_leech_from_all_spell_damage_permyriad" 500.0
+        equal (box (Named "LifeLeech", 5.0, [ SkillIs Spell ])) (box (leech.Head.Stat, leech.Head.Value, leech.Head.Conds))
+        equal 5 leech.Length
+        let zap = { Skill.make "Zap" [ Attack ] with BaseDamage = Map.ofList [ Lightning, Range.fixedAt 400.0; Physical, Range.fixedAt 100.0 ]; BaseTime = 0.5; BaseCrit = 0.0 }
+        let leeching (ms: Mod list) =
+            let p = { Actor.make "Player" (Mod.base' (Named "Accuracy") 1e9 :: Mod.base' (Named "LifeLeech") 10.0 :: ms) [ zap ] with Rotation = [ Actor.always "Zap" ]; Vitals = Some(PlayerStats.basic 5000.0 0.0) }
+            Fight.single foe p 12.5
+        let lowest ms = (Sim.run (leeching ms) 1u).MinLife
+        // 10 a hit from the physical damage, 50 with the lightning: the life sinks less
+        equal (box true) (box (lowest (mods "life_leech_also_recovers_based_on_lightning_damage" 1.0) > lowest [] + 0.01))
+        equal (box true) (box (lowest (mods "life_leech_recovers_based_on_your_chaos_damage_instead_of_physical_damage" 1.0) < lowest [] - 0.001))
+        for ms in [ []; mods "life_leech_also_recovers_based_on_elemental_damage_types" 1.0; mods "life_leech_recovers_based_on_your_chaos_damage_instead_of_physical_damage" 1.0 ] do
+            same (leeching ms) seeds)

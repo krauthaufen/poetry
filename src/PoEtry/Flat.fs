@@ -613,6 +613,11 @@ module Flat =
     let private qManaLeech = site MSkill Base [ ManaLeech ]
     let private qManaLeechAmount = siteMult MSkill (named "ManaLeechAmount")
     let private qLifeLeech = site MSkill Base (named "LifeLeech")
+    let private qLeechNotPhysical = site MSkill Flag (named "LeechNotFromPhysical")
+    let private qLeechLightning = site MSkill Flag (named "LeechFrom:Lightning")
+    let private qLeechCold = site MSkill Flag (named "LeechFrom:Cold")
+    let private qLeechFire = site MSkill Flag (named "LeechFrom:Fire")
+    let private qLeechChaos = site MSkill Flag (named "LeechFrom:Chaos")
     let private qLifeLeechAmount = siteMult MSkill (named "LifeLeechAmount")
     let private qLifeOnHit = site MSkill Base (named "LifeOnHit")
     let private qManaOnHit = site MSkill Base (named "ManaOnHit")
@@ -1127,6 +1132,8 @@ module Flat =
               CSigil: int
               /// Whether anything of the actor's makes a skill cost life (`Sim.splitCost`).
               LifeCosts: bool
+              /// Whether anything of the actor's makes life leech go by more than physical damage.
+              LeechTypes: bool
               /// Whether any meta gem gains energy from hits.
               MetaHits: bool
               /// What a full Infernal Flame burns, percent of maximum life and energy shield.
@@ -1230,6 +1237,9 @@ module Flat =
               /// The debuffs an enemy has while it is in the player's Presence (`Fight.PresenceAuras`).
               /// (with whether it is an exposure: as strong as the enemy lets exposure be)
               PresenceAuras: (int * int * Mod list * bool)[]
+              /// What an enemy gets once as it comes into the Presence (`Fight.PresenceEntry`):
+              /// the mark that it is inside, the debuff, its stacks, mods and seconds.
+              PresenceEntry: (int * int * int * Mod list * float)[]
               /// Chance (%) for a charm that is used to keep its charges, and where the count of that goes.
               CharmKeep: float
               CCharmKept: int
@@ -1437,6 +1447,9 @@ module Flat =
         let curseK (e: EnemyDef) = Mods.more Ctx.empty [ Named "CurseEffectOnSelf" ] (ModDb.ofList e.Mods)
         for (name, _, _) in fight.EnemyAuras @ fight.PresenceAuras do
             statuses.Id name |> ignore
+        for (name, _, _, _) in fight.PresenceEntry do
+            statuses.Id name |> ignore
+            statuses.Id("Entered: " + name) |> ignore
         let enemyInfo (d: EnemyDef) : EnemyInfo =
                 let db = ModDb.ofList d.Mods
                 { Def = d
@@ -2191,6 +2204,9 @@ module Flat =
                       Builders = builders
                       Banners = banners
                       HasSigil = sigils.Count > 0
+                      LeechTypes =
+                        (let named (m: Mod) = match m.Stat with Named n -> n.StartsWith "LeechFrom:" || n = "LeechNotFromPhysical" | _ -> false
+                         actor.Mods |> List.exists named || actor.Skills |> List.exists (fun sk -> sk.Mods |> List.exists named))
                       LifeCosts =
                         (let named (m: Mod) = match m.Stat with Named ("CostAsLife" | "LifeCostEqualToMana" | "LifeCostPercentOfLife") -> true | _ -> false
                          actor.Mods |> List.exists named || actor.Skills |> List.exists (fun sk -> sk.Mods |> List.exists named))
@@ -2301,6 +2317,7 @@ module Flat =
                       BerserkLoss = Mods.sumBase Ctx.empty [ Named "LifeLossPercentPerMinutePerRage" ] sheet
                       CharmKeep = Mods.sumBase Ctx.empty [ Named "CharmKeepCharges" ] sheet
                       PresenceAuras = fight.PresenceAuras |> List.map (fun (name, stacks, mods) -> statuses.Id name, stacks, mods, name.StartsWith "Exposure:") |> Array.ofList
+                      PresenceEntry = fight.PresenceEntry |> List.map (fun (name, stacks, mods, seconds) -> statuses.Id("Entered: " + name), statuses.Id name, stacks, mods, seconds) |> Array.ofList
                       CCharmKept = counts.Id "charm:kept charges"
                       MaxRage = Map.tryFind "Rage" actor.MaxResources |> Option.defaultValue 0
                       Attackers =
@@ -3457,6 +3474,7 @@ module Flat =
 
     let private actionSpeedStat = Named "ActionSpeed"
     let private damageDealtStat = Named "DamageDealt"
+    let private gainAsChaosStat = Named "GainAsChaos"
     let private movementSpeedStat = Named "MovementSpeed"
 
     let private kill (s: State) (e: Foe) (at: float) =
@@ -3602,7 +3620,8 @@ module Flat =
     /// (`Sim.syncPresence`).
     let private syncPresence (s: State) =
         let auras = s.Main.PresenceAuras
-        if auras.Length > 0 then
+        let entries = s.Main.PresenceEntry
+        if auras.Length > 0 || entries.Length > 0 then
             let reach = s.Main.Fight.Presence
             for live in 0 .. s.Live.Length - 1 do
                 let e = at s.Foes (at s.Live live)
@@ -3613,6 +3632,15 @@ module Flat =
                         let has = (at e.Has id) && (at e.Expires id) > s.Time
                         if inside && not has then setDebuff e id stacks infinity (if exposure then mods |> List.map (Mod.scaled e.Info.ExposureK) else mods)
                         elif not inside && has && System.Double.IsPositiveInfinity(at e.Expires id) then removeDebuff e id
+                    for place in 0 .. entries.Length - 1 do
+                        let mark, id, stacks, mods, seconds = at entries place
+                        let marked = at e.Has mark
+                        if inside && not marked then
+                            setDebuff e mark 1 infinity []
+                            if not ((at e.Has id) && (at e.Expires id) > s.Time) then
+                                setDebuff e id stacks (s.Time + seconds) mods
+                                expireAt s (s.Time + seconds)
+                        elif not inside && marked then removeDebuff e mark
 
     let inline private alive (s: State) = System.Double.IsNaN s.Died
 
@@ -5884,8 +5912,14 @@ module Flat =
                         | _ -> s.FlaskCharges
                     let leechMult = multQ ev qManaLeechAmount
                     let extra = extra * leechMult
+                    let leechBase =
+                        if not p.LeechTypes then at de 0
+                        else
+                            (if flagQ ev qLeechNotPhysical then 0.0 else at de 0)
+                            + (if flagQ ev qLeechLightning then at de (typeIndex Lightning) else 0.0) + (if flagQ ev qLeechCold then at de (typeIndex Cold) else 0.0)
+                            + (if flagQ ev qLeechFire then at de (typeIndex Fire) else 0.0) + (if flagQ ev qLeechChaos then at de (typeIndex Chaos) else 0.0)
                     let lifeLeechFull =
-                        min (at de 0) Constants.effectiveMaxDamageForLeech * sumQ ev qLifeLeech / 100.0
+                        min leechBase Constants.effectiveMaxDamageForLeech * sumQ ev qLifeLeech / 100.0
                         * multQ ev qLifeLeechAmount * v.LifeRecoveryRate
                     let lifeLeech = max 0.0 (lifeLeechFull - s.StrikeLifeLeech)
                     let onHit = sumQ ev qLifeOnHit * v.LifeRecoveryRate
@@ -6480,6 +6514,7 @@ module Flat =
         defList s e
         let actionSpeed = max 0.1 (dmore e actionSpeedStat 1.0)
         let dealt = max 0.0 (dmore e damageDealtStat 1.0)
+        let atk = { atk with Damage = Vitals.withExtraChaos (dsum e Base gainAsChaosStat 0.0) atk.Damage }
         let next = atk.Interval / max 0.1 (1.0 - chill / 100.0) / actionSpeed
         schedule s (s.Time + next) EEnemyAttack index 0 0.0 0.0
         if stopped then bump s p.CStopped
@@ -6668,7 +6703,7 @@ module Flat =
             defList s e
             let actionSpeed = max 0.1 (dmore e actionSpeedStat 1.0)
             let dealt = max 0.0 (dmore e damageDealtStat 1.0)
-            let atk = { atk with Damage = atk.Damage |> Map.map (fun _ d -> d * dealt) }
+            let atk = { atk with Damage = atk.Damage |> Map.map (fun _ d -> d * dealt) |> Vitals.withExtraChaos (dsum e Base gainAsChaosStat 0.0) }
             let next = atk.Interval / max 0.1 (1.0 - chill / 100.0) / actionSpeed
             schedule s (s.Time + next) EEnemyAttack index 0 0.0 0.0
             let inRange = Vec.length e.Def.Position - e.Def.Size <= atk.Range + 1e-6
@@ -6682,6 +6717,8 @@ module Flat =
                 let landed = landsOn s rng s.PEntropy hitChance
                 if not landed then bump s p.CEvaded
                 else
+                    // "Recover X% of Missing Life before being Hit by an Enemy"
+                    if v.MissingLifeBeforeHit > 0.0 && s.Life < v.Life then s.Life <- s.Life + (v.Life - s.Life) * v.MissingLifeBeforeHit / 100.0
                     let blockRoll () = rng.Chance v.Block
                     let blocked = blockRoll () || (v.LuckyBlock && blockRoll ())
                     let deflectChance =
