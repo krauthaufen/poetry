@@ -18,7 +18,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
    whose description or behaviour changed.
 5. Go through the lists below; the wiki's version history of a skill says what changed.
 
-## Rules (125)
+## Rules (127)
 
 ### Hit damage
 
@@ -89,6 +89,8 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | Armour vs elemental | stat text; order a guess | guess |
 | Damage taken | stat text | guess (order) |
 | Life flask | player behaviour | guess |
+| Low Energy Shield, low and full life | game constants | data; no shield: guess |
+| Defend with X% of Armour | stat descriptions | data; stacking: guess |
 | Ailments on the player | GameConstants "...Player" | data; using unmitigated damage is a guess |
 | Ignited by one's own critical hits | stat description; the stat's id ("if crit recently") for the 4 s; that it is mitigated like an Ignite is a guess | data / guess |
 | Buffs and debuffs that expire faster | stat descriptions; which effects count as buffs (the stat's id: "only buff category") is a guess | guess |
