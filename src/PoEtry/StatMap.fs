@@ -1483,6 +1483,23 @@ module StatMap =
         // "+X seconds to base use time when Shapeshifting": a character that uses shapeshift
         // skills is in its animal form for the whole fight and never changes into it
         | "use_time_+_ms_if_shapeshift_required" -> Some NotOffensive
+        // "per 100 maximum Life": the character's maximum life as stacks (Setup.loadWith)
+        | "spell_damage_+%_per_100_max_life_with_non_channelling_skills" ->
+            one (Mod.inc (Damage AllDamage) v |> Mod.whenever (SkillIs Spell) |> Mod.whenever (Not(SkillIs Channelling)) |> Mod.whenever (PerStack("MaxLife100", 1.0)))
+        | "spell_critical_strike_chance_+%_per_100_max_life_with_non_channelling_skills" ->
+            one (Mod.inc CritChance v |> Mod.whenever (SkillIs Spell) |> Mod.whenever (Not(SkillIs Channelling)) |> Mod.whenever (PerStack("MaxLife100", 1.0)))
+        | "spell_ailment_magnitude_+%_per_100_max_life_with_non_channelling_skills" ->
+            one (Mod.inc (AilmentMagnitude None) v |> Mod.whenever (SkillIs Spell) |> Mod.whenever (Not(SkillIs Channelling)) |> Mod.whenever (PerStack("MaxLife100", 1.0)))
+        // "Attacks have added Physical damage equal to X% of maximum Life": X for every full 100 life
+        | "attack_added_physical_damage_%_of_maximum_life" ->
+            Some(Mods [ for st in [ AddedMin Physical; AddedMax Physical ] -> Mod.base' st v |> Mod.whenever (SkillIs Attack) |> Mod.whenever (PerStack("MaxLife100", 1.0)) ])
+        | "gain_armour_equal_to_strength" -> one (Mod.base' Armour 1.0 |> Mod.whenever (PerStack("Str", 1.0)))
+        // durations of a kind of skill
+        | "plant_skill_effect_duration_+%" -> one (Mod.inc SkillDuration v |> Mod.whenever (SkillIs(Tag "Plant")))
+        | "offering_duration_+%" -> one (Mod.inc SkillDuration v |> Mod.whenever (SkillIs(Tag "Type:Offering")))
+        | "totem_duration_+%" -> one (Mod.inc SkillDuration v |> Mod.whenever (SkillIs(Tag "Type:SummonsTotem")))
+        | "projectile_ailment_chance_+%" -> Some(Mods(allAilments |> List.map (fun a -> Mod.inc (AilmentChance a) v |> Mod.whenever (SkillIs Projectile))))
+        | "ailment_duration_+%_vs_cursed_enemy" -> one (Mod.inc (AilmentDuration None) v |> Mod.whenever (EnemyHas "Cursed"))
         | "energy_shield_gained_on_block" -> one (Mod.base' (Named "ESOnBlock") v)
         // damage the character takes
         | "marauder_hidden_ascendancy_damage_taken_+%_final" -> one (Mod.more (Named "Taken:All") v)

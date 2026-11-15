@@ -345,8 +345,8 @@ module Setup =
           Bases = bases
           // "per 100 maximum mana" (Archmage) reads this permanent stack count
           // the character's own numbers as stacks, for "per 100 maximum Mana", "per 15 Strength"
-          MaxResources = maxResources |> Map.add "MaxMana100" (int (vitals.Mana / 100.0)) |> Map.add "BlockChance" (int vitals.Block) |> Map.add "LowestAttribute" (int (min vitals.Str (min vitals.Dex vitals.Int))) |> Map.add "Str" (int vitals.Str) |> Map.add "Dex" (int vitals.Dex) |> Map.add "Int" (int vitals.Int)
-          Resources = (startResources |> Map.toList) @ [ "MaxMana100", int (vitals.Mana / 100.0); "BlockChance", int vitals.Block; "LowestAttribute", int (min vitals.Str (min vitals.Dex vitals.Int)); "Str", int vitals.Str; "Dex", int vitals.Dex; "Int", int vitals.Int ]
+          MaxResources = maxResources |> Map.add "MaxMana100" (int (vitals.Mana / 100.0)) |> Map.add "MaxLife100" (int (vitals.Life / 100.0)) |> Map.add "BlockChance" (int vitals.Block) |> Map.add "LowestAttribute" (int (min vitals.Str (min vitals.Dex vitals.Int))) |> Map.add "Str" (int vitals.Str) |> Map.add "Dex" (int vitals.Dex) |> Map.add "Int" (int vitals.Int)
+          Resources = (startResources |> Map.toList) @ [ "MaxMana100", int (vitals.Mana / 100.0); "MaxLife100", int (vitals.Life / 100.0); "BlockChance", int vitals.Block; "LowestAttribute", int (min vitals.Str (min vitals.Dex vitals.Int)); "Str", int vitals.Str; "Dex", int vitals.Dex; "Int", int vitals.Int ]
           Vitals = vitals
           Periodics = periodics
           Cycles = cycles
@@ -937,7 +937,7 @@ module Setup =
           Minions =
             (let carried =
                 player.Resources |> List.filter (fun (k, _) ->
-                    List.contains k [ "MaxMana100"; "Str"; "Dex"; "Int"; "Spirit"; "BlockChance"; "LowestAttribute"; "GrandSpectrum"; "CorruptedItems" ]
+                    List.contains k [ "MaxMana100"; "MaxLife100"; "Str"; "Dex"; "Int"; "Spirit"; "BlockChance"; "LowestAttribute"; "GrandSpectrum"; "CorruptedItems" ]
                     || k.StartsWith "Supports" || k.StartsWith "AffectedBy" || k.StartsWith "Constant")
              c.Minions |> List.map (fun m ->
                  if m.ActiveWhile.IsSome && m.Resources.IsEmpty then

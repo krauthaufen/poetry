@@ -2260,7 +2260,7 @@ module Behaviours =
                             |> List.filter (fun (k, _) -> k = "base_number_of_totems_allowed") |> List.sumBy snd |> int |> max 1
                         // "+N to maximum number of Summoned Totems" (Ballista Totems: of those)
                         let named n = Mods.sumBase Ctx.empty [ Named n ] charMods
-                        let limit = limit + int (named "AdditionalTotems") + (if gem.Name.Contains "Ballista" then int (named "AdditionalBallistaTotems") else 0)
+                        let limit = limit + int (named "AdditionalTotems") + (if Gems.data db gem.Name |> Option.exists (fun d -> d.Types.Contains "TotemsAreBallistae") then int (named "AdditionalBallistaTotems") else 0)
                         // Ancestral Bond: "Your Totem Limit is doubled", "Totems reserve 75 Spirit
                         // each": as many as the Spirit the persistent gems leave pays for, one at least
                         let limit =

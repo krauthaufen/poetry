@@ -1820,3 +1820,21 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         let per2, cap2 = empower { c with Sheet = { c.Sheet with Mods = c.Sheet.Mods @ mods "warcry_monster_power_+%" 50.0 } }
         near (per / 1.5) per2
         if cap < infinity then near (cap / 1.5) cap2)
+
+    test "per 100 maximum Life, Armour per Strength, durations of plant, offering and totem skills" (fun () ->
+        equal
+            (box [ Mod.inc (Damage AllDamage) 2.0 |> Mod.whenever (SkillIs Spell) |> Mod.whenever (Not(SkillIs Channelling)) |> Mod.whenever (PerStack("MaxLife100", 1.0)) ])
+            (box (mods "spell_damage_+%_per_100_max_life_with_non_channelling_skills" 2.0))
+        equal (box [ Mod.inc SkillDuration 20.0 |> Mod.whenever (SkillIs(Tag "Plant")) ]) (box (mods "plant_skill_effect_duration_+%" 20.0))
+        equal (box [ Mod.inc SkillDuration 20.0 |> Mod.whenever (SkillIs(Tag "Type:Offering")) ]) (box (mods "offering_duration_+%" 20.0))
+        equal (box [ Mod.inc SkillDuration 20.0 |> Mod.whenever (SkillIs(Tag "Type:SummonsTotem")) ]) (box (mods "totem_duration_+%" 20.0))
+        // the character's life in hundreds is there to count, and 1 Armour for each Strength
+        let plain = load blank Options.defaults
+        let c = load { blank with ExtraLines = [ "+1 to Armour per Strength" ] } Options.defaults
+        equal (box [ "MaxLife100", int (c.Vitals.Life / 100.0) ]) (box (c.Resources |> List.filter (fun (k, _) -> k = "MaxLife100")))
+        near (plain.Vitals.Armour + plain.Vitals.Str) c.Vitals.Armour
+        // a totem placed with 20% increased Totem Duration stands 1.2 times as long
+        let seconds (c: Loaded) =
+            (Setup.pressed c Options.defaults "Shockwave Totem").Value.Rules |> List.pick (fun r -> match r.Reaction with GrantBuff (n, s, _, _) when n.EndsWith " buff" -> Some s | _ -> None)
+        let t = load { blank with Groups = [ group [ gem "Shockwave Totem" ] ] } Options.defaults
+        near (1.2 * seconds t) (seconds { t with Sheet = { t.Sheet with Mods = t.Sheet.Mods @ mods "totem_duration_+%" 20.0 } }))
