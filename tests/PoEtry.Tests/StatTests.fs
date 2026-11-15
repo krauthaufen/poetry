@@ -1299,7 +1299,10 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         let es = [ "+200 to maximum Energy Shield"; "40% more Energy Shield Recharge Rate while on Low Energy Shield" ]
         near ((at es []).EnergyShieldRecharge * 1.4) (at es [ "LowEnergyShield", 1 ]).EnergyShieldRecharge
         // Arcane Surge: 20% more mana regeneration, or life regeneration instead
-        near ((at [] []).ManaRegen * 1.2) (at [] [ "ArcaneSurge", 1 ]).ManaRegen
+        let surge = [ "Gain Arcane Surge when you deal a Critical Hit" ]
+        near ((at surge []).ManaRegen * 1.2) (at surge [ "ArcaneSurge", 1 ]).ManaRegen
+        // (a character with no way to Arcane Surge has no such line: its recovery never changes with its buffs)
+        equal false (at [] []).RatesVary
         let regen = [ "Regenerate 10 Life per second"; "Arcane Surge grants more Life Regeneration Rate instead of Mana Regeneration Rate" ]
         near ((at regen []).LifeRegen * 1.2) (at regen [ "ArcaneSurge", 1 ]).LifeRegen
         near (at regen []).ManaRegen (at regen [ "ArcaneSurge", 1 ]).ManaRegen

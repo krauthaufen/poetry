@@ -3776,7 +3776,8 @@ module Sim =
                 w.Kills |> List.truncate n |> List.rev
                 |> List.fold (fun w (name, _, at) -> killedOverTime env rng name (playersDotKill env w.Enemies.[name] at) w) w
         let w = w |> syncPresence env.Fight
-        let w = w |> recover env.Fight.Player.Vitals (vitalsNow env w) env.Fight.Player.ManaFlask env.Fight.Player.Charms dt
+        let rates = match env.Fight.Player.Vitals with Some v when not v.RatesVary -> Some v | _ -> vitalsNow env w
+        let w = w |> recover env.Fight.Player.Vitals rates env.Fight.Player.ManaFlask env.Fight.Player.Charms dt
         if allDead w || (w.Player |> Option.exists (fun p -> p.Died.IsSome)) then
             w
         else

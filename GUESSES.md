@@ -18,7 +18,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
    whose description or behaviour changed.
 5. Go through the lists below; the wiki's version history of a skill says what changed.
 
-## Rules (127)
+## Rules (131)
 
 ### Hit damage
 
@@ -42,6 +42,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 
 | Rule | Source, and what is guessed | Confidence |
 |---|---|---|
+| Cooldown uses | stat descriptions; that "+1" is added before the doubling is a guess | data; order guess |
 | Triggered skills | use immediately, cost no time, respect their cooldown | guess per trigger |
 | Ice Nova on a Frostbolt | skill description, game table, gem data. What counts as "near" (nearer the target than the player) is a guess | data / guess |
 
@@ -95,11 +96,13 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | Ignited by one's own critical hits | stat description; the stat's id ("if crit recently") for the 4 s; that it is mitigated like an Ignite is a guess | data / guess |
 | Buffs and debuffs that expire faster | stat descriptions; which effects count as buffs (the stat's id: "only buff category") is a guess | guess |
 | Slowing potency on the player | stat description; that it is a multiplier of its own is a guess | guess |
-| Light stun on the player | game constants; formula a guess | guess |
+| Light stun on the player | game constants; formula a guess; the regeneration: stat description | guess |
 | Scarred Faith | keystone text; what "prevented" covers and the start are guesses | data / guess |
+| Prevented damage recouped as life | stat description; what "prevented" covers is the reading used for Scarred Faith | data / guess |
 | Conduit | keystone text; that it is lost without allies is our reading of "instead" | data / guess |
 | Which monster | game data (PoB Minions / Spectres export); which variant a name means is not in the API | data; the variant by name is a guess |
 | Skills | game data | data; that the player commands whenever the cooldown allows is a guess |
+| Minion modifiers on the player | stat descriptions; which lines count as companion damage (only those naming companions, not all minion damage) is a guess | data; guess |
 | Minions inflict Withered | stat text | data; 4 s is a guess |
 | The same minion gem twice | PoB lists both; that the tree's and the gem's are one is a guess | guess |
 | Count | 1 per gem, or the gem's pack size; how many a build reserves spirit for is unknown from the API | | guess, usually too low |
@@ -110,7 +113,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | Taking hits for the owner | stat text. Which of several takes it, and that it takes the damage as the player mitigated it, are guesses | data; guess |
 | Minion Instability | support text. The radius is not in its stats: 2 m | data; radius guess |
 | Kelari's Malediction | game data; "Summons 2 Beetles per Corpse consumed" from the wiki. That the player commands them at once is a guess | data; guess |
-| Totems | gem data | data; the simplifications are guesses |
+| Totems | gem data; stat description | data; the simplifications are guesses |
 | Trinity | gem data | guess |
 | Aftershock | stat text | guess (same damage and area) |
 | Jagged Ground | poe2db keyword text, GameConstants `JaggedGroundMagnitude`, support gem data and descriptions. That an enemy stays in the patch is a guess | data / guess |
@@ -177,6 +180,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 
 | Rule | Source, and what is guessed | Confidence |
 |---|---|---|
+| Rageforged | gem descriptions and stats (support_rageforged_consumes_X_rage_to_enrage_skill_use, support_rageforged_enraged_damage_+%_final, rage_skip_consume_chance_%). That the spending comes before the hits is the support's text ("spend ... to deal"); that only the use's own hits gain is our reading | data; guess |
 | "Consumes one of each Charge every X s" | skill text | data + guess (skip chance applies) |
 | Virtuous Barrier motes | skill text and data; supports not counted as skills | data + guess |
 

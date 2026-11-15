@@ -3689,8 +3689,7 @@ module Flat =
         match s.P.Vitals with
         | Some v when dt > 0.0 && alive s ->
             // (the pools are the sheet's; how fast they recover is of the moment, `Sim.recover`)
-            enter s 0
-            let r = vitalsNow s v
+            let r = if v.RatesVary then (enter s 0; vitalsNow s v) else v
             let t0 = s.Time - dt
             recouped s t0
             let streams = s.Streams

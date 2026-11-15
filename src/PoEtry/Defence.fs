@@ -333,7 +333,16 @@ module Defence =
           // "You cannot Recover Energy Shield to above Armour"
           ESRecoverCap = (if flag "ESRecoveryCappedAtArmour" then armour else infinity)
           RecoupPreventedPerPower = named "RecoupPreventedPhysicalAsESPerPower"
-          RecoupPreventedLife = named "RecoupPreventedPhysicalAsLife" }
+          RecoupPreventedLife = named "RecoupPreventedPhysicalAsLife"
+          RatesVary =
+            let rates =
+                set [ "LifeRecoveryRate"; "ManaRecoveryRate"; "ESRecoveryRate"; "ESRechargeRate"; "ESRechargeFaster"; "ESRechargeDelayFlat"
+                      "ESRegenPercent"; "WardRegen"; "ManaRegenPercentOfLife"; "ManaDegenPercent"; "ConstantLifeRecovery"; "NoESRecharge"; "NoESRegen"
+                      "RegenESInsteadOfLife"; "LifeRechargesInsteadOfES"; "NoInherentManaRegen" ]
+            let rec onBuffs (c: Cond) = match c with WhileBuff _ | PerStack _ -> true | Not inner | OfOwner inner -> onBuffs inner | _ -> false
+            sheet.Mods |> List.exists (fun m ->
+                (match m.Stat with LifeRegen | LifeRegenPercent | ManaRegen -> true | Named n -> rates.Contains n | _ -> false)
+                && m.Conds |> List.exists onBuffs) }
 
     let compute bases sheet = computeWith Map.empty bases sheet
 
