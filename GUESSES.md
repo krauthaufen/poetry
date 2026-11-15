@@ -18,7 +18,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
    whose description or behaviour changed.
 5. Go through the lists below; the wiki's version history of a skill says what changed.
 
-## Rules (134)
+## Rules (145)
 
 ### Hit damage
 
@@ -67,6 +67,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | Full circle from the player | geometry | guess |
 | Damage per target | — | guess |
 | Resistances "treated as negated" | game text | guess (interaction with penetration/exposure order) |
+| States of a while ago | stat descriptions; the shared time of a count and that a repeated Ignite of one enemy counts are ours | data; guess |
 | Life per Endurance Charge consumed | stat description; "none when kept" is our reading of "consumed" | data; guess |
 | Chance to not remove charges | game text | guess (cap: Flicker Strike's equivalent is hard-capped at 75%) |
 | Projectiles of `ProjectilesNotFromUser` skills (Falling Thunder) | skill text, skill type | guess (geometry) |
@@ -123,6 +124,13 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | Curses that hinder | stat description; scaling with the enemy's curse effect is a guess | data / guess |
 | Shapeshift skills | using one means "while Shapeshifted" conditions hold for the whole fight | | guess |
 | Onslaught on kill | stat descriptions; 4 s as the stat that names it | data; 4 s guess |
+| Thorns | poe2db keyword Thorns; that modifiers to all damage apply and the base critical chance of 0 are ours | data; guess |
+| Life and energy shield lost on use | stat description; that a triggered use loses nothing is ours | data; guess |
+| Arctic Armour | gem description and stats; that the burst counts the stage it takes, and that spell damage added by the character's lines adds to it once: ours | data; guess |
+| Ancestral Bond and more totems | stat descriptions; that the doubling comes after what adds to the limit, that minions counted by Spirit are not deducted first and that a character with the keystone has at least one totem: ours. "No Charge requirement for placing Totems" changes nothing here | data; guess |
+| Life regeneration granted to allies | stat description; "Base" as before increases: ours | data; guess |
+| Companion in your Presence | stat description; always beside the character: ours | guess |
+| Power counted by warcries | stat description; that the cap grows too: ours | data; guess |
 | Knockback | gem data (`global_knockback`, `base_knockback_distance`, `generic_knockback_*`), stat descriptions. The unit of the distance, the metre where none is named, and that bosses are immune (a guide says so; the wiki could not be read) are guesses | guess |
 | Resisting by the lowest resistance | stat description; that penetration applies after is a guess | data / guess |
 | A random element | stat description; the average in place of the choice | guess |
@@ -177,6 +185,9 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | Flames of Chayula | skill data; 8 s and the colours from poe2db patch notes; cap of ten from PoB; pick-up is a guess | guess |
 | Low life | user: low life must be justified by the build | guess |
 | Skills an item triggers | item text, skill types | data; "with this weapon" is taken as any attack (guess) |
+| Entangle | gem stats and description; that a vine deals its hit when it attaches, that the three are counted for each enemy and not for each fissure, and that the vine's second is no skill duration: ours | data; guess |
+| Damage that starts from a Unique enemy | stat descriptions; the enemy hit for the one it starts from: ours | data; guess |
+| Secondary radius as a width or an impact | the stat sets' description texts; Entangle's fissure as wide as its vines reach to either side and Shield Wall's width: ours | data; guess |
 | Ice Bite | stat description, support description ("infuses your damage with Cold damage"). The stat's id says "added cold attack damage": that it is for attacks only is not what the text says, so it is for all damage | data; all damage is a guess |
 
 ### Resources over time

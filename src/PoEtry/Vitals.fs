@@ -128,6 +128,8 @@ type PlayerStats =
       ESOnKill: float
       LifeOnBlock: float
       ManaOnBlock: float
+      /// "Gain X Energy Shield when you Block" (negative: lose).
+      ESOnBlock: float
       /// Recoup: (pool "Life" | "Mana" | "ES", damage types it counts, percent), recovered over RecoupSeconds.
       Recoup: (string * DamageType list * float) list
       RecoupSeconds: float
@@ -168,7 +170,7 @@ module PlayerStats =
           TakenMult = Map.empty; FlatPhysicalTaken = 0.0; LessCritDamageTaken = 0.0; EnemyCritChanceMult = 1.0; BlindedEnemyCritMult = 1.0; MarkedEnemyAccuracyMult = 1.0; DeferPrevent = 0.0; DeferLose = 0.0; ArmourVsProjectiles = 1.0; ArmourVsCrits = 1.0; ArmourDefend = 1.0; StunThreshold = life
           AilmentThreshold = life / 2.0; FreezeThreshold = life / 2.0; AvoidStun = 0.0; Avoid = Map.empty
           SelfEffect = Map.empty; SelfDuration = Map.empty; LifeOnKill = 0.0; LifePerEnduranceConsumed = 0.0; ESOnKill = 0.0; LifeOnBlock = 0.0
-          ManaOnBlock = 0.0; Recoup = []; RecoupSeconds = 4.0; LifeRecoveryRate = 1.0; ManaRecoveryRate = 1.0
+          ManaOnBlock = 0.0; ESOnBlock = 0.0; Recoup = []; RecoupSeconds = 4.0; LifeRecoveryRate = 1.0; ManaRecoveryRate = 1.0
           ESRecoveryRate = 1.0; LifeFlask = None; CostsLife = false; LifeRecharge = 0.0; UnluckyEvade = false
           LuckyDeflect = false; LifeLeechRate = 1.0; DeflectEffect = 40.0; StartLife = 1.0; LifeReserved = 0.0; LifeFrozenWithES = false; SurroundedAt = 5; SurroundedRadius = Constants.surroundedRadius; StunRecovery = 1.0; ESRecoverCap = infinity; RecoupPreventedPerPower = 0.0; RecoupPreventedLife = 0.0; RegenOnStun = 0.0; RatesVary = true; LifeFlaskAlsoES = false }
 

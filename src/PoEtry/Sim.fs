@@ -40,6 +40,10 @@ type Hook =
     | OnKill
     /// The player is hit by a monster.
     | WhenHit
+    /// The player is hit by a monster's melee attack (after `WhenHit`).
+    | WhenHitMelee
+    /// A hit of the actor's Fully Breaks the armour of an enemy whose armour was not.
+    | OnFullBreak
     /// Killing an enemy that had this status ("Frozen", "Shocked"), with a skill that isn't a herald's own.
     | OnKillOf of status: string
     | OnInflict of Ailment
@@ -847,6 +851,8 @@ module Sim =
             | n -> Map.add "ElementalAilments" n m
         |> fun m -> if e.Debuffs |> Map.exists (fun k _ -> k.StartsWith "Exposure:") then Map.add "Exposed" 1 m else m
         |> fun m -> if e.Def.Rarity = Rare || e.Def.Rarity = Unique then Map.add "RareOrUnique" 1 m else m
+        |> fun m -> if e.Def.Rarity = Unique then Map.add "Unique" 1 m else m
+        |> fun m -> if e.Def.Rarity = Magic then Map.add "Magic" 1 m else m
         // low life: at or below 35% (PoE2); full life: untouched
         |> fun m -> if e.Life <= 0.35 * e.Def.Life then Map.add "LowLife" 1 m else m
         |> fun m -> if e.Life >= e.Def.Life then Map.add "FullLife" 1 m else m
@@ -1941,13 +1947,15 @@ module Sim =
                             // blocked once every stored use is recharging; free again when the first is back
                             Cooldowns = if pending.Length >= uses then Map.add skill.Name pending.Head st.Cooldowns else Map.remove skill.Name st.Cooldowns }) w
                 | None -> w
-            // "Lose X% of maximum Life, Mana and Energy Shield when you use" (Atziri's Impatience); life stays >= 1
+            // "Lose X% of maximum Life, Mana and Energy Shield when you use" (Atziri's Impatience); life stays >= 1.
+            // "Lose X% of maximum Life and Energy Shield when you use a Chaos Skill": those two only
             let w =
                 let lose = Mods.sumBase ctx [ Named "LosePoolsOnUse" ] mods / 100.0
+                let loseLifeES = lose + Mods.sumBase ctx [ Named "LoseLifeAndESOnUse" ] mods / 100.0
                 match actor.Vitals, w.Player with
-                | Some v, Some p when lose > 0.0 && useTime > 0.0 ->
+                | Some v, Some p when loseLifeES > 0.0 && useTime > 0.0 ->
                     { w with
-                        Player = Some { p with Life = max (min 1.0 p.Life) (p.Life - lose * v.Life); EnergyShield = max 0.0 (p.EnergyShield - lose * v.EnergyShield); Mana = max 0.0 (p.Mana - lose * v.Mana) }
+                        Player = Some { p with Life = max (min 1.0 p.Life) (p.Life - loseLifeES * v.Life); EnergyShield = max 0.0 (p.EnergyShield - loseLifeES * v.EnergyShield); Mana = max 0.0 (p.Mana - lose * v.Mana) }
                         Counts = bump "pool loss on use" w.Counts }
                 | _ -> w
             let pattern =
@@ -2764,6 +2772,7 @@ module Sim =
                     let share =
                         Dmg.get Physical hit.Dealt * Mods.sumBase ctx [ Named "ArmourBreakOfPhysical" ] mods / 100.0
                         + Dmg.get Fire hit.Dealt * Mods.sumBase ctx [ Named "ArmourBreakOfFire" ] mods / 100.0
+                        + Dmg.get Chaos hit.Dealt * Mods.sumBase ctx [ Named "ArmourBreakOfChaos" ] mods / 100.0
                         + dealt * Mods.sumBase ctx [ Named "ArmourBreakOfDamage" ] mods / 100.0
                         + Mods.sumBase ctx [ Named "ArmourBreakFlat" ] mods
                     // "Players Break 3 times Armour against Normal Monsters and 2 times Armour against Magic Monsters"
@@ -2785,7 +2794,9 @@ module Sim =
                                     [ OfType Physical ]
                                     @ (if Mods.flag ctx (Named "BrokenArmourFire") mods then [ OfType Fire ] else [])
                                     @ (if Mods.flag ctx (Named "BrokenArmourColdLightning") mods then [ OfType Cold; OfType Lightning ] else [])
-                            addDebuff target "FullyBrokenArmour" seconds 1 (scopes |> List.map (fun sc -> Mod.inc (DamageTaken sc) taken |> Mod.from "Fully Broken Armour")) w
+                            let w = addDebuff target "FullyBrokenArmour" seconds 1 (scopes |> List.map (fun sc -> Mod.inc (DamageTaken sc) taken |> Mod.from "Fully Broken Armour")) w
+                            // (a break of armour that was not fully broken already)
+                            if before < baseArmour then react env rng actor OnFullBreak skill (Some target) w else w
                         else w
                 // mana leech from physical attack damage dealt, recovered over time
                 let w =
@@ -3503,6 +3514,7 @@ module Sim =
                         else w
                     let w = (let _, _, _, whenHit, _ = env.Rage in gainRage env whenHit w)
                     let w = (match env.Fight.Player.Skills |> List.tryHead with Some any -> react env rng env.Fight.Player WhenHit any (Some name) w | None -> w)
+                    let w = (match env.Fight.Player.Skills |> List.tryHead with Some any when atk.Melee -> react env rng env.Fight.Player WhenHitMelee any (Some name) w | _ -> w)
                     // "Rage loss is paused for 4 seconds upon gaining Rage, or after taking damage"
                     let w = updateActor env.Fight.Player.Name (fun st -> { st with RageAt = w.Time }) w
                     // charms used when a hit of their damage type is taken (they help from the next hit on)
@@ -3601,6 +3613,9 @@ module Sim =
                                         { p with
                                             Ward = (if v.WardOnBlock > 0.0 then min (max p.Ward pools.Ward) (p.Ward + v.WardOnBlock) else p.Ward)
                                             Life = min (max p.Life pools.Life) (p.Life + v.LifeOnBlock)
+                                            EnergyShield =
+                                                (if v.ESOnBlock = 0.0 then p.EnergyShield
+                                                 else max 0.0 (min (max p.EnergyShield (min pools.EnergyShield v.ESRecoverCap)) (p.EnergyShield + v.ESOnBlock)))
                                             Mana = min pools.Mana (p.Mana + v.ManaOnBlock) } }
                         | _ -> w
                     if blocked then

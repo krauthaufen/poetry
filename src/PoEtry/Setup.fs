@@ -216,6 +216,7 @@ module Setup =
             let most = named |> List.map (fun (c, _) -> count c) |> List.max
             [ for c, name in named do
                 if count c >= 10 then yield "Supports10:" + name
+                if count c >= 5 then yield "Supports5:" + name
                 if most > 0 && count c = most then yield "SupportsMajority:" + name ]
         // "for each Corrupted Item Equipped"
         let corrupted = Behaviours.corruptedItems build
@@ -275,6 +276,18 @@ module Setup =
             match Behaviours.windDancerStages db sheet build with
             | Some n -> Map.add "WindDancerStage" n maxResources, Map.add "WindDancerStage" (if o.StartEmpty then 0 else n) startResources
             | None -> maxResources, startResources
+        // "while your Companion is in your Presence": a character with a companion gem has it
+        // beside it for the whole fight
+        let startResources =
+            let companion =
+                build.Groups |> List.filter (fun g -> g.Enabled) |> List.collect (fun g -> g.Gems)
+                |> List.exists (fun x -> x.Enabled && not x.IsSupport && (x.Name.StartsWith "Companion: " || (Gems.data db x.Name |> Option.exists (fun d -> d.Types.Contains "Companion"))))
+            if companion then Map.add "CompanionInPresence" 1 startResources else startResources
+        // and so do Arctic Armour's
+        let maxResources, startResources =
+            match Behaviours.arcticArmour db sheet build with
+            | Some (_, _, _, n) -> Map.add "ArcticArmourStage" n maxResources, Map.add "ArcticArmourStage" (if o.StartEmpty then 0 else n) startResources
+            | None -> maxResources, startResources
         let vitals = Defence.computeWith (if sheetSetTwo then Map.add "WeaponSetTwo" 1 startResources else startResources) bases sheet
         let vitals = if o.LowLife && vitals.Life > 1.0 then { vitals with StartLife = 0.35 } else vitals
         // life reserved by skills ("Reserve Life instead of Spirit") and by stats: what is left is all
@@ -332,8 +345,8 @@ module Setup =
           Bases = bases
           // "per 100 maximum mana" (Archmage) reads this permanent stack count
           // the character's own numbers as stacks, for "per 100 maximum Mana", "per 15 Strength"
-          MaxResources = maxResources |> Map.add "MaxMana100" (int (vitals.Mana / 100.0)) |> Map.add "BlockChance" (int vitals.Block) |> Map.add "LowestAttribute" (int (min vitals.Str (min vitals.Dex vitals.Int))) |> Map.add "Str" (int vitals.Str) |> Map.add "Dex" (int vitals.Dex) |> Map.add "Int" (int vitals.Int)
-          Resources = (startResources |> Map.toList) @ [ "MaxMana100", int (vitals.Mana / 100.0); "BlockChance", int vitals.Block; "LowestAttribute", int (min vitals.Str (min vitals.Dex vitals.Int)); "Str", int vitals.Str; "Dex", int vitals.Dex; "Int", int vitals.Int ]
+          MaxResources = maxResources |> Map.add "MaxMana100" (int (vitals.Mana / 100.0)) |> Map.add "MaxLife100" (int (vitals.Life / 100.0)) |> Map.add "BlockChance" (int vitals.Block) |> Map.add "LowestAttribute" (int (min vitals.Str (min vitals.Dex vitals.Int))) |> Map.add "Str" (int vitals.Str) |> Map.add "Dex" (int vitals.Dex) |> Map.add "Int" (int vitals.Int)
+          Resources = (startResources |> Map.toList) @ [ "MaxMana100", int (vitals.Mana / 100.0); "MaxLife100", int (vitals.Life / 100.0); "BlockChance", int vitals.Block; "LowestAttribute", int (min vitals.Str (min vitals.Dex vitals.Int)); "Str", int vitals.Str; "Dex", int vitals.Dex; "Int", int vitals.Int ]
           Vitals = vitals
           Periodics = periodics
           Cycles = cycles
@@ -361,7 +374,9 @@ module Setup =
           /// Timed hits of one use (skills that keep hitting), instead of the skill's own.
           Pattern: (HitTiming * float) list option
           /// Skills its supports grant and trigger (Impending Doom's Doom Blast).
-          Extra: Skill list }
+          Extra: Skill list
+          /// What the skill sets going on a clock of its own (Entangle's vines).
+          Periodics: Periodic list }
 
     /// The dodge roll as something the player can press (`Spam Setup.dodgeRoll`): it deals
     /// nothing and takes its time; Cast on Dodge gains energy from the distance rolled.
@@ -371,7 +386,7 @@ module Setup =
         if gemName = dodgeRoll then
             Some
                 { Skill = { Skill.make dodgeRoll [ Tag "DodgeRoll" ] with BaseTime = Constants.dodgeRollSeconds; Hits = [] }
-                  Infused = None; GrantsVerisium = 0; Rules = []; Grants = []; Curse = None; Pattern = None; Extra = [] }
+                  Infused = None; GrantsVerisium = 0; Rules = []; Grants = []; Curse = None; Pattern = None; Extra = []; Periodics = [] }
         else pressedGem c o gemName
 
     and private pressedGem (c: Loaded) (o: Options) (gemName: string) : Pressed option =
@@ -430,7 +445,8 @@ module Setup =
                     let cryRules = cryRules @ (match wave with Some (_, rs) -> rs | None -> [])
                     let biteRules =
                         let withParts (x: Skill) = x.Name :: (x.Parts |> List.map (fun p -> p.Name))
-                        Behaviours.iceBite db charMods setup s (withParts s @ (match copy with Some (_, _, cp) -> withParts cp | None -> []))
+                        let names = withParts s @ (match copy with Some (_, _, cp) -> withParts cp | None -> [])
+                        Behaviours.iceBite db charMods setup s names @ Behaviours.blazingCritical db charMods setup s names
                     let biteRules =
                         let withParts (x: Skill) = x.Name :: (x.Parts |> List.map (fun p -> p.Name))
                         biteRules @ Behaviours.jaggedGround db charMods setup s (withParts s @ (match copy with Some (_, _, cp) -> withParts cp | None -> []))
@@ -438,6 +454,10 @@ module Setup =
                     let rules = cryRules @ biteRules @ (match lasting with Some (_, rs) -> rs | None -> []) @ Behaviours.useRules db charMods setup s.Name o.Pickup @ Behaviours.buffRules db charMods setup s @ Behaviours.totemPlacement db charMods setup s @ curseRules
                     let grants = Behaviours.verisiumGrant db charMods setup
                     let s = Behaviours.applyObserved s
+                    // Entangle: the vines are a skill of their own, on a clock, against what a fissure hit
+                    let vines = Behaviours.entangle db charMods setup s
+                    let s = match vines with Some (main, _, _, _) -> main | None -> s
+                    let rules = rules @ (match vines with Some (_, _, r, _) -> [ r ] | None -> [])
                     // skills that deal no damage (buffs, infusion grants) don't hit
                     // (curses and marks do "hit": that is how they reach their targets)
                     let s = if grants > 0 || (curse.IsNone && s.BaseDamage.IsEmpty && s.Dots.IsEmpty && not (s.Tags.Contains Attack) && s.Parts.IsEmpty) then { s with Hits = [] } else s
@@ -449,7 +469,8 @@ module Setup =
                           Grants = (match curse with Some (_, _, _, player) -> player | None -> []) @ cryGrants
                           Curse = curse |> Option.map (fun (name, _, _, _) -> name)
                           Pattern = lasting |> Option.map fst
-                          Extra = (doom |> Option.map fst |> Option.toList) @ (match tipped with Some (f, _, _) -> [ f ] | None -> []) @ (match wave with Some (f, _) -> [ f ] | None -> []) @ empowered }
+                          Extra = (doom |> Option.map fst |> Option.toList) @ (match tipped with Some (f, _, _) -> [ f ] | None -> []) @ (match wave with Some (f, _) -> [ f ] | None -> []) @ empowered @ (match vines with Some (_, v, _, _) -> [ v ] | None -> [])
+                          Periodics = (match vines with Some (_, _, _, p) -> [ p ] | None -> []) }
                 | _ -> None)
 
     let gemOf (p: Play) =
@@ -488,7 +509,7 @@ module Setup =
                     let skip = isDefaultAttack || (not offering && ([ "Travel"; "Minion"; "ModifiesNextSkill"; "Persistent" ] |> List.exists d.Types.Contains))
                     let empowers = p.Rules |> List.exists (fun r -> match r.Reaction with Empower _ -> true | _ -> false)
                     // (a buff the skill's use gives: not one that comes of what its hits inflict, like Ice Bite's)
-                    let grantsBuff = p.Rules |> List.exists (fun r -> match r.Hook, r.Reaction with OnInflict _, _ -> false | _, (ChargeBuff _ | GrantBuff _) -> true | _ -> false)
+                    let grantsBuff = p.Rules |> List.exists (fun r -> match r.Hook, r.Reaction with (OnInflict _ | OnCrit | OnFullBreak), _ -> false | _, (ChargeBuff _ | GrantBuff _) -> true | _ -> false)
                     let cooldown = p.Skill.Cooldown |> Option.defaultValue 0.0
                     let needsBuilding = p.Skill.Mods |> List.exists (fun m -> match m.Stat with Named n -> (n.StartsWith "Requires:" || n.StartsWith "NeedsEnemyStacks:") && m.Value > 0.0 | _ -> false)
                     // Barrage is readied whenever it can be, for a main skill it can repeat
@@ -542,7 +563,7 @@ module Setup =
         // a main "skill" that only places a totem or grants a buff is kept up, not spammed
         let main =
             match pressed c o mainGem with
-            | Some p when (p.Skill.Hits.IsEmpty || p.Pattern.IsSome) && p.Rules |> List.exists (fun r -> match r.Hook, r.Reaction with OnInflict _, _ -> false | _, (ChargeBuff _ | GrantBuff _) -> true | _ -> false) -> KeepBuff mainGem
+            | Some p when (p.Skill.Hits.IsEmpty || p.Pattern.IsSome) && p.Rules |> List.exists (fun r -> match r.Hook, r.Reaction with (OnInflict _ | OnCrit | OnFullBreak), _ -> false | _, (ChargeBuff _ | GrantBuff _) -> true | _ -> false) -> KeepBuff mainGem
             | _ -> Spam mainGem
         let plain =
             // a main skill with a cooldown of its own goes first whenever it is ready: otherwise the
@@ -610,7 +631,7 @@ module Setup =
         let resolve g =
             match main with
             | Some (name, s) when name = g ->
-                Some { (pressed c o g |> Option.defaultValue { Skill = s; Infused = None; GrantsVerisium = 0; Rules = []; Grants = []; Curse = None; Pattern = None; Extra = [] }) with Skill = s }
+                Some { (pressed c o g |> Option.defaultValue { Skill = s; Infused = None; GrantsVerisium = 0; Rules = []; Grants = []; Curse = None; Pattern = None; Extra = []; Periodics = [] }) with Skill = s }
             | _ -> pressed c o g
         let used = play |> List.collect gemOf |> List.distinct |> List.choose (fun g -> resolve g |> Option.map (fun p -> g, p))
         let byGem g = used |> List.tryFind (fun (n, _) -> n = g) |> Option.map snd
@@ -668,6 +689,12 @@ module Setup =
                     { p.Skill with Tags = p.Skill.Tags.Add Triggered; Cost = 0.0 }, { rule with Reaction = TriggerSkill p.Skill.Name }))
         let heraldSkills = heraldSkills @ (itemTriggered |> List.map fst)
         let heraldRules = heraldRules @ (itemTriggered |> List.map snd)
+        // Thorns: the hit that retaliates when a monster hits the player
+        let thorns = Behaviours.thorns sheet
+        let heraldSkills = heraldSkills @ (thorns |> Option.map fst |> Option.toList)
+        // Arctic Armour: the burst a melee hit on the player sets off
+        let arctic = Behaviours.arcticArmour db sheet c.Build
+        let heraldSkills = heraldSkills @ (match arctic with Some (s, _, _, _) -> [ s ] | None -> [])
         let consumers =
             (used |> List.choose (fun (_, p) -> p.Infused)) @ (metas |> List.collect (fun (_, _, cs) -> cs))
         let grantRules =
@@ -735,6 +762,11 @@ module Setup =
                 @ Behaviours.selfIgnite sheet
                 @ Behaviours.rareModsOnKill sheet
                 @ Behaviours.totemRecently sheet pressedSkills
+                @ Behaviours.recentStates sheet pressedSkills
+                @ (thorns |> Option.map snd |> Option.toList)
+                @ (match arctic with Some (_, r, _, _) -> r | None -> [])
+                @ Behaviours.scavengedPlating db sheet c.Build
+                @ Behaviours.fullBreakRules pressedSkills
                 @ (match windDancer with Some (_, r, _, _) -> r | None -> [])
                 @ Behaviours.shockedGround sheet
                 @ fst (Behaviours.summons db sheet c.Build pressedSkills)
@@ -744,6 +776,10 @@ module Setup =
                        let rate = c.Vitals.Evasion * percent / 100.0 * Mods.mult Ctx.empty [ Named "ESRecoveryRate" ] (ModDb.ofList sheet.Mods)
                        [ { Hook = WhenHit; Filter = AnySkill; Chance = 100.0; Reaction = SpendStack("GhostShroud", RegenES(rate, 4.0)) } ]
                    | _ -> [])
+                // (an effect the character has all the time is not given again for a while)
+                |> (let permanent = Behaviours.permanentEffects sheet
+                    if permanent.IsEmpty then id
+                    else List.filter (fun r -> match r.Reaction with GrantBuff (n, _, _, _) -> not (List.contains n permanent) | _ -> true))
             Metas = metas |> List.map (fun (m, _, _) -> m)
             Infusions = infusionSetup
             // infusions start full (kept up while clearing), scaled like invocations
@@ -753,6 +789,8 @@ module Setup =
                  let has (ms: Mod list) = ms |> List.exists (fun m -> List.contains m.Stat sources && m.Value > 0.0)
                  if has sheet.Mods || (used |> List.exists (fun (_, p) -> has p.Skill.Mods)) then c.Resources
                  else c.Resources |> List.map (fun (k, n) -> if k = "Rage" then k, 0 else k, n))
+                // "Onslaught", "You have Arcane Surge": the state for the whole fight
+                @ (Behaviours.permanentEffects sheet |> List.map (fun name -> name, 1))
                 // shapeshift skills are used in animal form: "while Shapeshifted" holds
                 @ (if used |> List.exists (fun (g, _) -> Gems.data db g |> Option.exists (fun d -> d.Types.Contains "Shapeshift")) then [ "Shapeshifted", 1 ] else [])
                 // "while moving": a character that gains from moving moves, where the skills it
@@ -782,7 +820,7 @@ module Setup =
             // (with the weapon set in hand: the buffs of the moment don't say which it is)
             VitalsAt = Some(fun current -> Defence.computeWith (if c.SheetSetTwo then Map.add "WeaponSetTwo" 1 current else current) c.Bases sheet)
             VitalsReads = Some(Defence.reads sheet)
-            Periodics = c.Periodics @ snd (Behaviours.summons db sheet c.Build pressedSkills) @ starPeriodics @ (frenzy |> Option.map fst |> Option.toList) @ (match windDancer with Some (_, _, p, _) -> p | None -> [])
+            Periodics = c.Periodics @ (used |> List.collect (fun (_, p) -> p.Periodics)) @ (match arctic with Some (_, _, p, _) -> [ p ] | None -> []) @ snd (Behaviours.summons db sheet c.Build pressedSkills) @ starPeriodics @ (frenzy |> Option.map fst |> Option.toList) @ (match windDancer with Some (_, _, p, _) -> p | None -> [])
             MaxResources =
                 Map.fold (fun m k v -> Map.add k v m) c.MaxResources infusionMaxima |> (if frenzy.IsSome then Map.add "CombatFrenzyReady" 1 else id)
                 |> (let stages = Behaviours.whirlwindStages db c.Build
@@ -899,7 +937,7 @@ module Setup =
           Minions =
             (let carried =
                 player.Resources |> List.filter (fun (k, _) ->
-                    List.contains k [ "MaxMana100"; "Str"; "Dex"; "Int"; "Spirit"; "BlockChance"; "LowestAttribute"; "GrandSpectrum"; "CorruptedItems" ]
+                    List.contains k [ "MaxMana100"; "MaxLife100"; "Str"; "Dex"; "Int"; "Spirit"; "BlockChance"; "LowestAttribute"; "GrandSpectrum"; "CorruptedItems" ]
                     || k.StartsWith "Supports" || k.StartsWith "AffectedBy" || k.StartsWith "Constant")
              c.Minions |> List.map (fun m ->
                  if m.ActiveWhile.IsSome && m.Resources.IsEmpty then

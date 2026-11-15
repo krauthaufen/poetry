@@ -148,6 +148,55 @@ module Behaviours =
                             most)
                     | _ -> None))
 
+    /// Arctic Armour: "conjures an icy barrier that gains stages over time. While the barrier
+    /// has stages, Melee Attacks that hit you will remove a stage to cause a burst of ice that
+    /// deals Cold Spell damage to the attacker": a stage every `base_active_skill_buff_stack_gain_frequency_ms`
+    /// up to the gem's maximum; a melee hit on the player sets off the burst, a spell of its
+    /// own with the gem's supports, whose damage is the gem's "Cold Damage per Stage" for every
+    /// stage held when it is set off, and then takes one stage. Returns the burst, the rules,
+    /// the stages' clock and the most stages.
+    let arcticArmour (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) : (Skill * Rule list * Periodic * int) option =
+        let mods = ModDb.ofList sheet.Mods
+        let stage = "ArcticArmourStage"
+        build.Groups |> List.filter (fun g -> g.Enabled)
+        |> List.tryPick (fun g ->
+            let enabled = g.Gems |> List.filter (fun x -> x.Enabled)
+            let supports = enabled |> List.filter (fun x -> x.IsSupport) |> List.map (fun x -> x.Name, x.Level)
+            enabled
+            |> List.filter (fun x -> not x.IsSupport && x.Name = "Arctic Armour")
+            |> List.tryPick (fun gem ->
+                let setup = { Gem = gem.Name; Level = gem.Level; Quality = gem.Quality; StatSet = 1; Supports = supports }
+                let raw = Gems.rawStats db mods setup
+                let stat k = raw |> List.filter (fun (s, _) -> s = k) |> List.sumBy snd
+                let lo, hi = stat "arctic_armour_minimum_added_cold_damage_per_stack", stat "arctic_armour_maximum_added_cold_damage_per_stack"
+                let most, every = int (stat "maximum_number_of_arctic_armour_stationary_stacks"), stat "base_active_skill_buff_stack_gain_frequency_ms" / 1000.0
+                if hi <= 0.0 || most <= 0 || every <= 0.0 then None
+                else
+                    let built =
+                        match Gems.skill db mods (Gems.chooseWeapon db gem.Name sheet.Weapons) setup with
+                        | Ok (s, _) -> s
+                        | Error _ -> Skill.make gem.Name [ Tag "Cold" ]
+                    let name = gem.Name + ": Burst"
+                    let perStage m = m |> Mod.whenever (PerStack(stage, 1.0)) |> Mod.from "Arctic Armour stages"
+                    let skill =
+                        { built with
+                            Name = name
+                            Tags = (built.Tags.Add Spell).Add Triggered
+                            BaseDamage = Map.empty
+                            AddedDamageEffectiveness = 1.0
+                            Cost = 0.0
+                            Cooldown = None
+                            Parts = []
+                            Hits = [ 1.0, 1.0 ]
+                            Delivery = Single
+                            Mods = built.Mods @ [ perStage (Mod.base' (AddedMin Cold) lo); perStage (Mod.base' (AddedMax Cold) hi) ] }
+                    Some(
+                        skill,
+                        [ { Hook = WhenHitMelee; Filter = AnySkill; Chance = 100.0; Reaction = IfBuff(stage, TriggerSkill name) }
+                          { Hook = WhenHitMelee; Filter = AnySkill; Chance = 100.0; Reaction = SpendStack(stage, NoReaction) } ],
+                        { Name = "arctic armour stages"; Every = every; Action = GainRandom [ stage ] },
+                        most)))
+
     /// Bolts that build up by themselves (Hailstorm Rounds: "Passively generate bolts of ice at
     /// a frequency equal to reload time, up to a cap"): the most that are kept, and the seconds
     /// one takes (the weapon's reload time over reload and attack speed, as a reload would be).
@@ -939,7 +988,11 @@ module Behaviours =
                 let empowered (m: Mod) = m |> Mod.whenever (SkillIs Attack) |> Mod.whenever (WhileBuff "EmpoweredAttacks") |> Mod.from skill.Name
                 let fire = sum "infernal_cry_exerted_attack_all_damage_%_to_gain_as_fire_%"
                 let aftershocks = sum "seismic_cry_slam_skill_additional_aftershocks"
-                [ { Hook = OnUse; Filter = Called skill.Name; Chance = 100.0; Reaction = Empower("EmpoweredAttacks", per, (if cap > 0.0 then cap else infinity)) } ],
+                // "X% increased total Power counted by Warcries": the power counted and what a
+                // warcry counts at most are that much more, which is the same as an attack for
+                // so much less power, counted up to so much less
+                let counted = max 0.01 (Mods.inc { Ctx.empty with SkillTags = skill.Tags; SkillName = skill.Name } [ Named "WarcryPower" ] (ModDb.ofList (ModDb.toList charMods @ skill.Mods)))
+                [ { Hook = OnUse; Filter = Called skill.Name; Chance = 100.0; Reaction = Empower("EmpoweredAttacks", per / counted, (if cap > 0.0 then cap / counted else infinity)) } ],
                 [ if fire > 0.0 then
                       for t in DamageType.all -> empowered (Mod.base' (GainAs(t, Fire)) fire)
                   if aftershocks > 0.0 then yield empowered (Mod.base' (Named "AftershockChance") (100.0 * aftershocks) |> Mod.whenever (SkillIs Slam)) ]
@@ -1061,9 +1114,11 @@ module Behaviours =
     let keywordMods (sheet: CharacterSheet) : Mod list =
         let db = ModDb.ofList sheet.Mods
         let has =
-            sheet.Mods
-            |> List.filter (fun m -> m.Stat = Named "Has:UnholyMight")
-            |> List.collect (fun m -> snd (keywordEffect db "UnholyMight") |> List.map (fun k -> { k with Conds = m.Conds @ k.Conds }))
+            [ "UnholyMight"; "Onslaught"; "ArcaneSurge" ]
+            |> List.collect (fun name ->
+                sheet.Mods
+                |> List.filter (fun m -> m.Stat = Named("Has:" + name))
+                |> List.collect (fun m -> snd (keywordEffect db name) |> List.map (fun k -> { k with Conds = m.Conds @ k.Conds })))
         has
         // Arcane Surge's 20% more mana regeneration (x its effect), or life regeneration instead
         // (where the character's lines speak of Arcane Surge: how it gains it)
@@ -1072,6 +1127,13 @@ module Behaviours =
               yield Mod.more stat (Constants.arcaneSurgeRegen * Mods.inc Ctx.empty [ Named "ArcaneSurgeEffect" ] db) |> Mod.whenever (WhileBuff "ArcaneSurge") |> Mod.from "Arcane Surge" ]
         @ [ Mod.inc Evasion (10.0 * Mods.inc Ctx.empty [ Named "TailwindEffect" ] db) |> Mod.whenever (PerStack("Tailwind", 1.0)) |> Mod.from "Tailwind"
             Mod.base' CritChance 0.5 |> Mod.whenever (PerEnemyStack("CriticalWeakness", 1.0)) |> Mod.from "Critical Weakness" ]
+
+    /// Named effects the character has all the time ("Onslaught", "You have Arcane Surge" with
+    /// no condition): the state by its name is there for the whole fight, and nothing gives
+    /// the effect a second time for a while.
+    let permanentEffects (sheet: CharacterSheet) : string list =
+        [ "Onslaught"; "ArcaneSurge" ]
+        |> List.filter (fun name -> sheet.Mods |> List.exists (fun m -> m.Stat = Named("Has:" + name) && m.Conds.IsEmpty))
 
     /// "Increases and Reductions to Minion Damage also affect you", "... to Companion Damage
     /// also apply to you", "Increases and Reductions to Minion Attack Speed also affect you":
@@ -1528,6 +1590,55 @@ module Behaviours =
             names |> List.distinct |> List.map (fun n ->
                 { Hook = OnInflict Freeze; Filter = Called n; Chance = 100.0; Reaction = GrantBuff("Ice Bite", seconds, 1, mods) })
 
+    /// Entangle: "Conjures a rootbound fissure that crawls forward, damaging enemies in its path.
+    /// While the fissure persists, vines lash out from it and attach to nearby enemies, damaging
+    /// and Slowing them." The fissure hits once, as it is made (the skill's own hit). An enemy
+    /// it hit is near a fissure for the skill's duration ("Entangled"), and while it is, vines
+    /// attach to it: "Attaches a Vine every 0.1 seconds", "Can attach up to 3 Vines to each
+    /// enemy", "Vines remain attached for up to 1 second", so a vine a third of a second on one
+    /// enemy however many fissures stand; each attaching deals the Vines' hit, and the enemy is
+    /// slowed by all three. Returns the skill without its Vines part, the Vines as a skill of
+    /// their own, the rule that marks the enemy and the vines' clock.
+    let entangle (db: GameDb) (charMods: ModDb) (setup: GemSetup) (skill: Skill) : (Skill * Skill * Rule * Periodic) option =
+        match skill.Parts |> List.tryFind (fun p -> p.Name.EndsWith ": Vines") with
+        | Some vines when setup.Gem = "Entangle" ->
+            let raw = Gems.rawStats db charMods { setup with StatSet = 2 }
+            let sum id = raw |> List.filter (fun (k, _) -> k = id) |> List.sumBy snd
+            let every, most, lasts = sum "entangle_apply_vines_every_X_ms" / 1000.0, sum "entangle_vines_maximum_number_of_vines_allowed", sum "entangle_vine_duration_ms" / 1000.0
+            if every <= 0.0 || most <= 0.0 || lasts <= 0.0 || skill.Duration <= 0.0 then None
+            else
+                let ctx = { Ctx.empty with SkillTags = skill.Tags; SkillName = skill.Name }
+                let seconds = skill.Duration * Mods.mult ctx [ SkillDuration ] (ModDb.ofList (ModDb.toList charMods @ skill.Mods))
+                let slow = most * sum "entangle_base_movement_speed_+%_final_per_applied_stack"
+                let own =
+                    { vines with
+                        Tags = vines.Tags.Add Triggered
+                        Cost = 0.0
+                        Cooldown = None
+                        Mods = vines.Mods @ [ Mod.flag (Named "OnlyVs:Entangled") ] }
+                Some(
+                    { skill with Parts = skill.Parts |> List.filter (fun p -> p.Name <> vines.Name) },
+                    own,
+                    { Hook = OnHit; Filter = Called skill.Name; Chance = 100.0
+                      Reaction = ApplyDebuff("Entangled", seconds, 1, (if slow < 0.0 then [ Mod.more (Named "MovementSpeed") (max -100.0 slow) ] else [])) },
+                    { Name = "Entangle vines"; Every = max every (lasts / most); Action = TriggerNamed own.Name })
+        | _ -> None
+
+    /// Blazing Critical: "Attacks Gain X% of Damage as Fire Damage for N seconds on Critically
+    /// Hitting with Supported Skills": the same kind of buff as Ice Bite's, for the character's
+    /// attacks, from the critical hits of the supported skill, its parts and its infused form.
+    let blazingCritical (db: GameDb) (charMods: ModDb) (setup: GemSetup) (skill: Skill) (names: string list) : Rule list =
+        let raw = Gems.rawStats db charMods setup
+        let sum id = raw |> List.filter (fun (k, _) -> k = id) |> List.sumBy snd
+        let gain, ms = sum "support_blazing_crits_gain_%_fire_damage_with_attacks_on_critical_hit", sum "support_blazing_crits_base_duration_ms"
+        if gain <= 0.0 || ms <= 0.0 then []
+        else
+            let ctx = { Ctx.empty with SkillTags = skill.Tags; SkillName = skill.Name }
+            let seconds = ms / 1000.0 * Mods.mult ctx [ SkillDuration ] (ModDb.ofList (ModDb.toList charMods @ skill.Mods))
+            let mods = [ for t in DamageType.all -> Mod.base' (GainAs(t, Fire)) gain |> Mod.whenever (SkillIs Attack) |> Mod.from "Blazing Critical" ]
+            names |> List.distinct |> List.map (fun n ->
+                { Hook = OnCrit; Filter = Called n; Chance = 100.0; Reaction = GrantBuff("Blazing Critical", seconds, 1, mods) })
+
     /// The character's Spirit and what its persistent skills reserve.
     /// Spirit: flat amounts (quests, mods, sceptres' own value) and "per X on body armour",
     /// x increases. Reserved: each persistent gem's `spiritReservationFlat` at its level plus
@@ -1889,6 +2000,12 @@ module Behaviours =
                     let explodePct = supportStat "explode_on_low_life_%_maximum_life_to_deal"
                     // "Allies in your Presence Regenerate X% of your Maximum Life per second"
                     let ownerRegen = Mods.sumBase Ctx.empty [ Named "Sheet:Life" ] charMods * Mods.sumBase Ctx.empty [ Named "AllyRegenPercentOfOwnerLife" ] charMods / 100.0
+                    // "X% of your Base Life Regeneration is granted to Allies in your Presence":
+                    // the character's own, before what increases it
+                    let ownerRegen =
+                        ownerRegen
+                        + (Mods.sumBase Ctx.empty [ LifeRegen ] charMods + Mods.sumBase Ctx.empty [ Named "Sheet:Life" ] charMods * Mods.sumBase Ctx.empty [ LifeRegenPercent ] charMods / 100.0)
+                          * Mods.sumBase Ctx.empty [ Named "AllyRegenPercentOfOwnerRegen" ] charMods / 100.0
                     let withSupports (b: MinionBody) =
                         let b = { b with Life = b.Life * lifeMore; TakesForOwner = takes; LifeRegen = b.LifeRegen + ownerRegen }
                         if explodePct > 0.0 then { b with Explodes = Some(m.Name + ": Minion Instability") } else b
@@ -2142,6 +2259,26 @@ module Behaviours =
                         let limit =
                             Gems.rawStats db charMods { Gem = gem.Name; Level = gem.Level; Quality = gem.Quality; StatSet = 1; Supports = supports }
                             |> List.filter (fun (k, _) -> k = "base_number_of_totems_allowed") |> List.sumBy snd |> int |> max 1
+                        // "+N to maximum number of Summoned Totems" (Ballista Totems: of those)
+                        let named n = Mods.sumBase Ctx.empty [ Named n ] charMods
+                        let limit = limit + int (named "AdditionalTotems") + (if Gems.data db gem.Name |> Option.exists (fun d -> d.Types.Contains "TotemsAreBallistae") then int (named "AdditionalBallistaTotems") else 0)
+                        // Ancestral Bond: "Your Totem Limit is doubled", "Totems reserve 75 Spirit
+                        // each": as many as the Spirit the persistent gems leave pays for, one at least
+                        let limit =
+                            if not (Mods.flag Ctx.empty (Named "AncestralBond") charMods) then limit
+                            else
+                                let free = spiritTotal sheet build - (spiritUses db sheet build |> List.sumBy (fun u -> u.Flat))
+                                max 1 (min (2 * limit) (int (free / Constants.ancestralBondSpirit)))
+                        // what a totem has for every totem standing (all of them stand together)
+                        let s =
+                            let perTotem n = named n * float limit
+                            let extra =
+                                [ Mod.inc Speed (perTotem "TotemCastSpeedPerTotem") |> Mod.whenever (SkillIs Spell)
+                                  Mod.inc Speed (perTotem "TotemAttackSpeedPerTotem") |> Mod.whenever (SkillIs Attack)
+                                  Mod.more (Damage AllDamage) (perTotem "TotemDamagePerTotem") ]
+                                |> List.filter (fun m -> m.Value <> 0.0) |> List.map (Mod.from "per Summoned Totem")
+                            let rec add (sk: Skill) = { sk with Mods = sk.Mods @ extra; Parts = sk.Parts |> List.map add }
+                            if extra.IsEmpty then s else add s
                         [ for i in 1 .. limit ->
                             { Actor.make (if limit > 1 then sprintf "%s %d" gem.Name i else gem.Name + " (totem)") sheet.Mods [ s ] with ActiveWhile = Some(gem.Name + " buff") } ],
                         []
@@ -2158,6 +2295,95 @@ module Behaviours =
             skills
             |> List.filter (fun s -> s.Tags.Contains(Tag "Type:SummonsTotem"))
             |> List.map (fun s -> { Hook = OnUse; Filter = Called s.Name; Chance = 100.0; Reaction = GrantBuff("SummonedTotemRecently", Constants.recentlySeconds, 1, []) })
+
+    /// Thorns: "If you have Thorns damage, you inherently Retaliate against Melee Attack Hits,
+    /// dealing your Thorns damage to the enemy that Hit you" ("against all Hits" with the line
+    /// that says so). The retaliation is a hit that is neither attack nor spell: a skill of its
+    /// own, whose damage is the character's Thorns damage (added damage for the skill "Thorns"),
+    /// set off when a monster hits the player. It goes to the enemy the player aims at, which in
+    /// a fight with one enemy is the one that hit.
+    let thorns (sheet: CharacterSheet) : (Skill * Rule) option =
+        let has =
+            sheet.Mods |> List.exists (fun m ->
+                (match m.Stat with AddedMin _ | AddedMax _ -> m.Value > 0.0 | _ -> false) && List.contains (SkillIs(Tag "Thorns")) m.Conds)
+        if not has then None
+        else
+            let any = Mods.flag Ctx.empty (Named "ThornsAnyHit") (ModDb.ofList sheet.Mods)
+            let skill = { Skill.make "Thorns" [ Triggered; Tag "Thorns" ] with BaseCrit = 0.0; Cost = 0.0 }
+            Some(skill, { Hook = (if any then WhenHit else WhenHitMelee); Filter = AnySkill; Chance = 100.0; Reaction = TriggerSkill skill.Name })
+
+    /// Scavenged Plating: "Fully Breaking an enemy's Armour grants you stacks of Scavenged
+    /// Plating for a duration ... Normal enemies grant 1 stack, Magic enemies grant 2 stacks,
+    /// Rare enemies grant 5 stacks and Unique enemies grant 10 stacks", up to the gem's maximum,
+    /// for the gem's duration (all stacks share it, a new break starts it again).
+    let scavengedPlating (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) : Rule list =
+        let most = int (Mods.sumBase Ctx.empty [ Named "ScavengedPlatingMax" ] (ModDb.ofList sheet.Mods))
+        if most <= 0 then []
+        else
+            let seconds =
+                build.Groups |> List.filter (fun g -> g.Enabled) |> List.collect (fun g -> g.Gems)
+                |> List.tryFind (fun x -> x.Enabled && not x.IsSupport && x.Name = "Scavenged Plating")
+                |> Option.map (fun gem ->
+                    Gems.rawStats db (ModDb.ofList sheet.Mods) { Gem = gem.Name; Level = gem.Level; Quality = gem.Quality; StatSet = 1; Supports = [] }
+                    |> List.filter (fun (k, _) -> k = "base_skill_effect_duration") |> List.sumBy snd)
+                |> Option.filter (fun ms -> ms > 0.0)
+                |> Option.map (fun ms -> ms / 1000.0)
+                |> Option.defaultValue 8.0
+            let seconds = seconds * Mods.mult Ctx.empty [ SkillDuration ] (ModDb.ofList sheet.Mods)
+            let stack = GrantBuff("ScavengedPlating", seconds, most, [])
+            let rule reaction = { Hook = OnFullBreak; Filter = AnySkill; Chance = 100.0; Reaction = reaction }
+            // one stack whatever the enemy, one more of a Magic one, four more of a Rare or Unique one, five more of a Unique one
+            [ rule stack; rule (IfEnemyHas("Magic", stack)) ]
+            @ [ for _ in 1 .. 4 -> rule (IfEnemyHas("RareOrUnique", stack)) ]
+            @ [ for _ in 1 .. 5 -> rule (IfEnemyHas("Unique", stack)) ]
+
+    /// "X% chance to gain an Endurance Charge when Supported Skills Fully Break Armour": the
+    /// skill's own stat, for its hits.
+    let fullBreakRules (skills: Skill list) : Rule list =
+        skills |> List.collect (fun s ->
+            let chance = s.Mods |> List.sumBy (fun m -> if m.Stat = Named "EnduranceChargeOnFullBreak" && m.Kind = Base then m.Value else 0.0)
+            if chance > 0.0 then [ { Hook = OnFullBreak; Filter = Called s.Name; Chance = min 100.0 chance; Reaction = GainResource("EnduranceCharge", 1) } ] else [])
+
+    /// States about what the character did or suffered a while ago, kept only where one of its
+    /// stats asks for them: a rule gives the state (or one more stack of it, for stats that
+    /// count "for each ...") when the thing happens, and it lasts 4 s ("Recently") or the 8 s
+    /// the stat names. A count's stacks share one time, started anew by every stack: the game
+    /// lets each run out on its own, so a count kept up by a steady stream is the same and one
+    /// that thins out is held a little too long. The most stacks are what the stat's "up to X%"
+    /// leaves room for.
+    let recentStates (sheet: CharacterSheet) (skills: Skill list) : Rule list =
+        let rec names (c: Cond) =
+            match c with
+            | WhileBuff b | PerStack (b, _) -> [ b ]
+            | Not inner | OfOwner inner -> names inner
+            | _ -> []
+        let rec ofSkill (s: Skill) = s.Mods @ (s.Parts |> List.collect ofSkill)
+        let asked = sheet.Mods @ (skills |> List.collect ofSkill) |> List.collect (fun m -> m.Conds |> List.collect names) |> Set.ofList
+        // the most stacks a count can have: "up to X%" over the percent per stack (the largest of the stats that count it)
+        let most (state: string) (upTo: float) =
+            let per =
+                sheet.Mods |> List.filter (fun m -> m.Conds |> List.exists (fun c -> names c = [ state ]) && m.Value <> 0.0) |> List.map (fun m -> abs m.Value)
+            if upTo <= 0.0 || per.IsEmpty then 1000 else max 1 (int (floor (upTo / List.min per + 1e-9)))
+        let rule state hook filter seconds stacks = { Hook = hook; Filter = filter; Chance = 100.0; Reaction = GrantBuff(state, seconds, stacks, []) }
+        [ // "if you have Stunned an Enemy Recently": the stuns monsters suffer here are Heavy Stuns
+          "StunnedEnemyRecently", (fun s -> rule s (OnInflict HeavyStun) AnySkill Constants.recentlySeconds 1)
+          // "if you've dealt a Melee Hit in the past eight seconds"
+          "MeleeHitInPast8Seconds", (fun s -> rule s OnHit (WithTag Melee) 8.0 1)
+          // "if you've Dodge Rolled Recently": where the dodge roll is pressed (Cast on Dodge)
+          "DodgeRolledRecently", (fun s -> rule s OnUse (WithTag(Tag "DodgeRoll")) Constants.recentlySeconds 1)
+          // "for each time you've Warcried Recently"
+          "WarcriesRecently", (fun s -> rule s OnUse (WithTag Warcry) Constants.recentlySeconds (most s 0.0))
+          // "for each Poison you have inflicted Recently, up to a maximum of 100%"
+          "PoisonsRecently", (fun s -> rule s (OnInflict Poison) AnySkill Constants.recentlySeconds (most s 100.0))
+          // "per Enemy you've Ignited / Frozen in the last 8 seconds, up to 40%"
+          "IgnitedInLast8Seconds", (fun s -> rule s (OnInflict Ignite) AnySkill 8.0 (most s 40.0))
+          "FrozenInLast8Seconds", (fun s -> rule s (OnInflict Freeze) AnySkill 8.0 (most s 40.0))
+          // "for each time you've been Hit by an Enemy Recently, up to 100%"
+          "TimesHitRecently", (fun s -> rule s WhenHit AnySkill Constants.recentlySeconds (most s 100.0))
+          // "if you've Hit with Projectile Attack Damage in the past eight seconds" (Advancing Assault)
+          "ProjectileAttackHitInPast8Seconds", (fun s -> rule s OnHit (WithTags([ Attack; Projectile ], [])) 8.0 1) ]
+        |> List.filter (fun (state, _) -> asked.Contains state)
+        |> List.map (fun (state, make) -> make state)
 
     /// Using a totem gem places the totem: the buff its actor waits for, lasting the totem's
     /// duration ("base_totem_duration" x skill duration mods).

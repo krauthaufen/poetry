@@ -13,6 +13,8 @@ module Constants =
     let surroundedRadius = 30.0
     /// "Recently": the past 4 seconds (game keyword text).
     let recentlySeconds = 4.0
+    /// Ancestral Bond: "Totems reserve 75 Spirit each".
+    let ancestralBondSpirit = 75.0
     /// Onslaught: 20% increased skill speed (game keyword text).
     let onslaughtSpeed = 20.0
     /// Arcane Surge: 20% more mana regeneration rate (game keyword text; wiki Arcane Surge).
