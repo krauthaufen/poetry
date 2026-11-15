@@ -127,6 +127,12 @@ type Reaction =
     /// buff for each (`RareMods.buffName`), a new one of a name starting its time again ("When
     /// you kill a Rare monster, you gain its Modifiers for 60 seconds").
     | GainRareMods of duration: float
+    /// The enemy concerned (one that was killed) explodes: every other living enemy within
+    /// `radius` of it is dealt this percentage of its maximum life as damage of the type, which
+    /// each mitigates as a hit of that type (resistance, armour, damage taken). The damage is
+    /// the corpse's: the modifiers to the damage of whoever caused it do not scale it. Those
+    /// it kills are kills of the actor's (and may explode in turn).
+    | Explode of percent: float * damageType: DamageType * radius: float
     /// At most once every `seconds`: if the time since this was last done is over, do this and
     /// start the time again. The time is the actor's own, by `key`; it is no cooldown (cooldown
     /// recovery does not shorten it) and no buff (nothing makes it expire faster).
@@ -600,6 +606,8 @@ module Sim =
         /// Stacks of a resource arrive (picked-up infusion remnants, Verisium).
         | GainStacks of actor: string * resource: string * count: int
         | Expose of actor: string * target: string * damageType: DamageType * amount: float * duration: float
+        /// A killed enemy explodes (see `Reaction.Explode`).
+        | Explosion of actor: string * enemy: string * percent: float * damageType: DamageType * radius: float
         /// Ice Crystals appear beside an enemy: (owner, explosion part, enemy, how many, life of one, most at once, seconds they last).
         | PlantCrystals of actor: string * part: string * enemy: string * count: int * life: float * limit: int * lasts: float
         /// One stack of a buff is used up (an empowered attack has landed).
@@ -1804,6 +1812,10 @@ module Sim =
                         | _ -> w
                      match reaction with
                      | SpendStack _ | SetStacks _ | Empower _ | IfEnemyHas _ | IfBuff _ | Every _ | WithCorpse _ | IgniteSelf _ | RegenES _ | NoReaction -> w
+                     | Explode (percent, dt, radius) ->
+                         match target with
+                         | Some t -> schedule w.Time (Explosion(actor.Name, t, percent, dt, radius)) w
+                         | None -> w
                      | SummonEmpowered (pool, count, duration, first) -> summonWith env pool count duration first w
                      | SummonPerCorpse (pool, duration, deadMinions) ->
                          let size = env.Fight.Minions |> List.filter (fun m -> m.Pool = Some pool) |> List.length
@@ -2995,7 +3007,7 @@ module Sim =
                 // only their damage over time on the dead monster is dropped
                 let w =
                     if dead then
-                        let w = react env rng actor OnKill skill None w
+                        let w = react env rng actor OnKill skill (Some target) w
                         // what the killed enemy was (frozen, shocked...) can set things off
                         status e |> Map.fold (fun w k _ -> react env rng actor (OnKillOf k) skill (Some target) w) w
                     else
@@ -4024,7 +4036,7 @@ module Sim =
         let w =
             if not mine then w
             else
-                let w = react env rng player OnKill dotKiller None w
+                let w = react env rng player OnKill dotKiller (Some name) w
                 status w.Enemies.[name] |> Map.fold (fun w k _ -> react env rng player (OnKillOf k) dotKiller (Some name) w) w
         dotKillGains env rng w.Enemies.[name] mine w
 
@@ -4049,6 +4061,7 @@ module Sim =
              | ManaArrives _ -> tell t "ManaArrives" "" "" (float sq)
              | GainStacks (a, r, _) -> tell t "GainStacks" a r (float sq)
              | Expose (a, e, _, _, _) -> tell t "Expose" a e (float sq)
+             | Explosion (a, e, _, _, _) -> tell t "Explosion" a e (float sq)
              | PlantCrystals (a, p, _, _, _, _, _) -> tell t "PlantCrystals" a p (float sq)
              | SpendBuff (a, b) -> tell t "SpendBuff" a b (float sq)
              | EnergyArrives (a, m, _) -> tell t "EnergyArrives" a m (float sq)
@@ -4355,6 +4368,26 @@ module Sim =
                     { w with Crystals = List.rev kept; Counts = bump ("crystals:" + part) w.Counts }
                 | _ -> w
             | Expose (name, target, dt, amount, duration) -> expose (actorDef env name) target dt amount duration w
+            | Explosion (name, dead, percent, dt, radius) ->
+                let d = w.Enemies.[dead]
+                let amount = d.Def.Life * percent / 100.0
+                let killed = ResizeArray<string>()
+                let w =
+                    alive w
+                    |> List.filter (fun o -> o.Def.Name <> dead && Vec.dist o.Def.Position d.Def.Position <= radius + o.Def.Size)
+                    |> List.fold (fun (w: World) o ->
+                        let e = w.Enemies.[o.Def.Name]
+                        let dealt = Hit.mitigate Ctx.empty ModDb.empty (defender e) (Map.ofList [ dt, amount ]) |> Map.find dt
+                        let took = min dealt e.Life
+                        let dies = dealt >= e.Life
+                        if dies then killed.Add e.Def.Name
+                        { w with
+                            Enemies = Map.add e.Def.Name { e with Life = (if dies then 0.0 else e.Life - took) } w.Enemies
+                            DamageBy = addf "Explosion" took w.DamageBy
+                            DamageByType = addf (DamageType.name dt) took w.DamageByType
+                            Counts = bump "hits:Explosion" w.Counts
+                            Kills = if dies then (e.Def.Name, e.Def.Rarity, w.Time) :: w.Kills else w.Kills }) { w with Counts = bump "explosion" w.Counts }
+                killed |> Seq.fold (fun w k -> killedOverTime env rng k (name = env.Fight.Player.Name) w) w
             // Conduit: "If you would gain a Charge, Allies in your Presence gain that Charge
             // instead": the actor gains nothing (what an ally holds, no minion reads)
             | GainStacks (name, r, _) when conduit (actorDef env name) r ->

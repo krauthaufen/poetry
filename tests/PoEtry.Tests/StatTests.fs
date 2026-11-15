@@ -2676,3 +2676,45 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         let set = { c with Sheet = { c.Sheet with Mods = c.Sheet.Mods @ mods "base_spell_critical_strike_chance_override_permyriad" 1500.0 } }
         near 0.0 (skills set |> List.find (fun s -> s.Name = "Despair")).BaseCrit
         near 15.0 (skills set |> List.find (fun s -> s.Name = "Despair: Doom Blast")).BaseCrit)
+
+
+    test "enemies that explode when killed: a share of their life to those around, which may explode in turn" (fun () ->
+        equal (box [ Named "ExplodeOnKill:Cursed", 30.0 ]) (box (mods "explode_cursed_enemies_for_25%_life_as_chaos_on_kill_chance_%" 30.0 |> List.map (fun m -> m.Stat, m.Value)))
+        equal (box [ Named "ExplodeOnKill:Empowered", 25.0 ]) (box (mods "explode_enemies_for_10%_life_as_fire_on_kill_with_empowered_attacks_chance_%" 25.0 |> List.map (fun m -> m.Stat, m.Value)))
+        equal (box [ Named "ExplodeOnKill:Any", 10.0 ]) (box (mods "witchhunter_chance_to_explode_enemies_for_100%_of_life_as_physical" 10.0 |> List.map (fun m -> m.Stat, m.Value)))
+        let c = load blank Options.defaults
+        let rulesOf ms = Behaviours.explodeOnKill { c.Sheet with Mods = ms }
+        equal (box true) (box (rulesOf []).IsEmpty)
+        (match rulesOf (mods "explode_cursed_enemies_for_25%_life_as_chaos_on_kill_chance_%" 30.0 @ mods "explode_enemies_for_10%_life_as_fire_on_kill_with_empowered_attacks_chance_%" 25.0) with
+         | [ { Hook = OnKillOf "Cursed"; Chance = 30.0; Reaction = Explode (25.0, Chaos, _) }; { Hook = OnKill; Filter = WithTag Attack; Chance = 25.0; Reaction = IfBuff ("EmpoweredAttacks", Explode (10.0, Fire, _)) } ] -> ()
+         | other -> failwithf "unexpected %A" other)
+        // one bolt of 2000 at "a" (1000 life), which dies and explodes for all its life as physical
+        // damage: "b" beside it (900 life, no armour) dies of it and explodes too; "c" (50% fire
+        // resistance, which is nothing against physical damage) has taken 1000 + 900; "far", 5 m
+        // away, nothing
+        let bolt = { Skill.make "Bolt" [ Spell ] with BaseDamage = Map.ofList [ Fire, Range.fixedAt 2000.0 ]; BaseCrit = 0.0 }
+        let foe name x life = { EnemyDef.atLevel 83 life with Name = name; Position = Vec.make 20.0 x; Size = 4.0; Mods = []; Attack = None }
+        let fight (rule: Rule) =
+            let player = { Actor.make "Player" [] [ bolt ] with Rules = [ rule ]; Rotation = [ { Use = "Bolt"; When = fun v -> v.Time < 0.1 } ] }
+            { Fight.single (foe "a" 0.0 1000.0) player 3.0 with
+                Enemies = [ foe "a" 0.0 1000.0; foe "b" 10.0 900.0; { foe "c" -10.0 1e6 with Mods = [ Mod.base' (Resist Fire) 50.0 ] }; foe "far" 50.0 1e6 ]
+                Targeting = Nearest }
+        let dealt (o: Outcome) k = Map.tryFind k o.DamageBy |> Option.defaultValue 0.0
+        let any = fight { Hook = OnKill; Filter = AnySkill; Chance = 100.0; Reaction = Explode(100.0, Physical, 20.0) }
+        let o = Sim.run any 1u
+        equal 2 (o.Kills.Length)
+        equal 2 (count o "explosion")
+        // a's explosion: 900 of b's life and 1000 to c; b's: 900 to c
+        near (900.0 + 1000.0 + 900.0) (dealt o "Explosion")
+        near (900.0 + 1000.0 + 900.0) (Map.find "Physical" o.DamageByType)
+        same any seeds
+        // as fire, a tenth: b takes 100 and lives, c 50 of 100 (its resistance)
+        let fire = fight { Hook = OnKill; Filter = AnySkill; Chance = 100.0; Reaction = Explode(10.0, Fire, 20.0) }
+        let o = Sim.run fire 1u
+        equal 1 (o.Kills.Length)
+        near 150.0 (dealt o "Explosion")
+        same fire seeds
+        // only a cursed enemy's: none here
+        let cursed = fight { Hook = OnKillOf "Cursed"; Filter = AnySkill; Chance = 100.0; Reaction = Explode(25.0, Chaos, 20.0) }
+        equal 0 (count (Sim.run cursed 1u) "explosion")
+        same cursed seeds)

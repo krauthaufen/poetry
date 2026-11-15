@@ -1362,6 +1362,23 @@ module Behaviours =
             [ { Hook = OnKillOf "RareOrUnique"; Filter = AnySkill; Chance = 100.0; Reaction = GainRareMods 60.0 } ]
         else []
 
+    /// Enemies that explode when the character kills them: "X% chance for Enemies you Kill to
+    /// Explode, dealing 100% of their maximum Life as Physical Damage" (its "Chance is doubled
+    /// against Undead and Demons" is not played: the monsters here have no kind), "Cursed
+    /// Enemies you kill have a X% chance to explode, dealing a quarter of their maximum Life as
+    /// Chaos damage", "Enemies you kill with Empowered Attacks have a X% chance to Explode,
+    /// dealing a tenth of their maximum Life as Fire Damage" (an attack a warcry empowered).
+    let explodeOnKill (sheet: CharacterSheet) : Rule list =
+        let db = ModDb.ofList sheet.Mods
+        let chance kind = min 100.0 (Mods.sumBase Ctx.empty [ Named("ExplodeOnKill:" + kind) ] db)
+        let r = Constants.explodeOnKillRadius
+        [ if chance "Any" > 0.0 then
+              yield { Hook = OnKill; Filter = AnySkill; Chance = chance "Any"; Reaction = Explode(100.0, Physical, r) }
+          if chance "Cursed" > 0.0 then
+              yield { Hook = OnKillOf "Cursed"; Filter = AnySkill; Chance = chance "Cursed"; Reaction = Explode(25.0, Chaos, r) }
+          if chance "Empowered" > 0.0 then
+              yield { Hook = OnKill; Filter = WithTag Attack; Chance = chance "Empowered"; Reaction = IfBuff("EmpoweredAttacks", Explode(10.0, Fire, r)) } ]
+
     /// "Buffs on you expire X% faster": time passes that much faster for the buffs the
     /// character's rules give it (Onslaught, Arcane Surge, a skill's buff, Ice Bite): they last
     /// 1 / (1 + X / 100) of their time. Not charges (they are no buffs: the stat is

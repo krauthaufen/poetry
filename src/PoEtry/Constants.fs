@@ -58,6 +58,9 @@ module Constants =
     let playerMeleeStunMore = 50.0
     let armourBreakDuration = 12.0
     let fullyBrokenArmourTaken = 20.0
+    /// How far the explosion of a killed enemy reaches ("Enemies you Kill Explode"): the data
+    /// has no radius for it; 2 m is our guess.
+    let explodeOnKillRadius = 20.0
     /// Dodge roll: distance in game units and seconds it takes (game files, skill
     /// DodgeRollPlayer: dodge_roll_base_travel_distance 46, cast time 750 ms, not modifiable).
     let dodgeRollDistance = 46.0

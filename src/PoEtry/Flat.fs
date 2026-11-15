@@ -106,6 +106,9 @@ module Flat =
     [<Literal>]
     let private ELand = 18
 
+    /// A killed enemy explodes (`Sim.Event.Explosion`): a = the enemy, b = the damage type, x = percent of its life, y = radius.
+    let private EExplode = 40
+
     let private kindName kind =
         match kind with
         | EReady -> "Ready"
@@ -126,6 +129,7 @@ module Flat =
         | EMana -> "ManaArrives"
         | EPlant -> "PlantCrystals"
         | ELand -> "Landed"
+        | k when k = EExplode -> "Explosion"
         | _ -> "Expire"
 
     let private ailmentIndex (a: Ailment) =
@@ -724,6 +728,8 @@ module Flat =
         | RSetStacks of buff: int * stacks: int
         | RIfEnemyHas of status: int * next: Re
         | RIfBuff of buff: int * next: Re
+        /// The killed enemy explodes (see `Reaction.Explode`); `dtype`: the type's index.
+        | RExplode of percent: float * dtype: int * radius: float
         /// At most once every `seconds` (see `Reaction.Every`); `key`: where the actor keeps the time.
         | REvery of key: string * seconds: float * count: int * next: Re
         | RRegenES of perSecond: float * duration: float * count: int
@@ -1212,6 +1218,10 @@ module Flat =
               /// no rule of the actor makes it: any time); NaN for what is no curse.
               CurseRipe: float[]
               CCurseDetonated: int
+              /// Where an explosion of a killed enemy counts: itself, its hits, its damage.
+              CExplosion: int
+              CExplosionHits: int
+              ExplosionSource: int
               /// The skill that goes by the name "ArchonRecovery" (-1: none).
               ArchonCell: int
               /// The skill the mods of a gained charge are asked of (the actor's first).
@@ -1426,6 +1436,7 @@ module Flat =
         | IfEnemyHas _ -> "IfEnemyHas"
         | IfBuff _ -> "IfBuff"
         | Every _ -> "Every"
+        | Explode _ -> "Explode"
         | RegenES _ -> "RegenES"
         | IgniteSelf _ -> "IgniteSelf"
         | Empower _ -> "Empower"
@@ -1669,6 +1680,7 @@ module Flat =
                 | IfEnemyHas (st, next) -> RIfEnemyHas(statuses.Id st, reaction next)
                 | IfBuff (b, next) -> RIfBuff(buffs.Id b, reaction next)
                 | Every (key, seconds, next) -> REvery("Every:" + key, seconds, counts.Id("every:" + key), reaction next)
+                | Explode (percent, dt, radius) -> RExplode(percent, typeIndex dt, radius)
                 | RegenES (rate, duration) -> RRegenES(rate, duration, counts.Id "regen:ES")
                 | IgniteSelf percent -> RIgniteSelf percent
                 | GainEnergy (meta, amount) -> RGainEnergy((match actor.Metas |> List.tryFindIndex (fun m -> m.Name = meta) with Some i -> i | None -> -1), amount)
@@ -2313,6 +2325,9 @@ module Flat =
                                 | Some d -> d / 2.0
                                 | None -> infinity)
                       CCurseDetonated = count "curse detonated"
+                      CExplosion = count "explosion"
+                      CExplosionHits = count "hits:Explosion"
+                      ExplosionSource = sources.Id "Explosion"
                       ArchonCell = cellOf "ArchonRecovery"
                       FirstSkill = (if actor.Skills.IsEmpty then -1 else 0)
                       Rotation = rotation
@@ -4426,6 +4441,7 @@ module Flat =
                 setBuff s pick 1 (s.Time + duration) []
                 expireAt s (s.Time + duration)
         | RIfBuff (b, next) -> if held s b then perform s rng sid target next
+        | RExplode (percent, t, radius) -> if target >= 0 then schedule s s.Time EExplode target t percent radius
         | REvery (key, seconds, count, next) ->
             if s.Time >= (Map.tryFind key s.A.Energy |> Option.defaultValue -infinity) - 1e-9 then
                 bump s count
@@ -6031,7 +6047,7 @@ module Flat =
                  | None -> ())
                 // a killing hit's ailments are not inflicted; what the killed enemy was can set things off
                 if dead then
-                    react s rng p.OnKill "" sid -1
+                    react s rng p.OnKill "" sid target
                     if p.HasKillOf then
                         statusMap p beforeHas beforeStacks |> Map.iter (fun k _ -> react s rng p.OnKillOf k sid target)
                 else
@@ -7190,6 +7206,36 @@ module Flat =
             gainRage s p.RageOnKill
             mark s p.BKilled 4.0
 
+    /// A killed enemy explodes (`Sim.step`, `Explosion`): those it kills are kills over time of the actor's.
+    let private explode (s: State) (rng: Rng) (target: int) (t: int) (percent: float) (radius: float) =
+        let p = s.P
+        let mine = s.Cur = 0
+        let dead = at s.Foes target
+        let amount = dead.Def.Life * percent / 100.0
+        let dt = DamageType.all.[t]
+        let live = Array.copy s.Live
+        let killed = ResizeArray<Foe>()
+        bump s p.CExplosion
+        for k in 0 .. live.Length - 1 do
+            let o = at s.Foes (at live k)
+            if o.Life > 0.0 && o.Index <> dead.Index && Vec.dist o.Def.Position dead.Def.Position <= radius + o.Def.Size then
+                let dealt = Hit.mitigate Ctx.empty ModDb.empty (defender s o) (Map.ofList [ dt, amount ]) |> Map.find dt
+                let took = min dealt o.Life
+                addDamage s p.ExplosionSource took
+                addByType s t took
+                bump s p.CExplosionHits
+                if dealt >= o.Life then
+                    kill s o s.Time
+                    killed.Add o
+                else o.Life <- o.Life - took
+        for e in killed do
+            if mine then
+                reactDot s rng p.OnKill "" e.Index
+                if p.HasKillOf then
+                    refreshStatus s e
+                    statusMap p e.SHas e.SStacks |> Map.iter (fun k _ -> reactDot s rng p.OnKillOf k e.Index)
+            dotKillGains s rng e mine
+
     /// The earliest event happens (`Sim.step`).
     let private step (s: State) =
         let q = s.Queue
@@ -7219,6 +7265,7 @@ module Flat =
                 | EEnemyAttack -> tell t "EnemyAttack" (at s.Foes a).Def.Name "" (float q.Seq)
                 | EEnergy -> tell t "EnergyArrives" name (at p.Metas a).Meta.Name (float q.Seq)
                 | EExpose -> tell t "Expose" name (at s.Foes a).Def.Name (float q.Seq)
+                | k when k = EExplode -> tell t "Explosion" name (at s.Foes a).Def.Name (float q.Seq)
                 | ERevive -> tell t "ReviveMinions" "" "" (float q.Seq)
                 | ELeaves -> tell t "MinionLeaves" name "" (float q.Seq)
                 | EWard -> tell t "WardArrives" "" "" (float q.Seq)
@@ -7262,7 +7309,7 @@ module Flat =
                     let e = at s.Foes s.FoeIds.[name]
                     let mine = e.Dots |> List.exists (fun d -> d.By = 0 && d.Until >= when')
                     if mine then
-                        reactDot s rng p.OnKill "" -1
+                        reactDot s rng p.OnKill "" e.Index
                         if p.HasKillOf then
                             refreshStatus s e
                             statusMap p e.SHas e.SStacks |> Map.iter (fun k _ -> reactDot s rng p.OnKillOf k e.Index)
@@ -7277,7 +7324,7 @@ module Flat =
                         enter s 0
                         let e = at s.Foes target
                         if mine then
-                            reactDot s rng s.P.OnKill "" -1
+                            reactDot s rng s.P.OnKill "" e.Index
                             if s.P.HasKillOf then
                                 refreshStatus s e
                                 statusMap s.P e.SHas e.SStacks |> Map.iter (fun k _ -> reactDot s rng s.P.OnKillOf k e.Index)
@@ -7382,6 +7429,7 @@ module Flat =
                          | ECycle -> onCycle s rng a
                          | EGainStacks -> onGainStacks s rng a b
                          | EExpose -> expose s a DamageType.all.[b] x y
+                         | k when k = EExplode -> explode s rng a b x y
                          | EPeriodic -> onPeriodic s rng a
                          | EEnergy -> gainEnergy s rng a x
                          | ELand -> react s rng s.P.OnLand "" a b

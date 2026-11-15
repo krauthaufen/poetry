@@ -1647,6 +1647,14 @@ module StatMap =
         | "lose_%_of_life_loss_over_4_seconds_instead" -> Some(Mods [ Mod.base' (Named "DeferLifeLossPrevent") v; Mod.base' (Named "DeferLifeLossLose") v ])
         // "X% chance on Shocking Enemies to create Shocked Ground" (Behaviours.shockedGround)
         | "chance_%_to_create_shocking_ground_on_shock" -> one (Mod.base' (Named "ShockedGroundOnShock") v)
+        // Enemies that explode when killed (Behaviours.explodeOnKill): "Cursed Enemies you kill have
+        // a X% chance to explode, dealing a quarter of their maximum Life as Chaos damage",
+        // "Enemies you kill with Empowered Attacks have a X% chance to Explode, dealing a tenth of
+        // their maximum Life as Fire Damage", "X% chance for Enemies you Kill to Explode, dealing
+        // 100% of their maximum Life as Physical Damage"
+        | "explode_cursed_enemies_for_25%_life_as_chaos_on_kill_chance_%" -> one (Mod.base' (Named "ExplodeOnKill:Cursed") v)
+        | "explode_enemies_for_10%_life_as_fire_on_kill_with_empowered_attacks_chance_%" -> one (Mod.base' (Named "ExplodeOnKill:Empowered") v)
+        | "witchhunter_chance_to_explode_enemies_for_100%_of_life_as_physical" -> one (Mod.base' (Named "ExplodeOnKill:Any") v)
         // Herald of Blood's explosion: "partially based on their accumulated Blood Loss", "has a
         // chance to Aggravate Bleeding" (the explosion itself is played, Behaviours.heralds)
         | "skill_herald_bleeding_enemies_explode_for_%_blood_loss_as_unscalable_physical_damage" -> Some(Unsimulated "blood loss")
