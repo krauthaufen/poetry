@@ -1137,6 +1137,9 @@ module Flat =
               CMinionNoRoom: int
               CMinionLeft: int
               Vitals: PlayerStats option
+              /// The player's defences for the sets of buffs they were asked for in any run of
+              /// this program (a function of the buffs: knowing them changes no result).
+              VitalsKnown: Dictionary<string, PlayerStats>
               BuffNames: string[]
               /// The buffs the defences depend on (`Actor.VitalsReads`; all of them where that is not said),
               /// and by buff, whether it is one of them.
@@ -2192,6 +2195,7 @@ module Flat =
                       CMinionNoRoom = count "minion:no room"
                       CMinionLeft = count "minion:left"
                       Vitals = actor.Vitals
+                      VitalsKnown = Dictionary<string, PlayerStats>()
                       BuffNames = buffNames
                       VitalsOn =
                         (match actor.VitalsReads with
@@ -3675,12 +3679,15 @@ module Flat =
                 for id in p.VitalsOn do
                     if s.A.BHas.[id] then key <- key + string id + "=" + string s.A.BStacks.[id] + ";"
                 let v =
-                    match s.VitalsSeen.TryGetValue key with
-                    | true, v -> v
-                    | _ ->
-                        let v = at (buffMap s)
-                        s.VitalsSeen.[key] <- v
-                        v
+                    // (what any run of the program has worked out is kept with the program)
+                    let seen = s.VitalsSeen
+                    lock seen (fun () ->
+                        match seen.TryGetValue key with
+                        | true, v -> v
+                        | _ ->
+                            let v = at (buffMap s)
+                            seen.[key] <- v
+                            v)
                 s.VitalsOf <- s.A.VitalsVersion
                 s.VitalsLast <- Some v
                 v
@@ -7160,7 +7167,7 @@ module Flat =
           /// By actor: see `MapSeed`.
           Seeds: ResizeArray<MapSeed> }
 
-    let private newKept () : Kept = { Queue = Queue(); Evs = ResizeArray(); Vitals = Dictionary(); Answers = ResizeArray(); Comps = ResizeArray(); Seeds = ResizeArray() }
+    let private newKept (p: Program) : Kept = { Queue = Queue(); Evs = ResizeArray(); Vitals = p.VitalsKnown; Answers = ResizeArray(); Comps = ResizeArray(); Seeds = ResizeArray() }
 
     /// An enemy as it comes into the fight (`fresh` in `Sim.runWith`): `root` is the enemy
     /// the fight names that it is, or that it replaces.
@@ -7564,20 +7571,20 @@ module Flat =
 
     /// Play a program's fight with a seed: what `Sim.run` gives for the fight and the seed,
     /// but for `Shown`, which stays empty.
-    let run (p: Program) (seed: uint32) : Outcome = play p seed None (newKept ())
+    let run (p: Program) (seed: uint32) : Outcome = play p seed None (newKept p)
 
     /// The program's fight, to be played with one seed after another: what `run` gives for
     /// each, faster from the second on. A runner keeps its working memory between runs and
     /// what it has learned of the player's defences (see `Kept`). One runner is for one
     /// thread at a time; who plays in parallel makes a runner for each thread.
     let runner (p: Program) : uint32 -> Outcome =
-        let kept = newKept ()
+        let kept = newKept p
         fun seed -> play p seed None kept
 
     /// The same, telling `tell` what `Sim.traced` tells: every event as it is taken from the
     /// queue and every hit that lands.
     let traced (tell: float -> string -> string -> string -> float -> unit) (p: Program) (seed: uint32) : Outcome =
-        play p seed (Some tell) (newKept ())
+        play p seed (Some tell) (newKept p)
 
     /// A fight as a program for `run` and `runner`, or what the fight has that is not built
     /// here. A fight that compiles gives the reference's result, but for rounding. (Nothing

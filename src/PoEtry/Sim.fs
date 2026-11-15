@@ -689,6 +689,8 @@ module Sim =
           WithBuffs: System.Collections.Generic.Dictionary<string, System.Collections.Generic.Dictionary<string, Map<string, Effect> * ModDb>>
           /// The player's defences by its buffs and their stacks, written out (`vitalsNow`).
           VitalsSeen: System.Collections.Generic.Dictionary<string, PlayerStats>
+          /// The buffs they were last asked with (the very same map), and what they were.
+          VitalsLast: (Map<string, Effect> * PlayerStats) option[]
           /// Percent of maximum life lost per minute per Rage (Berserk).
           BerserkLoss: float
           /// Chance (%) for a charm that is used to keep its charges.
@@ -912,13 +914,33 @@ module Sim =
     let private vitalsNow (env: Env) (w: World) : PlayerStats option =
         match env.Fight.Player.Vitals, env.Fight.Player.VitalsAt with
         | Some _, Some at ->
-            let buffs = buffStacks (Map.find env.Fight.Player.Name w.Actors)
-            let key = buffs |> Map.fold (fun (acc: System.Text.StringBuilder) k n -> acc.Append(k).Append('=').Append(n).Append(';')) (System.Text.StringBuilder()) |> string
-            match env.VitalsSeen.TryGetValue key with
-            | true, v -> Some v
+            let st = Map.find env.Fight.Player.Name w.Actors
+            match env.VitalsLast.[0] with
+            | Some (asked, v) when obj.ReferenceEquals(asked, st.Buffs) -> Some v
             | _ ->
-                let v = at buffs
-                env.VitalsSeen.[key] <- v
+                // (written out: the buffs the defences read, where the actor says which those are)
+                let key =
+                    match env.Fight.Player.VitalsReads with
+                    | Some names ->
+                        names
+                        |> Set.fold (fun (acc: System.Text.StringBuilder) k ->
+                            match Map.tryFind k st.Buffs with
+                            | Some e -> acc.Append(k).Append('=').Append(e.Stacks).Append(';')
+                            | None -> acc) (System.Text.StringBuilder())
+                        |> string
+                    | None ->
+                        st.Buffs |> Map.fold (fun (acc: System.Text.StringBuilder) k e -> acc.Append(k).Append('=').Append(e.Stacks).Append(';')) (System.Text.StringBuilder()) |> string
+                // (what any run of the fight has worked out is kept with the fight)
+                let seen = env.VitalsSeen
+                let v =
+                    lock seen (fun () ->
+                        match seen.TryGetValue key with
+                        | true, v -> v
+                        | _ ->
+                            let v = at (buffStacks st)
+                            seen.[key] <- v
+                            v)
+                env.VitalsLast.[0] <- Some(st.Buffs, v)
                 Some v
         | v, _ -> v
 
@@ -4122,6 +4144,19 @@ module Sim =
                     | _ -> { st with Buffs = Map.remove buff st.Buffs }) w
             | Expire -> w
 
+    /// The defences that the runs of the fight that was run last have worked out, by the
+    /// buffs written out (a function of the buffs: knowing them changes no result). Runs
+    /// of one fight follow each other, or go side by side: they share what is known.
+    let private vitalsOfLast : (Fight * System.Collections.Generic.Dictionary<string, PlayerStats>) option[] = Array.create 1 None
+    let private vitalsKnown (fight: Fight) : System.Collections.Generic.Dictionary<string, PlayerStats> =
+        lock vitalsOfLast (fun () ->
+            match vitalsOfLast.[0] with
+            | Some (last, known) when obj.ReferenceEquals(last, fight) -> known
+            | _ ->
+                let known = System.Collections.Generic.Dictionary<string, PlayerStats>()
+                vitalsOfLast.[0] <- Some(fight, known)
+                known)
+
     let private envOf (trace: (float -> string -> string -> string -> float -> unit) option) (fight: Fight) =
         { Fight = fight
           Trace = trace
@@ -4138,7 +4173,8 @@ module Sim =
           SlowMagnitude = Mods.inc Ctx.empty [ Named "SlowMagnitude" ] (ModDb.ofList fight.Player.Mods)
           AsksESRecharge = asksBuff fight "ESRechargeStartedRecently"
           WithBuffs = System.Collections.Generic.Dictionary()
-          VitalsSeen = System.Collections.Generic.Dictionary()
+          VitalsSeen = vitalsKnown fight
+          VitalsLast = Array.create 1 None
           SkillDbs =
             Map.ofList
                 [ for a in fight.Player :: fight.Minions do
