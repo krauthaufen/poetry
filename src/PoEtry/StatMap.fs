@@ -804,6 +804,7 @@ module StatMap =
         | "base_damage_taken_+%" -> one (Mod.inc (Named "Taken:All") v)
         | "physical_attack_damage_taken_+" -> one (Mod.base' (Named "FlatPhysicalAttackTaken") v)
         | "deflection_rating_+%" -> one (Mod.inc Deflection v)
+        | "deflection_rating_+%_while_surrounded" -> one (Mod.inc Deflection v |> Mod.whenever (WhileBuff "Surrounded"))
         | "additional_block_chance_against_projectiles_%" -> one (Mod.base' (Named "BlockVsProjectiles") v)
         | "base_self_critical_strike_multiplier_-%" -> one (Mod.base' (Named "LessCritDamageTaken") v)
         // ---- thresholds, stuns and ailments on yourself ----

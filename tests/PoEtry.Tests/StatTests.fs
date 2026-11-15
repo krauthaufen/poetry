@@ -1103,6 +1103,12 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         let player = { Actor.make "Player" [] [ strike (mods "deal_no_elemental_damage" 1.0) ] with Rotation = [ { Use = "Strike"; When = fun _ -> true } ] }
         same (Fight.single { EnemyDef.atLevel 83 1e9 with Mods = []; Attack = None } player 5.0) seeds)
 
+    test "increased Deflection Rating while Surrounded: only while it is" (fun () ->
+        let c = load { blank with ExtraLines = [ "+1000 to Deflection Rating"; "40% increased Deflection Rating while Surrounded" ] } Options.defaults
+        let p = Setup.player c Options.defaults [] None
+        let at st = (p.VitalsAt.Value (Map.ofList st)).Deflection
+        near (at [] * 1.4) (at [ "Surrounded", 1 ]))
+
     // ---- Flame Breath ----
 
     test "Empowered Flame Breath: a use with a Power Charge to consume gains 50% of its damage as lightning" (fun () ->
