@@ -392,7 +392,10 @@ module Report =
                     | [| "ready" |] -> Some(OnCooldown g)
                     | [| "buff" |] -> Some(KeepBuff g)
                     | [| "curse" |] -> Some(KeepCurse g)
-                    | [| "below"; r; n |] -> Some(WhileBelow(r, (match System.Int32.TryParse n with | true, v -> v | _ -> 1), g))
+                    // (a resource's name may have colons of its own: "below:Mote:blue:1")
+                    | parts when parts.Length >= 3 && parts.[0] = "below" ->
+                        let r = System.String.Join(":", parts.[1 .. parts.Length - 2])
+                        Some(WhileBelow(r, (match System.Int32.TryParse parts.[parts.Length - 1] with | true, v -> v | _ -> 1), g))
                     | _ -> None
                 // (what a part asks of what the player sees; None: a word that says nothing)
                 let asks (g: string) (part: string) : (View -> bool) option =
