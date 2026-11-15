@@ -125,6 +125,11 @@ type PlayerStats =
       DeferPrevent: float
       DeferLose: float
       MarkedEnemyAccuracyMult: float
+      /// What a Marked enemy's chance to deal a critical hit is multiplied by ("Enemies you Mark
+      /// cannot deal Critical Hits": 0), and what a Blinded enemy's critical damage bonus is
+      /// ("Enemies have no Critical Damage Bonus ... after you Blind them": 0).
+      MarkedEnemyCritMult: float
+      BlindedEnemyCritBonusMult: float
       ArmourVsProjectiles: float
       ArmourVsCrits: float
       /// "Defend with X% of Armour" (of the moment's conditions): the share of armour that counts against every hit.
@@ -182,7 +187,7 @@ module PlayerStats =
           LifeRegen = 0.0; ManaRegen = 0.0; EnergyShieldRecharge = 0.0; Block = 0.0; LuckyBlock = false
           BlockedDamageTaken = 0.0; Ward = 0.0; WardRegen = 0.0; WardOnBlock = 0.0; Darkness = 0.0; DarknessSeconds = 0.0; CostsInfernalFlame = false; TakenAs = []
           ESRechargeDelay = 4.0; ESRegen = 0.0; ManaBeforeLife = 0.0; BypassES = 0.0; ArmourAppliesTo = Map.empty
-          TakenMult = Map.empty; FlatPhysicalTaken = 0.0; PhysicalReduction = 0.0; PhysicalReductionCap = 90.0; ESAsArmour = 0.0; MissingLifeBeforeHit = 0.0; LessCritDamageTaken = 0.0; EnemyCritChanceMult = 1.0; BlindedEnemyCritMult = 1.0; MarkedEnemyAccuracyMult = 1.0; DeferPrevent = 0.0; DeferLose = 0.0; ArmourVsProjectiles = 1.0; ArmourVsCrits = 1.0; ArmourDefend = 1.0; StunThreshold = life
+          TakenMult = Map.empty; FlatPhysicalTaken = 0.0; PhysicalReduction = 0.0; PhysicalReductionCap = 90.0; ESAsArmour = 0.0; MissingLifeBeforeHit = 0.0; LessCritDamageTaken = 0.0; EnemyCritChanceMult = 1.0; BlindedEnemyCritMult = 1.0; MarkedEnemyAccuracyMult = 1.0; MarkedEnemyCritMult = 1.0; BlindedEnemyCritBonusMult = 1.0; DeferPrevent = 0.0; DeferLose = 0.0; ArmourVsProjectiles = 1.0; ArmourVsCrits = 1.0; ArmourDefend = 1.0; StunThreshold = life
           AilmentThreshold = life / 2.0; FreezeThreshold = life / 2.0; AvoidStun = 0.0; Avoid = Map.empty
           SelfEffect = Map.empty; SelfDuration = Map.empty; LifeOnKill = 0.0; LifePerEnduranceConsumed = 0.0; ESOnKill = 0.0; LifeOnBlock = 0.0
           ManaOnBlock = 0.0; ESOnBlock = 0.0; Recoup = []; RecoupSeconds = 4.0; LifeRecoveryRate = 1.0; ManaRecoveryRate = 1.0

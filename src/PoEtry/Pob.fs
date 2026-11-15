@@ -11,7 +11,9 @@ type PobGem =
       /// The monster a spectre or companion gem summons (PoB skillMinion), if the source says.
       Minion: string option
       /// How many minions a persistent minion gem has, where the player said (the game's data doesn't).
-      Count: int option }
+      Count: int option
+      /// The gem is Corrupted ("+N to Level of all Corrupted Skill Gems" counts for it).
+      Corrupted: bool }
 
 type PobGroup =
     { Label: string
@@ -137,7 +139,7 @@ module Pob =
                           Enabled = Xml.attr "enabled" gem <> Some "false"
                           IsSupport = gemId.Contains "SupportGem" || skillId.StartsWith "Support" || skillId.Contains "SupportPlayer"
                           StatSet = int' (Xml.attr "statSetIndex" gem) 1
-                          Minion = Xml.attr "skillMinion" gem |> Option.filter (fun s -> s <> ""); Count = None }) })
+                          Minion = Xml.attr "skillMinion" gem |> Option.filter (fun s -> s <> ""); Count = None; Corrupted = (Xml.attr "corrupted" gem = Some "true") }) })
         let config =
             Xml.descendants "Input" root
             |> List.choose (fun i ->

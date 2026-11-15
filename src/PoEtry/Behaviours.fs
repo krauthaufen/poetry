@@ -2098,6 +2098,50 @@ module Behaviours =
     /// multiplier (+- spread) at its attack time; its skills scale with its level; the gem's
     /// supports apply to them; "Minions deal / have ..." mods of the owner apply.
     /// Returns the actors and notes about what was left out.
+    /// Puppet Master: "X% Surpassing Chance to gain a Puppet Master stack whenever you use a
+    /// Command Skill". A stack: minions deal 10% increased damage with Command skills and have
+    /// 3% increased skill speed, for 8 seconds, up to 5 stacks (x increased effect, duration,
+    /// "+N maximum stacks"). The minions use their Command skills themselves here, so each
+    /// gains its stacks from its own commands; the stacks of one minion run out together.
+    /// (What the buff gives the player's own speed with Command skills is nothing here.)
+    let puppetMaster (sheet: CharacterSheet) : Rule list =
+        let db = ModDb.ofList sheet.Mods
+        let chance = Mods.sumBase Ctx.empty [ Named "PuppetMasterOnCommand" ] db
+        if chance <= 0.0 then []
+        else
+            let effect = Mods.inc Ctx.empty [ Named "PuppetMasterEffect" ] db
+            let stacks = max 1 (5 + int (Mods.sumBase Ctx.empty [ Named "PuppetMasterMaxStacks" ] db))
+            let seconds = 8.0 * Mods.inc Ctx.empty [ Named "PuppetMasterDuration" ] db / buffExpiry sheet
+            let mods =
+                [ Mod.inc (Damage AllDamage) (10.0 * effect) |> Mod.whenever (SkillIs(Tag "Command")); Mod.inc Speed (3.0 * effect) ]
+                |> List.map (Mod.from "Puppet Master")
+            [ { Hook = OnUse; Filter = WithTag(Tag "Command"); Chance = min 100.0 chance; Reaction = GrantBuff("Puppet Master", seconds, stacks, mods) } ]
+
+    let archonOfUndeathName = "Archon of Undeath"
+
+    /// Archon of Undeath (BuffTemplates ArchonUndeath): minions deal 25% more damage and their
+    /// Command skills have 200% more cooldown recovery, x increased Archon effect, for an
+    /// Archon's 10 seconds (x increased Archon duration); then no Archon can be gained for the
+    /// recovery period (20 s, see `elementalArchon`). Gained by chance "when you use a Command
+    /// Skill" or "when you create an Offering". The skill that stands for gaining it has the
+    /// buff's time and the recovery as its cooldown; its use puts the buff on every minion.
+    let archonOfUndeath (sheet: CharacterSheet) (stat: string) (filter: SkillFilter) : (Skill * Rule list) option =
+        let db = ModDb.ofList sheet.Mods
+        let chance = Mods.sumBase Ctx.empty [ Named stat ] db
+        if chance <= 0.0 then None
+        else
+            let effect = Mods.inc Ctx.empty [ Named "ArchonEffect" ] db
+            let seconds = 10.0 * Mods.inc Ctx.empty [ Named "ArchonDuration" ] db / buffExpiry sheet
+            let recovery = if Mods.flag Ctx.empty (Named "ArchonNoRecovery") db then 0.0 else 20.0 / Mods.inc Ctx.empty [ Named "ArchonRecoveryFaster" ] db
+            let mods =
+                [ Mod.more (Damage AllDamage) (25.0 * effect); Mod.more CooldownRecovery (200.0 * effect) |> Mod.whenever (SkillIs(Tag "Command")) ]
+                |> List.map (Mod.from archonOfUndeathName)
+            let skill = { Skill.make archonOfUndeathName [ Triggered ] with BaseCrit = 0.0; Hits = []; Cooldown = Some(seconds + recovery) }
+            Some(
+                skill,
+                [ { Hook = OnUse; Filter = filter; Chance = min 100.0 chance; Reaction = TriggerSkill archonOfUndeathName }
+                  { Hook = OnUse; Filter = Called archonOfUndeathName; Chance = 100.0; Reaction = GrantMinionBuff(archonOfUndeathName, seconds, mods) } ])
+
     let minions (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) : Actor list * string list =
         let charMods = ModDb.ofList sheet.Mods
         // as many of each as the character's Spirit pays for
@@ -2228,6 +2272,16 @@ module Behaviours =
                                   Delivery = AreaAtTarget 20.0 } ]
                     // what the minions do on a hit ("Minions have x% chance to inflict Withered on Hit")
                     let rules = keywordRules { sheet with Mods = minionMods } ordered
+                    // what using a Command skill gives: Puppet Master's stacks to each minion that
+                    // commands, an Archon of Undeath to all (rolled by the first of the gem's
+                    // minions: the player commands them together)
+                    let commands = ordered |> List.exists (fun s -> s.Tags.Contains(Tag "Command"))
+                    let rules = if commands then rules @ puppetMaster sheet else rules
+                    let archon = if commands then archonOfUndeath sheet "ArchonOfUndeathOnCommand" (WithTag(Tag "Command")) else None
+                    let withArchon (i: int) (a: Actor) =
+                        match archon with
+                        | Some (skill, rs) when i = 1 -> { a with Skills = a.Skills @ [ skill ]; Rules = a.Rules @ rs }
+                        | _ -> a
                     // a minion without any damaging skill (a healer) simply doesn't fight
                     if ordered.IsEmpty then [], []
                     else
@@ -2242,7 +2296,7 @@ module Behaviours =
                         let extra = match body with Some b -> explosion b | None -> []
                         let acts = ordered |> List.map (fun s -> Actor.always s.Name)
                         let most = most + int (Mods.sumBase Ctx.empty [ Named "TemporaryMinionLimit" ] (ModDb.ofList minionMods))
-                        [ for i in 1 .. most -> { Actor.make (sprintf "%s %d" m.Name i) minionMods (ordered @ extra) with Body = body; Pool = Some gem.Name; Rules = rules; Rotation = acts } ],
+                        [ for i in 1 .. most -> { Actor.make (sprintf "%s %d" m.Name i) minionMods (ordered @ extra) with Body = body; Pool = Some gem.Name; Rules = rules; Rotation = acts } |> withArchon i ],
                         (if summonedBy raw then [] else [ sprintf "%s: what summons its minions is not simulated" gem.Name ])
                     | None ->
                         // killed, it is revived after the gem's revive time
@@ -2255,7 +2309,7 @@ module Behaviours =
                         let acts = ordered |> List.map (fun s -> Actor.always s.Name)
                         [ for i in 1 .. count ->
                             let name = if count > 1 then sprintf "%s %d" m.Name i else m.Name
-                            { Actor.make name minionMods (ordered @ extra) with Body = Some body; Rules = rules; Rotation = acts } ],
+                            { Actor.make name minionMods (ordered @ extra) with Body = Some body; Rules = rules; Rotation = acts } |> withArchon i ],
                         []))
         |> List.concat
         |> List.unzip
@@ -2271,6 +2325,22 @@ module Behaviours =
                         group |> List.fold (fun s a -> Set.add a.Name s) seen, acc @ group)
                     (Set.empty, [])
                 |> snd
+            // an Archon of Undeath and its recovery are the player's: of all the minions that could
+            // roll for it, the first does (the others' commands roll for nothing)
+            let named =
+                let carries (a: Actor) = a.Skills |> List.exists (fun s -> s.Name = archonOfUndeathName)
+                match named |> List.tryFindIndex carries with
+                | None -> named
+                | Some first ->
+                    named |> List.mapi (fun i a ->
+                        if i = first || not (carries a) then a
+                        else
+                            { a with
+                                Skills = a.Skills |> List.filter (fun s -> s.Name <> archonOfUndeathName)
+                                Rules = a.Rules |> List.filter (fun r ->
+                                    match r.Reaction with
+                                    | TriggerSkill n | GrantMinionBuff (n, _, _) when n = archonOfUndeathName -> false
+                                    | _ -> true) })
             named, List.concat notes
 
     /// What summons a build's temporary minions (the pools `minions` makes), as rules and
@@ -2597,6 +2667,134 @@ module Behaviours =
           "ProjectileAttackHitInPast8Seconds", (fun s -> rule s OnHit (WithTags([ Attack; Projectile ], [])) 8.0 1) ]
         |> List.filter (fun (state, _) -> asked.Contains state)
         |> List.map (fun (state, make) -> make state)
+
+    /// A spear that lodges and "explodes after a delay" (Explosive Spear): its Explosion strikes
+    /// the detonation time after the spear's own hit ("base_skill_detonation_time", x Fast
+    /// Forward's less, x increased Detonation Time). The explosion with a Frenzy Charge
+    /// ("explode immediately") is another part and does not wait.
+    let detonation (db: GameDb) (charMods: ModDb) (setup: GemSetup) (skill: Skill) : Skill =
+        match Gems.data db setup.Gem with
+        | Some d when d.Types.Contains "DetonatesAfterTime" && Gems.lodged.Contains d.Name ->
+            let raw = Gems.rawStats db charMods setup
+            let sum id = raw |> List.filter (fun (k, _) -> k = id) |> List.sumBy snd
+            let ctx = { Ctx.empty with SkillTags = skill.Tags; SkillName = skill.Name }
+            let seconds =
+                sum "base_skill_detonation_time" / 1000.0 * (1.0 + sum "support_fast_forward_detonation_time_+%_final" / 100.0)
+                * Mods.inc ctx [ Named "DetonationTime" ] (ModDb.addList skill.Mods charMods)
+            if seconds <= 0.0 then skill
+            else
+                { skill with
+                    Parts = skill.Parts |> List.map (fun p -> if p.Name.EndsWith ": Explosion" then { p with Mods = p.Mods @ [ Mod.base' (Named "PartDelay") seconds |> Mod.from "detonation time" ] } else p) }
+        | _ -> skill
+
+    /// The state of an attack that is Ancestrally Boosted: stacks are the attacks to come that
+    /// are (an attack uses one up, as an empowerment of a warcry: the engines).
+    let ancestralBoostBuff = "EmpoweredAttacks:Ancestral Boost"
+
+    /// "An Ancestrally Boosted Slam has 30% more damage and 25% increased area of effect".
+    let private boostMods (times: float) =
+        [ Mod.more (Damage AllDamage) (100.0 * ((1.0 + 0.3 * times) / (1.0 + 0.3 * (times - 1.0)) - 1.0)); Mod.inc AreaOfEffect 25.0 ]
+        |> List.map (Mod.whenever (SkillIs Slam) >> Mod.whenever (Not(SkillIs Triggered)) >> Mod.whenever (WhileBuff ancestralBoostBuff) >> Mod.from "Ancestral Boost")
+
+    /// Fist of War ("Supports Slams you use yourself, providing a powerful Ancestral Boost every
+    /// few seconds": every `ancestral_slam_interval_duration`; III: "Ancestral Boost has double
+    /// effect on Supported Skills") and Ancestral Call (Strikes, every
+    /// `ancestral_call_spirit_strike_interval_ms`). A use of the skill that starts when the
+    /// time since the last boost is over is Ancestrally Boosted. Gives the
+    /// skill (with what a double effect adds), the skill that keeps the time, and the rules.
+    let ancestralBoost (db: GameDb) (charMods: ModDb) (setup: GemSetup) (skill: Skill) : Skill * Skill list * Rule list =
+        let raw = Gems.rawStats db charMods setup
+        let sum id = raw |> List.filter (fun (k, _) -> k = id) |> List.sumBy snd
+        let seconds = (sum "ancestral_slam_interval_duration" + sum "ancestral_call_spirit_strike_interval_ms") / 1000.0
+        if seconds <= 0.0 || not (skill.Tags.Contains Attack) then skill, [], []
+        else
+            let gate = skill.Name + ": Ancestral Boost"
+            let clock = { Skill.make gate [ Triggered ] with BaseCrit = 0.0; Hits = []; Cooldown = Some seconds }
+            // twice the effect: 60% more in all and 50% increased area, for this skill and its parts
+            let rec doubled (s: Skill) = { s with Mods = s.Mods @ boostMods 2.0; Parts = s.Parts |> List.map doubled }
+            (if sum "double_ancestral_boost_effect" > 0.0 then doubled skill else skill),
+            [ clock ],
+            // (as a use of the skill starts, what is left of an earlier boost goes: a channelled
+            // slam does not use it up the way other attacks do; then, the time being over, this
+            // use is boosted)
+            [ { Hook = OnUse; Filter = Called skill.Name; Chance = 100.0; Reaction = RemoveBuff ancestralBoostBuff }
+              { Hook = OnUse; Filter = Called skill.Name; Chance = 100.0; Reaction = TriggerSkill gate }
+              { Hook = OnUse; Filter = Called gate; Chance = 100.0; Reaction = SetStacks(ancestralBoostBuff, 1) } ]
+
+    /// "The next Attack you use within N seconds after Heavy Stunning a Rare or Unique Enemy is
+    /// Ancestrally Boosted".
+    let ancestralBoostOnStun (sheet: CharacterSheet) : Rule list =
+        match Mods.sumBase Ctx.empty [ Named "AncestralBoostOnHeavyStun" ] (ModDb.ofList sheet.Mods) with
+        | seconds when seconds > 0.0 ->
+            [ { Hook = OnInflict HeavyStun; Filter = AnySkill; Chance = 100.0; Reaction = IfEnemyHas("RareOrUnique", GrantBuff(ancestralBoostBuff, seconds, 1, [])) } ]
+        | _ -> []
+
+    /// An actor that can be Ancestrally Boosted (a rule of its says so) has what the boost gives.
+    let ancestralBoosted (a: Actor) : Actor =
+        let rec boosts (r: Reaction) =
+            match r with
+            | SetStacks (b, _) | GrantBuff (b, _, _, _) -> b = ancestralBoostBuff
+            | IfEnemyHas (_, next) | IfBuff (_, next) | SpendStack (_, next) -> boosts next
+            | _ -> false
+        if a.Rules |> List.exists (fun r -> boosts r.Reaction) then { a with Mods = a.Mods @ boostMods 1.0 } else a
+
+    /// "Skills deal X% increased Damage per Connected Red Support Gem", "X% increased Skill Speed
+    /// per Connected Green Support Gem", "X% increased Critical Hit Chance per Connected Blue
+    /// Support Gem": the supports socketed in the skill's gem, by their colour.
+    let connectedSupports (db: GameDb) (charMods: ModDb) (setup: GemSetup) (skill: Skill) : Skill =
+        let per name = Mods.sumBase Ctx.empty [ Named name ] charMods
+        let count (colour: int) = setup.Supports |> List.filter (fun (name, _) -> Gems.data db name |> Option.exists (fun d -> d.Color = colour)) |> List.length |> float
+        let mods =
+            [ Damage AllDamage, per "DamagePerRedSupport" * count 1; Speed, per "SpeedPerGreenSupport" * count 2; CritChance, per "CritPerBlueSupport" * count 3 ]
+            |> List.filter (fun (_, v) -> v <> 0.0)
+            |> List.map (fun (stat, v) -> Mod.inc stat v |> Mod.from "connected supports")
+        if mods.IsEmpty then skill
+        else
+            let rec add (s: Skill) = { s with Mods = s.Mods @ mods; Parts = s.Parts |> List.map add }
+            add skill
+
+    /// "for each different Warcry you've used Recently", "for each different Spell you've Cast
+    /// in the last eight seconds", "for every different Grenade fired in the past 8 seconds",
+    /// "for each type of Ammunition fired in the past 10 seconds": a modifier that counts them
+    /// (`PerStack("Different:<kind>:<seconds>", 1)`, StatMap) becomes one modifier for each of
+    /// the actor's skills of the kind, which holds while that skill was used within the time;
+    /// using the skill starts the time again.
+    let differentUsed (a: Actor) : Actor =
+        let kindOf (c: Cond) =
+            match c with
+            | PerStack (b, _) when b.StartsWith "Different:" ->
+                match b.Split ':' with
+                | [| _; kind; seconds |] -> Some(kind, float seconds)
+                | _ -> None
+            | _ -> None
+        let ofKind (kind: string) (s: Skill) =
+            match kind with
+            | "Warcry" -> s.Tags.Contains Warcry
+            // (a spell that is triggered is not cast)
+            | "Spell" -> s.Tags.Contains Spell && not (s.Tags.Contains Triggered)
+            | "Grenade" -> s.Tags.Contains(Tag "Grenade")
+            | "Ammo" -> s.Tags.Contains Crossbow && s.Clip > 0
+            | _ -> false
+        let state (s: Skill) (seconds: float) = sprintf "Used:%s:%g" s.Name seconds
+        let asked = System.Collections.Generic.HashSet<string * float>()
+        let expand (m: Mod) =
+            match m.Conds |> List.tryPick kindOf with
+            | Some (kind, seconds) ->
+                asked.Add((kind, seconds)) |> ignore
+                let rest = m.Conds |> List.filter (fun c -> (kindOf c).IsNone)
+                a.Skills |> List.filter (ofKind kind) |> List.map (fun s -> { m with Conds = WhileBuff(state s seconds) :: rest })
+            | None -> [ m ]
+        let rec skill (s: Skill) = { s with Mods = s.Mods |> List.collect expand; Parts = s.Parts |> List.map skill }
+        let mods = a.Mods |> List.collect expand
+        let skills = a.Skills |> List.map skill
+        if asked.Count = 0 then a
+        else
+            let rules =
+                [ for (kind, seconds) in asked do
+                    for s in a.Skills do
+                        if ofKind kind s then
+                            yield { Hook = OnUse; Filter = Called s.Name; Chance = 100.0; Reaction = GrantBuff(state s seconds, seconds, 1, []) } ]
+            { a with Mods = mods; Skills = skills; Rules = a.Rules @ rules }
 
     /// Using a totem gem places the totem: the buff its actor waits for, lasting the totem's
     /// duration ("base_totem_duration" x skill duration mods).

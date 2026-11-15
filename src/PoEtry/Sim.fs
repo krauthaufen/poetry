@@ -1498,6 +1498,17 @@ module Sim =
         allSkills actor |> List.find (fun s -> s.Name = name)
 
     let private partFlag (p: Skill) (name: string) = p.Mods |> List.exists (fun m -> m.Stat = Named name)
+
+    /// How many of a part that waits to be set off can wait at once: the skill's own limit
+    /// ("Maximum of 30 active Bolts", "Limit 6 Spikes": `WaitLimit`), 20 where it has none.
+    let waitLimit (p: Skill) =
+        match p.Mods |> List.filter (fun m -> m.Stat = Named "WaitLimit" && m.Kind = Base) with
+        | [] -> 20
+        | ms -> max 1 (int (ms |> List.sumBy (fun m -> m.Value)))
+
+    /// Seconds a part of a skill strikes after the skill's own hit (a lodged spear's explosion
+    /// after its detonation time: `PartDelay`).
+    let partDelay (p: Skill) = p.Mods |> List.sumBy (fun m -> if m.Stat = Named "PartDelay" && m.Kind = Base then m.Value else 0.0)
     /// The rest of a part's flag that starts with this ("OnlyInfused:ColdInfusion" -> "ColdInfusion").
     let private partNamed (p: Skill) (prefix: string) =
         p.Mods |> List.tryPick (fun m -> match m.Stat with Named n when n.StartsWith prefix -> Some(n.Substring prefix.Length) | _ -> None)
@@ -2173,7 +2184,7 @@ module Sim =
                             [ 1 .. n ] |> List.fold (fun w i ->
                                 let passing = match part.Delivery with Projectiles p -> p.Passing > 0.0 && p.HitInterval <= 0.0 | _ -> false
                                 if passing then schedule at (PassingStrike(actor.Name, part.Name, mult, target.Def.Name, at - w.Time)) w
-                                else schedule (if n = 1 then at else w.Time + (at - w.Time) * float i / float n) (Strike(actor.Name, part.Name, mult, target.Def.Name)) w) w) w)
+                                else schedule ((if n = 1 then at else w.Time + (at - w.Time) * float i / float n) + (if part.Name = skill.Name then 0.0 else partDelay part)) (Strike(actor.Name, part.Name, mult, target.Def.Name)) w) w) w)
                     w
             // what happens when the use lands: when its first hit is due, after that hit
             let w =
@@ -2263,7 +2274,7 @@ module Sim =
                             match Map.tryFind infusion st.Buffs with
                             | Some e when e.Stacks > 1 -> { st with Buffs = Map.add infusion { e with Stacks = e.Stacks - 1 } st.Buffs }
                             | _ -> { st with Buffs = Map.remove infusion st.Buffs }) w
-                    | _, Some _ -> updateActor actor.Name (fun st -> { st with Pending = Map.add p.Name (min 20 ((Map.tryFind p.Name st.Pending |> Option.defaultValue 0) + 1)) st.Pending }) w
+                    | _, Some _ -> updateActor actor.Name (fun st -> { st with Pending = Map.add p.Name (min (waitLimit p) ((Map.tryFind p.Name st.Pending |> Option.defaultValue 0) + 1)) st.Pending }) w
                     | _ -> w) w
             // a detonator (or a warcry) sets off everything of that kind that waits
             let w =
@@ -2401,7 +2412,9 @@ module Sim =
             // start is paid when the channel begins, not with every use that continues it
             let ownCost =
                 if skill.CostPerSecond <= 0.0 then ownCost
-                else (if st.LastUsed = skill.Name then 0.0 else ownCost) + skill.CostPerSecond * max Constants.serverTick (useTime env actor skill w)
+                // ("Modifiers to Cast / Attack Speed also affect this Skill's cost": so much more
+                // a second as the skill is faster, which is what its unhurried time costs)
+                else (if st.LastUsed = skill.Name then 0.0 else ownCost) + skill.CostPerSecond * (if partFlag skill "CostOverTimeWithSpeed" then skill.BaseTime else max Constants.serverTick (useTime env actor skill w))
             (ownCost + extraCost) * Mods.mult costCtx [ ManaCost ] db / Mods.inc costCtx [ ManaCostEfficiency ] db
         let affordable (skill: Skill) =
             match actor.Vitals, w.Player with
@@ -2476,7 +2489,7 @@ module Sim =
                 elif skill.Clip > 0 && not (st.LoadDue.Contains skill.Name) then 0.0 else skill.Cost
             let ownCost =
                 if skill.CostPerSecond <= 0.0 then ownCost
-                else (if st.LastUsed = skill.Name then 0.0 else ownCost) + skill.CostPerSecond * t
+                else (if st.LastUsed = skill.Name then 0.0 else ownCost) + skill.CostPerSecond * (if partFlag skill "CostOverTimeWithSpeed" then skill.BaseTime else t)
             let cost = (ownCost + extraCost) * Mods.mult costCtx [ ManaCost ] db / Mods.inc costCtx [ ManaCostEfficiency ] db
             // after the last bolt of a load: reload (attack speed and reload speed shorten it;
             // PoB: increases add up, more multiplies), unless the reload is instant
@@ -3586,10 +3599,10 @@ module Sim =
                                   |> Map.add into ((Map.tryFind into m |> Option.defaultValue 0.0) + moved))
                             atk.Damage
                     // a critical hit is tested against evasion once more: evaded, it is an ordinary hit
-                    let crit = rng.Chance(atk.CritChance * v.EnemyCritChanceMult * (if st.ContainsKey "Blinded" then v.BlindedEnemyCritMult else 1.0)) && not (hitChance < 100.0 && rng.Chance(100.0 - hitChance))
+                    let crit = rng.Chance(atk.CritChance * v.EnemyCritChanceMult * (if st.ContainsKey "Blinded" then v.BlindedEnemyCritMult else 1.0) * (if st.ContainsKey "Marked" then v.MarkedEnemyCritMult else 1.0)) && not (hitChance < 100.0 && rng.Chance(100.0 - hitChance))
                     // "Defend with X% of Armour against Projectile Attacks / Critical Hits"
                     let armourShare = (if atk.Melee then 1.0 else v.ArmourVsProjectiles) * (if crit then v.ArmourVsCrits else 1.0) * v.ArmourDefend
-                    let critMult = if crit then 1.0 + Constants.monsterBaseCritBonus / 100.0 * (1.0 - v.LessCritDamageTaken / 100.0) else 1.0
+                    let critMult = if crit then 1.0 + Constants.monsterBaseCritBonus / 100.0 * (1.0 - v.LessCritDamageTaken / 100.0) * (if st.ContainsKey "Blinded" then v.BlindedEnemyCritBonusMult else 1.0) else 1.0
                     let playerSt = Map.find env.Fight.Player.Name w.Actors
                     let shocked =
                         Map.tryFind "Shocked" playerSt.Buffs |> Option.filter (fun x -> x.Expires > w.Time)

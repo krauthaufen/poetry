@@ -746,6 +746,10 @@ module StatMap =
         // what the monsters one blinds or marks do to the character with their hits
         | "enemies_you_blind_have_critical_strike_chance_+%" -> one (Mod.inc (Named "BlindedEnemyCritChance") v)
         | "marked_enemy_accuracy_rating_+%" -> one (Mod.inc (Named "MarkedEnemyAccuracy") v)
+        // "Enemies you Mark cannot deal Critical Hits"; "Enemies have no Critical Damage Bonus for N
+        // seconds after you Blind them" (while they are Blinded)
+        | "marked_enemies_cannot_deal_critical_strikes" -> one (Mod.inc (Named "MarkedEnemyCritChance") -100.0)
+        | "enemies_you_blind_have_no_crit_bonus_for_x_seconds" -> one (Mod.flag (Named "BlindedEnemyNoCritBonus"))
         | "defend_with_%_armour_against_ranged_attacks" -> one (Mod.base' (Named "DefendWithArmourVsProjectiles") v)
         | "defend_with_%_armour_against_critical_strikes" -> one (Mod.base' (Named "DefendWithArmourVsCrits") v)
         // "Defend with X% of Armour while not on Low Energy Shield", "... while on Low Energy Shield",
@@ -1055,6 +1059,12 @@ module StatMap =
 
     let private explicit (id: string) (v: float) : Meaning option =
         let one m = Some(Mods [ m ])
+        // types an ailment scales from besides its own, and own types it no longer scales from
+        let ailmentSources (also: (Ailment * DamageType) list) (notFrom: (Ailment * DamageType) list) =
+            Some(Mods(
+                    Mod.flag (Named Ailments.sourcesChanged)
+                    :: (also |> List.map (fun (a, t) -> Mod.flag (Named(Ailments.alsoFromStat a t))))
+                    @ (notFrom |> List.map (fun (a, t) -> Mod.flag (Named(Ailments.notFromStat a t))))))
         match id with
         | id when readWhereBuilt.Contains id -> Some Structural
         // (a support's "more / less life" for the minions of its gem: Behaviours.minions)
@@ -1064,6 +1074,9 @@ module StatMap =
         // skill places totems (Behaviours.totems)
         | id when id.StartsWith "supported_" && id.Contains "_skill_gem_level_+" && (id.EndsWith "_other_supports" || id.EndsWith "_other_support") -> Some Structural
         | "cast_on_minion_death_gain_1_energy_per_X_minion_relative_defensiveness_%" | "base_skill_summons_totems" -> Some Structural
+        // Fist of War, Ancestral Call: "an Ancestral Boost every few seconds", with double effect (Behaviours.ancestralBoost)
+        | "support_ancestral_slam_big_hit_max_count" | "ancestral_slam_interval_duration" | "double_ancestral_boost_effect"
+        | "support_ancestral_call_strike_is_ancestral_boosted" | "ancestral_call_spirit_strike_interval_ms" -> Some Structural
         // the gem's own "Minions have X% more Maximum Life", and a support's "Minions take X%
         // more / less Damage" (Feeding Frenzy, Meat Shield): Behaviours.minions
         | "active_skill_minion_life_+%_final" | "feeding_frenzy_minion_damage_taken_+%_final"
@@ -1492,6 +1505,45 @@ module StatMap =
         | "attack_speed_+%_if_have_blocked_recently" -> one (Mod.inc Speed v |> Mod.whenever (SkillIs Attack) |> Mod.whenever (WhileBuff "BlockedRecently"))
         // "Curses you inflict have infinite Duration": a thousand times as long
         | "curses_never_expire" -> one (Mod.more (Named "CurseDuration") 99900.0)
+        // "Modifiers to Cast Speed / Attack Speed also affect this Skill's cost": the cost by the
+        // second of a channel (the engines: what a use costs)
+        | "cast_speed_modifiers_apply_to_over_time_cost" | "attack_speed_modifiers_apply_to_over_time_cost" -> one (Mod.flag (Named "CostOverTimeWithSpeed"))
+        // Ancestral Boost (Behaviours.ancestralBoost): "Ancestrally Boosted Attacks deal X%
+        // increased Damage / have X% increased Area of Effect", "The next Attack you use within N
+        // seconds after Heavy Stunning a Rare or Unique Enemy is Ancestrally Boosted"
+        | "ancestral_boosted_attack_damage_+%" -> one (Mod.inc (Damage AllDamage) v |> Mod.whenever (SkillIs Attack) |> Mod.whenever (WhileBuff "EmpoweredAttacks:Ancestral Boost"))
+        | "ancestral_boosted_area_of_effect_+%" -> one (Mod.inc AreaOfEffect v |> Mod.whenever (SkillIs Attack) |> Mod.whenever (WhileBuff "EmpoweredAttacks:Ancestral Boost"))
+        | "next_attack_is_ancestrally_boosted_for_x_seconds_on_heavy_stunning_unique_or_rare_enemy" -> one (Mod.base' (Named "AncestralBoostOnHeavyStun") v)
+        // what an ailment scales from besides its own damage, or in its place (Ailments.scalesFromWith)
+        | "unique_fire_damage_shocks" -> ailmentSources [ Shock, Fire ] [ Ignite, Fire ]
+        | "unique_cold_damage_ignites" -> ailmentSources [ Ignite, Cold ] [ Chill, Cold; Freeze, Cold ]
+        | "unique_lightning_damage_freezes" -> ailmentSources [ Freeze, Lightning ] [ Shock, Lightning ]
+        | "elemental_damage_can_inflict_bleeding" -> ailmentSources [ Bleed, Fire; Bleed, Cold; Bleed, Lightning ] []
+        | "chaos_damage_can_shock" -> ailmentSources [ Shock, Chaos ] []
+        | "physical_damage_from_hits_also_contributes_to_chill_and_freeze" -> ailmentSources [ Chill, Physical; Freeze, Physical ] []
+        | "elemental_damage_also_contributes_to_flammability_ignite_chill_freeze_and_shock" ->
+            ailmentSources [ Ignite, Cold; Ignite, Lightning; Chill, Fire; Chill, Lightning; Freeze, Fire; Freeze, Lightning; Shock, Fire; Shock, Cold ] []
+        // "X% increased Attack Speed per 400 Accuracy Rating, up to 20%" (Setup.fight counts the Accuracy Rating)
+        | "attack_speed_+%_per_200_accuracy_rating" when v > 0.0 ->
+            one (Mod.inc Speed v |> Mod.whenever (SkillIs Attack) |> Mod.whenever (PerStack(sprintf "AccuracyUpTo:%d" (400 * int (floor (20.0 / v + 1e-9))), 400.0)))
+        // "Skills deal X% increased Damage per Connected Red Support Gem", "... increased Skill Speed
+        // per Connected Green Support Gem", "... increased Critical Hit Chance per Connected Blue
+        // Support Gem" (Behaviours.connectedSupports)
+        | "skills_gain_damage_+%_per_sockted_or_adjacent_red_support_gem" -> one (Mod.base' (Named "DamagePerRedSupport") v)
+        | "skills_gain_skill_speed_+%_per_sockted_or_adjacent_green_support_gem" -> one (Mod.base' (Named "SpeedPerGreenSupport") v)
+        | "skills_gain_critical_strike_chance_+%_per_sockted_or_adjacent_blue_support_gem" -> one (Mod.base' (Named "CritPerBlueSupport") v)
+        // "Your Hits cannot be Evaded by Pinned Enemies"
+        | "pinned_enemies_cannot_evade_your_attacks" -> one (Mod.override' HitChance 100.0 |> Mod.whenever (EnemyHas "Pinned"))
+        // Puppet Master and Archon of Undeath (Behaviours.puppetMaster, archonOfUndeath)
+        | "surpassing_chance_%_to_gain_1_puppeteer_stack_on_using_command_skill" -> one (Mod.base' (Named "PuppetMasterOnCommand") v)
+        | "max_puppet_master_stacks_+" -> one (Mod.base' (Named "PuppetMasterMaxStacks") v)
+        | "puppet_master_effect_+%" -> one (Mod.inc (Named "PuppetMasterEffect") v)
+        | "puppet_master_duration_+%" -> one (Mod.inc (Named "PuppetMasterDuration") v)
+        | "chance_%_to_gain_archon_of_undeath_on_using_command_skill" -> one (Mod.base' (Named "ArchonOfUndeathOnCommand") v)
+        | "chance_%_to_gain_archon_of_undeath_when_you_create_an_offering" -> one (Mod.base' (Named "ArchonOfUndeathOnOffering") v)
+        // "+N to Level of all Corrupted Skill Gems / Corrupted Spell Skill Gems" (Setup.corruptedLevels)
+        | "corrupted_skill_gem_level_+" -> one (Mod.base' (Named "CorruptedGemLevel") v)
+        | "corrupted_spell_skill_gem_level_+" -> one (Mod.base' (Named "CorruptedSpellGemLevel") v)
         | "mark_skill_gem_level_+" -> one (Mod.base' (Named "GemLevel") v |> Mod.whenever (SkillIs(Tag "Type:Mark")))
         | "despair_gem_level_+" -> one (Mod.base' (Named "GemLevel") v |> Mod.whenever (SkillNamed "Despair"))
         // "Increases and Reductions to Spell damage also apply to Attacks" (Behaviours.minionIncreasesOnYou)
@@ -1691,7 +1743,15 @@ module StatMap =
         | "support_blazing_crits_gain_%_fire_damage_with_attacks_on_critical_hit" | "support_blazing_crits_base_duration_ms" -> Some Structural
         // a detonation after a time: read where a skill's hit waits for it (Gems: grenades, Frost
         // Bomb; Behaviours.toxicDomain), elsewhere not played
-        | "base_skill_detonation_time" | "support_fast_forward_detonation_time_+%_final" | "skill_detonation_time_+%" -> Some(Unsimulated "detonation time")
+        | "base_skill_detonation_time" | "support_fast_forward_detonation_time_+%_final" -> Some(Unsimulated "detonation time")
+        // "X% increased Detonation Time" (Gems.fuse: a grenade's fuse; Behaviours.detonation: a lodged spear's)
+        | "skill_detonation_time_+%" -> one (Mod.inc (Named "DetonationTime") v)
+        // how many of a part that waits to be set off can wait at once (the engines: `Sim.waitLimit`):
+        // "Maximum of N active Bolts" (Stormblast Bolts' explosions wait for a Detonator), "Limit N
+        // Spikes" (Earthshatter's wait for a warcry), the spears of Rapid Assault a Detonator sets
+        // off, Forge Hammer's fissures that wait for a warcry
+        | "stormblast_bolts_maximum_active_bolt_count" | "spike_slam_max_spikes" | "rapid_assault_attached_spear_limit" | "forge_hammer_base_maximum_number_of_fissures" ->
+            one (Mod.base' (Named "WaitLimit") v)
         // how a skill is aimed, queued and animated, and markers the game keeps for its own
         // texts: a fight that plays uses by their times and hits by their places has nothing
         // these could change
@@ -2282,7 +2342,9 @@ module StatMap =
           "unique_jewel_nearby_disconnected_passives_can_be_allocated"
           "tame_beast_can_target_unique_beasts"; "ascendancy_shaman_gain_additional_socketable_mods"
           // "Can only use a Normal Body Armour": the one that is worn is among the items
-          "cannot_use_non_normal_body_armour" ]
+          "cannot_use_non_normal_body_armour"
+          // a Staff can be wielded with a Focus: both are among the items
+          "can_equip_staff_with_focus" ]
         |> List.contains id
 
     /// "X% increased Explicit Resistance Modifier magnitudes" and the like on an item: the
@@ -2411,10 +2473,29 @@ module StatMap =
                                         | st -> yield { m with Stat = ForMinions st; Conds = OfOwner(WhileBuff buff) :: m.Conds } |> Mod.from ("Rare modifier " + id)
                             | _ -> () ])
 
+    /// "... for each different Warcry you've used Recently / Spell you've Cast in the last eight
+    /// seconds / Grenade fired in the past 8 seconds / type of Ammunition fired in the past 10
+    /// seconds": what the rest of the id means, once for each of them (Behaviours.differentUsed
+    /// makes the count: one state per skill of the kind).
+    and private perDifferent (id: string) (value: float) : Meaning option =
+        [ "_per_different_warcry_used_recently", "Different:Warcry:4"
+          "_per_num_unique_spells_cast_in_last_8_seconds", "Different:Spell:8"
+          "_per_different_grenade_type_fired_in_past_8_seconds", "Different:Grenade:8"
+          "_per_ammo_type_fired_in_past_10_seconds", "Different:Ammo:10" ]
+        |> List.tryPick (fun (suffix, state) ->
+            if id.EndsWith suffix then
+                match direct (id.Substring(0, id.Length - suffix.Length)) value with
+                | Some (Mods ms) when not ms.IsEmpty -> Some(Mods(ms |> List.map (Mod.whenever (PerStack(state, 1.0)))))
+                | _ -> None
+            else None)
+
     /// What a stat means. Local stats first, then the explicit table, then patterns,
     /// then gem-name prefixes, then the non-offensive bucket. Anything else is Unmapped.
     and meaning (id: string) (value: float) : Meaning =
         if id = "gain_rare_monster_mods_on_kill_ms" then rareModsOnKill () else
+        match perDifferent id value with
+        | Some m -> m
+        | None ->
         match local id value with
         | Some m -> m
         | None ->

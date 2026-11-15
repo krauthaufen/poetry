@@ -585,6 +585,11 @@ module Flat =
     let private qAllIgnites = site MSkill Flag (named "AllDamageIgnites")
     let private qAllChills = site MSkill Flag (named "AllDamageChills")
     let private qAllShocks = site MSkill Flag (named "AllDamageShocks")
+    /// What an ailment scales from besides, or no longer (`Ailments.alsoFrom`, `notFrom`): asked
+    /// only where something changes it.
+    let private qSourcesChanged = site MSkill Flag (named Ailments.sourcesChanged)
+    let private qSourceAlso = Ailments.alsoFrom |> List.map (fun (a, t) -> a, t, site MSkill Flag (named (Ailments.alsoFromStat a t))) |> Array.ofList
+    let private qSourceNot = Ailments.notFrom |> List.map (fun (a, t) -> a, t, site MSkill Flag (named (Ailments.notFromStat a t))) |> Array.ofList
     let private qAilChance = perAilment (fun a -> site MSkill Base [ AilmentChance a ])
     let private qAilChanceMult = perAilment (fun a -> siteMult MSkill [ AilmentChance a ])
     let private qFaster = site MSkill Inc (named "FasterAilments")
@@ -951,6 +956,10 @@ module Flat =
           /// A part that waits until another skill sets it off; the waiting parts of other
           /// skills that a use of this skill sets off, and where that is counted.
           Waits: bool
+          /// How many of it can wait at once (`Sim.waitLimit`), and how long after the skill's
+          /// own hit it strikes (`Sim.partDelay`).
+          WaitLimit: int
+          PartDelay: float
           SetsOff: int[]
           CDetonated: int
           /// The Glory and Combo the skill needs to be used (counter, amount), and the stacks
@@ -2021,6 +2030,8 @@ module Flat =
                       Takes = (match named' "Takes:" with Some st -> statuses.Id st | None -> -1)
                       CTakes = (match named' "Takes:" with Some st -> counts.Id("consumed:" + st) | None -> -1)
                       Waits = (named' "DetonatedBy:").IsSome
+                      WaitLimit = Sim.waitLimit s
+                      PartDelay = Sim.partDelay s
                       SetsOff =
                         [| for o in actor.Skills do
                             for part in o.Parts do
@@ -4720,7 +4731,7 @@ module Flat =
                         let n = pi.SeqHits
                         for i in 1 .. n do
                             if pi.Passing then schedule s at EPassing part target mult (at - s.Time)
-                            else schedule s (if n = 1 then at else s.Time + (at - s.Time) * float i / float n) EStrike part target mult 0.0
+                            else schedule s ((if n = 1 then at else s.Time + (at - s.Time) * float i / float n) + (if part = sid then 0.0 else pi.PartDelay)) EStrike part target mult 0.0
             // what happens when the use lands: when its first hit is due, after that hit
             if first < infinity && p.OnLand.Length > 0 && p.OnLand |> Array.exists (fun r -> at r.Applies sid) then
                 schedule s first ELand sid target 0.0 0.0
@@ -4800,7 +4811,7 @@ module Flat =
                         let infusion = pi.OnlyInfused
                         if (at s.A.BHas infusion) && (at s.A.BStacks infusion) > 1 then setBuff s infusion ((at s.A.BStacks infusion) - 1) (at s.A.BExpires infusion) (at s.A.BMods infusion)
                         else removeBuff s infusion
-                    elif pi.Waits && part >= 0 then put s.A.Waiting part (min 20 ((at s.A.Waiting part) + 1))
+                    elif pi.Waits && part >= 0 then put s.A.Waiting part (min pi.WaitLimit ((at s.A.Waiting part) + 1))
             // a detonator (or a warcry) sets off everything of that kind that waits
             // (how many wait is seen before any is set off: two parts of one name are each set
             // off for all that wait by that name)
@@ -5003,7 +5014,10 @@ module Flat =
         let ownCost =
             if skill.CostPerSecond <= 0.0 then ownCost
             else
-                let seconds = if System.Double.IsNaN seconds then max Constants.serverTick (useTime s sid) else seconds
+                // ("Modifiers to Cast / Attack Speed also affect this Skill's cost", see `Sim`)
+                let seconds =
+                    if skill.Mods |> List.exists (fun m -> m.Stat = Named "CostOverTimeWithSpeed") then skill.BaseTime
+                    elif System.Double.IsNaN seconds then max Constants.serverTick (useTime s sid) else seconds
                 (if s.A.LastUsed = sid then 0.0 else ownCost) + skill.CostPerSecond * seconds
         (ownCost + extraCost) * costMult / efficiency
 
@@ -5531,9 +5545,24 @@ module Flat =
             | Shock when flagQ ev qAllShocks -> allTypes
             | _ -> (at scalesOf (ailmentIndex a))
         let mutable sum = 0.0
-        for place in 0 .. types.Length - 1 do
-            let t = at types place
-            sum <- sum + (at un t)
+        if flagQ ev qSourcesChanged then
+            for i in 0 .. damageTypes.Length - 1 do
+                let dt = damageTypes.[i]
+                let t = typeIndex dt
+                let mutable counts = false
+                for place in 0 .. types.Length - 1 do
+                    if at types place = t then counts <- true
+                if not counts then
+                    for (b, u, q) in qSourceAlso do
+                        if b = a && u = dt && flagQ ev q then counts <- true
+                if counts then
+                    for (b, u, q) in qSourceNot do
+                        if b = a && u = dt && flagQ ev q then counts <- false
+                if counts then sum <- sum + (at un t)
+        else
+            for place in 0 .. types.Length - 1 do
+                let t = at types place
+                sum <- sum + (at un t)
         sum
 
     let private ailmentDuration (ev: Ev) (a: Ailment) =
@@ -6787,10 +6816,10 @@ module Flat =
                                   |> Map.add into ((Map.tryFind into m |> Option.defaultValue 0.0) + moved))
                             atk.Damage
                     // a critical hit is tested against evasion once more: evaded, it is an ordinary hit
-                    let crit = rng.Chance(atk.CritChance * v.EnemyCritChanceMult * (if blinded then v.BlindedEnemyCritMult else 1.0)) && not (hitChance < 100.0 && rng.Chance(100.0 - hitChance))
+                    let crit = rng.Chance(atk.CritChance * v.EnemyCritChanceMult * (if blinded then v.BlindedEnemyCritMult else 1.0) * (if marked then v.MarkedEnemyCritMult else 1.0)) && not (hitChance < 100.0 && rng.Chance(100.0 - hitChance))
                     // "Defend with X% of Armour against Projectile Attacks / Critical Hits"
                     let armourShare = (if atk.Melee then 1.0 else v.ArmourVsProjectiles) * (if crit then v.ArmourVsCrits else 1.0) * v.ArmourDefend
-                    let critMult = if crit then 1.0 + Constants.monsterBaseCritBonus / 100.0 * (1.0 - v.LessCritDamageTaken / 100.0) else 1.0
+                    let critMult = if crit then 1.0 + Constants.monsterBaseCritBonus / 100.0 * (1.0 - v.LessCritDamageTaken / 100.0) * (if blinded then v.BlindedEnemyCritBonusMult else 1.0) else 1.0
                     let shocked =
                         if (at s.A.BHas p.BShocked) && (at s.A.BExpires p.BShocked) > s.Time then (at s.A.BMods p.BShocked) |> List.sumBy (fun m -> m.Value) else 0.0
                     let unmitigated = incoming |> Map.map (fun _ d -> d * critMult)

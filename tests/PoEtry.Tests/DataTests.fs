@@ -284,7 +284,7 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
             // the arrow itself is an ordinary hit
             equal (box false) (box (Mods.flag Ctx.empty (Named "NoHitDamage") (ModDb.ofList s.Mods)))
         | Error e -> failwith e
-        let gem name = { Name = name; Level = 20; Quality = 0; Enabled = true; IsSupport = false; StatSet = 1; Minion = None; Count = None }
+        let gem name = { Name = name; Level = 20; Quality = 0; Enabled = true; IsSupport = false; StatSet = 1; Minion = None; Count = None; Corrupted = false }
         let b = { blank with Groups = [ { Label = ""; Slot = ""; Enabled = true; Gems = [ gem "Into the Breach" ] } ] }
         let flames only = Behaviours.periodics db.Value (sheetOf { b with ExtraLines = only }) b 5.0 |> List.tryPick (fun p -> match p.Action with GainTimedBuff (n, chance, d, cap, mods) -> Some(p.Every, chance, d, cap, mods) | _ -> None)
         match flames [] with
@@ -310,7 +310,7 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         | Error e -> failwith e)
 
     test "a fight starts with the charges the build can generate; against a lone boss not with what needs kills" (fun () ->
-        let gem name = { Name = name; Level = 20; Quality = 0; Enabled = true; IsSupport = false; StatSet = 1; Minion = None; Count = None }
+        let gem name = { Name = name; Level = 20; Quality = 0; Enabled = true; IsSupport = false; StatSet = 1; Minion = None; Count = None; Corrupted = false }
         let group name = { Label = ""; Slot = ""; Enabled = true; Gems = [ gem name ] }
         let start (b: PobBuild) (enemies: EnemyDef list) =
             let c = Setup.loadWith db.Value treeJson b Options.defaults
@@ -344,7 +344,7 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         | Mods [ m ] -> equal (box [ WhileBuff "FlaskEffect" ]) (box m.Conds)
         | m -> failwithf "%A" m
         // Mana Remnants at level 20: 281 mana each, one per 2 s from crits on ailing enemies, 25% on such kills
-        let gem name lvl = { Name = name; Level = lvl; Quality = 0; Enabled = true; IsSupport = false; StatSet = 1; Minion = None; Count = None }
+        let gem name lvl = { Name = name; Level = lvl; Quality = 0; Enabled = true; IsSupport = false; StatSet = 1; Minion = None; Count = None; Corrupted = false }
         let b = { blank with Groups = [ { Label = ""; Slot = ""; Enabled = true; Gems = [ gem "Mana Remnants" 20 ] } ]; ExtraLines = [ "Recover 2% of Maximum Mana when you collect a Remnant" ] }
         match Behaviours.manaRemnants db.Value (sheetOf b) b 1.0 with
         | Some r ->
@@ -355,7 +355,7 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         | None -> failwith "no mana remnants")
 
     test "a persistent skill that reserves life instead of spirit puts the character on low life" (fun () ->
-        let gem name support = { Name = name; Level = 20; Quality = 0; Enabled = true; IsSupport = support; StatSet = 1; Minion = None; Count = None }
+        let gem name support = { Name = name; Level = 20; Quality = 0; Enabled = true; IsSupport = support; StatSet = 1; Minion = None; Count = None; Corrupted = false }
         let group gems = { Label = ""; Slot = ""; Enabled = true; Gems = gems }
         // Wind Dancer 30 Spirit, Vitality II 40, Direstrike I 20, Cannibalism I 15: 105 Spirit; Atziri's
         // Communion: 0.66% of life per point instead -> 69.3% of life
@@ -710,7 +710,7 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         near (plain.Vitals.Str + 50.0) both.Vitals.Str)
 
     test "a character that gains from moving moves, if its skill can be used on the move" (fun () ->
-        let gem name = { Name = name; Level = 20; Quality = 0; Enabled = true; IsSupport = false; StatSet = 1; Minion = None; Count = None }
+        let gem name = { Name = name; Level = 20; Quality = 0; Enabled = true; IsSupport = false; StatSet = 1; Minion = None; Count = None; Corrupted = false }
         let group name = { Label = ""; Slot = ""; Enabled = true; Gems = [ gem name ] }
         let bow = "Weapon 1", "Rarity: Normal\nCrude Bow\n--------\n"
         let moving lines name =
@@ -745,7 +745,7 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         equal (box true) (box (has (part (built "Firestorm" None) "Ice Bolts") "OnlyInfused:ColdInfusion"))
         equal (box true) (box (has (built "Lightning Warp" None) "OnlyVs:Cullable"))
         // in a fight against a lone boss: no shock, no charge, no corpse
-        let gem name = { Name = name; Level = 20; Quality = 0; Enabled = true; IsSupport = false; StatSet = 1; Minion = None; Count = None }
+        let gem name = { Name = name; Level = 20; Quality = 0; Enabled = true; IsSupport = false; StatSet = 1; Minion = None; Count = None; Corrupted = false }
         let run name items =
             let b = { blank with Items = items; Groups = [ { Label = ""; Slot = ""; Enabled = true; Gems = [ gem name ] } ]; ExtraLines = [ "+5000 to maximum Mana"; "+5000 to Accuracy Rating" ] }
             let o = { Options.defaults with MaxTime = 10.0; Immortal = true }
@@ -806,7 +806,7 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         near 156.0 (let b = { blank with Items = [ item "Helmet" [ "Armour: 100"; "Idols socketed: 2"; "--------"; "+50 to Spirit" ] ]; ExtraLines = quest @ [ "+3 to Spirit per Idol socketed in your Equipment" ] } in Behaviours.spiritTotal (sheetOf b) b)
         near 150.0 (let b = { blank with Items = [ helmet ]; ExtraLines = quest } in Behaviours.spiritTotal (sheetOf b) b)
         // Skeletal Warriors: 20 Spirit each at level 20, the first two free; Herald of Thunder 30
-        let gem name = { Name = name; Level = 20; Quality = 0; Enabled = true; IsSupport = false; StatSet = 1; Minion = None; Count = None }
+        let gem name = { Name = name; Level = 20; Quality = 0; Enabled = true; IsSupport = false; StatSet = 1; Minion = None; Count = None; Corrupted = false }
         let group name = { Label = ""; Slot = ""; Enabled = true; Gems = [ gem name ] }
         let b = { blank with Items = [ helmet ]; ExtraLines = quest; Groups = [ group "Skeletal Warrior"; group "Herald of Thunder" ] }
         let uses = Behaviours.spiritUses db.Value (sheetOf b) b
@@ -828,7 +828,7 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         near (30.0 / 1.4) (uses |> List.sumBy (fun u -> u.Flat)))
 
     test "spirit reservation: granted skills are free, quality and tree efficiency, corrupted items" (fun () ->
-        let gem name q = { Name = name; Level = 20; Quality = q; Enabled = true; IsSupport = false; StatSet = 1; Minion = None; Count = None }
+        let gem name q = { Name = name; Level = 20; Quality = q; Enabled = true; IsSupport = false; StatSet = 1; Minion = None; Count = None; Corrupted = false }
         let group slot name q = { Label = ""; Slot = slot; Enabled = true; Gems = [ gem name q ] }
         let cost (b: PobBuild) name = Behaviours.spiritUses db.Value (sheetOf b) b |> List.filter (fun u -> u.Gem = name) |> List.sumBy (fun u -> u.Flat)
         // Cast on Critical: 100 Spirit; 0.5% reservation efficiency per quality
@@ -857,7 +857,8 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         near 3.6 (later "Explosive Grenade")
         near 4.0 (later "Frost Bomb")
         equal (box ([]: string list)) (box (Gems.unmodelledTypes db.Value "Frost Bomb" |> List.filter ((=) "DetonatesAfterTime")))
-        equal (box [ "DetonatesAfterTime" ]) (box (Gems.unmodelledTypes db.Value "Explosive Spear" |> List.filter ((=) "DetonatesAfterTime")))
+        // (a lodged Explosive Spear: its explosion waits the detonation time, Behaviours.detonation)
+        equal (box ([]: string list)) (box (Gems.unmodelledTypes db.Value "Explosive Spear" |> List.filter ((=) "DetonatesAfterTime")))
         // a skill with no gem of its own, by its name: Punch (the unarmed attack) is an attack
         match Gems.data db.Value "Punch" with
         | Some d -> equal (box true) (box (d.Types.Contains "Attack" && d.Types.Contains "Melee"))
@@ -874,7 +875,7 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         near 15.0 (cost { blank with ExtraLines = [ "Persistent Buffs have 50% less Reservation" ]; Groups = [ group "" "Herald of Thunder" 0 ] } "Herald of Thunder")
         // supports: Clarity II adds 20 Spirit to a persistent buff; Heightened Curse's 140% is for
         // the curse socketed in a meta gem, not for the meta gem
-        let sup name = { Name = name; Level = 1; Quality = 0; Enabled = true; IsSupport = true; StatSet = 1; Minion = None; Count = None }
+        let sup name = { Name = name; Level = 1; Quality = 0; Enabled = true; IsSupport = true; StatSet = 1; Minion = None; Count = None; Corrupted = false }
         let withGems gems = { blank with Groups = [ { Label = ""; Slot = ""; Enabled = true; Gems = gems } ] }
         near 50.0 (cost (withGems [ gem "Herald of Thunder" 0; sup "Clarity II" ]) "Herald of Thunder")
         near 100.0 (cost (withGems [ gem "Cast on Critical" 0; gem "Enfeeble" 0; sup "Heightened Curse" ]) "Cast on Critical")
@@ -912,7 +913,7 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         | Error e -> failwith e)
 
     test "Charged Staff: its shockwave is set off by quarterstaff attacks while the buff is up, with the gem's supports" (fun () ->
-        let gem name support = { Name = name; Level = 20; Quality = 0; Enabled = true; IsSupport = support; StatSet = 1; Minion = None; Count = None }
+        let gem name support = { Name = name; Level = 20; Quality = 0; Enabled = true; IsSupport = support; StatSet = 1; Minion = None; Count = None; Corrupted = false }
         let group gems = { Label = ""; Slot = ""; Enabled = true; Gems = gems }
         let fight (staffGems: PobGem list) charges =
             let b =
@@ -1060,7 +1061,7 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         | Error e -> failwith e)
 
     test "Blasphemy: socketed curses become auras at the gem's reduced effect" (fun () ->
-        let gem name support = { Name = name; Level = 20; Quality = 0; Enabled = true; IsSupport = support; StatSet = 1; Minion = None; Count = None }
+        let gem name support = { Name = name; Level = 20; Quality = 0; Enabled = true; IsSupport = support; StatSet = 1; Minion = None; Count = None; Corrupted = false }
         let group = { Label = ""; Slot = ""; Enabled = true; Gems = [ gem "Blasphemy" false; gem "Despair" false ] }
         let b = { blank with Groups = [ group ] }
         let sheet = sheetOf b
@@ -1088,7 +1089,7 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
             near 1.2 (Behaviours.curseDelay db.Value (ModDb.ofList (match StatMap.meaning "curse_delay_+%" -20.0 with Mods ms -> ms | _ -> [])) setup s)
             near 0.0 (Behaviours.curseDelay db.Value (ModDb.ofList (match StatMap.meaning "unique_no_curse_delay" 1.0 with Mods ms -> ms | _ -> [])) setup s)
         | Error e -> failwith e
-        let gem name = { Name = name; Level = 20; Quality = 0; Enabled = true; IsSupport = false; StatSet = 1; Minion = None; Count = None }
+        let gem name = { Name = name; Level = 20; Quality = 0; Enabled = true; IsSupport = false; StatSet = 1; Minion = None; Count = None; Corrupted = false }
         let b = { blank with Groups = [ { Label = ""; Slot = ""; Enabled = true; Gems = [ gem "Despair" ] } ]; ExtraLines = [ "+5000 to maximum Mana" ] }
         let o = { Options.defaults with MaxTime = 3.0; Immortal = true }
         let c = Setup.loadWith db.Value treeJson b o
@@ -1098,7 +1099,7 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         equal (box 1) (box out.Counts.["apply:Curse:Despair"]))
 
     test "Ghost Dance: a shroud is lost when hit and energy shield regenerates from evasion" (fun () ->
-        let gem name = { Name = name; Level = 20; Quality = 0; Enabled = true; IsSupport = false; StatSet = 1; Minion = None; Count = None }
+        let gem name = { Name = name; Level = 20; Quality = 0; Enabled = true; IsSupport = false; StatSet = 1; Minion = None; Count = None; Corrupted = false }
         let b = { blank with Groups = [ { Label = ""; Slot = ""; Enabled = true; Gems = [ gem "Ghost Dance" ] } ]; ExtraLines = [ "+1000 to Evasion Rating"; "+100 to Spirit" ] }
         let c = Setup.loadWith db.Value treeJson b Options.defaults
         // three shrouds at most, all there at the start; one every 10.1 s at level 20
@@ -1114,7 +1115,7 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         | None -> failwith "no Ghost Dance rule")
 
     test "Grim Pillars: the pillars stay as Ice Crystals and explode once enough damage is dealt beside them" (fun () ->
-        let gem name = { Name = name; Level = 20; Quality = 0; Enabled = true; IsSupport = false; StatSet = 1; Minion = None; Count = None }
+        let gem name = { Name = name; Level = 20; Quality = 0; Enabled = true; IsSupport = false; StatSet = 1; Minion = None; Count = None; Corrupted = false }
         let run lines =
             let b = { blank with Groups = [ { Label = ""; Slot = ""; Enabled = true; Gems = [ gem "Grim Pillars" ] } ]; ExtraLines = lines }
             let o = { Options.defaults with MaxTime = 10.0; Immortal = true }
@@ -1134,7 +1135,7 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         if perUse < 1.0 || perUse > 6.0 then failwithf "%.1f explosions per use" perUse)
 
     test "Shattering Spite: spear hits pile up Bloodstone Lances, thirty are shattered at once" (fun () ->
-        let gem name = { Name = name; Level = 20; Quality = 0; Enabled = true; IsSupport = false; StatSet = 1; Minion = None; Count = None }
+        let gem name = { Name = name; Level = 20; Quality = 0; Enabled = true; IsSupport = false; StatSet = 1; Minion = None; Count = None; Corrupted = false }
         let run lines =
             let b = { blank with
                         Items = [ "Weapon 1", "Rarity: Normal\nHardwood Spear\n--------\n" ]
@@ -1165,7 +1166,7 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         | Error e -> failwith e)
 
     test "Righteous Descent: a Fragment of Divinity empowers it and saves its cooldown" (fun () ->
-        let gem name = { Name = name; Level = 20; Quality = 0; Enabled = true; IsSupport = false; StatSet = 1; Minion = None; Count = None }
+        let gem name = { Name = name; Level = 20; Quality = 0; Enabled = true; IsSupport = false; StatSet = 1; Minion = None; Count = None; Corrupted = false }
         let run lines =
             let b = { blank with
                         Items = [ "Weapon 1", "Rarity: Normal\nHardwood Spear\n--------\n" ]

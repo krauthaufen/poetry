@@ -338,6 +338,10 @@ module Gems =
     /// Skill data for a gem name.
     let data (db: GameDb) name = skillOfGem db name
 
+    /// Skills that put something down which explodes after the skill's detonation time, the
+    /// explosion being a part of its own (Behaviours.detonation): a lodged Explosive Spear.
+    let lodged = set [ "Explosive Spear" ]
+
     /// Skill types that only say which supports fit or how the skill is aimed and animated:
     /// nothing to simulate.
     let private descriptiveTypes =
@@ -406,7 +410,7 @@ module Gems =
         |> Option.map (fun d -> if d.Types.Contains "CrossbowAmmoSkill" then shotOf db name |> Option.defaultValue d else d)
         |> Option.map (fun d ->
             // (a detonation after a time is played for grenades and Frost Bomb: their hit's delay)
-            let fused = d.Types.Contains "Grenade" || d.Name = "Frost Bomb"
+            let fused = d.Types.Contains "Grenade" || d.Name = "Frost Bomb" || lodged.Contains d.Name
             // (what Grim Pillars and Oil Barrage leave on the ground is played: Ice Crystals, Oil Ground)
             let grounded = d.Name = "Grim Pillars" || d.Name = "Oil Barrage"
             let played t = match Map.tryFind t playedTypes with Some [] -> true | Some names -> List.contains d.Name names | None -> false
@@ -970,7 +974,7 @@ module Gems =
          // Malediction's corpses (summons)
          let cov = if secondaryDurationRead.Contains data.Name then { cov with Unsimulated = cov.Unsimulated |> List.filter (fun (k, _) -> k <> "base_secondary_skill_effect_duration") } else cov
          // the detonation time is read where the hit waits for it (HitDelay above) and for Toxic Domain's pustule
-         if (data.Types.Contains "DetonatesAfterTime" && (data.Types.Contains "Grenade" || data.Name = "Frost Bomb")) || data.Name = "Toxic Domain" then
+         if (data.Types.Contains "DetonatesAfterTime" && (data.Types.Contains "Grenade" || data.Name = "Frost Bomb" || lodged.Contains data.Name)) || data.Name = "Toxic Domain" then
              { cov with Unsimulated = cov.Unsimulated |> List.filter (fun (k, _) -> k <> "base_skill_detonation_time" && k <> "support_fast_forward_detonation_time_+%_final") }
          else cov)
 
@@ -988,7 +992,7 @@ module Gems =
         if sk.HitDelay <= 0.0 || not (sk.Tags.Contains(Tag "Grenade")) then sk
         else
             let ctx = { Ctx.empty with SkillName = sk.Name; SkillTags = sk.Tags }
-            let k = Mods.inc ctx [ Named "GrenadeFuse" ] (ModDb.addList sk.Mods characterMods)
+            let k = Mods.inc ctx [ Named "GrenadeFuse" ] (ModDb.addList sk.Mods characterMods) * Mods.inc ctx [ Named "DetonationTime" ] (ModDb.addList sk.Mods characterMods)
             if k = 1.0 then sk else { sk with HitDelay = sk.HitDelay * max 0.0 k }
 
     let private speedAsDamage (characterMods: ModDb) (sk: Skill) : Skill =

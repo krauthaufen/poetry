@@ -13,7 +13,7 @@ let private blank : PobBuild =
     { Level = 1; ClassName = "Witch"; Ascendancy = ""; Items = []; TreeNodes = []; TreeNodesSet1 = []; TreeNodesSet2 = []
       Groups = []; MainGroup = 1; Config = Map.empty; TreeOverrides = Map.empty; ExtraLines = [] }
 
-let private gem name = { Name = name; Level = 20; Quality = 0; Enabled = true; IsSupport = false; StatSet = 1; Minion = None; Count = None }
+let private gem name = { Name = name; Level = 20; Quality = 0; Enabled = true; IsSupport = false; StatSet = 1; Minion = None; Count = None; Corrupted = false }
 let private support name = { gem name with Level = 1; IsSupport = true }
 let private group gems = { Label = ""; Slot = ""; Enabled = true; Gems = gems }
 
@@ -1932,7 +1932,7 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         // what the engine does not read stays listed
         equal (box true) (box (List.contains "volcano_delay_between_slams_ms" volcano))
         equal (box false) (box (List.contains "Hazard" (Gems.unmodelledTypes db.Value "Spearfield")))
-        equal (box true) (box (List.contains "DetonatesAfterTime" (Gems.unmodelledTypes db.Value "Explosive Spear")))
+        equal (box true) (box (List.contains "CreatesGroundEffect" (Gems.unmodelledTypes db.Value "Explosive Spear")))
         equal (box false) (box (List.contains "Orb" (Gems.unmodelledTypes db.Value "Orb of Storms"))))
 
     test "stats: elemental conversion, consumed states, culling under its other id, states of a while ago, spell increases for attacks" (fun () ->
@@ -2286,3 +2286,299 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         equal 1 (count o "flask:life")
         equal 2 (count (Sim.run (fight false) 1u) "uses:Bolt")
         same (fight true) seeds)
+
+    // ---- round 16 ----
+
+    test "corrupted gems' levels; a channel's cost by the second that goes with its speed; what counts the different skills used" (fun () ->
+        // "+N to Level of all Corrupted (Spell) Skill Gems": the corrupted skill gems, a spell both
+        let b =
+            { blank with
+                Groups = [ group [ { gem "Spark" with Corrupted = true }; { support "Pierce" with Corrupted = true } ]; group [ gem "Fireball" ]; group [ { gem "Lightning Arrow" with Corrupted = true } ] ] }
+        let ms = mods "corrupted_skill_gem_level_+" 1.0 @ mods "corrupted_spell_skill_gem_level_+" 2.0
+        let levels = (Setup.corruptedLevels db.Value ms b).Groups |> List.map (fun g -> g.Gems |> List.map (fun x -> x.Level))
+        equal (box [ [ 23; 1 ]; [ 20 ]; [ 21 ] ]) (box levels)
+        // a channel of 10 mana a second whose use takes 1 s, twice as fast: 5 mana a use; where
+        // speed also affects the cost, 20 a second: 10 a use. 100 mana and none coming in: 20 uses, or 10
+        let beam = { Skill.make "Beam" [ Spell; Channelling ] with BaseDamage = Map.ofList [ Fire, Range.fixedAt 100.0 ]; BaseCrit = 0.0; CostPerSecond = 10.0 }
+        let foe = { EnemyDef.atLevel 83 1e9 with Mods = []; Attack = None }
+        let channel (skill: Skill) =
+            let player =
+                { Actor.make "Player" [ Mod.more Speed 100.0 ] [ skill ] with
+                    Rotation = [ Actor.always "Beam" ]
+                    Vitals = Some { PlayerStats.basic 100.0 100.0 with ManaRegen = 0.0 } }
+            Fight.single foe player 30.5
+        let withSpeed = { beam with Mods = mods "cast_speed_modifiers_apply_to_over_time_cost" 1.0 }
+        equal 20 (count (Sim.run (channel beam) 1u) "uses:Beam")
+        equal 10 (count (Sim.run (channel withSpeed) 1u) "uses:Beam")
+        equal (box (mods "cast_speed_modifiers_apply_to_over_time_cost" 1.0)) (box (mods "attack_speed_modifiers_apply_to_over_time_cost" 1.0))
+        same (channel beam) seeds
+        same (channel withSpeed) seeds
+        // "100% increased Damage for each different Spell you've Cast in the last eight seconds":
+        // two spells of 100 a hit and 1 s a cast, one after the other. The first cast counts
+        // itself (200), from the second on both are counted (300): 200 + 4 x 300 in 5 s
+        let spell name = { Skill.make name [ Spell ] with BaseDamage = Map.ofList [ Fire, Range.fixedAt 100.0 ]; BaseCrit = 0.0 }
+        let counting =
+            { Actor.make "Player" [ Mod.inc (Damage AllDamage) 100.0 |> Mod.whenever (PerStack("Different:Spell:8", 1.0)) ] [ spell "One"; spell "Two"; { spell "Never" with Tags = Set.ofList [ Spell; Triggered ] } ] with
+                Rotation = [ { Use = "Two"; When = fun v -> v.LastUsed = "One" }; Actor.always "One" ] }
+            |> Behaviours.differentUsed
+        equal 2 (counting.Mods.Length)
+        equal 2 (counting.Rules.Length)
+        let f = Fight.single foe counting 5.2
+        near (200.0 + 4.0 * 300.0) ((Sim.run f 1u).DamageBy |> Map.toList |> List.sumBy snd)
+        same f seeds
+        // what the ids are: the rest of the id, once for each
+        equal (box [ PerStack("Different:Warcry:4", 1.0) ]) (box (mods "damage_+%_per_different_warcry_used_recently" 5.0).Head.Conds)
+        equal (box (GainAs(Physical, Fire), 4.0)) (box (let m = (mods "non_skill_base_all_damage_%_to_gain_as_fire_per_different_grenade_type_fired_in_past_8_seconds" 4.0).Head in m.Stat, m.Value))
+        equal (box [ PerStack("Different:Ammo:10", 1.0); SkillIs Crossbow ]) (box (mods "crossbow_damage_+%_per_ammo_type_fired_in_past_10_seconds" 5.0).Head.Conds))
+
+    test "what waits to be set off waits up to the skill's own limit; a lodged spear's explosion comes after its detonation time" (fun () ->
+        let foe = { EnemyDef.atLevel 83 1e9 with Mods = []; Attack = None }
+        let hit name dmg tags = { Skill.make name tags with BaseDamage = Map.ofList [ Physical, Range.fixedAt dmg ]; BaseCrit = 0.0 }
+        // a bolt whose explosion waits for a Detonator, and a Detonator with a cooldown of 5.5 s:
+        // it is used at 0 (nothing waits) and at 6, after five bolts. With "Maximum of 3 active
+        // Bolts" three explosions go off, without it all five
+        let bolts (limit: Mod list) =
+            let explosion = { hit "Bolt: Explosion" 100.0 [ Attack ] with Mods = Mod.flag (Named "DetonatedBy:Type:Detonator") :: limit }
+            let bolt = { hit "Bolt" 10.0 [ Attack ] with Parts = [ explosion ] }
+            let spark = { hit "Spark" 1.0 [ Attack; Tag "Type:Detonator" ] with Cooldown = Some 5.5 }
+            let player = { Actor.make "Player" [ Mod.base' (Named "Accuracy") 1e9 ] [ spark; bolt ] with Rotation = [ Actor.always "Spark"; Actor.always "Bolt" ] }
+            Fight.single foe player 7.5
+        equal 5 (count (Sim.run (bolts []) 1u) "hits:Bolt: Explosion")
+        equal 3 (count (Sim.run (bolts (mods "stormblast_bolts_maximum_active_bolt_count" 3.0)) 1u) "hits:Bolt: Explosion")
+        equal (box (mods "spike_slam_max_spikes" 6.0)) (box [ Mod.base' (Named "WaitLimit") 6.0 ])
+        same (bolts (mods "stormblast_bolts_maximum_active_bolt_count" 3.0)) seeds
+        // a spear of 1 s a throw whose explosion comes 2.5 s after it lands: in 6.2 s six spears
+        // land (at 1 .. 6) and the first three have exploded (at 3.5, 4.5, 5.5)
+        let lodged =
+            let explosion = { hit "Spear: Explosion" 100.0 [ Attack ] with Mods = [ Mod.base' (Named "PartDelay") 2.5 ] }
+            let player = { Actor.make "Player" [ Mod.base' (Named "Accuracy") 1e9 ] [ { hit "Spear" 10.0 [ Attack ] with Parts = [ explosion ] } ] with Rotation = [ Actor.always "Spear" ] }
+            Fight.single foe player 6.2
+        let o = Sim.run lodged 1u
+        equal 6 (count o "hits:Spear")
+        equal 3 (count o "hits:Spear: Explosion")
+        same lodged seeds
+        // the gem: 2.5 s, and 30% less with Fast Forward if the support says so
+        let b = { blank with Level = 90; Groups = [ group [ gem "Explosive Spear" ] ]; Items = [ "Weapon 1", "Rarity: Normal\nHardwood Spear\n" ] }
+        let c = load b Options.defaults
+        match Setup.pressed c Options.defaults "Explosive Spear" with
+        | Some p ->
+            let delays = p.Skill.Parts |> List.map (fun part -> part.Name, Sim.partDelay part)
+            equal (box [ "Explosive Spear: Explosion", 2.5; "Explosive Spear: Frenzy-Charged", 0.0 ]) (box delays)
+        | None -> failwith "Explosive Spear cannot be pressed"
+        equal (box ([]: string list)) (box (Gems.unmodelledTypes db.Value "Explosive Spear" |> List.filter (fun t -> t = "DetonatesAfterTime")))
+        equal (box (Mod.inc (Named "DetonationTime") 20.0)) (box (mods "skill_detonation_time_+%" 20.0).Head))
+
+    test "Puppet Master's stacks from the minions' Command skills; an Archon of Undeath for ten seconds and its recovery" (fun () ->
+        let foe = { EnemyDef.atLevel 83 1e9 with Mods = []; Attack = None }
+        let hit name dmg seconds tags = { Skill.make name tags with BaseDamage = Map.ofList [ Physical, Range.fixedAt dmg ]; BaseCrit = 0.0; BaseTime = seconds }
+        let sheet (ms: Mod list) = { (load blank Options.defaults).Sheet with Mods = ms }
+        let idle = { Actor.make "Player" [] [] with Rotation = [] }
+        let sure = [ Mod.base' (Named "Accuracy") 1e9 ]
+        let dealt (o: Outcome) (k: string) = Map.tryFind k o.DamageBy |> Option.defaultValue 0.0
+        // Puppet Master, 100% to gain a stack with every command, +1 to maximum stacks, 50%
+        // increased effect: 15% increased damage with Command skills a stack, up to 6. The n-th
+        // command hits with min(n, 6) stacks (its own stack is gained as it starts)
+        let puppet = Behaviours.puppetMaster (sheet (mods "surpassing_chance_%_to_gain_1_puppeteer_stack_on_using_command_skill" 100.0 @ mods "max_puppet_master_stacks_+" 1.0 @ mods "puppet_master_effect_+%" 50.0))
+        match puppet with
+        | [ { Hook = OnUse; Chance = 100.0; Reaction = GrantBuff ("Puppet Master", seconds, 6, ms) } ] ->
+            near 8.0 seconds
+            equal (box [ Damage AllDamage, 15.0; Speed, 4.5 ]) (box (ms |> List.map (fun m -> m.Stat, m.Value)))
+        | other -> failwithf "unexpected %A" other
+        equal 0 (Behaviours.puppetMaster (sheet [])).Length
+        let commanded =
+            let minion = { Actor.make "Brute" sure [ hit "Brute: Smash" 100.0 1.0 [ Attack; Tag "Command" ]; hit "Brute: Jab" 100.0 1.0 [ Attack ] ] with Rotation = [ Actor.always "Brute: Smash" ]; Rules = puppet }
+            { Fight.single foe idle 12.2 with Minions = [ minion ] }
+        let o = Sim.run commanded 1u
+        let n = count o "hits:Brute: Smash"
+        equal (box true) (box (n >= 12))
+        near ([ 1 .. n ] |> List.sumBy (fun k -> 100.0 * (1.0 + 0.15 * float (min k 6)))) (dealt o "Brute: Smash (hit)")
+        same commanded seeds
+        // Archon of Undeath, 100% on a command: 25% more damage for all minions for 10 s, then
+        // 20 s in which none is gained. A commander that hits every 0.7 s and a follower every
+        // 0.9 s, 20.2 s: 14 of 28 and 11 of 22 hits fall into the ten seconds
+        let undeath = Behaviours.archonOfUndeath (sheet (mods "chance_%_to_gain_archon_of_undeath_on_using_command_skill" 100.0)) "ArchonOfUndeathOnCommand" (WithTag(Tag "Command"))
+        match undeath with
+        | Some (skill, rules) ->
+            near 30.0 skill.Cooldown.Value
+            let commander = { Actor.make "Mage" sure [ hit "Mage: Bomb" 100.0 0.7 [ Spell; Tag "Command" ]; skill ] with Rotation = [ Actor.always "Mage: Bomb" ]; Rules = rules }
+            let follower = { Actor.make "Warrior" sure [ hit "Warrior: Slash" 100.0 0.9 [ Attack ] ] with Rotation = [ Actor.always "Warrior: Slash" ] }
+            let f = { Fight.single foe idle 20.2 with Minions = [ commander; follower ] }
+            let o = Sim.run f 1u
+            equal 1 (count o "trigger:Archon of Undeath")
+            near (14.0 * 125.0 + 14.0 * 100.0) (dealt o "Mage: Bomb (hit)")
+            near (11.0 * 125.0 + 11.0 * 100.0) (dealt o "Warrior: Slash (hit)")
+            same f seeds
+        | None -> failwith "no Archon of Undeath"
+        equal (box true) (box (Behaviours.archonOfUndeath (sheet []) "ArchonOfUndeathOnCommand" AnySkill).IsNone)
+        equal (box (Named "ArchonOfUndeathOnOffering")) (box (mods "chance_%_to_gain_archon_of_undeath_when_you_create_an_offering" 20.0).Head.Stat)
+        equal (box (Mod.inc (Named "PuppetMasterDuration") 30.0)) (box (mods "puppet_master_duration_+%" 30.0).Head))
+
+    test "Ancestral Boost: a slam's 30% more damage every few seconds (Fist of War), twice with double effect, after a Heavy Stun" (fun () ->
+        let foe = { EnemyDef.atLevel 83 1e9 with Mods = []; Attack = None }
+        let slam = { Skill.make "Slam" [ Attack; Melee; Slam ] with BaseDamage = Map.ofList [ Physical, Range.fixedAt 100.0 ]; BaseCrit = 0.0 }
+        // a slam a second, a boost every 2.5 s: the first slam is boosted, then those that
+        // start at 3, 6 and 9. 12 slams, 4 of them at 130
+        let boosted (s: Skill) =
+            let clock = { Skill.make "Slam: Ancestral Boost" [ Triggered ] with BaseCrit = 0.0; Hits = []; Cooldown = Some 2.5 }
+            let rules =
+                [ { Hook = OnUse; Filter = Called "Slam"; Chance = 100.0; Reaction = RemoveBuff Behaviours.ancestralBoostBuff }
+                  { Hook = OnUse; Filter = Called "Slam"; Chance = 100.0; Reaction = TriggerSkill clock.Name }
+                  { Hook = OnUse; Filter = Called clock.Name; Chance = 100.0; Reaction = SetStacks(Behaviours.ancestralBoostBuff, 1) } ]
+            let player = { Actor.make "Player" [ Mod.base' (Named "Accuracy") 1e9 ] [ s; clock ] with Rotation = [ Actor.always "Slam" ]; Rules = rules } |> Behaviours.ancestralBoosted
+            Fight.single foe player 12.2
+        let dealt f = (Sim.run f 1u).DamageBy |> Map.toList |> List.sumBy snd
+        near (8.0 * 100.0 + 4.0 * 130.0) (dealt (boosted slam))
+        same (boosted slam) seeds
+        // a strike gains nothing of it but what "Ancestrally Boosted Attacks" have: 50% increased damage
+        let strike = { slam with Tags = Set.ofList [ Attack; Melee; Strike ] }
+        near (12.0 * 100.0) (dealt (boosted strike))
+        near (8.0 * 100.0 + 4.0 * 150.0) (dealt (boosted { strike with Mods = mods "ancestral_boosted_attack_damage_+%" 50.0 }))
+        // the gems: Fist of War I every 6 s; III every 14 s with double effect (60% more in all)
+        let build (support': string) = { blank with Level = 90; Groups = [ group [ gem "Earthquake"; support support' ] ]; Items = [ "Weapon 1", "Rarity: Normal\nAkoyan Club\n" ] }
+        let pressedWith s =
+            let c = load (build s) Options.defaults
+            match Setup.pressed c Options.defaults "Earthquake" with
+            | Some p -> p
+            | None -> failwith "Earthquake cannot be pressed"
+        let one, three = pressedWith "Fist of War I", pressedWith "Fist of War III"
+        let clockOf (p: Setup.Pressed) = p.Extra |> List.find (fun s -> s.Name = "Earthquake: Ancestral Boost")
+        near 6.0 (clockOf one).Cooldown.Value
+        near 14.0 (clockOf three).Cooldown.Value
+        let more (p: Setup.Pressed) = p.Skill.Mods |> List.filter (fun m -> m.Source = "Ancestral Boost" && m.Kind = More) |> List.map (fun m -> m.Value)
+        equal 0 (more one).Length
+        near (100.0 * (1.6 / 1.3 - 1.0)) (more three).Head
+        // after a Heavy Stun on a Rare or Unique enemy, for the line's seconds
+        let c = load blank Options.defaults
+        match Behaviours.ancestralBoostOnStun { c.Sheet with Mods = mods "next_attack_is_ancestrally_boosted_for_x_seconds_on_heavy_stunning_unique_or_rare_enemy" 6.0 } with
+        | [ { Hook = OnInflict HeavyStun; Reaction = IfEnemyHas ("RareOrUnique", GrantBuff (b, seconds, 1, [])) } ] ->
+            equal (box Behaviours.ancestralBoostBuff) (box b)
+            near 6.0 seconds
+        | other -> failwithf "unexpected %A" other)
+
+    test "Pinned enemies cannot evade the attacks of a character that says so" (fun () ->
+        // 100 accuracy against 5000 evasion: few attacks hit; against a Pinned enemy, with "Your
+        // Hits cannot be Evaded by Pinned Enemies", every one of the ten
+        let foe = { EnemyDef.atLevel 83 1e9 with Mods = [ Mod.base' Evasion 5000.0 ]; Attack = None }
+        let jab = { Skill.make "Jab" [ Attack; Melee ] with BaseDamage = Map.ofList [ Physical, Range.fixedAt 100.0 ]; BaseCrit = 0.0 }
+        let fight (ms: Mod list) (pinned: bool) =
+            let player =
+                { Actor.make "Player" (Mod.base' (Named "Accuracy") 100.0 :: ms) [ jab ] with
+                    Rotation = [ Actor.always "Jab" ]
+                    Rules = (if pinned then [ { Hook = OnUse; Filter = AnySkill; Chance = 100.0; Reaction = ApplyDebuff("Pinned", 1e6, 1, []) } ] else []) }
+            Fight.single foe player 10.2
+        let sure = mods "pinned_enemies_cannot_evade_your_attacks" 1.0
+        let hits f = count (Sim.run f 1u) "hits:Jab"
+        equal 10 (hits (fight sure true))
+        equal (box true) (box (hits (fight [] true) < 8 && hits (fight sure false) < 8))
+        same (fight sure true) seeds
+        same (fight sure false) seeds)
+
+    test "what an ailment scales from besides its own damage type, or in its place" (fun () ->
+        let foe = { EnemyDef.atLevel 83 1e15 with Mods = []; Attack = None }
+        let fight (t: DamageType) (dmg: float) (ms: Mod list) =
+            let bolt = { Skill.make "Bolt" [ Spell ] with BaseDamage = Map.ofList [ t, Range.fixedAt dmg ]; BaseCrit = 0.0 }
+            Fight.single foe { Actor.make "Player" ms [ bolt ] with Rotation = [ Actor.always "Bolt" ] } 5.2
+        let run t dmg ms = Sim.run (fight t dmg ms) 1u
+        let has (o: Outcome) k = count o ("inflict:" + k) > 0
+        // a fire hit of far more than the ailment threshold Ignites and does not Shock; with "Fire
+        // Damage from Hits Contributes to Shock Chance instead of Flammability and Ignite
+        // Magnitudes" it Shocks and never Ignites
+        let plain, shocking = run Fire 1e9 [], run Fire 1e9 (mods "unique_fire_damage_shocks" 1.0)
+        equal (box (true, false)) (box (has plain "Ignite", has plain "Shock"))
+        equal (box (false, true)) (box (has shocking "Ignite", has shocking "Shock"))
+        // cold: Chill and Freeze; with "Contributes to Flammability and Ignite Magnitudes instead
+        // of Chill Magnitude or Freeze Buildup" an Ignite and neither
+        let cold, burning = run Cold 1e9 [], run Cold 1e9 (mods "unique_cold_damage_ignites" 1.0)
+        equal (box (false, true)) (box (has cold "Ignite", has cold "Chill" || has cold "Freeze"))
+        equal (box (true, false)) (box (has burning "Ignite", has burning "Chill" || has burning "Freeze"))
+        // lightning: Shock; with "Contributes to Freeze Buildup instead of Shock Chance" a Freeze and no Shock
+        let lightning, freezing = run Lightning 1e9 [], run Lightning 1e9 (mods "unique_lightning_damage_freezes" 1.0)
+        equal (box (true, false)) (box (has lightning "Shock", has lightning "Freeze"))
+        equal (box (false, true)) (box (has freezing "Shock", has freezing "Freeze"))
+        // chaos shocks only where "Chaos Damage from Hits also Contributes to Shock Chance"
+        equal (box (false, true)) (box (has (run Chaos 1e9 []) "Shock", has (run Chaos 1e9 (mods "chaos_damage_can_shock" 1.0)) "Shock"))
+        // "Elemental Damage also Contributes to Bleeding Magnitude": a fire hit that always
+        // inflicts Bleeding makes the Bleeding a physical hit of the same damage makes
+        let bleeds = [ Mod.base' (AilmentChance Bleed) 100.0 ]
+        let bleeding (o: Outcome) = Map.tryFind "Bleed" o.DamageBy |> Option.defaultValue 0.0
+        near 0.0 (bleeding (run Fire 1000.0 bleeds))
+        let fromFire = bleeding (run Fire 1000.0 (bleeds @ mods "elemental_damage_can_inflict_bleeding" 1.0))
+        equal (box true) (box (fromFire > 0.0))
+        near (bleeding (run Physical 1000.0 bleeds)) fromFire
+        // the line that makes every element count for the ailments of all three
+        let all = mods "elemental_damage_also_contributes_to_flammability_ignite_chill_freeze_and_shock" 1.0
+        let o = run Fire 1e9 all
+        equal (box (true, true, true)) (box (has o "Ignite", has o "Shock", has o "Chill" || has o "Freeze"))
+        for f in [ fight Fire 1e9 (mods "unique_fire_damage_shocks" 1.0); fight Cold 1e9 (mods "unique_cold_damage_ignites" 1.0); fight Lightning 1e9 (mods "unique_lightning_damage_freezes" 1.0)
+                   fight Fire 1000.0 (bleeds @ mods "elemental_damage_can_inflict_bleeding" 1.0); fight Fire 1e9 all; fight Physical 1e9 (mods "physical_damage_from_hits_also_contributes_to_chill_and_freeze" 1.0) ] do
+            same f seeds)
+
+    test "enemies one marks cannot deal critical hits; enemies one blinds have no critical damage bonus" (fun () ->
+        let v = (load { blank with ExtraLines = [ "Enemies you Mark cannot deal Critical Hits" ] } Options.defaults).Vitals
+        near 0.0 v.MarkedEnemyCritMult
+        near 1.0 v.BlindedEnemyCritBonusMult
+        equal (box (Mod.flag (Named "BlindedEnemyNoCritBonus"))) (box (mods "enemies_you_blind_have_no_crit_bonus_for_x_seconds" 4.0).Head)
+        // a monster that always crits, 10 a hit, one hit a second for ten seconds
+        let brute =
+            { EnemyDef.make Rarity.defaults 70 Unique "brute" (Vec.make 5.0 0.0) with
+                Life = 1e9; Mods = []
+                Attack = Some { Interval = 1.0; Damage = Map.ofList [ Physical, 10.0 ]; Accuracy = 1e9; Range = 20.0; CritChance = 100.0; Melee = true } }
+        let bolt (ms: Mod list) = { Skill.make "Bolt" [ Spell ] with BaseDamage = Map.ofList [ Chaos, { Min = 1.0; Max = 1.0 } ]; BaseTime = 0.25; BaseCrit = 0.0; Mods = ms }
+        let fight (vitals: PlayerStats) (skill: Skill) (rules: Rule list) =
+            Fight.single brute { Actor.make "Player" [] [ skill ] with Vitals = Some { vitals with StunThreshold = 1e9; AilmentThreshold = 1e9 }; Rules = rules } 10.0
+        let basic = PlayerStats.basic 1e6 0.0
+        // marked by every use: no critical hit once it is marked (the first hit may come before)
+        let marking = [ { Hook = OnUse; Filter = AnySkill; Chance = 100.0; Reaction = ApplyCurse("Mark:Test", 100.0, []) } ]
+        let crits f = count (Sim.run f 1u) "enemy:crit"
+        equal (box true) (box (crits (fight basic (bolt []) marking) >= 5))
+        equal (box true) (box (crits (fight { basic with MarkedEnemyCritMult = 0.0 } (bolt []) marking) <= 1))
+        equal (box true) (box (crits (fight { basic with MarkedEnemyCritMult = 0.0 } (bolt []) []) >= 5))
+        same (fight { basic with MarkedEnemyCritMult = 0.0 } (bolt []) marking) seeds
+        // blinded by every hit: its critical hits deal what an ordinary hit deals
+        let blinding = bolt [ Mod.base' (AilmentChance Blind) 100.0 ]
+        let o = Sim.run (fight { basic with BlindedEnemyCritBonusMult = 0.0 } blinding []) 1u
+        let full = Sim.run (fight basic blinding []) 1u
+        let extra = Constants.monsterBaseCritBonus / 100.0
+        equal (box true) (box (full.DamageTaken > o.DamageTaken * (1.0 + 0.5 * extra)))
+        equal (box true) (box (o.DamageTaken <= full.DamageTaken / (1.0 + extra) + 10.0 * extra + 1e-6))
+        same (fight { basic with BlindedEnemyCritBonusMult = 0.0 } blinding []) seeds)
+
+    test "attack speed per 400 Accuracy Rating, up to 20%" (fun () ->
+        let m = (mods "attack_speed_+%_per_200_accuracy_rating" 4.0).Head
+        equal (box (Speed, Inc, 4.0, [ PerStack("AccuracyUpTo:2000", 400.0); SkillIs Attack ])) (box (m.Stat, m.Kind, m.Value, m.Conds))
+        // a level 1 character with +1000 to Accuracy Rating: 1000 and 6 per Dexterity, counted up
+        // to the 2000 that make 20%; with +5000 the 2000
+        let counted (line: string) =
+            let c = load { blank with ExtraLines = [ line; "4% increased Attack Speed per 400 Accuracy Rating, up to 20%" ] } Options.defaults
+            let player = Setup.player c Options.defaults [] None
+            let f = Setup.fight c Options.defaults player [ EnemyDef.atLevel 83 1e9 ]
+            c.Vitals.Dex, f.Player.Resources |> List.tryPick (fun (k, n) -> if k = "AccuracyUpTo:2000" then Some n else None) |> Option.defaultValue -1
+        let dex, some = counted "+1000 to Accuracy Rating"
+        equal (int (1000.0 + 6.0 * dex)) some
+        equal 2000 (snd (counted "+5000 to Accuracy Rating"))
+        // 2 full 400s of 1000-odd: 8% increased attack speed, and nothing for a spell
+        let ctx tags = { Ctx.empty with SkillTags = Set.ofList tags; Buffs = Map.ofList [ "AccuracyUpTo:2000", some ] }
+        equal (box (Some 8.0)) (box (Mod.eval (ctx [ Attack ]) m))
+        equal (box None) (box (Mod.eval (ctx [ Spell ]) m)))
+
+    test "increased damage, skill speed and critical hit chance per connected support gem of a colour" (fun () ->
+        let names = [ "Pierce I"; "Controlled Destruction"; "Rapid Attacks I"; "Brutality I" ]
+        let colour (name: string) = match Gems.data db.Value name with Some d -> d.Color | None -> failwithf "no support %s" name
+        let n c = names |> List.filter (fun s -> colour s = c) |> List.length |> float
+        // (the four are of more than one colour, and each is red, green or blue)
+        near 4.0 (n 1 + n 2 + n 3)
+        equal (box true) (box (n 1 < 4.0 && n 2 < 4.0 && n 3 < 4.0))
+        let charMods =
+            ModDb.ofList
+                (mods "skills_gain_damage_+%_per_sockted_or_adjacent_red_support_gem" 5.0
+                 @ mods "skills_gain_skill_speed_+%_per_sockted_or_adjacent_green_support_gem" 3.0
+                 @ mods "skills_gain_critical_strike_chance_+%_per_sockted_or_adjacent_blue_support_gem" 10.0)
+        let setup = { Gem = "Spark"; Level = 20; Quality = 0; StatSet = 1; Supports = names |> List.map (fun s -> s, 1) }
+        let part = Skill.make "Bolt: Burst" [ Spell ]
+        let skill = Behaviours.connectedSupports db.Value charMods setup { Skill.make "Bolt" [ Spell ] with Parts = [ part ] }
+        let expected = [ Damage AllDamage, 5.0 * n 1; Speed, 3.0 * n 2; CritChance, 10.0 * n 3 ] |> List.filter (fun (_, v) -> v <> 0.0)
+        equal (box expected) (box (skill.Mods |> List.map (fun m -> m.Stat, m.Value)))
+        equal (box expected) (box (skill.Parts.Head.Mods |> List.map (fun m -> m.Stat, m.Value)))
+        equal (box true) (box (skill.Mods |> List.forall (fun m -> m.Kind = Inc)))
+        // a character without the lines: the skill as it was
+        equal 0 (Behaviours.connectedSupports db.Value ModDb.empty setup (Skill.make "Bolt" [ Spell ])).Mods.Length)

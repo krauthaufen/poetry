@@ -18,7 +18,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
    whose description or behaviour changed.
 5. Go through the lists below; the wiki's version history of a skill says what changed.
 
-## Rules (154)
+## Rules (159)
 
 ### Hit damage
 
@@ -108,6 +108,8 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | Conduit | keystone text; that it is lost without allies is our reading of "instead" | data / guess |
 | Which monster | game data (PoB Minions / Spectres export); which variant a name means is not in the API | data; the variant by name is a guess |
 | Skills | game data | data; that the player commands whenever the cooldown allows is a guess |
+| Puppet Master | poe2db (Puppet Master: per stack values, 8 s, 5 stacks); BuffDefinitions `puppet_master` (which stats) | data; one clock for the stacks: guess |
+| Archon of Undeath | game data (BuffDefinitions, BuffTemplates) | data; one roll per gem and command: guess |
 | Minion modifiers on the player | stat descriptions; which lines count as companion damage (only those naming companions, not all minion damage) is a guess | data; guess |
 | Minions inflict Withered | stat text | data; 4 s is a guess |
 | The same minion gem twice | PoB lists both; that the tree's and the gem's are one is a guess | guess |
@@ -140,11 +142,14 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | A random element | stat description; the average in place of the choice | guess |
 | Additional Remnants | stat descriptions; adding the two up is a guess | guess |
 | Using them up | game rule | guess |
+| Ancestral Boost | poe2db Keywords (Ancestral Boost); gem data | data; that the time is not shortened by cooldown recovery is not so here (the clock is a cooldown): guess |
+| Marked and Blinded monsters' critical hits | stat descriptions; that the N seconds are the time it is Blinded | data; the time: guess |
 | Herald of Plague | gem description, `herald_of_agony_poison_spread_on_kill_radius_base_magnitude_to_grant` (its description: a radius in tenths of a metre) | data / guess |
 | Kills by damage over time | game: "on kill" effects are not limited to hits unless they say so; the owner rule is a simplification | guess |
 | Chains | game rule (recollection) | guess |
 | Herald of Ash | gem description + data | data; the ignite takes no further modifiers (guess); in the damage shares it is the herald's, not "Ignite" |
 | Item modifier magnitudes | item text as the API gives it | guess |
+| Counting different skills used | stat descriptions; that the use being made counts itself | data; counting itself: guess |
 | Tempest Bell | `bell_hit_limit`, `bell_shockwave_cooldown_ms`; description | data / guess |
 | Lightning Warp | description ("Can also be used on Ball Lightning Projectiles", "Creates a Lightning Infusion on successful use") | guess |
 | Rain of Arrows | `active_skill_base_area_of_effect_radius`, `active_skill_base_secondary_area_of_effect_radius`; uniform landing is a guess | data / guess |

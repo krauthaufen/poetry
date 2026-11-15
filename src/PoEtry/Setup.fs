@@ -150,6 +150,24 @@ module Setup =
                                         let setup = { Gem = x.Name; Level = x.Level; Quality = x.Quality; StatSet = 1; Supports = supports }
                                         { x with Level = max 1 (x.Level - Gems.supportLevels db setup); Quality = max 0 (x.Quality - Gems.supportQuality db setup) }) }) }
 
+    /// "+N to Level of all Corrupted Skill Gems", "+N to Level of all Corrupted Spell Skill
+    /// Gems": the skill gems that are Corrupted have so many levels more (a support is no
+    /// skill gem; a spell is a gem whose skill has the type).
+    let corruptedLevels (db: GameDb) (mods: Mod list) (build: PobBuild) =
+        let mdb = ModDb.ofList mods
+        let all = int (Mods.sumBase Ctx.empty [ Named "CorruptedGemLevel" ] mdb)
+        let spells = int (Mods.sumBase Ctx.empty [ Named "CorruptedSpellGemLevel" ] mdb)
+        if all = 0 && spells = 0 then build
+        else
+            { build with
+                Groups =
+                    build.Groups |> List.map (fun g ->
+                        { g with
+                            Gems =
+                                g.Gems |> List.map (fun x ->
+                                    if x.IsSupport || not x.Corrupted then x
+                                    else { x with Level = max 1 (x.Level + all + (if (Gems.ctxOf db x.Name).SkillTags.Contains Spell then spells else 0)) }) }) }
+
     /// Build the character. `read` reads a game data file by name ("tree.json").
     let rec load (read: string -> string) (build: PobBuild) (o: Options) : Loaded =
         loadWith (GameDb.load read) (read "tree.json") build o
@@ -163,7 +181,9 @@ module Setup =
         let build = if o.Bonded then { build with Config = Map.add "bonded" "1" build.Config } else build
         let build = ownLevels db build
         let build = dropGems o.Without build
-        let sheet = Pob.character db tree jewelSlots build |> fun s -> Pob.withPersistentBuffs db s build
+        let sheet = Pob.character db tree jewelSlots build
+        let build = corruptedLevels db sheet.Mods build
+        let sheet = Pob.withPersistentBuffs db sheet build
         // charms: their effects are sheet mods that hold while the charm lasts
         let charms, charmMods = Behaviours.charms db sheet build
         let sheet = { sheet with Mods = sheet.Mods @ charmMods }
@@ -460,6 +480,9 @@ module Setup =
                            |> List.map (fun p -> { Hook = OnKill; Filter = Called s.Name; Chance = 100.0; Reaction = TriggerSkill p.Name }))
                     let empowered, empRules, empGrants = Behaviours.empowerNext db charMods (Gems.chooseWeapon db setup.Gem sheet.Weapons) setup s
                     let cryRules, cryGrants = cryRules @ empRules, cryGrants @ empGrants
+                    // Fist of War, Ancestral Call: an Ancestral Boost every few seconds
+                    let s, boostClock, boostRules = Behaviours.ancestralBoost db charMods setup s
+                    let empowered, cryRules = empowered @ boostClock, cryRules @ boostRules
                     let tipped = Behaviours.iceTipped db charMods (Gems.chooseWeapon db setup.Gem sheet.Weapons) setup s
                     let cryRules = cryRules @ (match tipped with Some (_, rs, _) -> rs | None -> [])
                     let cryGrants = cryGrants @ (match tipped with Some (_, _, ms) -> ms | None -> [])
@@ -475,7 +498,7 @@ module Setup =
                         @ Behaviours.oilGround db charMods setup s @ Behaviours.whirlwind db setup s
                     let rules = cryRules @ biteRules @ (match lasting with Some (_, rs) -> rs | None -> []) @ Behaviours.useRules db charMods setup s.Name o.Pickup @ Behaviours.buffRules db charMods setup s @ Behaviours.totemPlacement db charMods setup s @ curseRules
                     let grants = Behaviours.verisiumGrant db charMods setup
-                    let s = Behaviours.applyObserved s |> Behaviours.lifeCost charMods
+                    let s = Behaviours.applyObserved s |> Behaviours.lifeCost charMods |> Behaviours.detonation db charMods setup |> Behaviours.connectedSupports db charMods setup
                     // Entangle: the vines are a skill of their own, on a clock, against what a fissure hit
                     let vines = Behaviours.entangle db charMods setup s
                     let s = match vines with Some (main, _, _, _) -> main | None -> s
@@ -714,6 +737,9 @@ module Setup =
         // Thorns: the hit that retaliates when a monster hits the player
         let thorns = Behaviours.thorns sheet
         let heraldSkills = heraldSkills @ (thorns |> Option.map fst |> Option.toList)
+        // "X% to gain Archon of Undeath when you create an Offering"
+        let undeath = Behaviours.archonOfUndeath sheet "ArchonOfUndeathOnOffering" (WithTag(Tag "Type:Offering"))
+        let heraldSkills = heraldSkills @ (undeath |> Option.map fst |> Option.toList)
         // Arctic Armour: the burst a melee hit on the player sets off
         let arctic = Behaviours.arcticArmour db sheet c.Build
         let heraldSkills = heraldSkills @ (match arctic with Some (s, _, _, _) -> [ s ] | None -> [])
@@ -791,8 +817,9 @@ module Setup =
                 @ Behaviours.selfIgnite sheet
                 @ Behaviours.rareModsOnKill sheet
                 @ Behaviours.totemRecently sheet pressedSkills
-                @ Behaviours.recentStates sheet pressedSkills @ Behaviours.intimidateOnImmobilise sheet @ Behaviours.debilitateOnWarcry sheet @ Behaviours.fearIncarnate sheet pressedSkills
+                @ Behaviours.recentStates sheet pressedSkills @ Behaviours.intimidateOnImmobilise sheet @ Behaviours.ancestralBoostOnStun sheet @ Behaviours.debilitateOnWarcry sheet @ Behaviours.fearIncarnate sheet pressedSkills
                 @ (thorns |> Option.map snd |> Option.toList)
+                @ (undeath |> Option.map snd |> Option.defaultValue [])
                 @ (match arctic with Some (_, r, _, _) -> r | None -> [])
                 @ Behaviours.scavengedPlating db sheet c.Build
                 @ Behaviours.fullBreakRules pressedSkills
@@ -873,6 +900,9 @@ module Setup =
         |> fun (a: Actor) ->
             let rules, periodics = Behaviours.affinity sheet a.Rules a.Periodics
             { a with Rules = rules; Periodics = periodics }
+        // "for each different Warcry / Spell / Grenade / type of Ammunition used in the past ..."
+        |> Behaviours.differentUsed
+        |> Behaviours.ancestralBoosted
 
     /// A fight against these enemies.
     and fight (c: Loaded) (o: Options) (player: Actor) (enemies: EnemyDef list) : Fight =
@@ -949,6 +979,11 @@ module Setup =
             // ("for each Minion in your Presence, up to ...": counted up to what the line names)
             @ (player.Mods |> List.collect (fun m -> m.Conds) |> List.choose (function
                 | PerStack (name, _) when name.StartsWith "ActiveMinionsUpTo:" -> Some(name, min persistent.Length (int (name.Substring 18)))
+                // ("per 400 Accuracy Rating, up to 20%": the Accuracy Rating of the character's
+                // attacks, counted up to what the line's most takes)
+                | PerStack (name, _) when name.StartsWith "AccuracyUpTo:" ->
+                    let accuracy = Mods.total { Ctx.empty with SkillTags = Set.ofList [ Attack ] } [ Named "Accuracy" ] (ModDb.ofList player.Mods)
+                    Some(name, min (int accuracy) (int (name.Substring 13)))
                 | _ -> None) |> List.distinct)
             |> List.filter (fun (_, n) -> n > 0)
         let counted (a: Actor) =
