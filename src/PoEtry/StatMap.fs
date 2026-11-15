@@ -1008,6 +1008,10 @@ module StatMap =
         | "minion_damage_increases_and_reductions_also_affects_you" -> one (Mod.flag (Named "MinionDamageAffectsYou"))
         | "companion_damage_increases_and_reductions_also_affects_you" -> one (Mod.flag (Named "CompanionDamageAffectsYou"))
         | "additive_modifiers_to_minion_attack_speed_also_affect_you" -> one (Mod.flag (Named "MinionAttackSpeedAffectsYou"))
+        // "X% increased Surrounded Area of Effect": the area enemies surround the player in
+        | "surrounded_area_of_effect_+%" -> one (Mod.inc (Named "SurroundedArea") v)
+        // "X% increased Attack and Cast Speed if you've summoned a Totem Recently" (Behaviours.totemRecently)
+        | "attack_and_cast_speed_+%_on_placing_totem" -> one (Mod.inc Speed v |> Mod.whenever (WhileBuff "SummonedTotemRecently"))
         // grenades: "X% increased Cooldown Recovery Rate for Grenade Skills", "+1 Cooldown Use",
         // "X% increased Grenade fuse duration" (Gems.fuse)
         | "grenade_skill_cooldown_speed_+%" -> one (Mod.inc CooldownRecovery v |> Mod.whenever (SkillIs(Tag "Grenade")))

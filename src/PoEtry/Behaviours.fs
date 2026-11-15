@@ -2102,6 +2102,16 @@ module Behaviours =
         |> List.unzip
         |> fun (actors, notes) -> List.concat actors, List.concat notes
 
+    /// "if you've summoned a Totem Recently": placing a totem (using a totem gem) makes it so
+    /// for 4 s, where something asks.
+    let totemRecently (sheet: CharacterSheet) (skills: Skill list) : Rule list =
+        let asks = sheet.Mods |> List.exists (fun m -> m.Conds |> List.contains (WhileBuff "SummonedTotemRecently"))
+        if not asks then []
+        else
+            skills
+            |> List.filter (fun s -> s.Tags.Contains(Tag "Type:SummonsTotem"))
+            |> List.map (fun s -> { Hook = OnUse; Filter = Called s.Name; Chance = 100.0; Reaction = GrantBuff("SummonedTotemRecently", Constants.recentlySeconds, 1, []) })
+
     /// Using a totem gem places the totem: the buff its actor waits for, lasting the totem's
     /// duration ("base_totem_duration" x skill duration mods).
     let totemPlacement (db: GameDb) (charMods: ModDb) (setup: GemSetup) (skill: Skill) : Rule list =

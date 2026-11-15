@@ -6779,7 +6779,7 @@ module Flat =
         let mutable near = 0
         for live in 0 .. s.Live.Length - 1 do
             let e = at s.Foes (at s.Live live)
-            if e.Life > 0.0 && Vec.length e.Def.Position - e.Def.Size <= 30.0 then near <- near + 1
+            if e.Life > 0.0 && Vec.length e.Def.Position - e.Def.Size <= v.SurroundedRadius then near <- near + 1
         setState s 9 (near >= max 1 v.SurroundedAt)
         // charge states: "while at maximum Power Charges", "while you have no Frenzy Charges"
         for k in 0 .. 2 do

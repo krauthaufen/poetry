@@ -9,6 +9,10 @@ module Constants =
     let private byLevel (table: float[]) level =
         table.[(max 1 (min level table.Length)) - 1]
 
+    /// Surrounded: enemies within 3 m (PoB SurroundedRadiusBase), in tenths of a metre.
+    let surroundedRadius = 30.0
+    /// "Recently": the past 4 seconds (game keyword text).
+    let recentlySeconds = 4.0
     /// Onslaught: 20% increased skill speed (game keyword text).
     let onslaughtSpeed = 20.0
     /// Arcane Surge: 20% more mana regeneration rate (game keyword text; wiki Arcane Surge).

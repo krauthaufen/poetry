@@ -327,6 +327,8 @@ module Defence =
           LifeReserved = min 1.0 (named "LifeReservedPercent" / 100.0)
           LifeFrozenWithES = flag "LifeFrozenWithES"
           SurroundedAt = 5 + int (named "SurroundedOffset")
+          // "increased Surrounded Area of Effect": an area, the radius by its square root (as a skill's)
+          SurroundedRadius = Geometry.radius Constants.surroundedRadius (Mods.mult c [ Named "SurroundedArea" ] db)
           StunRecovery = max 0.01 (Mods.mult c [ Named "StunRecovery" ] db)
           // "You cannot Recover Energy Shield to above Armour"
           ESRecoverCap = (if flag "ESRecoveryCappedAtArmour" then armour else infinity)

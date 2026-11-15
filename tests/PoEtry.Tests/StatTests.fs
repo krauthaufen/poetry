@@ -1335,3 +1335,17 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         let fight = Fight.single { EnemyDef.atLevel 83 1e9 with Mods = []; Attack = None } player 5.0
         equal 2 (Sim.run fight 1u).Counts.["uses:Bomb"]
         same fight seeds)
+
+    test "Surrounded within a wider area; attack and cast speed if you've summoned a Totem Recently" (fun () ->
+        let c = load { blank with ExtraLines = [ "50% increased Surrounded Area of Effect" ] } Options.defaults
+        // 3 m, the area 1.5 times: the radius by the square root, cut off as a skill's
+        near 36.0 c.Vitals.SurroundedRadius
+        near 30.0 (load blank Options.defaults).Vitals.SurroundedRadius
+        equal (box [ Mod.inc Speed 10.0 |> Mod.whenever (WhileBuff "SummonedTotemRecently") ]) (box (mods "attack_and_cast_speed_+%_on_placing_totem" 10.0))
+        // placing a totem makes it so for 4 s, where something asks
+        let totem = { Skill.make "Totem" [ Spell; Tag "Type:SummonsTotem" ] with Hits = [] }
+        let sheet = { (load blank Options.defaults).Sheet with Mods = mods "attack_and_cast_speed_+%_on_placing_totem" 10.0 }
+        match Behaviours.totemRecently sheet [ totem; Skill.make "Bolt" [ Spell ] ] with
+        | [ { Filter = Called "Totem"; Reaction = GrantBuff ("SummonedTotemRecently", 4.0, 1, []) } ] -> ()
+        | r -> failwithf "%A" r
+        equal 0 (Behaviours.totemRecently (load blank Options.defaults).Sheet [ totem ]).Length)
