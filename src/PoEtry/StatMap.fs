@@ -169,6 +169,7 @@ module StatMap =
             | "per" :: c :: "charge" :: tail when c = "power" || c = "frenzy" || c = "endurance" ->
                 go (PerStack(titleCase [ c; "charge" ], 1.0) :: acc) tail
             | "per" :: "rage" :: tail -> go (PerStack("Rage", 1.0) :: acc) tail
+            | "per" :: n :: "rage" :: tail when n <> "" && n |> Seq.forall System.Char.IsDigit -> go (PerStack("Rage", float n) :: acc) tail
             // Grand Spectrum: "per socketed Grand Spectrum"
             | "per" :: "stackable" :: "unique" :: "jewel" :: tail -> go (PerStack("GrandSpectrum", 1.0) :: acc) tail
             | "with" :: c :: "charges" :: tail when c = "power" || c = "frenzy" || c = "endurance" ->
@@ -997,6 +998,8 @@ module StatMap =
         | "flask_duration_+%" -> one (Mod.inc (Named "FlaskDuration") v)
         // "Banner Skills have X% increased Duration"
         | "banner_duration_+%" -> one (Mod.inc (Named "BannerDuration") v)
+        // "X% increased Minion Duration": of temporary minions
+        | "base_minion_duration_+%" -> one (Mod.inc (Named "MinionDuration") v)
         | "ailment_chance_+%" -> Some(Mods(allAilments |> List.map (fun a -> Mod.inc (AilmentChance a) v)))
         | "ailment_effect_+%" | "base_ailment_effect_+%" -> one (Mod.inc (AilmentMagnitude None) v)
         | "base_damaging_ailment_effect_+%" ->

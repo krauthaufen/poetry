@@ -1628,7 +1628,8 @@ module Behaviours =
         let duration =
             match stat "base_skill_effect_duration" with
             | 0.0 -> infinity
-            | ms -> ms / 1000.0 * Mods.mult ctx [ SkillDuration ] (ModDb.ofList (ModDb.toList charMods @ skill.Mods))
+            // ("increased Minion Duration" lengthens it beside skill effect duration)
+            | ms -> ms / 1000.0 * Mods.mult ctx [ SkillDuration; Named "MinionDuration" ] (ModDb.ofList (ModDb.toList charMods @ skill.Mods))
         let rule reaction = [ { Hook = OnUse; Filter = Called skill.Name; Chance = 100.0; Reaction = reaction } ]
         if has "base_number_of_zombies_allowed" then
             let empowered = [ Mod.more (Damage AllDamage) (stat "power_charged_zombie_hit_damage_+%_final") |> Mod.from "Empowered" ]
@@ -1839,7 +1840,7 @@ module Behaviours =
                 let duration =
                     match stat "base_skill_effect_duration" with
                     | 0.0 -> infinity
-                    | ms -> ms / 1000.0 * Mods.mult ctx [ SkillDuration ] charMods
+                    | ms -> ms / 1000.0 * Mods.mult ctx [ SkillDuration; Named "MinionDuration" ] charMods
                 let perCast = int (stat "skill_raging_spirits_max_per_action")
                 let interval = stat "base_cooldown_modifiable_repeat_interval_ms"
                 let onHit = stat "skill_grants_%_chance_to_summon_azmerian_swarm_on_hitting_unique_or_rare_enemy_affected_by_elemental_ailment"

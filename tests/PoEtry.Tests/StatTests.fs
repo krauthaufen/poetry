@@ -1068,4 +1068,13 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
             Behaviours.banners db.Value c.Sheet c.Build |> List.map (fun b -> b.Duration)
         match banner [], banner [ "Banner Skills have 50% increased Duration" ] with
         | [ plain ], [ longer ] -> near (plain * 1.5) longer
-        | a, b -> failwithf "banners %A %A" a b)
+        | a, b -> failwithf "banners %A %A" a b
+        // "40% increased Minion Duration", with 10% increased skill effect duration: a zombie lasts 1.5 times as long
+        let zombie (ms: Mod list) =
+            let setup = { Gem = "Raise Zombie"; Level = 20; Quality = 0; StatSet = 1; Supports = [] }
+            match Behaviours.summoner db.Value (ModDb.ofList ms) setup (Skill.make "Raise Zombie" []) with
+            | [ { Reaction = WithCorpse(Summon(_, _, d), _) } ] -> d
+            | r -> failwithf "zombie %A" r
+        near (zombie [] * 1.5) (zombie (mods "base_minion_duration_+%" 40.0 @ mods "skill_effect_duration_+%" 10.0))
+        // "Every 10 Rage also grants 5% increased Physical Damage"
+        equal (box [ Mod.inc (Damage(OfType Physical)) 5.0 |> Mod.whenever (PerStack("Rage", 10.0)) ]) (box (mods "physical_damage_+%_per_10_rage" 5.0)))
