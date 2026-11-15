@@ -1655,6 +1655,8 @@ module StatMap =
         | "explode_cursed_enemies_for_25%_life_as_chaos_on_kill_chance_%" -> one (Mod.base' (Named "ExplodeOnKill:Cursed") v)
         | "explode_enemies_for_10%_life_as_fire_on_kill_with_empowered_attacks_chance_%" -> one (Mod.base' (Named "ExplodeOnKill:Empowered") v)
         | "witchhunter_chance_to_explode_enemies_for_100%_of_life_as_physical" -> one (Mod.base' (Named "ExplodeOnKill:Any") v)
+        // "Warcries Explode Corpses dealing X% of their Life as Physical Damage"
+        | "corpses_in_your_area_of_effect_explode_dealing_%_maximum_life_physical_damage_on_warcry" -> one (Mod.base' (Named "WarcryExplodesCorpses") v)
         // Herald of Blood's explosion: "partially based on their accumulated Blood Loss", "has a
         // chance to Aggravate Bleeding" (the explosion itself is played, Behaviours.heralds)
         | "skill_herald_bleeding_enemies_explode_for_%_blood_loss_as_unscalable_physical_damage" -> Some(Unsimulated "blood loss")

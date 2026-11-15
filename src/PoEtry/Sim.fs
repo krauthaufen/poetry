@@ -133,6 +133,8 @@ type Reaction =
     /// the corpse's: the modifiers to the damage of whoever caused it do not scale it. Those
     /// it kills are kills of the actor's (and may explode in turn).
     | Explode of percent: float * damageType: DamageType * radius: float
+    /// Every corpse there is explodes as by `Explode`, and is used up.
+    | ExplodeCorpses of percent: float * damageType: DamageType * radius: float
     /// At most once every `seconds`: if the time since this was last done is over, do this and
     /// start the time again. The time is the actor's own, by `key`; it is no cooldown (cooldown
     /// recovery does not shorten it) and no buff (nothing makes it expire faster).
@@ -1816,6 +1818,13 @@ module Sim =
                          match target with
                          | Some t -> schedule w.Time (Explosion(actor.Name, t, percent, dt, radius)) w
                          | None -> w
+                     | ExplodeCorpses (percent, dt, radius) ->
+                         // (the corpses there are: of the enemies killed last, the earlier ones first)
+                         let n = w.Kills.Length - w.CorpsesUsed
+                         if n <= 0 then w
+                         else
+                             w.Kills |> List.truncate n |> List.rev
+                             |> List.fold (fun w (name, _, _) -> schedule w.Time (Explosion(actor.Name, name, percent, dt, radius)) w) { w with CorpsesUsed = w.Kills.Length }
                      | SummonEmpowered (pool, count, duration, first) -> summonWith env pool count duration first w
                      | SummonPerCorpse (pool, duration, deadMinions) ->
                          let size = env.Fight.Minions |> List.filter (fun m -> m.Pool = Some pool) |> List.length

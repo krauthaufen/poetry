@@ -2714,6 +2714,25 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         equal 1 (o.Kills.Length)
         near 150.0 (dealt o "Explosion")
         same fire seeds
+        // "Warcries Explode Corpses dealing 20% of their Life as Physical Damage": the bolt kills
+        // "a" (b and c untouched: no explosion on the kill); the cry at 1 s explodes its corpse:
+        // 200 to b and 200 to c; the cry at 2 s finds no corpse
+        (match rulesOf (mods "corpses_in_your_area_of_effect_explode_dealing_%_maximum_life_physical_damage_on_warcry" 20.0) with
+         | [ { Hook = OnUse; Filter = WithTag Warcry; Reaction = ExplodeCorpses (20.0, Physical, _) } as rule ] ->
+             let cry = { Skill.make "Cry" [ Warcry ] with Hits = []; BaseCrit = 0.0 }
+             let player =
+                 { Actor.make "Player" [] [ bolt; cry ] with
+                     Rules = [ rule ]
+                     Rotation = [ { Use = "Bolt"; When = fun v -> v.Time < 0.1 }; { Use = "Cry"; When = fun v -> v.Time < 2.5 } ] }
+             let f =
+                 { Fight.single (foe "a" 0.0 1000.0) player 3.0 with
+                     Enemies = [ foe "a" 0.0 1000.0; foe "b" 10.0 900.0; foe "c" -10.0 1e6 ]
+                     Targeting = Nearest }
+             let o = Sim.run f 1u
+             equal 1 (count o "explosion")
+             near 400.0 (dealt o "Explosion")
+             same f seeds
+         | other -> failwithf "unexpected %A" other)
         // only a cursed enemy's: none here
         let cursed = fight { Hook = OnKillOf "Cursed"; Filter = AnySkill; Chance = 100.0; Reaction = Explode(25.0, Chaos, 20.0) }
         equal 0 (count (Sim.run cursed 1u) "explosion")

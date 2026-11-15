@@ -1377,7 +1377,12 @@ module Behaviours =
           if chance "Cursed" > 0.0 then
               yield { Hook = OnKillOf "Cursed"; Filter = AnySkill; Chance = chance "Cursed"; Reaction = Explode(25.0, Chaos, r) }
           if chance "Empowered" > 0.0 then
-              yield { Hook = OnKill; Filter = WithTag Attack; Chance = chance "Empowered"; Reaction = IfBuff("EmpoweredAttacks", Explode(10.0, Fire, r)) } ]
+              yield { Hook = OnKill; Filter = WithTag Attack; Chance = chance "Empowered"; Reaction = IfBuff("EmpoweredAttacks", Explode(10.0, Fire, r)) }
+          // "Warcries Explode Corpses dealing X% of their Life as Physical Damage": every corpse
+          // there is (the fight is within the warcry's reach)
+          match Mods.sumBase Ctx.empty [ Named "WarcryExplodesCorpses" ] db with
+          | pct when pct > 0.0 -> yield { Hook = OnUse; Filter = WithTag Warcry; Chance = 100.0; Reaction = ExplodeCorpses(pct, Physical, r) }
+          | _ -> () ]
 
     /// "Buffs on you expire X% faster": time passes that much faster for the buffs the
     /// character's rules give it (Onslaught, Arcane Surge, a skill's buff, Ice Bite): they last

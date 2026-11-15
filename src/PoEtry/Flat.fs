@@ -730,6 +730,7 @@ module Flat =
         | RIfBuff of buff: int * next: Re
         /// The killed enemy explodes (see `Reaction.Explode`); `dtype`: the type's index.
         | RExplode of percent: float * dtype: int * radius: float
+        | RExplodeCorpses of percent: float * dtype: int * radius: float
         /// At most once every `seconds` (see `Reaction.Every`); `key`: where the actor keeps the time.
         | REvery of key: string * seconds: float * count: int * next: Re
         | RRegenES of perSecond: float * duration: float * count: int
@@ -1437,6 +1438,7 @@ module Flat =
         | IfBuff _ -> "IfBuff"
         | Every _ -> "Every"
         | Explode _ -> "Explode"
+        | ExplodeCorpses _ -> "ExplodeCorpses"
         | RegenES _ -> "RegenES"
         | IgniteSelf _ -> "IgniteSelf"
         | Empower _ -> "Empower"
@@ -1681,6 +1683,7 @@ module Flat =
                 | IfBuff (b, next) -> RIfBuff(buffs.Id b, reaction next)
                 | Every (key, seconds, next) -> REvery("Every:" + key, seconds, counts.Id("every:" + key), reaction next)
                 | Explode (percent, dt, radius) -> RExplode(percent, typeIndex dt, radius)
+                | ExplodeCorpses (percent, dt, radius) -> RExplodeCorpses(percent, typeIndex dt, radius)
                 | RegenES (rate, duration) -> RRegenES(rate, duration, counts.Id "regen:ES")
                 | IgniteSelf percent -> RIgniteSelf percent
                 | GainEnergy (meta, amount) -> RGainEnergy((match actor.Metas |> List.tryFindIndex (fun m -> m.Name = meta) with Some i -> i | None -> -1), amount)
@@ -4442,6 +4445,13 @@ module Flat =
                 expireAt s (s.Time + duration)
         | RIfBuff (b, next) -> if held s b then perform s rng sid target next
         | RExplode (percent, t, radius) -> if target >= 0 then schedule s s.Time EExplode target t percent radius
+        | RExplodeCorpses (percent, t, radius) ->
+            let n = corpses s
+            if n > 0 then
+                for k in s.Kills.Count - n .. s.Kills.Count - 1 do
+                    let (name, _, _) = s.Kills.[k]
+                    schedule s s.Time EExplode s.FoeIds.[name] t percent radius
+                s.CorpsesUsed <- s.Kills.Count
         | REvery (key, seconds, count, next) ->
             if s.Time >= (Map.tryFind key s.A.Energy |> Option.defaultValue -infinity) - 1e-9 then
                 bump s count
