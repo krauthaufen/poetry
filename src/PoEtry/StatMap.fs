@@ -1064,6 +1064,9 @@ module StatMap =
         // skill places totems (Behaviours.totems)
         | id when id.StartsWith "supported_" && id.Contains "_skill_gem_level_+" && (id.EndsWith "_other_supports" || id.EndsWith "_other_support") -> Some Structural
         | "cast_on_minion_death_gain_1_energy_per_X_minion_relative_defensiveness_%" | "base_skill_summons_totems" -> Some Structural
+        // Fist of War, Ancestral Call: "an Ancestral Boost every few seconds", with double effect (Behaviours.ancestralBoost)
+        | "support_ancestral_slam_big_hit_max_count" | "ancestral_slam_interval_duration" | "double_ancestral_boost_effect"
+        | "support_ancestral_call_strike_is_ancestral_boosted" | "ancestral_call_spirit_strike_interval_ms" -> Some Structural
         // the gem's own "Minions have X% more Maximum Life", and a support's "Minions take X%
         // more / less Damage" (Feeding Frenzy, Meat Shield): Behaviours.minions
         | "active_skill_minion_life_+%_final" | "feeding_frenzy_minion_damage_taken_+%_final"
@@ -1495,6 +1498,14 @@ module StatMap =
         // "Modifiers to Cast Speed / Attack Speed also affect this Skill's cost": the cost by the
         // second of a channel (the engines: what a use costs)
         | "cast_speed_modifiers_apply_to_over_time_cost" | "attack_speed_modifiers_apply_to_over_time_cost" -> one (Mod.flag (Named "CostOverTimeWithSpeed"))
+        // Ancestral Boost (Behaviours.ancestralBoost): "Ancestrally Boosted Attacks deal X%
+        // increased Damage / have X% increased Area of Effect", "The next Attack you use within N
+        // seconds after Heavy Stunning a Rare or Unique Enemy is Ancestrally Boosted"
+        | "ancestral_boosted_attack_damage_+%" -> one (Mod.inc (Damage AllDamage) v |> Mod.whenever (SkillIs Attack) |> Mod.whenever (WhileBuff "EmpoweredAttacks:Ancestral Boost"))
+        | "ancestral_boosted_area_of_effect_+%" -> one (Mod.inc AreaOfEffect v |> Mod.whenever (SkillIs Attack) |> Mod.whenever (WhileBuff "EmpoweredAttacks:Ancestral Boost"))
+        | "next_attack_is_ancestrally_boosted_for_x_seconds_on_heavy_stunning_unique_or_rare_enemy" -> one (Mod.base' (Named "AncestralBoostOnHeavyStun") v)
+        // "Your Hits cannot be Evaded by Pinned Enemies"
+        | "pinned_enemies_cannot_evade_your_attacks" -> one (Mod.override' HitChance 100.0 |> Mod.whenever (EnemyHas "Pinned"))
         // Puppet Master and Archon of Undeath (Behaviours.puppetMaster, archonOfUndeath)
         | "surpassing_chance_%_to_gain_1_puppeteer_stack_on_using_command_skill" -> one (Mod.base' (Named "PuppetMasterOnCommand") v)
         | "max_puppet_master_stacks_+" -> one (Mod.base' (Named "PuppetMasterMaxStacks") v)

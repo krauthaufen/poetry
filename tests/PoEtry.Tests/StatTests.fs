@@ -2412,3 +2412,62 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         equal (box true) (box (Behaviours.archonOfUndeath (sheet []) "ArchonOfUndeathOnCommand" AnySkill).IsNone)
         equal (box (Named "ArchonOfUndeathOnOffering")) (box (mods "chance_%_to_gain_archon_of_undeath_when_you_create_an_offering" 20.0).Head.Stat)
         equal (box (Mod.inc (Named "PuppetMasterDuration") 30.0)) (box (mods "puppet_master_duration_+%" 30.0).Head))
+
+    test "Ancestral Boost: a slam's 30% more damage every few seconds (Fist of War), twice with double effect, after a Heavy Stun" (fun () ->
+        let foe = { EnemyDef.atLevel 83 1e9 with Mods = []; Attack = None }
+        let slam = { Skill.make "Slam" [ Attack; Melee; Slam ] with BaseDamage = Map.ofList [ Physical, Range.fixedAt 100.0 ]; BaseCrit = 0.0 }
+        // a slam a second, a boost every 2.5 s: the slam that lands at 1 starts the time, the
+        // next (2) is boosted; then those after 4, 7 and 10 (5, 8, 11). 12 slams, 4 of them at 130
+        let boosted (s: Skill) =
+            let clock = { Skill.make "Slam: Ancestral Boost" [ Triggered ] with BaseCrit = 0.0; Hits = []; Cooldown = Some 2.5 }
+            let rules =
+                [ { Hook = OnLand; Filter = Called "Slam"; Chance = 100.0; Reaction = TriggerSkill clock.Name }
+                  { Hook = OnUse; Filter = Called clock.Name; Chance = 100.0; Reaction = SetStacks(Behaviours.ancestralBoostBuff, 1) } ]
+            let player = { Actor.make "Player" [ Mod.base' (Named "Accuracy") 1e9 ] [ s; clock ] with Rotation = [ Actor.always "Slam" ]; Rules = rules } |> Behaviours.ancestralBoosted
+            Fight.single foe player 12.2
+        let dealt f = (Sim.run f 1u).DamageBy |> Map.toList |> List.sumBy snd
+        near (8.0 * 100.0 + 4.0 * 130.0) (dealt (boosted slam))
+        same (boosted slam) seeds
+        // a strike gains nothing of it but what "Ancestrally Boosted Attacks" have: 50% increased damage
+        let strike = { slam with Tags = Set.ofList [ Attack; Melee; Strike ] }
+        near (12.0 * 100.0) (dealt (boosted strike))
+        near (8.0 * 100.0 + 4.0 * 150.0) (dealt (boosted { strike with Mods = mods "ancestral_boosted_attack_damage_+%" 50.0 }))
+        // the gems: Fist of War I every 6 s; III every 14 s with double effect (60% more in all)
+        let build (support': string) = { blank with Level = 90; Groups = [ group [ gem "Earthquake"; support support' ] ]; Items = [ "Weapon 1", "Rarity: Normal\nAkoyan Club\n" ] }
+        let pressedWith s =
+            let c = load (build s) Options.defaults
+            match Setup.pressed c Options.defaults "Earthquake" with
+            | Some p -> p
+            | None -> failwith "Earthquake cannot be pressed"
+        let one, three = pressedWith "Fist of War I", pressedWith "Fist of War III"
+        let clockOf (p: Setup.Pressed) = p.Extra |> List.find (fun s -> s.Name = "Earthquake: Ancestral Boost")
+        near 6.0 (clockOf one).Cooldown.Value
+        near 14.0 (clockOf three).Cooldown.Value
+        let more (p: Setup.Pressed) = p.Skill.Mods |> List.filter (fun m -> m.Source = "Ancestral Boost" && m.Kind = More) |> List.map (fun m -> m.Value)
+        equal 0 (more one).Length
+        near (100.0 * (1.6 / 1.3 - 1.0)) (more three).Head
+        // after a Heavy Stun on a Rare or Unique enemy, for the line's seconds
+        let c = load blank Options.defaults
+        match Behaviours.ancestralBoostOnStun { c.Sheet with Mods = mods "next_attack_is_ancestrally_boosted_for_x_seconds_on_heavy_stunning_unique_or_rare_enemy" 6.0 } with
+        | [ { Hook = OnInflict HeavyStun; Reaction = IfEnemyHas ("RareOrUnique", GrantBuff (b, seconds, 1, [])) } ] ->
+            equal (box Behaviours.ancestralBoostBuff) (box b)
+            near 6.0 seconds
+        | other -> failwithf "unexpected %A" other)
+
+    test "Pinned enemies cannot evade the attacks of a character that says so" (fun () ->
+        // 100 accuracy against 5000 evasion: few attacks hit; against a Pinned enemy, with "Your
+        // Hits cannot be Evaded by Pinned Enemies", every one of the ten
+        let foe = { EnemyDef.atLevel 83 1e9 with Mods = [ Mod.base' Evasion 5000.0 ]; Attack = None }
+        let jab = { Skill.make "Jab" [ Attack; Melee ] with BaseDamage = Map.ofList [ Physical, Range.fixedAt 100.0 ]; BaseCrit = 0.0 }
+        let fight (ms: Mod list) (pinned: bool) =
+            let player =
+                { Actor.make "Player" (Mod.base' (Named "Accuracy") 100.0 :: ms) [ jab ] with
+                    Rotation = [ Actor.always "Jab" ]
+                    Rules = (if pinned then [ { Hook = OnUse; Filter = AnySkill; Chance = 100.0; Reaction = ApplyDebuff("Pinned", 1e6, 1, []) } ] else []) }
+            Fight.single foe player 10.2
+        let sure = mods "pinned_enemies_cannot_evade_your_attacks" 1.0
+        let hits f = count (Sim.run f 1u) "hits:Jab"
+        equal 10 (hits (fight sure true))
+        equal (box true) (box (hits (fight [] true) < 8 && hits (fight sure false) < 8))
+        same (fight sure true) seeds
+        same (fight sure false) seeds)

@@ -2671,6 +2671,53 @@ module Behaviours =
                     Parts = skill.Parts |> List.map (fun p -> if p.Name.EndsWith ": Explosion" then { p with Mods = p.Mods @ [ Mod.base' (Named "PartDelay") seconds |> Mod.from "detonation time" ] } else p) }
         | _ -> skill
 
+    /// The state of an attack that is Ancestrally Boosted: stacks are the attacks to come that
+    /// are (an attack uses one up, as an empowerment of a warcry: the engines).
+    let ancestralBoostBuff = "EmpoweredAttacks:Ancestral Boost"
+
+    /// "An Ancestrally Boosted Slam has 30% more damage and 25% increased area of effect".
+    let private boostMods (times: float) =
+        [ Mod.more (Damage AllDamage) (100.0 * ((1.0 + 0.3 * times) / (1.0 + 0.3 * (times - 1.0)) - 1.0)); Mod.inc AreaOfEffect 25.0 ]
+        |> List.map (Mod.whenever (SkillIs Slam) >> Mod.whenever (Not(SkillIs Triggered)) >> Mod.whenever (WhileBuff ancestralBoostBuff) >> Mod.from "Ancestral Boost")
+
+    /// Fist of War ("Supports Slams you use yourself, providing a powerful Ancestral Boost every
+    /// few seconds": every `ancestral_slam_interval_duration`; III: "Ancestral Boost has double
+    /// effect on Supported Skills") and Ancestral Call (Strikes, every
+    /// `ancestral_call_spirit_strike_interval_ms`). When a use of the skill has landed and the
+    /// time since the last boost is over, the next attack is Ancestrally Boosted. Gives the
+    /// skill (with what a double effect adds), the skill that keeps the time, and the rules.
+    let ancestralBoost (db: GameDb) (charMods: ModDb) (setup: GemSetup) (skill: Skill) : Skill * Skill list * Rule list =
+        let raw = Gems.rawStats db charMods setup
+        let sum id = raw |> List.filter (fun (k, _) -> k = id) |> List.sumBy snd
+        let seconds = (sum "ancestral_slam_interval_duration" + sum "ancestral_call_spirit_strike_interval_ms") / 1000.0
+        if seconds <= 0.0 || not (skill.Tags.Contains Attack) then skill, [], []
+        else
+            let gate = skill.Name + ": Ancestral Boost"
+            let clock = { Skill.make gate [ Triggered ] with BaseCrit = 0.0; Hits = []; Cooldown = Some seconds }
+            // twice the effect: 60% more in all and 50% increased area, for this skill and its parts
+            let rec doubled (s: Skill) = { s with Mods = s.Mods @ boostMods 2.0; Parts = s.Parts |> List.map doubled }
+            (if sum "double_ancestral_boost_effect" > 0.0 then doubled skill else skill),
+            [ clock ],
+            [ { Hook = OnLand; Filter = Called skill.Name; Chance = 100.0; Reaction = TriggerSkill gate }
+              { Hook = OnUse; Filter = Called gate; Chance = 100.0; Reaction = SetStacks(ancestralBoostBuff, 1) } ]
+
+    /// "The next Attack you use within N seconds after Heavy Stunning a Rare or Unique Enemy is
+    /// Ancestrally Boosted".
+    let ancestralBoostOnStun (sheet: CharacterSheet) : Rule list =
+        match Mods.sumBase Ctx.empty [ Named "AncestralBoostOnHeavyStun" ] (ModDb.ofList sheet.Mods) with
+        | seconds when seconds > 0.0 ->
+            [ { Hook = OnInflict HeavyStun; Filter = AnySkill; Chance = 100.0; Reaction = IfEnemyHas("RareOrUnique", GrantBuff(ancestralBoostBuff, seconds, 1, [])) } ]
+        | _ -> []
+
+    /// An actor that can be Ancestrally Boosted (a rule of its says so) has what the boost gives.
+    let ancestralBoosted (a: Actor) : Actor =
+        let rec boosts (r: Reaction) =
+            match r with
+            | SetStacks (b, _) | GrantBuff (b, _, _, _) -> b = ancestralBoostBuff
+            | IfEnemyHas (_, next) | IfBuff (_, next) | SpendStack (_, next) -> boosts next
+            | _ -> false
+        if a.Rules |> List.exists (fun r -> boosts r.Reaction) then { a with Mods = a.Mods @ boostMods 1.0 } else a
+
     /// "for each different Warcry you've used Recently", "for each different Spell you've Cast
     /// in the last eight seconds", "for every different Grenade fired in the past 8 seconds",
     /// "for each type of Ammunition fired in the past 10 seconds": a modifier that counts them

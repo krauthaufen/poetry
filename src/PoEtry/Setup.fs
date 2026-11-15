@@ -480,6 +480,9 @@ module Setup =
                            |> List.map (fun p -> { Hook = OnKill; Filter = Called s.Name; Chance = 100.0; Reaction = TriggerSkill p.Name }))
                     let empowered, empRules, empGrants = Behaviours.empowerNext db charMods (Gems.chooseWeapon db setup.Gem sheet.Weapons) setup s
                     let cryRules, cryGrants = cryRules @ empRules, cryGrants @ empGrants
+                    // Fist of War, Ancestral Call: an Ancestral Boost every few seconds
+                    let s, boostClock, boostRules = Behaviours.ancestralBoost db charMods setup s
+                    let empowered, cryRules = empowered @ boostClock, cryRules @ boostRules
                     let tipped = Behaviours.iceTipped db charMods (Gems.chooseWeapon db setup.Gem sheet.Weapons) setup s
                     let cryRules = cryRules @ (match tipped with Some (_, rs, _) -> rs | None -> [])
                     let cryGrants = cryGrants @ (match tipped with Some (_, _, ms) -> ms | None -> [])
@@ -814,7 +817,7 @@ module Setup =
                 @ Behaviours.selfIgnite sheet
                 @ Behaviours.rareModsOnKill sheet
                 @ Behaviours.totemRecently sheet pressedSkills
-                @ Behaviours.recentStates sheet pressedSkills @ Behaviours.intimidateOnImmobilise sheet @ Behaviours.debilitateOnWarcry sheet @ Behaviours.fearIncarnate sheet pressedSkills
+                @ Behaviours.recentStates sheet pressedSkills @ Behaviours.intimidateOnImmobilise sheet @ Behaviours.ancestralBoostOnStun sheet @ Behaviours.debilitateOnWarcry sheet @ Behaviours.fearIncarnate sheet pressedSkills
                 @ (thorns |> Option.map snd |> Option.toList)
                 @ (undeath |> Option.map snd |> Option.defaultValue [])
                 @ (match arctic with Some (_, r, _, _) -> r | None -> [])
@@ -899,6 +902,7 @@ module Setup =
             { a with Rules = rules; Periodics = periodics }
         // "for each different Warcry / Spell / Grenade / type of Ammunition used in the past ..."
         |> Behaviours.differentUsed
+        |> Behaviours.ancestralBoosted
 
     /// A fight against these enemies.
     and fight (c: Loaded) (o: Options) (player: Actor) (enemies: EnemyDef list) : Fight =
