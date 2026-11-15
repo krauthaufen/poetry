@@ -15,6 +15,19 @@ module Constants =
     let recentlySeconds = 4.0
     /// Ancestral Bond: "Totems reserve 75 Spirit each".
     let ancestralBondSpirit = 75.0
+
+    /// Hollow Palm Technique: the physical damage of an unarmed attack by its skill's level
+    /// (poe2db, "Unarmed Flat Damage"), levels 1 to 40.
+    let hollowPalmDamage : (float * float)[] =
+        [| 11, 17; 18, 27; 27, 41; 37, 55; 47, 70; 57, 86; 67, 100; 78, 117; 88, 132; 99, 148
+           109, 164; 114, 171; 118, 177; 128, 192; 138, 207; 146, 219; 155, 233; 164, 245; 172, 258; 180, 270
+           187, 281; 194, 291; 200, 300; 207, 310; 213, 320; 219, 329; 226, 339; 232, 348; 239, 358; 245, 367
+           251, 377; 258, 387; 264, 396; 270, 405; 276, 415; 283, 424; 289, 434; 295, 443; 302, 452; 308, 462 |]
+        |> Array.map (fun (a, b) -> float a, float b)
+    /// Unarmed attacks per second and base critical hit chance: PoE1's numbers (its unarmed
+    /// damage rolls, 2 to 5-8 by class, are PoE2's too). A guess.
+    let unarmedAttacksPerSecond = 1.2
+    let unarmedCritChance = 0.0
     /// Onslaught: 20% increased skill speed (game keyword text).
     let onslaughtSpeed = 20.0
     /// Arcane Surge: 20% more mana regeneration rate (game keyword text; wiki Arcane Surge).

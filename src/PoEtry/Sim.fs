@@ -640,6 +640,8 @@ module Sim =
           /// Largest leech instance of the current hit event (leech counts from one enemy).
           StrikeLeech: float
           Ward: float
+          /// Darkness reserved by damage taken: until when, how much.
+          Darkness: (float * float) list
           InfernalFlame: float
           LastStunRemnant: float
           LastManaRemnant: float
@@ -1189,6 +1191,15 @@ module Sim =
             let dmg = damage |> Map.toList |> List.sumBy snd
             if dmg <= 0.0 then w
             else
+            // Darkness: damage is reserved from what is not reserved of it, before anything else;
+            // a reservation is over after its time
+            let damage, darkness =
+                if pools.Darkness <= 0.0 then damage, p.Darkness
+                else
+                    let live = p.Darkness |> List.filter (fun (until, _) -> until > w.Time)
+                    let taken = min (max 0.0 (pools.Darkness - (live |> List.sumBy snd))) dmg
+                    if taken <= 0.0 then damage, live
+                    else damage |> Map.map (fun _ d -> d * (1.0 - taken / dmg)), (w.Time + pools.DarknessSeconds, taken) :: live
             let bypass = pools.BypassES / 100.0
             let es, rest =
                 damage
@@ -1220,6 +1231,7 @@ module Sim =
                     Mana = p.Mana - fromMana
                     EnergyShield = es
                     Ward = p.Ward - toWard
+                    Darkness = darkness
                     Life = life
                     Taken = p.Taken + dmg
                     Recoups = recoups @ p.Recoups
@@ -4035,6 +4047,7 @@ module Sim =
                           "FullMana", p.Mana >= v.Mana
                           "LowMana", p.Mana <= 0.35 * v.Mana
                           "HasEnergyShield", p.EnergyShield > 0.0
+                          "FullEnergyShield", v.EnergyShield > 0.0 && p.EnergyShield >= v.EnergyShield
                           // a flask drunk and still working (a constant one is a resource the fight starts with)
                           "ManaFlaskEffect", (w.Time < p.FlaskUntil || stacksOf (Map.find env.Fight.Player.Name w.Actors) "ConstantManaFlask" > 0)
                           "LifeFlaskEffect", (w.Time < p.LifeFlaskUntil || stacksOf (Map.find env.Fight.Player.Name w.Actors) "ConstantLifeFlask" > 0)
@@ -4299,6 +4312,7 @@ module Sim =
                       FlaskRate = 0.0
                       StrikeLeech = 0.0
                       Ward = v.Ward
+                      Darkness = []
                       InfernalFlame = 0.0
                       LastStunRemnant = -1e9
                       LastManaRemnant = -1e9

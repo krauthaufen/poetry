@@ -186,6 +186,25 @@ module Items =
                         mods @ (number l |> Option.map (fun v -> Mod.more (Named "ReservationEfficiency") -v |> Mod.whenever (Not(SkillIs(Tag "Type:Companion")))) |> Option.toList), left
                     elif l.StartsWith "Non-Minion Skills have " && l.EndsWith "less Reservation Efficiency" then
                         mods @ (number l |> Option.map (fun v -> Mod.more (Named "ReservationEfficiency") -v |> Mod.whenever (Not(SkillIs(Tag "Type:Minion")))) |> Option.toList), left
+                    // life flasks that are never drunk (see Pob.character). Their recovery is spread over
+                    // time, so it is never instant; nothing but the player recovers from a flask here
+                    elif l = "Non-Unique Life Flasks apply their Effects constantly" then mods @ [ Mod.flag (Named "ConstantLifeFlasks") ], left
+                    elif l = "Recovery from Life Flasks cannot be Instant" || l = "Recovery from your Life Flasks cannot be applied to anything other than you" then mods, left
+                    // Darkness: "You have no Spirit" is read by its own stat
+                    elif l.StartsWith "Base Maximum Darkness is " then
+                        mods @ (number l |> Option.map (fun v -> Mod.base' (Named "Darkness") v) |> Option.toList), left
+                    elif l = "Damage taken is Reserved from Darkness before being taken from Life or Energy Shield" then mods, left
+                    // Hollow Palm Technique (see Pob.character: the hands must be empty)
+                    elif l = "Can Attack as though using a Quarterstaff while both of your hand slots are empty" then mods @ [ Mod.flag (Named "HollowPalm") ], left
+                    elif l = "Unarmed Attacks that would use an Equipped Quarterstaff's damage have:" || l = "Base Unarmed Physical damage replaced with damage based on their Skill Level" then mods, left
+                    elif l.EndsWith "more Attack Speed per 75 Item Evasion on Equipped Armour Items" || (l.Contains "more Attack Speed per " && l.EndsWith "Item Evasion on Equipped Armour Items") then
+                        match numbers l with
+                        | [ a; b ] when b > 0.0 -> mods @ [ Mod.base' (Named "HollowPalmSpeed") a; Mod.base' (Named "HollowPalmSpeedPerEvasion") b ], left
+                        | _ -> mods, left @ [ line ]
+                    elif l.Contains "to Critical Hit Chance per " && l.EndsWith "Item Energy Shield on Equipped Armour Items" then
+                        match numbers l with
+                        | [ a; b ] when b > 0.0 -> mods @ [ Mod.base' (Named "HollowPalmCrit") a; Mod.base' (Named "HollowPalmCritPerES") b ], left
+                        | _ -> mods, left @ [ line ]
                     elif l.Contains "to maximum Mana per " && l.EndsWith "Item Armour on Equipped Helmet" then
                         match numbers l with
                         | [ a; b ] when b > 0.0 -> mods @ [ Mod.base' (Named "ManaPerHelmetArmour") (a / b) ], left

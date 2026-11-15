@@ -683,6 +683,21 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         let grant = "{\"id\": \"C\", \"stats\": {\"local_jewel_notables_in_radius_grant_critical_strike_multiplier_+%\": 10}}"
         equal (box [ radius ]) (box (parsed (item grant radius)).Coverage.UnknownText))
 
+    test "Abyssal Wasting lowers life regeneration, which monsters here never have: understood, without effect" (fun () ->
+        for id in [ "abyssal_wasting_on_hit"; "abyssal_wasting_effect_+%"; "abyssal_wasting_infinite_duration"; "unaffected_by_elemental_weakness" ] do
+            equal (box NotOffensive) (box (StatMap.meaning id 1.0))
+        // what it does besides is not swallowed with it
+        equal (box Unmapped) (box (StatMap.meaning "abyssal_wasting_also_prevents_enemies_from_dealing_critical_strikes" 1.0)))
+
+    test "api: an idol with a name of its own is an idol (the property Idol): counted, and its Bonded lines apply" (fun () ->
+        let idol = "{\"typeLine\": \"Carved Test\", \"properties\": [{\"name\": \"[Idol]\", \"values\": []}], \"bondedMods\": [\"[ShamanOnlyMods|Bonded]:\", \"Body Armours: 5% increased [Spirit]\"]}"
+        let rune = "{\"typeLine\": \"Test Rune\", \"properties\": []}"
+        let body =
+            Json.parse (sprintf "{\"rarity\": \"Rare\", \"name\": \"Test Robe\", \"typeLine\": \"Silk Robe\", \"inventoryId\": \"BodyArmour\", \"runeMods\": [\"[Idol|Idols] socketed in this item gain the benefits of their [ShamanOnlyMods|Bonded] modifiers\", \"[ShamanOnlyMods|Bonded]: 5%% increased [Spirit]\"], \"socketedItems\": [%s, %s]}" idol rune)
+        let text = Api.itemText body
+        equal (box true) (box (text.Contains "Idols socketed: 1"))
+        equal (box true) (box (text.Split('\n') |> Array.exists (fun l -> l.Trim() = "5% increased Spirit"))))
+
     // ---- mana lost, Glory gained ----
 
     test "mana degeneration lowers mana regeneration, and mana never falls below nothing" (fun () ->
@@ -1041,6 +1056,35 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         | None -> failwith "alive"
         same (fight 20.0 30.0) seeds
         same (fight 20.0 100.0) seeds)
+
+    test "Darkness: damage taken is reserved from it first, and a reservation is over after its time" (fun () ->
+        let v =
+            (load { blank with Level = 90; ExtraLines = [ "You have no Spirit"; "Base Maximum Darkness is 100"; "Damage taken is Reserved from Darkness before being taken from Life or Energy Shield"; "+5 to Maximum Darkness per Level"; "Darkness Reservation lasts for 10 seconds"; "20% increased maximum Darkness" ] } Options.defaults)
+        equal (box ([]: string list)) (box v.Sheet.Coverage.UnknownText)
+        // (100 + 5 x 90) x 1.2
+        near 660.0 v.Vitals.Darkness
+        near 10.0 v.Vitals.DarknessSeconds
+        // 250 every 4 s on 300 life. No Darkness: dead at the second hit. 400 Darkness for 10 s: the
+        // first hit and 150 of the second are reserved, the third finds none and kills. For 3 s: every
+        // hit finds all 400 again, and the life is never touched
+        let brute =
+            { EnemyDef.make Rarity.defaults 70 Unique "brute" (Vec.make 5.0 0.0) with
+                Life = 1e9; Mods = []
+                Attack = Some { Interval = 4.0; Damage = Map.ofList [ Physical, 250.0 ]; Accuracy = 1e9; Range = 20.0; CritChance = 0.0; Melee = true } }
+        let bolt = { Skill.make "Bolt" [ Spell ] with BaseDamage = Map.ofList [ Chaos, { Min = 1.0; Max = 1.0 } ]; BaseTime = 0.5 }
+        let fight darkness seconds =
+            let vitals = { PlayerStats.basic 300.0 0.0 with StunThreshold = 1e9; AilmentThreshold = 1e9; Darkness = darkness; DarknessSeconds = seconds }
+            Fight.single brute { Actor.make "Player" [] [ bolt ] with Vitals = Some vitals } 60.0
+        let run f = Sim.run f 1u
+        let plain, dark = (run (fight 0.0 0.0)).Died, (run (fight 400.0 10.0)).Died
+        match plain, dark with
+        | Some a, Some b -> near 4.0 (b - a)
+        | _ -> failwith "should have died"
+        let safe = run (fight 400.0 3.0)
+        equal (box None) (box safe.Died)
+        near 1.0 safe.MinLife
+        same (fight 400.0 10.0) seeds
+        same (fight 400.0 3.0) seeds)
 
     // ---- Scarred Faith ----
 

@@ -612,7 +612,12 @@ module Gems =
             if shieldDamage.IsSome then shieldDamage.Value
             elif ownWeapon then ownWeaponDamage
             elif isAttack then
-                weapon |> Option.map (fun w -> w.Damage) |> Option.defaultValue Map.empty
+                match weapon with
+                // Hollow Palm Technique: unarmed physical damage of the skill's level
+                | Some w when List.contains (Tag "HollowPalm") w.Tags ->
+                    let lo, hi = Constants.hollowPalmDamage.[max 0 (min (Constants.hollowPalmDamage.Length - 1) (level - 1))]
+                    Map.ofList [ Physical, { Min = lo; Max = hi } ]
+                | _ -> weapon |> Option.map (fun w -> w.Damage) |> Option.defaultValue Map.empty
             else
                 // a stat listed more than once adds up (infused sets list base damage twice)
                 ownStats

@@ -1351,7 +1351,7 @@ module Flat =
                 yield "AtMaximum" + kind + "Charges"
                 yield "No" + kind + "Charges"
                 yield "YouHaveNo" + kind + "Charges" ]
-        @ [ "Ignited"; "DamagingAilment"; "LowEnergyShield"; "ESRechargeStartedRecently" ]
+        @ [ "Ignited"; "DamagingAilment"; "LowEnergyShield"; "ESRechargeStartedRecently"; "FullEnergyShield" ]
 
     let private derivedStatuses =
         [ "Moving"; "Cullable"; "AnyAilment"; "Cursed"; "Marked"; "Immobilised"; "ElementalAilments"; "Exposed"; "RareOrUnique"; "LowLife"; "FullLife"; "Unique"; "Magic" ]
@@ -2846,6 +2846,7 @@ module Flat =
           mutable StrikeLeech: float
           mutable StrikeLifeLeech: float
           mutable Ward: float
+          mutable Darkness: (float * float) list
           mutable LifeFlaskCharges: float
           mutable LifeFlaskUntil: float
           mutable LifeFlaskRate: float
@@ -3614,6 +3615,18 @@ module Flat =
         if alive s then
             let dmg = damage |> Map.toList |> List.sumBy snd
             if dmg > 0.0 then
+                // Darkness (`Sim.takeDamage`)
+                let damage =
+                    if pools.Darkness <= 0.0 then damage
+                    else
+                        let live = s.Darkness |> List.filter (fun (until, _) -> until > s.Time)
+                        let taken = min (max 0.0 (pools.Darkness - (live |> List.sumBy snd))) dmg
+                        if taken <= 0.0 then
+                            s.Darkness <- live
+                            damage
+                        else
+                            s.Darkness <- (s.Time + pools.DarknessSeconds, taken) :: live
+                            damage |> Map.map (fun _ d -> d * (1.0 - taken / dmg))
                 let bypass = pools.BypassES / 100.0
                 let es, rest =
                     damage
@@ -6877,6 +6890,7 @@ module Flat =
         setState s 19 ignited
         setState s 20 ignited
         setState s 21 (v.EnergyShield > 0.0 && s.Shield <= Constants.lowStatusShare * v.EnergyShield)
+        setState s 23 (v.EnergyShield > 0.0 && s.Shield >= v.EnergyShield)
         setState s 22 (p.AsksESRecharge && v.EnergyShield > 0.0 && s.Time - s.LastHit >= v.ESRechargeDelay && s.Time - s.LastHit < v.ESRechargeDelay + Constants.esRechargeStartedRecently)
 
     /// What is planted in or beside the enemies (`Sim.step`): seeds set off by the damage
@@ -7452,6 +7466,7 @@ module Flat =
               StrikeLeech = 0.0
               StrikeLifeLeech = 0.0
               Ward = (match v with Some v -> v.Ward | None -> 0.0)
+              Darkness = []
               LifeFlaskCharges = (match v |> Option.bind (fun v -> v.LifeFlask) with Some f -> f.MaxCharges | None -> 0.0)
               LifeFlaskUntil = 0.0
               LifeFlaskRate = 0.0

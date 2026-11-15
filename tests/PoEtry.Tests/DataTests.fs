@@ -787,14 +787,23 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         near 1.36 (Mods.inc spell [ Damage AllDamage ] db)
         near 1.0 (Mods.inc { spell with SkillTags = Set.ofList [ Attack ] } [ Damage AllDamage ] db))
 
-    test "spirit: flat amounts, a sceptre's own value, the better weapon set; minions from what is left" (fun () ->
+    test "spirit: flat amounts, a sceptre's own value, the weapon set in hand; minions from what is left" (fun () ->
         let sceptre slot = slot, "Rarity: Rare\nTest Sceptre\n--------\nSpirit: 120\n--------\n30% increased Spirit\n"
         let helmet = item "Helmet" [ "Armour: 100"; "--------"; "+50 to Spirit" ]
         let quest = [ "+100 to Spirit" ]
         // the sceptre's own "30% increased Spirit" is already in the 120 it shows
         near 270.0 (let b = { blank with Items = [ sceptre "Weapon 2"; helmet ]; ExtraLines = quest } in Behaviours.spiritTotal (sheetOf b) b)
-        // a sceptre in weapon set two counts when it gives more than set one's
-        near 270.0 (let b = { blank with Items = [ sceptre "Weapon 2 Swap"; helmet ]; ExtraLines = quest } in Behaviours.spiritTotal (sheetOf b) b)
+        // a sceptre in weapon set two counts only while that set is in hand
+        near 150.0 (let b = { blank with Items = [ sceptre "Weapon 2 Swap"; helmet ]; ExtraLines = quest } in Behaviours.spiritTotal (sheetOf b) b)
+        let setTwo (b: PobBuild) = let sh = sheetOf b in { sh with Mods = sh.Mods @ [ Mod.base' (Named "Sheet:SpiritSetTwo") 1.0 ] }
+        near 270.0 (let b = { blank with Items = [ sceptre "Weapon 2 Swap"; helmet ]; ExtraLines = quest } in Behaviours.spiritTotal (setTwo b) b)
+        near 150.0 (let b = { blank with Items = [ sceptre "Weapon 2"; helmet ]; ExtraLines = quest } in Behaviours.spiritTotal (setTwo b) b)
+        // "-1 to Spirit per 2 Levels" at level 91: 45 less
+        near 105.0 (let b = { blank with Level = 91; Items = [ helmet ]; ExtraLines = quest @ [ "-1 to Spirit per 2 Levels" ] } in Behaviours.spiritTotal (sheetOf b) b)
+        // "Cannot gain Spirit from Equipment": neither the sceptre's 120 nor the helmet's 50
+        near 100.0 (let b = { blank with Items = [ sceptre "Weapon 2"; helmet ]; ExtraLines = quest @ [ "Cannot gain Spirit from Equipment" ] } in Behaviours.spiritTotal (sheetOf b) b)
+        // "+3 to Spirit per Idol socketed in your Equipment" with two idols in the helmet
+        near 156.0 (let b = { blank with Items = [ item "Helmet" [ "Armour: 100"; "Idols socketed: 2"; "--------"; "+50 to Spirit" ] ]; ExtraLines = quest @ [ "+3 to Spirit per Idol socketed in your Equipment" ] } in Behaviours.spiritTotal (sheetOf b) b)
         near 150.0 (let b = { blank with Items = [ helmet ]; ExtraLines = quest } in Behaviours.spiritTotal (sheetOf b) b)
         // Skeletal Warriors: 20 Spirit each at level 20, the first two free; Herald of Thunder 30
         let gem name = { Name = name; Level = 20; Quality = 0; Enabled = true; IsSupport = false; StatSet = 1; Minion = None }
@@ -803,7 +812,12 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         let uses = Behaviours.spiritUses db.Value (sheetOf b) b
         let counts = Behaviours.minionCounts 150.0 uses
         // 150 - 30 = 120 spare: 6 paid minions and 2 free
-        equal (box 8) (box counts.["Skeletal Warrior"]))
+        equal (box 8) (box counts.["Skeletal Warrior"])
+        // "Minions have 25% increased Reservation": 25 Spirit each; 40% increased efficiency of non-Minion skills: the Herald 30 / 1.4
+        let b = { b with ExtraLines = quest @ [ "Minions have 25% increased Reservation"; "40% increased Reservation Efficiency of non-Minion Skills" ] }
+        let uses = Behaviours.spiritUses db.Value (sheetOf b) b
+        near 25.0 (uses |> List.sumBy (fun u -> u.PerMinion))
+        near (30.0 / 1.4) (uses |> List.sumBy (fun u -> u.Flat)))
 
     test "spirit reservation: granted skills are free, quality and tree efficiency, corrupted items" (fun () ->
         let gem name q = { Name = name; Level = 20; Quality = q; Enabled = true; IsSupport = false; StatSet = 1; Minion = None }
@@ -969,6 +983,49 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
             near 8.5 (Mods.mult { Ctx.empty with SkillTags = s.Tags } [ Damage AllDamage ] (ModDb.ofList s.Mods))
             equal (box (AreaAroundSelf 60.0)) (box s.Delivery)
         | Error e -> failwith e)
+
+    test "Hollow Palm Technique: empty hands attack as with a quarterstaff, damage by skill level, speed per item evasion, crit per item energy shield" (fun () ->
+        let lines =
+            [ "Can Attack as though using a Quarterstaff while both of your hand slots are empty"
+              "Unarmed Attacks that would use an Equipped Quarterstaff's damage have:"
+              "Base Unarmed Physical damage replaced with damage based on their Skill Level"
+              "1% more Attack Speed per 75 Item Evasion on Equipped Armour Items"
+              "+0.1% to Critical Hit Chance per 10 Item Energy Shield on Equipped Armour Items" ]
+        let body = item "Body Armour" [ "Evasion Rating: 310"; "Energy Shield: 105"; "--------" ]
+        let sh = sheetOf { blank with Items = [ body ]; ExtraLines = lines }
+        equal (box ([]: string list)) (box sh.Coverage.UnknownText)
+        equal (box true) (box (sh.MainHand |> Option.exists (fun w -> List.contains (Tag "HollowPalm") w.Tags)))
+        let sdb = ModDb.ofList sh.Mods
+        let ctx = { Ctx.empty with SkillTags = Set.ofList [ Attack; Tag "HollowPalm" ] }
+        // 310 evasion: 4 x 1% more attack speed; 105 energy shield: 10 x 0.1% critical hit chance
+        near 1.04 (Mods.more ctx [ Speed ] sdb)
+        near 1.0 (Mods.sumBase ctx [ CritChance ] sdb)
+        near 1.0 (Mods.more { ctx with SkillTags = Set.ofList [ Attack ] } [ Speed ] sdb)
+        // level 20: 180 to 270 physical before the skill's own multiplier (level 1: 11 to 17)
+        let dmg level =
+            match Gems.skill db.Value sdb sh.MainHand { Gem = "Quarterstaff Strike"; Level = level; Quality = 0; StatSet = 1; Supports = [] } with
+            | Ok (s, _) -> s.BaseDamage.[Physical]
+            | Error e -> failwith e
+        near 180.0 (dmg 20).Min
+        near 270.0 (dmg 20).Max
+        near 11.0 (dmg 1).Min
+        // a weapon in hand: no such weapon
+        let armed = sheetOf { blank with Items = [ body; "Weapon 1", "Rarity: Rare\nTest Staff\nWrapped Quarterstaff\n--------\nPhysical Damage: 10-20\nAttacks per Second: 1.40\n" ]; ExtraLines = lines }
+        equal (box false) (box (armed.MainHand |> Option.exists (fun w -> List.contains (Tag "HollowPalm") w.Tags))))
+
+    test "Non-Unique Life Flasks apply their Effects constantly: so much life a second, never drunk" (fun () ->
+        let flask rarity = "Flask 1", sprintf "Rarity: %s\nTest Flask\nUltimate Life Flask\n--------\nFlask: Recovers 900 Life over 3 Seconds\nFlask: Consumes 10 of 75 Charges on use\n" rarity
+        let lines = [ "Non-Unique Life Flasks apply their Effects constantly"; "Recovery from Life Flasks cannot be Instant"; "Recovery from your Life Flasks cannot be applied to anything other than you" ]
+        let sh = sheetOf { blank with Items = [ flask "Magic" ]; ExtraLines = lines }
+        equal (box ([]: string list)) (box sh.Coverage.UnknownText)
+        let named n (s: CharacterSheet) = Mods.sumBase Ctx.empty [ Named n ] (ModDb.ofList s.Mods)
+        near 300.0 (named "ConstantLifeRecovery" sh)
+        equal (box true) (box sh.LifeFlask.IsNone)
+        // a unique flask, or no such line: a flask to drink
+        let unique = sheetOf { blank with Items = [ flask "Unique" ]; ExtraLines = lines }
+        near 0.0 (named "ConstantLifeRecovery" unique)
+        equal (box true) (box unique.LifeFlask.IsSome)
+        equal (box true) (box (sheetOf { blank with Items = [ flask "Magic" ] }).LifeFlask.IsSome))
 
     test "gem: shield attacks hit with the shield, scaled by its armour" (fun () ->
         let mods armour = ModDb.ofList [ Mod.base' (Named "ShieldArmour") armour ]
