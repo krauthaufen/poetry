@@ -165,7 +165,8 @@ module StatText =
             match Json.strField "text" v with
             | None -> None
             | Some text ->
-                let key, slots = template text
+                // (a description of several lines: a line of the game's text may begin with a space)
+                let key, slots = template (text.Replace("\n ", "\n"))
                 let limits =
                     Json.list (Json.field "limit" v)
                     |> List.map (fun l ->
@@ -266,7 +267,7 @@ module StatText =
     /// Parse one line, preferring local or global readings by context.
     /// A line may contain "\n" for descriptions that span several lines.
     let parseIn (context: Context) (index: Index) (line: string) : (string * float) list option =
-        let tokens = tokenize (line.Trim())
+        let tokens = tokenize (line.Trim().Replace("\n ", "\n"))
         let numbers =
             tokens |> List.choose (function
                 | Number v -> Some v
@@ -311,7 +312,8 @@ module StatText =
     let parse (index: Index) (line: string) = parseInWithNamed Global index line
 
     /// Parse a block of lines. Lines that only make sense together (the game wraps
-    /// some descriptions) are joined, up to three at a time.
+    /// some descriptions) are joined, up to three at a time (a keystone of more lines is read
+    /// line by line where its lines are known: Character).
     /// Returns parsed stats and the lines nobody understood.
     let parseLinesIn (context: Context) (index: Index) (lines: string list) =
         let rec go acc unknown rest =

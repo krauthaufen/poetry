@@ -2761,3 +2761,12 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         let some = dealt (fight (chance 50.0))
         equal (box true) (box (some > 1000.0 && some < 2000.0))
         same (fight (chance 50.0)) seeds)
+
+    test "text: a description of several lines, one of which the game begins with a space" (fun () ->
+        // the item's text comes line by line; the game's own text has "\n Remove all ..."
+        let stats, unknown =
+            StatText.parseLines db.Value.Text
+                [ "Gain 1 Explosive Rhythm every 2 times you use a Grenade Skill"
+                  "Remove all Explosive Rhythm on reaching 10 to gain Explosive Fervour for 10 Seconds" ]
+        equal (box [ "gain_stack_of_disorderly_conduct_every_x_grenade_skills_used", 2.0 ]) (box stats)
+        equal (box true) (box unknown.IsEmpty))
