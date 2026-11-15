@@ -18,7 +18,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
    whose description or behaviour changed.
 5. Go through the lists below; the wiki's version history of a skill says what changed.
 
-## Rules (119)
+## Rules (122)
 
 ### Hit damage
 
@@ -53,6 +53,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | Projectiles | — | guess (geometry), data (counts) |
 | Default spread | — | guess |
 | Fork | poe2db keyword text (Fork, Chain); the angle: the first game's wiki ("two new projectile travel ... at a 120º angle", via poedb); the remaining range and straight flight are guesses | data / guess |
+| Shocked Ground | keyword text (poe2db), stat description; game table BuffDefinitions (`shocked_ground`: no stats) | data / guess |
 | Spark | game tables (GrantedEffectStatSets, Projectiles), gem text; user: cone widening with the number, gone on hit. The 15 degrees and the zigzag step are guesses | data / guess |
 | Full circle from the player | geometry | guess |
 | Damage per target | — | guess |
@@ -111,6 +112,8 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | A random element | stat description; the average in place of the choice | guess |
 | Additional Remnants | stat descriptions; adding the two up is a guess | guess |
 | Using them up | game rule | guess |
+| Herald of Plague | gem description, `herald_of_agony_poison_spread_on_kill_radius_base_magnitude_to_grant` (its description: a radius in tenths of a metre) | data / guess |
+| Kills by damage over time | game: "on kill" effects are not limited to hits unless they say so; what is left out is a simplification | guess |
 | Chains | game rule (recollection) | guess |
 | Herald of Ash | gem description + data | data; the ignite takes no further modifiers (guess); in the damage shares it is the herald's, not "Ignite" |
 | Item modifier magnitudes | item text as the API gives it | guess |
