@@ -984,6 +984,35 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
             equal (box (AreaAroundSelf 60.0)) (box s.Delivery)
         | Error e -> failwith e)
 
+    test "Hollow Palm Technique: empty hands attack as with a quarterstaff, damage by skill level, speed per item evasion, crit per item energy shield" (fun () ->
+        let lines =
+            [ "Can Attack as though using a Quarterstaff while both of your hand slots are empty"
+              "Unarmed Attacks that would use an Equipped Quarterstaff's damage have:"
+              "Base Unarmed Physical damage replaced with damage based on their Skill Level"
+              "1% more Attack Speed per 75 Item Evasion on Equipped Armour Items"
+              "+0.1% to Critical Hit Chance per 10 Item Energy Shield on Equipped Armour Items" ]
+        let body = item "Body Armour" [ "Evasion Rating: 310"; "Energy Shield: 105"; "--------" ]
+        let sh = sheetOf { blank with Items = [ body ]; ExtraLines = lines }
+        equal (box ([]: string list)) (box sh.Coverage.UnknownText)
+        equal (box true) (box (sh.MainHand |> Option.exists (fun w -> List.contains (Tag "HollowPalm") w.Tags)))
+        let sdb = ModDb.ofList sh.Mods
+        let ctx = { Ctx.empty with SkillTags = Set.ofList [ Attack; Tag "HollowPalm" ] }
+        // 310 evasion: 4 x 1% more attack speed; 105 energy shield: 10 x 0.1% critical hit chance
+        near 1.04 (Mods.more ctx [ Speed ] sdb)
+        near 1.0 (Mods.sumBase ctx [ CritChance ] sdb)
+        near 1.0 (Mods.more { ctx with SkillTags = Set.ofList [ Attack ] } [ Speed ] sdb)
+        // level 20: 180 to 270 physical before the skill's own multiplier (level 1: 11 to 17)
+        let dmg level =
+            match Gems.skill db.Value sdb sh.MainHand { Gem = "Quarterstaff Strike"; Level = level; Quality = 0; StatSet = 1; Supports = [] } with
+            | Ok (s, _) -> s.BaseDamage.[Physical]
+            | Error e -> failwith e
+        near 180.0 (dmg 20).Min
+        near 270.0 (dmg 20).Max
+        near 11.0 (dmg 1).Min
+        // a weapon in hand: no such weapon
+        let armed = sheetOf { blank with Items = [ body; "Weapon 1", "Rarity: Rare\nTest Staff\nWrapped Quarterstaff\n--------\nPhysical Damage: 10-20\nAttacks per Second: 1.40\n" ]; ExtraLines = lines }
+        equal (box false) (box (armed.MainHand |> Option.exists (fun w -> List.contains (Tag "HollowPalm") w.Tags))))
+
     test "gem: shield attacks hit with the shield, scaled by its armour" (fun () ->
         let mods armour = ModDb.ofList [ Mod.base' (Named "ShieldArmour") armour ]
         let build armour =

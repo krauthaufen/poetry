@@ -1271,6 +1271,9 @@ module StatMap =
         | "spark_min_time_between_target_clearing_ms" | "active_skill_additional_projectiles_description_mode"
         | "item_can_have_catalyst_quality_in_addition_to_base_quality" | "skill_empower_limitation_specifier_for_stat_description"
         | "phylactery_can_only_contain_non_unique_jewel" | "has_unique_chaos_shrine_effect" -> Some Structural
+        // "Gloves you equip have their Base Type transformed to Fists of Stone ... Explicit Modifiers
+        // transformed": the gloves the API sends are the transformed ones, read as they are shown
+        | "ascendancy_hand_wraps" -> Some Structural
         | id when id.StartsWith "dummy_stat_" || id.StartsWith "warping_rune_add_item_tag_" || id.StartsWith "quality_display_"
                   || id.StartsWith "pvp_" || id.StartsWith "replace_" || id.EndsWith "_art_variation" -> Some Structural
         // read by id where the mechanic lives (Behaviours): remnants, infusions, conflux, motes

@@ -502,7 +502,28 @@ module Pob =
         let swapSpirit =
             parsed |> List.sumBy (fun (slot, p) -> if slot.Contains "Swap" then p.Defences |> List.sumBy (fun (st, v) -> if st = Named "Spirit" then v else 0.0) else 0.0)
         let shieldMods = if swapSpirit > 0.0 then (Mod.base' (Named "SpiritOnSetTwo") swapSpirit |> Mod.from "weapon set two") :: shieldMods else shieldMods
-        { Mods = itemMods @ constantFlaskMods @ shieldMods @ legacies @ radiusMods @ treeMods @ (extraMods |> List.map (sourced "quest"))
+        // Hollow Palm Technique: with both hands of set one empty the character attacks as though
+        // with a Quarterstaff, unarmed: physical damage by the skill's level (Gems reads the tag),
+        // more attack speed per item Evasion and critical hit chance per item Energy Shield on the armour worn
+        let mainHand, hollowMods =
+            let own = ModDb.ofList (treeMods @ extraMods)
+            let handsEmpty = not (items |> List.exists (fun (slot, _) -> slot = "Weapon 1" || slot = "Weapon 2"))
+            if not (handsEmpty && Mods.flag Ctx.empty (Named "HollowPalm") own) then mainHand, []
+            else
+                let worn stat = parsed |> List.sumBy (fun (slot, p) -> if slot.Contains "Swap" || slot.StartsWith "Weapon" then 0.0 else p.Defences |> List.sumBy (fun (st, v) -> if st = stat then v else 0.0))
+                let named n = Mods.sumBase Ctx.empty [ Named n ] own
+                let per value per' amount = if named per' > 0.0 then named value * floor (amount / named per') else 0.0
+                let lo, hi = Constants.hollowPalmDamage.[0]
+                Some { Damage = Map.ofList [ Physical, { Min = lo; Max = hi } ]
+                       CritChance = Constants.unarmedCritChance
+                       AttacksPerSecond = Constants.unarmedAttacksPerSecond
+                       ReloadTime = 0.0
+                       Tags = [ Tag "Base:Quarterstaff"; Quarterstaff; Unarmed; Tag "HollowPalm" ] },
+                [ Mod.more Speed (per "HollowPalmSpeed" "HollowPalmSpeedPerEvasion" (worn Evasion)) |> Mod.whenever (SkillIs Attack)
+                  Mod.base' CritChance (per "HollowPalmCrit" "HollowPalmCritPerES" (worn MaxEnergyShield)) ]
+                |> List.filter (fun m -> m.Value <> 0.0)
+                |> List.map (Mod.whenever (SkillIs(Tag "HollowPalm")) >> Mod.from "Hollow Palm Technique")
+        { Mods = itemMods @ constantFlaskMods @ shieldMods @ legacies @ radiusMods @ treeMods @ (extraMods |> List.map (sourced "quest")) @ hollowMods
           MainHand = mainHand
           Weapons = Option.toList mainHand @ Option.toList swapHand
           // the second weapon set's items keep their "... Swap" slot: Defence picks the set
