@@ -394,7 +394,7 @@ module Behaviours =
                                 { Banner.Name = gem.Name
                                   Glory = glory
                                   PerAttackHit = sum "active_skill_generates_mp_%_glory_per_attack_hit" * Mods.inc Ctx.empty [ Named "GloryGeneration" ] charMods
-                                  Duration = sum "base_skill_effect_duration" / 1000.0 * Mods.mult Ctx.empty [ SkillDuration ] charMods
+                                  Duration = sum "base_skill_effect_duration" / 1000.0 * Mods.mult Ctx.empty [ SkillDuration; Named "BannerDuration" ] charMods
                                   Mods =
                                     [ if sum "base_skill_buff_attack_damage_+%_final_to_apply" <> 0.0 then
                                           yield Mod.more (Damage AllDamage) (sum "base_skill_buff_attack_damage_+%_final_to_apply" * effect) |> Mod.whenever (SkillIs Attack)

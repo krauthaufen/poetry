@@ -1045,3 +1045,27 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         near v.Armour v.ESRecoverCap
         near 0.0 v.ESRegen
         near 0.0 v.EnergyShieldRecharge)
+
+    // ---- durations ----
+
+    test "durations: of Ignite, Shock and Chill; Swift Affliction's and Limit's more; flask effect; banners" (fun () ->
+        let dur id v a = Ailments.duration Ctx.empty (ModDb.ofList (mods id v)) a
+        for a in [ Ignite; Shock; Chill ] do near (Ailments.baseDuration a * 1.5) (dur "ignite_shock_chill_duration_+%" 50.0 a)
+        near (Ailments.baseDuration Poison) (dur "ignite_shock_chill_duration_+%" 50.0 Poison)
+        // "25% more Duration of Supported Skills and Damaging Ailments they inflict"
+        let swift = ModDb.ofList (mods "support_swift_affliction_skill_effect_and_damaging_ailment_duration_+%_final" 25.0)
+        for a in [ Ignite; Bleed; Poison ] do near (Ailments.baseDuration a * 1.25) (Ailments.duration Ctx.empty swift a)
+        near (Ailments.baseDuration Shock) (Ailments.duration Ctx.empty swift Shock)
+        near 1.25 (Mods.mult Ctx.empty [ SkillDuration ] swift)
+        near 0.7 (Mods.mult Ctx.empty [ SkillDuration ] (ModDb.ofList (mods "support_limit_skill_effect_duration_+%_final" -30.0)))
+        // "20% increased Flask Effect Duration": the same amount over 1.2 times the time
+        let flask = Defence.flask "Mana" (ModDb.ofList (mods "flask_duration_+%" 20.0)) (Some((100.0, 3.0, 10.0, 60.0), 0.0))
+        near 3.6 flask.Value.Duration
+        near 100.0 flask.Value.Amount
+        // "Banner Skills have 50% increased Duration"
+        let banner lines =
+            let c = load { blank with Groups = [ group [ gem "War Banner" ] ]; ExtraLines = "+100 to Spirit" :: lines } Options.defaults
+            Behaviours.banners db.Value c.Sheet c.Build |> List.map (fun b -> b.Duration)
+        match banner [], banner [ "Banner Skills have 50% increased Duration" ] with
+        | [ plain ], [ longer ] -> near (plain * 1.5) longer
+        | a, b -> failwithf "banners %A %A" a b)

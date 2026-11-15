@@ -39,7 +39,7 @@ module Defence =
         spec
         |> Option.map (fun ((amount, duration, perUse, maxC), ownGain) ->
             { Amount = amount * Mods.mult c [ Named(pool + "FlaskAmount") ] db
-              Duration = duration / max 0.1 (Mods.mult c [ Named(pool + "FlaskRate") ] db)
+              Duration = duration * Mods.mult c [ Named "FlaskDuration" ] db / max 0.1 (Mods.mult c [ Named(pool + "FlaskRate") ] db)
               ChargesPerUse = perUse * Mods.mult c [ Named(pool + "FlaskChargesUsed") ] db
               MaxCharges = maxC
               ChargesPerSecond = Mods.sumBase c [ Named "FlaskChargesPerSecond"; Named(pool + "FlaskChargesPerSecond") ] db

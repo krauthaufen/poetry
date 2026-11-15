@@ -986,6 +986,17 @@ module StatMap =
         | "skill_effect_duration_+%" -> one (Mod.inc SkillDuration v)
         | "support_more_duration_skill_effect_duration_+%_final"
         | "support_reduced_duration_skill_effect_duration_+%_final" -> one (Mod.more SkillDuration v)
+        // "Supported Skills have X% more Skill Effect Duration" (Limit)
+        | "support_limit_skill_effect_duration_+%_final" -> one (Mod.more SkillDuration v)
+        // "X% more Duration of Supported Skills and Damaging Ailments they inflict" (Swift Affliction)
+        | "support_swift_affliction_skill_effect_and_damaging_ailment_duration_+%_final" ->
+            Some(Mods(Mod.more SkillDuration v :: (Ailment.damaging |> List.map (fun a -> Mod.more (AilmentDuration(Some a)) v))))
+        // "X% increased Duration of Ignite, Shock and Chill on Enemies"
+        | "ignite_shock_chill_duration_+%" -> Some(Mods([ Ignite; Shock; Chill ] |> List.map (fun a -> Mod.inc (AilmentDuration(Some a)) v)))
+        // "X% increased Flask Effect Duration": a life or mana flask's recovery takes longer, the amount the same
+        | "flask_duration_+%" -> one (Mod.inc (Named "FlaskDuration") v)
+        // "Banner Skills have X% increased Duration"
+        | "banner_duration_+%" -> one (Mod.inc (Named "BannerDuration") v)
         | "ailment_chance_+%" -> Some(Mods(allAilments |> List.map (fun a -> Mod.inc (AilmentChance a) v)))
         | "ailment_effect_+%" | "base_ailment_effect_+%" -> one (Mod.inc (AilmentMagnitude None) v)
         | "base_damaging_ailment_effect_+%" ->
