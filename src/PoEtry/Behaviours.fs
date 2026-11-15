@@ -893,7 +893,9 @@ module Behaviours =
     ///   accumulated Blood Loss the explosion adds and its chance to aggravate bleeding are not
     ///   modelled.
     /// The explosion is centred on the enemy aimed at, not on the corpse. A herald's own hits
-    /// don't set heralds off. Herald of Ash: see `heraldOfAsh`. Plague: not modelled.
+    /// don't set heralds off. Herald of Ash: see `heraldOfAsh`.
+    /// - Herald of Plague: killing a poisoned enemy, by a hit or by damage over time, spreads its
+    ///   most damaging Poison to the others within the radius, with a chance to Hinder them.
     let heralds (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) : Skill list * Rule list =
         let charMods = ModDb.ofList sheet.Mods
         let attack = WithTagNot(Attack, Herald)
@@ -928,7 +930,20 @@ module Behaviours =
                         Some(skill, rules)
                     | Error _ -> None)))
         |> List.unzip
-        |> fun (skills, rules) -> skills, List.concat rules
+        |> fun (skills, rules) ->
+            // Herald of Plague: "killing a Poisoned enemy spreads its Poison to other nearby
+            // enemies" ("Spreads the most Damaging Poison on enemies you kill in a 1.8 metre
+            // radius"), "and has a chance to also Hinder them"
+            let plague =
+                build.Groups |> List.filter (fun g -> g.Enabled) |> List.collect (fun g -> g.Gems)
+                |> List.filter (fun x -> x.Enabled && not x.IsSupport && x.Name = "Herald of Plague")
+                |> List.collect (fun gem ->
+                    let raw = Gems.rawStats db charMods { Gem = gem.Name; Level = gem.Level; Quality = gem.Quality; StatSet = 1; Supports = [] }
+                    let stat id = raw |> List.filter (fun (k, _) -> k = id) |> List.sumBy snd
+                    let radius = stat "herald_of_agony_poison_spread_on_kill_radius_base_magnitude_to_grant"
+                    if radius <= 0.0 then []
+                    else [ { Hook = OnKillOf "Poisoned"; Filter = WithTags([], [ Herald ]); Chance = 100.0; Reaction = SpreadPoison(radius, stat "hinder_chance_%_on_spreading_poioson") } ])
+            skills, List.concat rules @ plague
 
     /// Herald of Ash: a non-herald attack that kills with overkill of at least
     /// `herald_of_ash_overkill_threshold_%` of the enemy's life makes it explode: enemies in the

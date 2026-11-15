@@ -1218,7 +1218,7 @@ module StatMap =
         | "skill_herald_of_blood_explosion_aggravate_bleeding_chance_%" -> Some(Unsimulated "aggravating bleeding")
         // Herald of Plague: "killing a Poisoned enemy spreads its Poison to other nearby enemies,
         // and has a chance to also Hinder them"
-        | "herald_of_agony_poison_spread_on_kill_radius_base_magnitude_to_grant" | "hinder_chance_%_on_spreading_poioson" -> Some(Unsimulated "spreading poison on kill")
+        | "herald_of_agony_poison_spread_on_kill_radius_base_magnitude_to_grant" | "hinder_chance_%_on_spreading_poioson" -> Some Structural
         // "When you kill a Rare monster, you gain its Modifiers for 60 seconds": the monsters of a
         // fight have no modifiers of their own (only what their rarity makes of them)
         | "gain_rare_monster_mods_on_kill_ms" -> Some(Unsimulated "rare monsters' modifiers")

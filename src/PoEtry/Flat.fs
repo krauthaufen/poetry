@@ -676,6 +676,7 @@ module Flat =
         | RRemoveBuff of buff: int
         | RRemoveDebuff of status: int
         | RInflictStatus of inflict: Inflict
+        | RSpreadPoison of radius: float * hinderChance: float * hindered: int * count: int
         | RGainResource of buff: int * count: int
         | RDropRemnant of buff: int * delay: float * extraChance: float * count: int
         /// A buff scaled by the charges held (see `Reaction.ChargeBuff`).
@@ -791,6 +792,8 @@ module Flat =
     type private CRule =
         { /// By skill: whether the rule's filter lets the skill through.
           Applies: bool[]
+          /// Whether it lets a kill by damage over time through (`Sim.dotKiller`).
+          AppliesDot: bool
           Chance: float
           Re: Re
           /// Of a rule for kills of enemies in some state: the state.
@@ -1338,6 +1341,7 @@ module Flat =
         | NoReaction -> "NoReaction"
         | RemoveDebuff _ -> "RemoveDebuff"
         | InflictStatus _ -> "InflictStatus"
+        | SpreadPoison _ -> "SpreadPoison"
         | GainResource _ -> "GainResource"
         | DropRemnant _ -> "DropRemnant"
         | ChargeBuff _ -> "ChargeBuff"
@@ -1575,6 +1579,7 @@ module Flat =
                 | RemoveBuff name -> RRemoveBuff(buffs.Id name)
                 | RemoveDebuff name -> RRemoveDebuff(statuses.Id name)
                 | InflictStatus (a, magnitude, duration) -> RInflictStatus(Status(a, magnitude, duration))
+                | SpreadPoison (radius, chance) -> RSpreadPoison(radius, chance, statuses.Id "Hindered", counts.Id "spread:Poison")
                 | GainResource (r, n) -> RGainResource(buff r, n)
                 | DropRemnant (r, delay, extra) -> RDropRemnant(buff r, delay, extra, counts.Id("remnant:" + r))
                 | ChargeBuff (name, charge, perStack, seconds, doubleChance) ->
@@ -1622,6 +1627,7 @@ module Flat =
                         | _ -> None)
             let rule (r: Rule) : CRule =
                 { Applies = all |> List.map (matches r.Filter) |> Array.ofList
+                  AppliesDot = matches r.Filter Sim.dotKiller
                   Chance = r.Chance
                   Re = reaction r.Reaction
                   Killed = (match r.Hook with OnKillOf st -> st | _ -> "") }
@@ -4129,6 +4135,13 @@ module Flat =
             if (at r.Applies sid) && (killed = "" || r.Killed = killed) then
                 if rng.Chance r.Chance then perform s rng sid target r.Re
 
+    /// `react` for a kill by damage over time: the rules whose filter lets such a kill through.
+    and private reactDot (s: State) (rng: Rng) (rules: CRule[]) (killed: string) (target: int) =
+        for rule in 0 .. rules.Length - 1 do
+            let r = at rules rule
+            if r.AppliesDot && (killed = "" || r.Killed = killed) then
+                if rng.Chance r.Chance then perform s rng -1 target r.Re
+
     and private perform (s: State) (rng: Rng) (sid: int) (target: int) (re: Re) =
         let onTarget () = target >= 0 && (at s.Foes target).Life > 0.0
         match re with
@@ -4223,7 +4236,7 @@ module Flat =
         | RGrantBuff (b, duration, maxStacks, mods) -> grantBuff s b duration maxStacks mods
         | RRemoveBuff b -> removeBuff s b
         | RApplyDebuff (id, duration, maxStacks, mods, blocked) ->
-            if not (at blocked sid) && onTarget () then addDebuff s (at s.Foes target) id duration maxStacks mods
+            if onTarget () && not (at blocked sid) then addDebuff s (at s.Foes target) id duration maxStacks mods
         | RApplyCurse (id, duration, mods, others, limit, count) ->
             if onTarget () then
                 let e = (at s.Foes target)
@@ -4240,6 +4253,21 @@ module Flat =
                     schedule s (s.Time + every * float k) EExpose target (typeIndex dt) (min cap (start + perPulse * float k)) duration
         | RRemoveDebuff id -> if onTarget () then removeDebuff (at s.Foes target) id
         | RInflictStatus i -> if onTarget () then inflict s (at s.Foes target) i
+        | RSpreadPoison (radius, hinder, hindered, count) ->
+            if target >= 0 then
+                let dead = at s.Foes target
+                let poisons =
+                    dead.Dots |> List.filter (fun d -> d.Ailing = Some Poison && d.Until > s.Time)
+                    |> List.sortByDescending (fun d -> d.Dps, d.Until) |> List.truncate 1
+                if not poisons.IsEmpty then
+                    let longest = poisons |> List.map (fun d -> d.Until - s.Time) |> List.max
+                    for k in 0 .. s.Live.Length - 1 do
+                        let o = at s.Foes (at s.Live k)
+                        if o.Life > 0.0 && o.Index <> dead.Index && Vec.dist o.Def.Position dead.Def.Position <= radius + o.Def.Size then
+                            for d in poisons do
+                                inflict s o (Dot(Poison, d.Of, d.Dps, d.Until - s.Time, d.Most))
+                            bump s count
+                            if rng.Chance hinder then addDebuff s o hindered longest 1 []
         | RTrigger skill -> trigger s rng skill
         | RGainResource (b, n) -> schedule s s.Time EGainStacks b n 0.0 0.0
         | RDropRemnant (b, delay, extra, count) ->
@@ -5713,7 +5741,7 @@ module Flat =
                 if dead then
                     react s rng p.OnKill "" sid -1
                     if p.HasKillOf then
-                        statusMap p beforeHas beforeStacks |> Map.iter (fun k _ -> react s rng p.OnKillOf k sid -1)
+                        statusMap p beforeHas beforeStacks |> Map.iter (fun k _ -> react s rng p.OnKillOf k sid target)
                 else
                     for k in 0 .. inflicted.Count - 1 do
                         let i = inflicted.[k]
@@ -6815,7 +6843,17 @@ module Flat =
             // (time passes for the player, whoever the event is of)
             enter s 0
             let p = s.P
+            let killsBefore = s.Kills.Count
             advance s t
+            // kills by damage over time set off the player's rules for kills (`Sim.step`)
+            if s.Kills.Count > killsBefore then
+                for k in killsBefore .. s.Kills.Count - 1 do
+                    let (name, _, _) = s.Kills.[k]
+                    let e = at s.Foes s.FoeIds.[name]
+                    reactDot s rng p.OnKill "" -1
+                    if p.HasKillOf then
+                        refreshStatus s e
+                        statusMap p e.SHas e.SStacks |> Map.iter (fun k _ -> reactDot s rng p.OnKillOf k e.Index)
             syncPresence s
             recover s dt
             if s.AliveCount > 0 && alive s then

@@ -938,6 +938,35 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         near 6.0 (Map.tryFind "Shocked" out.Uptime |> Option.defaultValue 0.0)
         same fight seeds)
 
+    // ---- Herald of Plague, and kills by damage over time ----
+
+    test "Herald of Plague: a poisoned enemy killed by its poison passes the most damaging one on, within 1.8 m; kills by damage over time set off rules" (fun () ->
+        let c = load { blank with Groups = [ group [ gem "Herald of Plague" ] ]; ExtraLines = [ "+100 to Spirit" ] } Options.defaults
+        let _, rules = Behaviours.heralds db.Value c.Sheet c.Build
+        let plague = rules |> List.filter (fun r -> match r.Reaction with SpreadPoison _ -> true | _ -> false)
+        equal (box [ OnKillOf "Poisoned", SpreadPoison(18.0, 29.0) ]) (box (plague |> List.map (fun r -> r.Hook, r.Reaction)))
+        // one bolt: a hit of 1 and a strong poison on the nearest enemy, which dies of it; one
+        // other enemy 1 m off gets the poison and is Hindered, one 5 m off does not
+        let bolt = { Skill.make "Bolt" [ Spell ] with BaseDamage = Map.ofList [ Chaos, { Min = 1.0; Max = 1.0 } ]; BaseTime = 0.25; BaseCrit = 0.0; Mods = [ Mod.base' (AilmentChance Poison) 100.0; Mod.more (AilmentMagnitude(Some Poison)) 10000.0 ] }
+        let foe name x y life = { EnemyDef.atLevel 83 life with Name = name; Position = Vec.make x y; Size = 4.0; Mods = []; Attack = None }
+        let fight spreads =
+            let player =
+                { Actor.make "Player" [] [ bolt ] with
+                    Rules = (if spreads then [ { Hook = OnKillOf "Poisoned"; Filter = WithTags([], [ Herald ]); Chance = 100.0; Reaction = SpreadPoison(18.0, 100.0) } ] else [])
+                          @ [ { Hook = OnKill; Filter = AnySkill; Chance = 100.0; Reaction = GainResource("Kills", 1) } ]
+                    MaxResources = Map.ofList [ "Kills", 10 ]
+                    Rotation = [ { Use = "Bolt"; When = fun v -> v.Time < 0.1 } ] }
+            { Fight.single (foe "a" 20.0 0.0 30.0) player 6.0 with Enemies = [ foe "a" 20.0 0.0 30.0; foe "b" 20.0 10.0 1e9; foe "c" 20.0 50.0 1e9 ]; Targeting = Nearest }
+        let out = Sim.run (fight true) 1u
+        equal (box 1) (box out.Kills.Length)
+        equal (box 1) (box (count out "spread:Poison"))
+        // the kill by poison counted as a kill for the rule
+        equal (box 1) (box (count out "gained:Kills"))
+        if (Map.tryFind "Hindered" out.Uptime |> Option.defaultValue 0.0) <= 0.0 then failwith "nobody hindered"
+        let poison (o: Outcome) = Map.tryFind "Poison" o.DamageBy |> Option.defaultValue 0.0
+        if poison out <= poison (Sim.run (fight false) 1u) + 1.0 then failwith "the poison did not go on"
+        same (fight true) seeds)
+
     // ---- Scarred Faith ----
 
     test "Scarred Faith: prevented physical damage recouped as energy shield per enemy power; no regeneration; none above armour" (fun () ->

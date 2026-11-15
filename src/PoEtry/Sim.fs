@@ -112,6 +112,10 @@ type Reaction =
     /// An ailment's status on the enemy concerned, as a hit would inflict it (a Shock only
     /// where it is stronger than the one there): what standing in Shocked Ground does.
     | InflictStatus of ailment: Ailment * magnitude: float * duration: float
+    /// The killed enemy's most damaging Poison goes to the other living enemies within the
+    /// radius of it (with what it had left of its time), and with this chance (%) each of them
+    /// is Hindered for that time too (Herald of Plague).
+    | SpreadPoison of radius: float * hinderChance: float
 
 /// "Enemies you sufficiently Overkill ... cause an explosion that Ignites nearby enemies
 /// based on the Overkill damage dealt" (Herald of Ash). `Skill` is the explosion among the
@@ -950,6 +954,9 @@ module Sim =
         | WithTags (has, hasNot) -> has |> List.forall skill.Tags.Contains && not (hasNot |> List.exists skill.Tags.Contains)
         | Called n -> skill.Name = n
 
+    /// What kills by damage over time count as for a rule's filter: no skill types.
+    let dotKiller = Skill.make "damage over time" []
+
     // ---- time passing ----
 
     /// Advance the clock to t, applying damage over time and recording uptime.
@@ -1650,6 +1657,24 @@ module Sim =
                                  schedule (w.Time + every * float k) (Expose(actor.Name, t, dt, min cap (start + perPulse * float k), duration)) w) w)
                      | RemoveDebuff name -> onTarget (fun t -> updateEnemy t (fun en -> { en with Debuffs = Map.remove name en.Debuffs }) w)
                      | InflictStatus (a, magnitude, duration) -> onTarget (fun t -> inflict t actor.Name (Status(a, magnitude, duration)) w)
+                     | SpreadPoison (radius, hinder) ->
+                         match target with
+                         | Some t ->
+                             let dead = w.Enemies.[t]
+                             // "Spreads the most Damaging Poison" (of equals, the one with the most time left)
+                             let poisons =
+                                 dead.Dots |> List.filter (fun d -> d.Ailment = Some Poison && d.Expires > w.Time)
+                                 |> List.sortByDescending (fun d -> d.Dps, d.Expires) |> List.truncate 1
+                             if poisons.IsEmpty then w
+                             else
+                                 let longest = poisons |> List.map (fun d -> d.Expires - w.Time) |> List.max
+                                 alive w
+                                 |> List.filter (fun o -> o.Def.Name <> t && Vec.dist o.Def.Position dead.Def.Position <= radius + o.Def.Size)
+                                 |> List.fold (fun w o ->
+                                     let w = poisons |> List.fold (fun w d -> inflict o.Def.Name actor.Name (Dot(Poison, d.Type, d.Dps, d.Expires - w.Time, d.MaxStacks)) w) w
+                                     let w = { w with Counts = bump "spread:Poison" w.Counts }
+                                     if rng.Chance hinder then addDebuff o.Def.Name "Hindered" longest 1 [] w else w) w
+                         | None -> w
                      | TriggerSkill name -> trigger env rng actor name w
                      | GainEnergy (meta, amount) -> gainEnergy env rng actor meta amount w
                      | GainResource (r, n) -> schedule w.Time (GainStacks(actor.Name, r, n)) w
@@ -2640,7 +2665,7 @@ module Sim =
                     if dead then
                         let w = react env rng actor OnKill skill None w
                         // what the killed enemy was (frozen, shocked...) can set things off
-                        status e |> Map.fold (fun w k _ -> react env rng actor (OnKillOf k) skill None w) w
+                        status e |> Map.fold (fun w k _ -> react env rng actor (OnKillOf k) skill (Some target) w) w
                     else
                         inflicted
                         |> List.fold
@@ -3565,7 +3590,21 @@ module Sim =
             else
                 let n = Map.tryFind key w.Streams |> Option.defaultValue 0
                 Rng(streamSeed w.Seed key n), { w with Streams = Map.add key (n + 1) w.Streams }
-        let w = { w with Queue = Map.remove (t, sq) w.Queue } |> advance t |> syncPresence env.Fight |> recover env.Fight.Player.Vitals env.Fight.Player.ManaFlask env.Fight.Player.Charms dt
+        let w = { w with Queue = Map.remove (t, sq) w.Queue }
+        let killsBefore = w.Kills.Length
+        let w = advance t w
+        // kills by damage over time (and recorded damage) set off the player's rules for kills,
+        // as by a skill that is neither attack nor spell
+        let w =
+            let n = w.Kills.Length - killsBefore
+            if n <= 0 then w
+            else
+                let player = env.Fight.Player
+                w.Kills |> List.truncate n |> List.rev
+                |> List.fold (fun w (name, _, _) ->
+                    let w = react env rng player OnKill dotKiller None w
+                    status w.Enemies.[name] |> Map.fold (fun w k _ -> react env rng player (OnKillOf k) dotKiller (Some name) w) w) w
+        let w = w |> syncPresence env.Fight |> recover env.Fight.Player.Vitals env.Fight.Player.ManaFlask env.Fight.Player.Charms dt
         if allDead w || (w.Player |> Option.exists (fun p -> p.Died.IsSome)) then
             w
         else
