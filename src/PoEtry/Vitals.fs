@@ -80,6 +80,10 @@ type PlayerStats =
       Ward: float
       WardRegen: float
       WardOnBlock: float
+      /// Darkness (Acolyte of Chayula): damage taken is reserved from it before energy shield
+      /// and life; a reservation lasts so many seconds, then that Darkness is there again.
+      Darkness: float
+      DarknessSeconds: float
       /// Pyromantic Pact: skill costs build Infernal Flame instead of spending mana.
       CostsInfernalFlame: bool
       /// "<from>" damage taken as "<to>": (from, to, percent).
@@ -165,7 +169,7 @@ module PlayerStats =
         { Str = 0.0; Dex = 0.0; Int = 0.0; Life = life; Mana = mana; EnergyShield = 0.0; Armour = 0.0; Evasion = 0.0
           Deflection = 0.0; Resist = Map.ofList [ Fire, 0.0; Cold, 0.0; Lightning, 0.0; Chaos, 0.0 ]
           LifeRegen = 0.0; ManaRegen = 0.0; EnergyShieldRecharge = 0.0; Block = 0.0; LuckyBlock = false
-          BlockedDamageTaken = 0.0; Ward = 0.0; WardRegen = 0.0; WardOnBlock = 0.0; CostsInfernalFlame = false; TakenAs = []
+          BlockedDamageTaken = 0.0; Ward = 0.0; WardRegen = 0.0; WardOnBlock = 0.0; Darkness = 0.0; DarknessSeconds = 0.0; CostsInfernalFlame = false; TakenAs = []
           ESRechargeDelay = 4.0; ESRegen = 0.0; ManaBeforeLife = 0.0; BypassES = 0.0; ArmourAppliesTo = Map.empty
           TakenMult = Map.empty; FlatPhysicalTaken = 0.0; LessCritDamageTaken = 0.0; EnemyCritChanceMult = 1.0; BlindedEnemyCritMult = 1.0; MarkedEnemyAccuracyMult = 1.0; DeferPrevent = 0.0; DeferLose = 0.0; ArmourVsProjectiles = 1.0; ArmourVsCrits = 1.0; ArmourDefend = 1.0; StunThreshold = life
           AilmentThreshold = life / 2.0; FreezeThreshold = life / 2.0; AvoidStun = 0.0; Avoid = Map.empty

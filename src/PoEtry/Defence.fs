@@ -254,6 +254,11 @@ module Defence =
           Ward = pool (Named "Ward") (fromItems (Named "Ward"))
           WardRegen = pool (Named "Ward") (fromItems (Named "Ward")) * wardRegenPercent / 100.0 * Mods.inc c [ Named "WardRegen" ] db
           WardOnBlock = Mods.sumBase c [ Named "WardOnBlock" ] db
+          // Darkness: its base and so much per level, x increased; a reservation lasts 10 s x its duration
+          Darkness = (match Mods.sumBase c [ Named "Darkness" ] db with
+                      | d when d > 0.0 -> floor (pool (Named "Darkness") (level * Mods.sumBase c [ Named "DarknessPerLevel" ] db))
+                      | _ -> 0.0)
+          DarknessSeconds = Mods.sumBase c [ Named "DarknessSeconds" ] db * Mods.inc c [ Named "DarknessSeconds" ] db
           CostsInfernalFlame = Mods.flag c (Named "Keystone:Pyromantic Pact") db
           TakenAs =
             [ for from in DamageType.all do

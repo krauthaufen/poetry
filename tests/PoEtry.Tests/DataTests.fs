@@ -1013,6 +1013,20 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         let armed = sheetOf { blank with Items = [ body; "Weapon 1", "Rarity: Rare\nTest Staff\nWrapped Quarterstaff\n--------\nPhysical Damage: 10-20\nAttacks per Second: 1.40\n" ]; ExtraLines = lines }
         equal (box false) (box (armed.MainHand |> Option.exists (fun w -> List.contains (Tag "HollowPalm") w.Tags))))
 
+    test "Non-Unique Life Flasks apply their Effects constantly: so much life a second, never drunk" (fun () ->
+        let flask rarity = "Flask 1", sprintf "Rarity: %s\nTest Flask\nUltimate Life Flask\n--------\nFlask: Recovers 900 Life over 3 Seconds\nFlask: Consumes 10 of 75 Charges on use\n" rarity
+        let lines = [ "Non-Unique Life Flasks apply their Effects constantly"; "Recovery from Life Flasks cannot be Instant"; "Recovery from your Life Flasks cannot be applied to anything other than you" ]
+        let sh = sheetOf { blank with Items = [ flask "Magic" ]; ExtraLines = lines }
+        equal (box ([]: string list)) (box sh.Coverage.UnknownText)
+        let named n (s: CharacterSheet) = Mods.sumBase Ctx.empty [ Named n ] (ModDb.ofList s.Mods)
+        near 300.0 (named "ConstantLifeRecovery" sh)
+        equal (box true) (box sh.LifeFlask.IsNone)
+        // a unique flask, or no such line: a flask to drink
+        let unique = sheetOf { blank with Items = [ flask "Unique" ]; ExtraLines = lines }
+        near 0.0 (named "ConstantLifeRecovery" unique)
+        equal (box true) (box unique.LifeFlask.IsSome)
+        equal (box true) (box (sheetOf { blank with Items = [ flask "Magic" ] }).LifeFlask.IsSome))
+
     test "gem: shield attacks hit with the shield, scaled by its armour" (fun () ->
         let mods armour = ModDb.ofList [ Mod.base' (Named "ShieldArmour") armour ]
         let build armour =

@@ -1051,6 +1051,35 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         same (fight 20.0 30.0) seeds
         same (fight 20.0 100.0) seeds)
 
+    test "Darkness: damage taken is reserved from it first, and a reservation is over after its time" (fun () ->
+        let v =
+            (load { blank with Level = 90; ExtraLines = [ "You have no Spirit"; "Base Maximum Darkness is 100"; "Damage taken is Reserved from Darkness before being taken from Life or Energy Shield"; "+5 to Maximum Darkness per Level"; "Darkness Reservation lasts for 10 seconds"; "20% increased maximum Darkness" ] } Options.defaults)
+        equal (box ([]: string list)) (box v.Sheet.Coverage.UnknownText)
+        // (100 + 5 x 90) x 1.2
+        near 660.0 v.Vitals.Darkness
+        near 10.0 v.Vitals.DarknessSeconds
+        // 250 every 4 s on 300 life. No Darkness: dead at the second hit. 400 Darkness for 10 s: the
+        // first hit and 150 of the second are reserved, the third finds none and kills. For 3 s: every
+        // hit finds all 400 again, and the life is never touched
+        let brute =
+            { EnemyDef.make Rarity.defaults 70 Unique "brute" (Vec.make 5.0 0.0) with
+                Life = 1e9; Mods = []
+                Attack = Some { Interval = 4.0; Damage = Map.ofList [ Physical, 250.0 ]; Accuracy = 1e9; Range = 20.0; CritChance = 0.0; Melee = true } }
+        let bolt = { Skill.make "Bolt" [ Spell ] with BaseDamage = Map.ofList [ Chaos, { Min = 1.0; Max = 1.0 } ]; BaseTime = 0.5 }
+        let fight darkness seconds =
+            let vitals = { PlayerStats.basic 300.0 0.0 with StunThreshold = 1e9; AilmentThreshold = 1e9; Darkness = darkness; DarknessSeconds = seconds }
+            Fight.single brute { Actor.make "Player" [] [ bolt ] with Vitals = Some vitals } 60.0
+        let run f = Sim.run f 1u
+        let plain, dark = (run (fight 0.0 0.0)).Died, (run (fight 400.0 10.0)).Died
+        match plain, dark with
+        | Some a, Some b -> near 4.0 (b - a)
+        | _ -> failwith "should have died"
+        let safe = run (fight 400.0 3.0)
+        equal (box None) (box safe.Died)
+        near 1.0 safe.MinLife
+        same (fight 400.0 10.0) seeds
+        same (fight 400.0 3.0) seeds)
+
     // ---- Scarred Faith ----
 
     test "Scarred Faith: prevented physical damage recouped as energy shield per enemy power; no regeneration; none above armour" (fun () ->

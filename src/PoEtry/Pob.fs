@@ -466,7 +466,11 @@ module Pob =
             treeMods |> List.map (fun m -> if m.Stat = Named "ArmourPerConnectedNotable" then { m with Stat = Armour; Value = m.Value * float connected } else m)
         // "This Flask cannot be Used but applies its Effect constantly" (Lavianga's Spirits): not
         // a flask to drink but so much life or mana per second, and its effect is always on
-        let constant (text: string) = text.Contains "cannot be Used but applies its Effect constantly"
+        // "Non-Unique Life Flasks apply their Effects constantly": every life flask that is not unique
+        let lifeFlasksConstant = Mods.flag Ctx.empty (Named "ConstantLifeFlasks") (ModDb.ofList (treeMods @ extraMods))
+        let constant (text: string) =
+            text.Contains "cannot be Used but applies its Effect constantly"
+            || (lifeFlasksConstant && not (text.Contains "Rarity: Unique") && (Items.parse db text).LifeFlask.IsSome)
         let constantFlaskMods =
             build.Items
             |> List.filter (fun (slot, text) -> slot.StartsWith "Flask" && constant text)

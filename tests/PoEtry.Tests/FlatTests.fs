@@ -403,6 +403,8 @@ let randomFight (case: uint32) : Fight * string =
                     SurroundedAt = whole 1 5
                     Ward = (if chance 0.1 then between 10.0 200.0 else 0.0)
                     WardRegen = 5.0
+                    Darkness = (if chance 0.1 then between 50.0 500.0 else 0.0)
+                    DarknessSeconds = between 2.0 10.0
                     LifeRecharge = (if chance 0.1 then between 5.0 50.0 else 0.0)
                     LifeFlask = (if chance 0.3 then Some { Amount = 300.0; Duration = 3.0; ChargesPerUse = 10.0; MaxCharges = 60.0; ChargesPerSecond = 0.2; ChargeGainMult = 1.0; Instant = (if chance 0.5 then 0.4 else 0.0) } else None)
                     Armour = (if chance 0.5 then between 100.0 8000.0 else 0.0)

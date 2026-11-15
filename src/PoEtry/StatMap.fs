@@ -716,6 +716,11 @@ module StatMap =
         // Spell damage for Spirit: "increased Spell Damage while on full Energy Shield while a Supported Skill is active"
         | "support_spell_damage_spirit_cost_spell_damage_+%_on_full_energy_shield" ->
             one (Mod.inc (Damage AllDamage) v |> Mod.whenever (SkillIs Spell) |> Mod.whenever (WhileBuff "FullEnergyShield"))
+        // Darkness (see Defence, takeDamage)
+        | "darkness_per_level" -> one (Mod.base' (Named "DarknessPerLevel") v)
+        | "maximum_darkness_+%" -> one (Mod.inc (Named "Darkness") v)
+        | "base_darkness_refresh_rate_ms" -> one (Mod.base' (Named "DarknessSeconds") (v / 1000.0))
+        | "darkness_refresh_rate_+%" -> one (Mod.inc (Named "DarknessSeconds") v)
         | "spirit_+_per_2_levels" -> one (Mod.base' (Named "SpiritPerTwoLevels") v)
         | "base_spirit_per_socketed_idol" -> one (Mod.base' (Named "Spirit") v |> Mod.whenever (PerStack("SocketedIdols", 1.0)))
         | "ascendancy_shaman_+_spirit_per_empty_charm_slot" -> one (Mod.base' (Named "SpiritPerEmptyCharmSlot") v)
