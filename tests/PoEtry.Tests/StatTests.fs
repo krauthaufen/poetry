@@ -1307,3 +1307,14 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         // "50% faster start of Energy Shield Recharge if you've been Stunned Recently"
         let delay = [ "50% faster start of Energy Shield Recharge if you've been Stunned Recently" ]
         near ((at delay []).ESRechargeDelay / 1.5) (at delay [ "StunnedRecently", 1 ]).ESRechargeDelay)
+
+    test "a state under another name is the state the fight keeps: not on Low Mana, you have Arcane Surge, Onslaught is active, holding a Shield" (fun () ->
+        let conds id = match mods id 10.0 with m :: _ -> m.Conds | [] -> []
+        equal (box [ Not(WhileBuff "LowMana"); SkillIs Attack ]) (box (conds "attack_speed_+%_while_not_on_low_mana"))
+        equal (box [ WhileBuff "ArcaneSurge"; SkillIs Spell ]) (box (conds "spell_damage_+%_while_you_have_arcane_surge"))
+        equal (box [ WhileBuff "Onslaught"; SkillIs Attack ]) (box (conds "attack_damage_+%_while_onslaught_active"))
+        equal (box [ WhileBuff "WieldingShield"; SkillIs Attack ]) (box (conds "attack_damage_+%_while_holding_a_shield"))
+        // a two handed weapon in hand is a state the fight starts with
+        let c = load { blank with Items = [ "Weapon 1", "Rarity: Normal\nWrapped Quarterstaff\n--------\n" ] } Options.defaults
+        let p = Setup.player c Options.defaults [] None
+        if not (p.Resources |> List.exists (fun (k, _) -> k = "WieldingTwoHandedWeapon")) then failwithf "no two handed weapon: %A" (p.Resources |> List.map fst))

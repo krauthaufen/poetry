@@ -191,6 +191,8 @@ module Setup =
             let oneHanded = sheet.MainHand |> Option.exists (fun w -> List.contains (Tag "OneHanded") w.Tags)
             kinds
             @ (if oneHanded && offhand.IsNone then [ "OneHandedEmptyOffHand" ] else [])
+            // "while wielding a Two Handed Weapon"
+            @ (if sheet.MainHand |> Option.exists (fun w -> List.contains (Tag "TwoHanded") w.Tags) then [ "WieldingTwoHandedWeapon" ] else [])
             @ (if offhand.IsNone then [ "OffHandIsEmpty" ] else [])
             // "while affected by Herald of Ash": every persistent buff gem in the build
             @ (build.Groups |> List.filter (fun g -> g.Enabled)

@@ -118,6 +118,22 @@ module StatMap =
     let private titleCase (words: string list) =
         words |> List.map (fun w -> if w = "" then w else string (System.Char.ToUpperInvariant w.[0]) + w.Substring 1) |> String.concat ""
 
+    /// "while <state>" under another name than the one the fight keeps the state by: "while not
+    /// on Low Mana", "while you have Arcane Surge", "while Onslaught is active", "while holding a
+    /// Shield", "while you have no Energy Shield"
+    let private stateAlias (name: string) : Cond option =
+        match name with
+        | "NotOnLowMana" | "NotLowMana" -> Some(Not(WhileBuff "LowMana"))
+        | "YouHaveArcaneSurge" -> Some(WhileBuff "ArcaneSurge")
+        | "OnslaughtActive" | "OnslaughtIsActive" -> Some(WhileBuff "Onslaught")
+        | "YouUnarmed" -> Some(WhileBuff "Unarmed")
+        | "HoldingAShield" | "HoldingShield" -> Some(WhileBuff "WieldingShield")
+        | "HoldingBow" -> Some(WhileBuff "WieldingBow")
+        | "HoldingStaff" -> Some(WhileBuff "WieldingStaff")
+        | "HaveAnyFrenzyCharges" -> Some(Not(WhileBuff "NoFrenzyCharges"))
+        | "NoEnergyShield" -> Some(Not(WhileBuff "HasEnergyShield"))
+        | _ -> None
+
     /// Pull conditions out of the words: "vs <status> enemies", "against <status> enemies",
     /// "while <state...>" (a buff the configuration has to provide, e.g. "WhileShapeshifted").
     let private conditions (words: string list) =
@@ -178,7 +194,7 @@ module StatMap =
             | "in" :: "weapon" :: "set" :: "one" :: tail -> go (Not(SkillIs(Tag "WeaponSet2")) :: acc) tail
             | "in" :: "weapon" :: "set" :: "two" :: tail -> go (SkillIs(Tag "WeaponSet2") :: acc) tail
             | "while" :: "you" :: "have" :: "energy" :: "shield" :: tail -> go (WhileBuff "HasEnergyShield" :: acc) tail
-            | "while" :: state when not state.IsEmpty -> List.rev acc, [], Some(WhileBuff(titleCase state))
+            | "while" :: state when not state.IsEmpty -> List.rev acc, [], Some(stateAlias (titleCase state) |> Option.defaultValue (WhileBuff(titleCase state)))
             | w :: tail ->
                 let a, ws, extra = go acc tail
                 a, w :: ws, extra
