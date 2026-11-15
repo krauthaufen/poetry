@@ -809,7 +809,13 @@ let private readReplay (j : Json) (m : Model) : Model =
         // the field: the player (with room for the minions beside) and the enemies, a margin around
         let low (pick : V2d -> float) = foes |> List.fold (fun d f -> min d (pick f.Start - f.Radius)) -14.0
         let high (pick : V2d -> float) = foes |> List.fold (fun d f -> max d (pick f.Start + f.Radius)) 14.0
-        let x0, x1, y0, y1 = low (fun p -> p.X), high (fun p -> p.X), low (fun p -> p.Y), high (fun p -> p.Y)
+        // (and the areas of what is used, so that a slam around an enemy is seen whole; not
+        // where projectiles fly off to, and no area counts for more than 6 m across)
+        let rings = happened |> List.collect (fun h -> h.Shapes |> List.choose (fun s -> match s.Sort, s.Nums with | "r", [ x; y; r; _ ] -> Some (x, y, min r 60.0) | _ -> None))
+        let x0 = rings |> List.fold (fun d (x, _, r) -> min d (x - r)) (low (fun p -> p.X))
+        let x1 = rings |> List.fold (fun d (x, _, r) -> max d (x + r)) (high (fun p -> p.X))
+        let y0 = rings |> List.fold (fun d (_, y, r) -> min d (y - r)) (low (fun p -> p.Y))
+        let y1 = rings |> List.fold (fun d (_, y, r) -> max d (y + r)) (high (fun p -> p.Y))
         { m with
             Foes = foes @ came
             Allies =
@@ -819,7 +825,8 @@ let private readReplay (j : Json) (m : Model) : Model =
                       Body = Json.number (Json.field "size" a); Companion = Json.bool (Json.field "companion" a) })
             Happened = happened
             Lasts = max 0.5 (Json.number (Json.field "duration" r))
-            Field = max 60.0 (max (x1 - x0) (y1 - y0) * 1.5)
+            // (the picture is wider than high: what is high counts for more)
+            Field = max 60.0 (max ((x1 - x0) * 1.15) ((y1 - y0) * 2.1))
             Middle = V2d ((x0 + x1) / 2.0, (y0 + y1) / 2.0)
             Began = -1.0
             Stands = Map.empty
