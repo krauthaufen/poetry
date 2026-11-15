@@ -1483,6 +1483,10 @@ module StatMap =
         // "+X seconds to base use time when Shapeshifting": a character that uses shapeshift
         // skills is in its animal form for the whole fight and never changes into it
         | "use_time_+_ms_if_shapeshift_required" -> Some NotOffensive
+        // Arctic Armour's stages and its burst (read where they are built: Behaviours.arcticArmour)
+        | "arctic_armour_minimum_added_cold_damage_per_stack" | "arctic_armour_maximum_added_cold_damage_per_stack"
+        | "maximum_number_of_arctic_armour_stationary_stacks" -> Some Structural
+        | "arctic_armour_armour_granted_+%_per_stage" -> one (Mod.inc Armour v |> Mod.whenever (PerStack("ArcticArmourStage", 1.0)))
         // Entangle's vines (read where they are built: Behaviours.entangle)
         | "entangle_apply_vines_every_X_ms" | "entangle_vines_maximum_number_of_vines_allowed" | "entangle_vine_duration_ms"
         | "entangle_base_movement_speed_+%_final_per_applied_stack" -> Some Structural

@@ -275,6 +275,11 @@ module Setup =
             match Behaviours.windDancerStages db sheet build with
             | Some n -> Map.add "WindDancerStage" n maxResources, Map.add "WindDancerStage" (if o.StartEmpty then 0 else n) startResources
             | None -> maxResources, startResources
+        // and so do Arctic Armour's
+        let maxResources, startResources =
+            match Behaviours.arcticArmour db sheet build with
+            | Some (_, _, _, n) -> Map.add "ArcticArmourStage" n maxResources, Map.add "ArcticArmourStage" (if o.StartEmpty then 0 else n) startResources
+            | None -> maxResources, startResources
         let vitals = Defence.computeWith (if sheetSetTwo then Map.add "WeaponSetTwo" 1 startResources else startResources) bases sheet
         let vitals = if o.LowLife && vitals.Life > 1.0 then { vitals with StartLife = 0.35 } else vitals
         // life reserved by skills ("Reserve Life instead of Spirit") and by stats: what is left is all
@@ -679,6 +684,9 @@ module Setup =
         // Thorns: the hit that retaliates when a monster hits the player
         let thorns = Behaviours.thorns sheet
         let heraldSkills = heraldSkills @ (thorns |> Option.map fst |> Option.toList)
+        // Arctic Armour: the burst a melee hit on the player sets off
+        let arctic = Behaviours.arcticArmour db sheet c.Build
+        let heraldSkills = heraldSkills @ (match arctic with Some (s, _, _, _) -> [ s ] | None -> [])
         let consumers =
             (used |> List.choose (fun (_, p) -> p.Infused)) @ (metas |> List.collect (fun (_, _, cs) -> cs))
         let grantRules =
@@ -748,6 +756,7 @@ module Setup =
                 @ Behaviours.totemRecently sheet pressedSkills
                 @ Behaviours.recentStates sheet pressedSkills
                 @ (thorns |> Option.map snd |> Option.toList)
+                @ (match arctic with Some (_, r, _, _) -> r | None -> [])
                 @ Behaviours.scavengedPlating db sheet c.Build
                 @ Behaviours.fullBreakRules pressedSkills
                 @ (match windDancer with Some (_, r, _, _) -> r | None -> [])
@@ -803,7 +812,7 @@ module Setup =
             // (with the weapon set in hand: the buffs of the moment don't say which it is)
             VitalsAt = Some(fun current -> Defence.computeWith (if c.SheetSetTwo then Map.add "WeaponSetTwo" 1 current else current) c.Bases sheet)
             VitalsReads = Some(Defence.reads sheet)
-            Periodics = c.Periodics @ (used |> List.collect (fun (_, p) -> p.Periodics)) @ snd (Behaviours.summons db sheet c.Build pressedSkills) @ starPeriodics @ (frenzy |> Option.map fst |> Option.toList) @ (match windDancer with Some (_, _, p, _) -> p | None -> [])
+            Periodics = c.Periodics @ (used |> List.collect (fun (_, p) -> p.Periodics)) @ (match arctic with Some (_, _, p, _) -> [ p ] | None -> []) @ snd (Behaviours.summons db sheet c.Build pressedSkills) @ starPeriodics @ (frenzy |> Option.map fst |> Option.toList) @ (match windDancer with Some (_, _, p, _) -> p | None -> [])
             MaxResources =
                 Map.fold (fun m k v -> Map.add k v m) c.MaxResources infusionMaxima |> (if frenzy.IsSome then Map.add "CombatFrenzyReady" 1 else id)
                 |> (let stages = Behaviours.whirlwindStages db c.Build

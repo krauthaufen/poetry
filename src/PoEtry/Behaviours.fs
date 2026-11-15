@@ -148,6 +148,55 @@ module Behaviours =
                             most)
                     | _ -> None))
 
+    /// Arctic Armour: "conjures an icy barrier that gains stages over time. While the barrier
+    /// has stages, Melee Attacks that hit you will remove a stage to cause a burst of ice that
+    /// deals Cold Spell damage to the attacker": a stage every `base_active_skill_buff_stack_gain_frequency_ms`
+    /// up to the gem's maximum; a melee hit on the player sets off the burst, a spell of its
+    /// own with the gem's supports, whose damage is the gem's "Cold Damage per Stage" for every
+    /// stage held when it is set off, and then takes one stage. Returns the burst, the rules,
+    /// the stages' clock and the most stages.
+    let arcticArmour (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) : (Skill * Rule list * Periodic * int) option =
+        let mods = ModDb.ofList sheet.Mods
+        let stage = "ArcticArmourStage"
+        build.Groups |> List.filter (fun g -> g.Enabled)
+        |> List.tryPick (fun g ->
+            let enabled = g.Gems |> List.filter (fun x -> x.Enabled)
+            let supports = enabled |> List.filter (fun x -> x.IsSupport) |> List.map (fun x -> x.Name, x.Level)
+            enabled
+            |> List.filter (fun x -> not x.IsSupport && x.Name = "Arctic Armour")
+            |> List.tryPick (fun gem ->
+                let setup = { Gem = gem.Name; Level = gem.Level; Quality = gem.Quality; StatSet = 1; Supports = supports }
+                let raw = Gems.rawStats db mods setup
+                let stat k = raw |> List.filter (fun (s, _) -> s = k) |> List.sumBy snd
+                let lo, hi = stat "arctic_armour_minimum_added_cold_damage_per_stack", stat "arctic_armour_maximum_added_cold_damage_per_stack"
+                let most, every = int (stat "maximum_number_of_arctic_armour_stationary_stacks"), stat "base_active_skill_buff_stack_gain_frequency_ms" / 1000.0
+                if hi <= 0.0 || most <= 0 || every <= 0.0 then None
+                else
+                    let built =
+                        match Gems.skill db mods (Gems.chooseWeapon db gem.Name sheet.Weapons) setup with
+                        | Ok (s, _) -> s
+                        | Error _ -> Skill.make gem.Name [ Tag "Cold" ]
+                    let name = gem.Name + ": Burst"
+                    let perStage m = m |> Mod.whenever (PerStack(stage, 1.0)) |> Mod.from "Arctic Armour stages"
+                    let skill =
+                        { built with
+                            Name = name
+                            Tags = (built.Tags.Add Spell).Add Triggered
+                            BaseDamage = Map.empty
+                            AddedDamageEffectiveness = 1.0
+                            Cost = 0.0
+                            Cooldown = None
+                            Parts = []
+                            Hits = [ 1.0, 1.0 ]
+                            Delivery = Single
+                            Mods = built.Mods @ [ perStage (Mod.base' (AddedMin Cold) lo); perStage (Mod.base' (AddedMax Cold) hi) ] }
+                    Some(
+                        skill,
+                        [ { Hook = WhenHitMelee; Filter = AnySkill; Chance = 100.0; Reaction = IfBuff(stage, TriggerSkill name) }
+                          { Hook = WhenHitMelee; Filter = AnySkill; Chance = 100.0; Reaction = SpendStack(stage, NoReaction) } ],
+                        { Name = "arctic armour stages"; Every = every; Action = GainRandom [ stage ] },
+                        most)))
+
     /// Bolts that build up by themselves (Hailstorm Rounds: "Passively generate bolts of ice at
     /// a frequency equal to reload time, up to a cap"): the most that are kept, and the seconds
     /// one takes (the weapon's reload time over reload and attack speed, as a reload would be).

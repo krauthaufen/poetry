@@ -1740,3 +1740,36 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         match primal.Parts |> List.tryFind (fun p -> p.Name.EndsWith "Spirits") with
         | Some spirits -> equal (box (Cone(86.0, 0.0, 18.0))) (box spirits.Delivery)
         | None -> failwithf "no Spirits part: %A" (primal.Parts |> List.map (fun p -> p.Name)))
+
+    test "Arctic Armour: stages build up; a melee hit on the player sets off a burst of the gem's cold damage for every stage held and takes one stage" (fun () ->
+        let o = { Options.defaults with MaxTime = 10.2 }
+        let c = load { blank with Groups = [ group [ gem "Arctic Armour" ]; group [ gem "Spark" ] ]; ExtraLines = [ "+200 to Spirit" ] } o
+        let raw = Gems.rawStats db.Value (ModDb.ofList []) { Gem = "Arctic Armour"; Level = 20; Quality = 0; StatSet = 1; Supports = [] } |> Map.ofList
+        let lo, hi = raw.["arctic_armour_minimum_added_cold_damage_per_stack"], raw.["arctic_armour_maximum_added_cold_damage_per_stack"]
+        let most, every = int raw.["maximum_number_of_arctic_armour_stationary_stacks"], raw.["base_active_skill_buff_stack_gain_frequency_ms"] / 1000.0
+        match Behaviours.arcticArmour db.Value c.Sheet c.Build with
+        | Some (skill, rules, clock, n) ->
+            equal most n
+            near every clock.Every
+            equal 2 rules.Length
+            equal (box [ lo; hi ]) (box (skill.Mods |> List.filter (fun m -> List.contains (PerStack("ArcticArmourStage", 1.0)) m.Conds) |> List.map (fun m -> m.Value)))
+        | None -> failwith "no Arctic Armour"
+        // full at the start of a fight
+        let p = Setup.player c o [ Spam "Spark" ] None
+        equal (box [ "ArcticArmourStage", most ]) (box (p.Resources |> List.filter (fun (k, _) -> k = "ArcticArmourStage")))
+        // a brute that hits every 2.5 s (at 2.5, 5, 7.5 and 10 s): four bursts, the first with all the stages
+        let brute =
+            { EnemyDef.make Rarity.defaults 70 Unique "brute" (Vec.make 5.0 0.0) with
+                Life = 1e12; Mods = []
+                Attack = Some { Interval = 2.5; Damage = Map.ofList [ Physical, 1.0 ]; Accuracy = 1e9; Range = 20.0; CritChance = 0.0; Melee = true } }
+        let fight = Setup.fight c o p [ brute ]
+        let out = Sim.run fight 1u
+        let bursts = count out "hits:Arctic Armour: Burst"
+        if bursts < 3 || bursts > 5 then failwithf "%d bursts" bursts
+        let dealt = out.DamageBy |> Map.toList |> List.filter (fun (k, _) -> k.StartsWith "Arctic Armour") |> List.sumBy snd
+        // each burst deals between the least and the most of its stages (no stage is short for long: one comes back every few seconds)
+        if dealt < float bursts * lo * float (most - 3) * 0.5 || dealt > float bursts * hi * float most * 4.0 then failwithf "%d bursts dealt %.0f (a stage %.0f to %.0f, %d stages)" bursts dealt lo hi most
+        // a hit that is no melee attack sets off nothing
+        let ranged = { brute with Attack = brute.Attack |> Option.map (fun a -> { a with Melee = false }) }
+        equal 0 (count (Sim.run (Setup.fight c o p [ ranged ]) 1u) "hits:Arctic Armour: Burst")
+        same fight seeds)
