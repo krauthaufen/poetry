@@ -734,6 +734,9 @@ module StatMap =
         | "maximum_energy_shield_+%" -> one (Mod.inc MaxEnergyShield v)
         | "base_evasion_rating" -> one (Mod.base' Evasion v)
         | "evasion_rating_+%" -> one (Mod.inc Evasion v)
+        // a state of the fight's (Sim.step: the recharge delay since the last hit is over, by
+        // no more than 2 s)
+        | "evasion_rating_+%_if_energy_shield_recharge_started_in_past_2_seconds" -> one (Mod.inc Evasion v |> Mod.whenever (WhileBuff "ESRechargeStartedRecently"))
         | "base_physical_damage_reduction_rating" -> one (Mod.base' Armour v)
         | "physical_damage_reduction_rating_+%" -> one (Mod.inc Armour v)
         | "evasion_and_physical_damage_reduction_rating_+%" -> Some(Mods [ Mod.inc Evasion v; Mod.inc Armour v ])
@@ -880,6 +883,9 @@ module StatMap =
         // "X% increased Slowing Potency of Debuffs on You": a multiplier of its own on how much
         // a slow on the player slows (the Chill of a monster's cold hit is the one slow there is)
         | "base_slow_potency_+%" -> one (Mod.inc (Named "SlowPotencyOnSelf") v)
+        // "Debuffs you inflict have X% increased Slow Magnitude": the Maim and Hinder the
+        // character's hits leave slow the monsters that much more (Sim.Env.SlowMagnitude)
+        | "base_debuff_slow_magnitude_+%" -> one (Mod.inc (Named "SlowMagnitude") v)
         | "shocked_effect_on_self_+%" -> one (Mod.inc (Named "SelfEffect:Shock") v)
         | "chill_effectiveness_on_self_+%" -> one (Mod.inc (Named "SelfEffect:Chill") v)
         | "ignite_effect_on_self_+%" -> one (Mod.inc (Named "SelfEffect:Ignite") v)

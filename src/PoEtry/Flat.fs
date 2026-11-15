@@ -1085,6 +1085,8 @@ module Flat =
               Reviving: int[]
               AnyPool: bool
               Walks: bool
+              /// See `Sim.Env.SlowMagnitude`.
+              SlowMagnitude: float
               /// Whether monsters attack at all (the player or a minion can be hurt).
               Attacked: bool
               /// Infusion remnants: by what inflicting an ailment may drop (the ailment, the
@@ -1335,7 +1337,7 @@ module Flat =
                 yield "AtMaximum" + kind + "Charges"
                 yield "No" + kind + "Charges"
                 yield "YouHaveNo" + kind + "Charges" ]
-        @ [ "Ignited"; "DamagingAilment"; "LowEnergyShield" ]
+        @ [ "Ignited"; "DamagingAilment"; "LowEnergyShield"; "ESRechargeStartedRecently" ]
 
     let private derivedStatuses =
         [ "Moving"; "Cullable"; "AnyAilment"; "Cursed"; "Marked"; "Immobilised"; "ElementalAilments"; "Exposed"; "RareOrUnique"; "LowLife"; "FullLife" ]
@@ -2148,6 +2150,7 @@ module Flat =
                       Reviving = reviving
                       AnyPool = anyPool
                       Walks = fight.Player.Vitals.IsSome
+                      SlowMagnitude = Mods.inc Ctx.empty [ Named "SlowMagnitude" ] (ModDb.ofList fight.Player.Mods)
                       Attacked = fight.Player.Vitals.IsSome || anyBody
                       Remnants = remnants
                       RemnantExtra = (match actor.Infusions with Some inf -> inf.ExtraRemnantChance | None -> 0.0)
@@ -3546,8 +3549,8 @@ module Flat =
                         if not (gap <= 0.0) && not (stopped s e true) then
                             let ailments = s.P.AilmentStatus
                             let slow =
-                                (if (at e.SHas (at ailments 10)) then 1.0 - Constants.maimSlow / 100.0 else 1.0)
-                                * (if (at e.SHas (at ailments 12)) then 1.0 - Constants.hinderSlow / 100.0 else 1.0)
+                                (if (at e.SHas (at ailments 10)) then max 0.0 (1.0 - Constants.maimSlow * s.P.SlowMagnitude / 100.0) else 1.0)
+                                * (if (at e.SHas (at ailments 12)) then max 0.0 (1.0 - Constants.hinderSlow * s.P.SlowMagnitude / 100.0) else 1.0)
                                 * (1.0 - (if (at e.Has s.P.SChilled) then (at e.DMods s.P.SChilled) |> List.sumBy (fun m -> m.Value) else 0.0) / 100.0)
                             // what its debuffs make of its movement speed
                             let slow =
@@ -6814,6 +6817,7 @@ module Flat =
         setState s 19 ignited
         setState s 20 ignited
         setState s 21 (v.EnergyShield > 0.0 && s.Shield <= Constants.lowStatusShare * v.EnergyShield)
+        setState s 22 (v.EnergyShield > 0.0 && s.Time - s.LastHit >= v.ESRechargeDelay && s.Time - s.LastHit < v.ESRechargeDelay + Constants.esRechargeStartedRecently)
 
     /// What is planted in or beside the enemies (`Sim.step`): seeds set off by the damage
     /// their enemy has taken (or its death: the blast then strikes the enemy aimed at), gone

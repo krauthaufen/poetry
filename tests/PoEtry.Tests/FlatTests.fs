@@ -147,6 +147,7 @@ let randomFight (case: uint32) : Fight * string =
                     WhileBuff "EmpoweredAttacks"; WhileBuff "EmpoweredAttacks:Temper"; WhileBuff "EmpoweredRepeatable:Tips"; WhileBuff "EmpoweredAttacks:Cry"
                     PerEnemyStack("Poisoned", 2.0); PerEnemyStack("Marked by pain", 1.0); Not(WhileBuff "FullMana"); WhileBuff "LowMana"; WhileBuff "KilledRecently"
                     WhileBuff "ConsumedPowerChargeRecently"; WhileBuff "TriggeredRecently"; WhileBuff "Tide"; EnemyHas "Exposed"; EnemyHas "FullyBrokenArmour"
+                    WhileBuff "ESRechargeStartedRecently"
                     // (what a minion asks of the player; the player of itself)
                     OfOwner(WhileBuff "HitRecently"); OfOwner(WhileBuff "Buffed"); OfOwner(Not(WhileBuff "FullMana")); OfOwner(PerStack("PowerCharge", 1.0)); OfOwner(WhileBuff "CritRecently") ] ]
     let withConds (m: Mod) = { m with Conds = conds () }
@@ -156,6 +157,7 @@ let randomFight (case: uint32) : Fight * string =
           (fun () -> [ Mod.inc (Damage(OfType(pick types))) (between 5.0 150.0) |> withConds ])
           (fun () -> [ Mod.inc (Damage Elemental) (between 5.0 80.0) |> withConds ])
           (fun () -> [ Mod.inc CritChance (between 10.0 400.0) |> withConds ])
+          (fun () -> [ Mod.inc (Named "SlowMagnitude") (between 10.0 150.0) ])
           (fun () -> [ Mod.base' CritChance (between 1.0 10.0) |> withConds ])
           (fun () -> [ Mod.base' CritBonus (between 10.0 150.0) |> withConds ])
           (fun () -> [ Mod.inc Speed (between -10.0 60.0) |> withConds ])

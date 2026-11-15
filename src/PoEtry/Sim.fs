@@ -699,7 +699,10 @@ module Sim =
           Trace: (float -> string -> string -> string -> float -> unit) option
           /// The player's rage upkeep: regeneration per second, loss per second, seconds without
           /// gaining before it is lost, rage when hit, rage on kill.
-          Rage: float * float * float * float * float }
+          Rage: float * float * float * float * float
+          /// "Debuffs you inflict have X% increased Slow Magnitude": how much more the Maim and
+          /// Hinder on the monsters slow them (the player's, for all of them).
+          SlowMagnitude: float }
 
     let private allAilments =
         [ Ignite; Bleed; Poison; Shock; Chill; Freeze; Electrocute; HeavyStun; Pin; Daze; Maim; Blind; Hinder ]
@@ -1009,7 +1012,7 @@ module Sim =
     /// Advance the clock to t, applying damage over time and recording uptime.
     /// DoT dps is constant between events (every change is an event), so this is
     /// exact; an enemy dying from DoT mid-interval dies at the exact time.
-    let private advance t (w: World) =
+    let private advance env t (w: World) =
         let dt = t - w.Time
         if dt <= 0.0 then
             w
@@ -1053,8 +1056,8 @@ module Sim =
                     let st = status e
                     let stopped = [ "Frozen"; "HeavilyStunned"; "Electrocuted"; "Pinned" ] |> List.exists st.ContainsKey
                     let slow =
-                        (if st.ContainsKey "Maimed" then 1.0 - Constants.maimSlow / 100.0 else 1.0)
-                        * (if st.ContainsKey "Hindered" then 1.0 - Constants.hinderSlow / 100.0 else 1.0)
+                        (if st.ContainsKey "Maimed" then max 0.0 (1.0 - Constants.maimSlow * env.SlowMagnitude / 100.0) else 1.0)
+                        * (if st.ContainsKey "Hindered" then max 0.0 (1.0 - Constants.hinderSlow * env.SlowMagnitude / 100.0) else 1.0)
                         * (1.0 - (e.Debuffs |> Map.tryFind "Chilled" |> Option.map (fun x -> x.Mods |> List.sumBy (fun m -> m.Value)) |> Option.defaultValue 0.0) / 100.0)
                     // what its debuffs make of its movement speed (Jagged Ground, "Hindered, with 15% reduced Movement Speed")
                     let slow = if e.Debuffs.IsEmpty then slow else slow * max 0.0 (Mods.more Ctx.empty [ Named "MovementSpeed" ] (defender e).Mods)
@@ -3781,7 +3784,7 @@ module Sim =
                 Rng(streamSeed w.Seed key n), { w with Streams = Map.add key (n + 1) w.Streams }
         let w = { w with Queue = Map.remove (t, sq) w.Queue }
         let killsBefore = w.Kills.Length
-        let w = advance t w
+        let w = advance env t w
         // the player's kills by damage over time set off the player's rules for kills, as by a
         // skill that is neither attack nor spell, and give what a kill gives (`dotKillGains`)
         let w =
@@ -3946,7 +3949,10 @@ module Sim =
                           "Ignited", p.Dots |> List.exists (fun (until, _, t) -> t = Fire && until > w.Time)
                           "DamagingAilment", p.Dots |> List.exists (fun (until, _, t) -> t = Fire && until > w.Time)
                           // on Low Energy Shield: at most 35% of its maximum (DefaultLowStatusThresholdPercent); none without any
-                          "LowEnergyShield", v.EnergyShield > 0.0 && p.EnergyShield <= Constants.lowStatusShare * v.EnergyShield ]
+                          "LowEnergyShield", v.EnergyShield > 0.0 && p.EnergyShield <= Constants.lowStatusShare * v.EnergyShield
+                          // energy shield recharge started in the past 2 seconds: its delay since the last
+                          // hit (or damage over time) is over, by no more than 2 s
+                          "ESRechargeStartedRecently", v.EnergyShield > 0.0 && w.Time - p.LastHit >= v.ESRechargeDelay && w.Time - p.LastHit < v.ESRechargeDelay + Constants.esRechargeStartedRecently ]
                     // charge states: "while at maximum Power Charges", "while you have no Frenzy Charges"
                     let playerSt = Map.find env.Fight.Player.Name w.Actors
                     let states =
@@ -4099,6 +4105,7 @@ module Sim =
              Mods.sumBase c [ Named "RageOnKill" ] db)
           BerserkLoss = Mods.sumBase Ctx.empty [ Named "LifeLossPercentPerMinutePerRage" ] (ModDb.ofList fight.Player.Mods)
           CharmKeep = Mods.sumBase Ctx.empty [ Named "CharmKeepCharges" ] (ModDb.ofList fight.Player.Mods)
+          SlowMagnitude = Mods.inc Ctx.empty [ Named "SlowMagnitude" ] (ModDb.ofList fight.Player.Mods)
           WithBuffs = System.Collections.Generic.Dictionary()
           VitalsSeen = System.Collections.Generic.Dictionary()
           SkillDbs =

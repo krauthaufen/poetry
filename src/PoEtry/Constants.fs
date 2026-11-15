@@ -187,6 +187,9 @@ module Constants =
     /// Hinder; no value in the data).
     let hinderSlow = 30.0
 
+    /// "if Energy Shield Recharge has started in the past 2 seconds" (stat description).
+    let esRechargeStartedRecently = 2.0
+
     /// Meta gem trigger cost: fixed added cast time (`total_cast_time_+_ms`, Comet +1 s)
     /// counts this many times. Comet = 1 s + 2 x 1 s = 300 energy (forum bug reports
     /// 3623092 / 3860952, user recollection); the tooltip formula would give 200.

@@ -1436,3 +1436,47 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         let bare = Sim.run (fight [ "MonsterHinderAura1" ]) 1u
         near (150.0 + float (count bare "hits:Swing" - 2) * 100.0) bare.DamageBy.["Swing (hit)"]
         same (fight [ "MonsterPhysicalDamageAura1"; "MonsterIncreasedSpeed1"; "MonsterFireResistance1" ]) seeds)
+
+    test "slow magnitude: the Maim and Hinder the character inflicts slow that much more" (fun () ->
+        equal (box [ Mod.inc (Named "SlowMagnitude") 100.0 ]) (box (mods "base_debuff_slow_magnitude_+%" 100.0))
+        // the walker of the Presence test (10 m away, 2 m a second), Hindered by every bolt from
+        // the first (0.5 s, at 9 m): 30% slower, it reaches into a Presence of 4.1 m (its centre
+        // at 4.6 m, 4.4 m on) after 0.5 + 44 / 14 = 3.64 s, and the hits from 4.0 s deal double;
+        // with 100% increased slow magnitude 60% slower: 0.5 + 44 / 8 = 6.0 s, after the fight
+        let bolt = { Skill.make "Bolt" [ Spell ] with BaseDamage = Map.ofList [ Chaos, { Min = 100.0; Max = 100.0 } ]; BaseTime = 0.5; BaseCrit = 0.0 }
+        let walker =
+            { EnemyDef.make Rarity.defaults 70 Normal "walker" (Vec.make 100.0 0.0) with
+                Life = 1e9; Mods = []; Size = 5.0; Speed = 20.0
+                Attack = Some { Interval = 1.0; Damage = Map.ofList [ Physical, 1.0 ]; Accuracy = 100.0; Range = 6.0; CritChance = 0.0; Melee = true } }
+        let fight extra =
+            let player = { Actor.make "Player" (Mod.base' (AilmentChance Hinder) 100.0 :: extra) [ bolt ] with Vitals = Some(PlayerStats.basic 1e6 0.0) }
+            { Fight.single walker player 5.2 with Presence = 41.0; PresenceAuras = [ "Weakened", 1, [ Mod.inc (DamageTaken AllDamage) 100.0 ] ] }
+        let dealt f = (Sim.run f 1u).DamageBy |> Map.toList |> List.sumBy snd
+        near (7.0 * 100.0 + 3.0 * 200.0) (dealt (fight []))
+        near (10.0 * 100.0) (dealt (fight (mods "base_debuff_slow_magnitude_+%" 100.0)))
+        same (fight (mods "base_debuff_slow_magnitude_+%" 100.0)) seeds)
+
+    test "evasion if energy shield recharge started in the past 2 seconds: from the end of its delay since the last hit, for 2 s" (fun () ->
+        equal
+            (box [ Mod.inc Evasion 40.0 |> Mod.whenever (WhileBuff "ESRechargeStartedRecently") ])
+            (box (mods "evasion_rating_+%_if_energy_shield_recharge_started_in_past_2_seconds" 40.0))
+        // a critical hit at 0.5 s Ignites the character for 4 s (damage over time keeps the
+        // recharge from starting: the last of it at the bolt at 4.5 s); with a delay of 3.9 s the
+        // recharge starts at 8.4 s, so the state holds for the bolts at 8.5, 9.0, 9.5 and 10.0 s,
+        // which a mod doubles: of 23 bolts of 100, four deal 200
+        let spark = { Skill.make "Spark" [ Spell ] with BaseDamage = Map.empty; BaseTime = 0.5; BaseCrit = 100.0; Cooldown = Some 100.0 }
+        let bolt = { Skill.make "Bolt" [ Spell ] with BaseDamage = Map.ofList [ Chaos, { Min = 100.0; Max = 100.0 } ]; BaseTime = 0.5; BaseCrit = 0.0 }
+        let vitals = { PlayerStats.basic 1e6 0.0 with EnergyShield = 100.0; ESRechargeDelay = 3.9 }
+        let doubled = Mod.more (Damage AllDamage) 100.0 |> Mod.whenever (WhileBuff "ESRechargeStartedRecently")
+        let player =
+            { Actor.make "Player" [ doubled; Mod.more (AilmentChance Ignite) -100.0 ] [ spark; bolt ] with
+                Vitals = Some vitals
+                Rotation = [ Actor.always "Spark"; Actor.always "Bolt" ]
+                Rules = [ { Hook = OnCrit; Filter = AnySkill; Chance = 100.0; Reaction = IgniteSelf 0.1 } ] }
+        let fight = Fight.single (EnemyDef.atLevel 83 1e12) player 12.2
+        let o = Sim.run fight 1u
+        equal 23 (count o "hits:Bolt")
+        near (19.0 * 100.0 + 4.0 * 200.0) o.DamageBy.["Bolt (hit)"]
+        // without energy shield there is nothing to recharge
+        near 2300.0 (Sim.run { fight with Player = { player with Vitals = Some { vitals with EnergyShield = 0.0 } } } 1u).DamageBy.["Bolt (hit)"]
+        same fight seeds)

@@ -18,7 +18,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
    whose description or behaviour changed.
 5. Go through the lists below; the wiki's version history of a skill says what changed.
 
-## Rules (132)
+## Rules (134)
 
 ### Hit damage
 
@@ -62,6 +62,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | Default spread | — | guess |
 | Fork | poe2db keyword text (Fork, Chain); the angle: the first game's wiki ("two new projectile travel ... at a 120º angle", via poedb); the remaining range and straight flight are guesses | data / guess |
 | Shocked Ground | keyword text (poe2db), stat description; game table BuffDefinitions (`shocked_ground`: no stats) | data / guess |
+| Slow magnitude | stat description; what counts as a slow: guess | guess |
 | Spark | game tables (GrantedEffectStatSets, Projectiles), gem text; user: cone widening with the number, gone on hit. The 15 degrees and the zigzag step are guesses | data / guess |
 | Full circle from the player | geometry | guess |
 | Damage per target | — | guess |
@@ -91,6 +92,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | Armour vs elemental | stat text; order a guess | guess |
 | Damage taken | stat text | guess (order) |
 | Life flask | player behaviour | guess |
+| Energy shield recharge started in the past 2 seconds | stat description; ES recharge rule above | data; below maximum: guess |
 | Low Energy Shield, low and full life | game constants | data; no shield: guess |
 | Defend with X% of Armour | stat descriptions | data; stacking: guess |
 | Ailments on the player | GameConstants "...Player" | data; using unmitigated damage is a guess |
