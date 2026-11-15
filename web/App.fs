@@ -242,6 +242,11 @@ type Model =
       Play : Pressed list
       Rotation : string list
       Pressable : string list
+      /// What a condition of pressing can be about: states an enemy can have, skills that leave something standing.
+      States : string list
+      Standing : string list
+      /// The skill whose conditions are being changed ("": none).
+      Editing : string
       /// The enemies as said here ("": as they are), and lines of modifiers of one's own (as
       /// typed, and as applied).
       EnemyLevel : string
@@ -394,7 +399,7 @@ type Model =
 let init : Model =
     { Build = ""; Scenario = "boss"; Status = "locating"; Title = ""; Class = ""; Ascendancy = ""; Tab = "character"
       Pools = []; Guards = []; Survival = []; Defences = []; Resistances = []; Minions = []
-      NotUnderstood = 0; Fighting = false; Gem = ""; Dps = []; Shares = []; Groups = []; Items = []; Bag = []; Swapped = Map.empty; Wearing = []; Equip = ""; Aim = ""; Pasting = false; Draft = ""; Dropped = Set.empty; GemEdits = []; Picker = ""; Offers = []; Wanted = ""; Offered = []; Probe = ""; ProbeRound = 0; Probing = false; Tuning = ""; TuneSaid = ""; Probed = ""; Worth = []; Play = []; Rotation = []; Pressable = []; EnemyLevel = ""; EnemyEle = ""; EnemyChaos = ""; CustomDraft = ""; Custom = ""; Calcs = []; CanLogin = false; Asked = false; Player = ""; Characters = []; Running = []; Lasting = []; Going = ""; Kept = ""; Restored = false; Notes = ""; NotesWere = ""; NodeWorth = Map.empty; Among = ""; CalcShown = []; Pinned = ""; Deltas = []; DeltaOf = ""; Ask = ""; AskMore = ""; Anointed = Set.empty; Types = []; Counts = []; Start = Map.empty; Switches = Set.empty
+      NotUnderstood = 0; Fighting = false; Gem = ""; Dps = []; Shares = []; Groups = []; Items = []; Bag = []; Swapped = Map.empty; Wearing = []; Equip = ""; Aim = ""; Pasting = false; Draft = ""; Dropped = Set.empty; GemEdits = []; Picker = ""; States = []; Standing = []; Editing = ""; Offers = []; Wanted = ""; Offered = []; Probe = ""; ProbeRound = 0; Probing = false; Tuning = ""; TuneSaid = ""; Probed = ""; Worth = []; Play = []; Rotation = []; Pressable = []; EnemyLevel = ""; EnemyEle = ""; EnemyChaos = ""; CustomDraft = ""; Custom = ""; Calcs = []; CanLogin = false; Asked = false; Player = ""; Characters = []; Running = []; Lasting = []; Going = ""; Kept = ""; Restored = false; Notes = ""; NotesWere = ""; NodeWorth = Map.empty; Among = ""; CalcShown = []; Pinned = ""; Deltas = []; DeltaOf = ""; Ask = ""; AskMore = ""; Anointed = Set.empty; Types = []; Counts = []; Start = Map.empty; Switches = Set.empty
       Passives = [||]; Ascendancies = []; Shown = []; AscendancyWeb = Data.pack (Data.ofList ([] : V3f list)); Path = Data.pack (Data.ofList ([] : V3f list))
       Loaded = false; Capacity = 0
       WebUv = Data.pack (Data.ofList ([] : V2f list)); AscendancyWebUv = Data.pack (Data.ofList ([] : V2f list)); PathUv = Data.pack (Data.ofList ([] : V2f list)); Art = ""; Links = [||]; Neighbours = Map.empty; Web = Data.pack (Data.ofList ([] : V3f list)); Allocated = Set.empty; Edited = false
@@ -1361,6 +1366,19 @@ let private ordered (m : Model) (how : string) (gem : string) : string list =
         let whens = whens |> List.filter (fun w -> w <> own)
         let next = whens.[((whens |> List.tryFindIndex (fun w -> w = code) |> Option.defaultValue 0) + 1) % whens.Length]
         now |> List.mapi (fun i g -> if i = at then (if next = "" then gem else gem + "@" + next) else g)
+    // (a condition more or less: "<skill>\n<condition>"; one of a kind, and "has" and "lacks" of
+    // the same state do not go together)
+    | "cond+" | "cond-" ->
+        (match gem.Split '\n' with
+         | [| skill; part |] ->
+            let kind (c : string) = if c.StartsWith "has:" || c.StartsWith "lacks:" then "state:" + c.Substring (c.IndexOf ':' + 1) elif c.StartsWith "up:" || c.StartsWith "down:" then "stands:" + c.Substring (c.IndexOf ':' + 1) else "when"
+            now |> List.map (fun g ->
+                if named g <> skill then g
+                else
+                    let parts = match g.IndexOf '@' with | -1 -> [] | k -> g.Substring(k + 1).Split '+' |> List.ofArray |> List.filter (fun c -> c <> "")
+                    let parts = if how = "cond-" then parts |> List.filter (fun c -> c <> part) else (parts |> List.filter (fun c -> kind c <> kind part)) @ [ part ]
+                    if parts.IsEmpty then skill else skill + "@" + String.concat "+" parts)
+         | _ -> now)
     // (before the last: that one is what is pressed when nothing else is ready)
     | "add" when at < 0 -> (match List.rev now with | last :: before -> List.rev before @ [ gem; last ] | [] -> [ gem ])
     | "auto" -> []
@@ -1493,6 +1511,7 @@ let rec private step (msg : Msg) (m : Model) : Model =
             offer (weigh { m with Worth = kept @ found; Probing = more; ProbeRound = m.ProbeRound + 1
                                   Probed = (if more then sprintf "%d of %d" (Json.int (Json.field "done" j)) (Json.int (Json.field "total" j)) else "") })
          | _ -> { m with Probing = false; Probed = "the analysis did not come back" })
+    | Order ("edit", gem) -> { m with Editing = (if m.Editing = gem then "" else gem) }
     | Order (how, gem) -> afresh { m with Rotation = ordered m how gem }
     | Enemy (what, value) ->
         let v = value.Trim ()
@@ -1678,6 +1697,8 @@ let rec private step (msg : Msg) (m : Model) : Model =
                                       Support = Json.bool (Json.field "support" x); Icon = Json.string (Json.field "icon" x); Own = Json.string (Json.field "gemIcon" x); Spirit = Json.number (Json.field "spirit" x); Persistent = Json.bool (Json.field "persistent" x)
                                       At = Json.int (Json.field "at" x); Socketed = Json.int (Json.field "socketed" x); Gives = nan; Minions = Json.int (Json.field "minions" x); Reserved = Json.number (Json.field "reserved" x) }) })
                     Pressable = Json.field "pressable" j |> Json.list |> List.map Json.string
+                    States = (match Json.field "states" (Json.field "conditions" j) |> Json.list |> List.map Json.string with | [] -> [ "Ignite"; "Shock"; "Chill"; "Freeze"; "Bleed"; "Poison" ] | xs -> xs)
+                    Standing = Json.field "skills" (Json.field "conditions" j) |> Json.list |> List.map Json.string
                     // (Runic Ward beside life and energy shield, for a character that has any)
                     Pools = [ row "Life" (n [ "pools"; "life" ]); row "Energy Shield" (n [ "pools"; "energyShield" ]) ] @ (if n [ "pools"; "ward" ] > 0.0 then [ row "Runic Ward" (n [ "pools"; "ward" ]) ] else []) @ [ row "Mana" (n [ "pools"; "mana" ]); row "Spirit" (n [ "pools"; "spirit" ]) ]
                     Guards = guards j
@@ -1950,31 +1971,78 @@ let private analyse (m : Model) (about : string) : Node<Msg> =
         span { Dom.Class "legend"; span { Dom.Class "w3"; "much" }; span { Dom.Class "w2"; "some" }; span { Dom.Class "w1"; "little" }; span { Dom.Class "w0"; "none" }; span { Dom.Class "wneg"; "costs damage" } }
     }
 
+/// A condition of pressing as it reads (a resource's name may have colons of its own).
+let private condition (c : string) : string =
+    let rest (k : int) = c.Substring (k + 1)
+    match c.Split ':' |> List.ofArray with
+    | [ "ready" ] -> "when ready" | [ "buff" ] -> "kept up" | [ "curse" ] -> "kept on the enemy" | [ "held" ] -> "when ready, not first"
+    | "below" :: _ ->
+        let r, n = c.Substring (6, c.LastIndexOf ':' - 6), rest (c.LastIndexOf ':')
+        if n = "1" then "when out of " + r else "while below " + n + " " + r
+    | "has" :: _ -> "enemy has " + rest 3 | "lacks" :: _ -> "enemy lacks " + rest 5
+    | "up" :: _ -> rest 2 + " stands" | "down" :: _ -> "no " + rest 4 + " stands"
+    | _ -> c
+
+/// The conditions of one skill: those it has, to take away, and by kind those to add.
+let private conditions (m : Model) (p : Pressed) : Node<Msg> =
+    let parts = p.Code.Split '+' |> List.ofArray |> List.filter (fun c -> c <> "" && c <> "held")
+    let free (cs : (string * string) list) = cs |> List.filter (fun (c, _) -> not (List.contains c parts))
+    let rows =
+        [ "pressed", free [ "ready", "when ready"; "buff", "kept up"; "curse", "kept on the enemy" ]
+          "when out of", free (m.Counts |> List.map (fun (k, _) -> "below:" + k + ":1", k))
+          "while not full of", free (m.Counts |> List.filter (fun (_, most) -> most > 1) |> List.map (fun (k, most) -> "below:" + k + ":" + string most, k))
+          "enemy has", free (m.States |> List.map (fun x -> "has:" + x, x))
+          "enemy lacks", free (m.States |> List.map (fun x -> "lacks:" + x, x))
+          "stands", free (m.Standing |> List.map (fun x -> "up:" + x, x))
+          "none stands", free (m.Standing |> List.map (fun x -> "down:" + x, x)) ]
+        |> List.filter (fun (_, cs) -> not cs.IsEmpty)
+    div {
+        Dom.Class "conds"
+        if not parts.IsEmpty then
+            div {
+                Dom.Class "actions"
+                for c in parts do
+                    button { Dom.Class "act on"; Dom.OnClick (fun _ -> Order ("cond-", p.Skill + "\n" + c)); condition c + " ×" }
+            }
+        for (kind, cs) in rows do
+            div {
+                Dom.Class "actions"
+                span { Dom.Class "kind"; kind }
+                for (c, name) in cs do
+                    button { Dom.Class "act"; Dom.OnClick (fun _ -> Order ("cond+", p.Skill + "\n" + c)); name }
+            }
+    }
+
 /// What is pressed, first to last, with the buttons that change the order.
 let private pressing (m : Model) : Node<Msg> =
     let listed = m.Play |> List.map (fun p -> p.Skill)
     let others = m.Pressable |> List.filter (fun g -> not (List.contains g listed))
     let chosen = not m.Rotation.IsEmpty
+    // (the conditions as they were said here, where they were)
+    let play = m.Play |> List.map (fun p -> match m.Rotation |> List.tryFind (fun g -> g.Split('@').[0] = p.Skill) with | Some g when g.Contains "@" -> { p with Code = g.Substring (g.IndexOf '@' + 1) } | _ -> p)
+    // (how it reads: what the simulator says of it, or the conditions said here)
+    let how (p : Pressed) = if p.Code = "" || p.Code = "held" then p.How else (match p.Code.Split '+' with | [| one |] -> condition one | many -> string many.Length + " conditions")
     section {
         Dom.Class "panel pressed"
         h3 { "What is pressed" }
-        for p in m.Play do
+        for p in play do
             div {
                 Dom.Class "press"
                 if p.Face <> "" then img { Dom.Attr ("src", p.Face); Dom.Attr ("alt", "") }
                 span { Dom.Class "name"; p.Skill }
-                button { Dom.Class "act how"; Dom.Attr ("title", "when it is pressed: press to change"); Dom.OnClick (fun _ -> Order ("when", p.Skill)); p.How }
+                button { Dom.Class "act how"; Dom.Attr ("title", "when it is pressed: press to change"); Dom.OnClick (fun _ -> Order ("edit", p.Skill)); how p }
                 button { Dom.Class "act"; Dom.OnClick (fun _ -> Order ("up", p.Skill)); "↑" }
                 button { Dom.Class "act"; Dom.OnClick (fun _ -> Order ("down", p.Skill)); "↓" }
                 button { Dom.Class "act"; Dom.OnClick (fun _ -> Order ("drop", p.Skill)); "×" }
             }
+            if m.Editing = p.Skill then conditions m p
         div {
             Dom.Class "actions"
             for g in others do
                 button { Dom.Class "act"; Dom.OnClick (fun _ -> Order ("add", g)); "+ " + g }
             if chosen then button { Dom.Class "act close"; Dom.OnClick (fun _ -> Order ("auto", "")); "As the skills say" }
         }
-        div { Dom.Class "depth"; "The first that is ready is pressed; the last whenever nothing else is. Press a condition to change it." }
+        div { Dom.Class "depth"; "The first whose conditions hold is pressed; the last whenever nothing else is. Press a condition to change it: all of a skill's conditions must hold." }
     }
 
 /// An item in its place: its picture with what is in its sockets. What it says in a tooltip,
