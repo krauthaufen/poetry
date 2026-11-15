@@ -2699,8 +2699,8 @@ module Behaviours =
     /// Fist of War ("Supports Slams you use yourself, providing a powerful Ancestral Boost every
     /// few seconds": every `ancestral_slam_interval_duration`; III: "Ancestral Boost has double
     /// effect on Supported Skills") and Ancestral Call (Strikes, every
-    /// `ancestral_call_spirit_strike_interval_ms`). When a use of the skill has landed and the
-    /// time since the last boost is over, the next attack is Ancestrally Boosted. Gives the
+    /// `ancestral_call_spirit_strike_interval_ms`). A use of the skill that starts when the
+    /// time since the last boost is over is Ancestrally Boosted. Gives the
     /// skill (with what a double effect adds), the skill that keeps the time, and the rules.
     let ancestralBoost (db: GameDb) (charMods: ModDb) (setup: GemSetup) (skill: Skill) : Skill * Skill list * Rule list =
         let raw = Gems.rawStats db charMods setup
@@ -2714,10 +2714,11 @@ module Behaviours =
             let rec doubled (s: Skill) = { s with Mods = s.Mods @ boostMods 2.0; Parts = s.Parts |> List.map doubled }
             (if sum "double_ancestral_boost_effect" > 0.0 then doubled skill else skill),
             [ clock ],
-            // (a use of the skill that was boosted takes the boost with it as it lands: a
-            // channelled slam does not use it up the way other attacks do)
-            [ { Hook = OnLand; Filter = Called skill.Name; Chance = 100.0; Reaction = RemoveBuff ancestralBoostBuff }
-              { Hook = OnLand; Filter = Called skill.Name; Chance = 100.0; Reaction = TriggerSkill gate }
+            // (as a use of the skill starts, what is left of an earlier boost goes: a channelled
+            // slam does not use it up the way other attacks do; then, the time being over, this
+            // use is boosted)
+            [ { Hook = OnUse; Filter = Called skill.Name; Chance = 100.0; Reaction = RemoveBuff ancestralBoostBuff }
+              { Hook = OnUse; Filter = Called skill.Name; Chance = 100.0; Reaction = TriggerSkill gate }
               { Hook = OnUse; Filter = Called gate; Chance = 100.0; Reaction = SetStacks(ancestralBoostBuff, 1) } ]
 
     /// "The next Attack you use within N seconds after Heavy Stunning a Rare or Unique Enemy is

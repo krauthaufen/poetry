@@ -142,7 +142,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | A random element | stat description; the average in place of the choice | guess |
 | Additional Remnants | stat descriptions; adding the two up is a guess | guess |
 | Using them up | game rule | guess |
-| Ancestral Boost | poe2db Keywords (Ancestral Boost); gem data | data; that the boost goes to the attack after the one that started its time (the first of a fight has none): guess |
+| Ancestral Boost | poe2db Keywords (Ancestral Boost); gem data | data; that the time is not shortened by cooldown recovery is not so here (the clock is a cooldown): guess |
 | Marked and Blinded monsters' critical hits | stat descriptions; that the N seconds are the time it is Blinded | data; the time: guess |
 | Herald of Plague | gem description, `herald_of_agony_poison_spread_on_kill_radius_base_magnitude_to_grant` (its description: a radius in tenths of a metre) | data / guess |
 | Kills by damage over time | game: "on kill" effects are not limited to hits unless they say so; the owner rule is a simplification | guess |

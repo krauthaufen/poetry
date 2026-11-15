@@ -2416,13 +2416,13 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
     test "Ancestral Boost: a slam's 30% more damage every few seconds (Fist of War), twice with double effect, after a Heavy Stun" (fun () ->
         let foe = { EnemyDef.atLevel 83 1e9 with Mods = []; Attack = None }
         let slam = { Skill.make "Slam" [ Attack; Melee; Slam ] with BaseDamage = Map.ofList [ Physical, Range.fixedAt 100.0 ]; BaseCrit = 0.0 }
-        // a slam a second, a boost every 2.5 s: the slam that lands at 1 starts the time, the
-        // next (2) is boosted; then those after 4, 7 and 10 (5, 8, 11). 12 slams, 4 of them at 130
+        // a slam a second, a boost every 2.5 s: the first slam is boosted, then those that
+        // start at 3, 6 and 9. 12 slams, 4 of them at 130
         let boosted (s: Skill) =
             let clock = { Skill.make "Slam: Ancestral Boost" [ Triggered ] with BaseCrit = 0.0; Hits = []; Cooldown = Some 2.5 }
             let rules =
-                [ { Hook = OnLand; Filter = Called "Slam"; Chance = 100.0; Reaction = RemoveBuff Behaviours.ancestralBoostBuff }
-                  { Hook = OnLand; Filter = Called "Slam"; Chance = 100.0; Reaction = TriggerSkill clock.Name }
+                [ { Hook = OnUse; Filter = Called "Slam"; Chance = 100.0; Reaction = RemoveBuff Behaviours.ancestralBoostBuff }
+                  { Hook = OnUse; Filter = Called "Slam"; Chance = 100.0; Reaction = TriggerSkill clock.Name }
                   { Hook = OnUse; Filter = Called clock.Name; Chance = 100.0; Reaction = SetStacks(Behaviours.ancestralBoostBuff, 1) } ]
             let player = { Actor.make "Player" [ Mod.base' (Named "Accuracy") 1e9 ] [ s; clock ] with Rotation = [ Actor.always "Slam" ]; Rules = rules } |> Behaviours.ancestralBoosted
             Fight.single foe player 12.2
