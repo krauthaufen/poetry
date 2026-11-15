@@ -2421,7 +2421,8 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         let boosted (s: Skill) =
             let clock = { Skill.make "Slam: Ancestral Boost" [ Triggered ] with BaseCrit = 0.0; Hits = []; Cooldown = Some 2.5 }
             let rules =
-                [ { Hook = OnLand; Filter = Called "Slam"; Chance = 100.0; Reaction = TriggerSkill clock.Name }
+                [ { Hook = OnLand; Filter = Called "Slam"; Chance = 100.0; Reaction = RemoveBuff Behaviours.ancestralBoostBuff }
+                  { Hook = OnLand; Filter = Called "Slam"; Chance = 100.0; Reaction = TriggerSkill clock.Name }
                   { Hook = OnUse; Filter = Called clock.Name; Chance = 100.0; Reaction = SetStacks(Behaviours.ancestralBoostBuff, 1) } ]
             let player = { Actor.make "Player" [ Mod.base' (Named "Accuracy") 1e9 ] [ s; clock ] with Rotation = [ Actor.always "Slam" ]; Rules = rules } |> Behaviours.ancestralBoosted
             Fight.single foe player 12.2

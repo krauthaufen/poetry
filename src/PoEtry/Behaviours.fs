@@ -2325,6 +2325,22 @@ module Behaviours =
                         group |> List.fold (fun s a -> Set.add a.Name s) seen, acc @ group)
                     (Set.empty, [])
                 |> snd
+            // an Archon of Undeath and its recovery are the player's: of all the minions that could
+            // roll for it, the first does (the others' commands roll for nothing)
+            let named =
+                let carries (a: Actor) = a.Skills |> List.exists (fun s -> s.Name = archonOfUndeathName)
+                match named |> List.tryFindIndex carries with
+                | None -> named
+                | Some first ->
+                    named |> List.mapi (fun i a ->
+                        if i = first || not (carries a) then a
+                        else
+                            { a with
+                                Skills = a.Skills |> List.filter (fun s -> s.Name <> archonOfUndeathName)
+                                Rules = a.Rules |> List.filter (fun r ->
+                                    match r.Reaction with
+                                    | TriggerSkill n | GrantMinionBuff (n, _, _) when n = archonOfUndeathName -> false
+                                    | _ -> true) })
             named, List.concat notes
 
     /// What summons a build's temporary minions (the pools `minions` makes), as rules and
@@ -2698,7 +2714,10 @@ module Behaviours =
             let rec doubled (s: Skill) = { s with Mods = s.Mods @ boostMods 2.0; Parts = s.Parts |> List.map doubled }
             (if sum "double_ancestral_boost_effect" > 0.0 then doubled skill else skill),
             [ clock ],
-            [ { Hook = OnLand; Filter = Called skill.Name; Chance = 100.0; Reaction = TriggerSkill gate }
+            // (a use of the skill that was boosted takes the boost with it as it lands: a
+            // channelled slam does not use it up the way other attacks do)
+            [ { Hook = OnLand; Filter = Called skill.Name; Chance = 100.0; Reaction = RemoveBuff ancestralBoostBuff }
+              { Hook = OnLand; Filter = Called skill.Name; Chance = 100.0; Reaction = TriggerSkill gate }
               { Hook = OnUse; Filter = Called gate; Chance = 100.0; Reaction = SetStacks(ancestralBoostBuff, 1) } ]
 
     /// "The next Attack you use within N seconds after Heavy Stunning a Rare or Unique Enemy is
