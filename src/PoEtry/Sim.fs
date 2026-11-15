@@ -702,7 +702,10 @@ module Sim =
           Rage: float * float * float * float * float
           /// "Debuffs you inflict have X% increased Slow Magnitude": how much more the Maim and
           /// Hinder on the monsters slow them (the player's, for all of them).
-          SlowMagnitude: float }
+          SlowMagnitude: float
+          /// Whether anything reads the state "ESRechargeStartedRecently" (`asksBuff`): it is
+          /// only kept where something does.
+          AsksESRecharge: bool }
 
     let private allAilments =
         [ Ignite; Bleed; Poison; Shock; Chill; Freeze; Electrocute; HeavyStun; Pin; Daze; Maim; Blind; Hinder ]
@@ -1012,6 +1015,29 @@ module Sim =
     /// Advance the clock to t, applying damage over time and recording uptime.
     /// DoT dps is constant between events (every change is an event), so this is
     /// exact; an enemy dying from DoT mid-interval dies at the exact time.
+    /// Whether a condition of the fight's (the player's mods and skills', its minions', its
+    /// defences', its rules') asks about a buff of this name.
+    let asksBuff (fight: Fight) (name: string) =
+        let rec asks (c: Cond) =
+            match c with
+            | WhileBuff b | PerStack (b, _) -> b = name
+            | Not inner | OfOwner inner -> asks inner
+            | _ -> false
+        let inMods (ms: Mod list) = ms |> List.exists (fun m -> m.Conds |> List.exists asks)
+        let rec inReaction (r: Reaction) =
+            match r with
+            | IfBuff (b, next) -> b = name || inReaction next
+            | SpendStack (_, next) | IfEnemyHas (_, next) -> inReaction next
+            | WithCorpse (a, b) -> inReaction a || inReaction b
+            | _ -> false
+        let rec skill (s: Skill) = inMods s.Mods || s.Parts |> List.exists skill
+        let actor (a: Actor) =
+            inMods a.Mods
+            || a.Skills |> List.exists skill
+            || a.Rules |> List.exists (fun r -> inReaction r.Reaction)
+            || (match a.VitalsReads with Some names -> names.Contains name | None -> a.VitalsAt.IsSome)
+        actor fight.Player || fight.Minions |> List.exists actor
+
     let private advance env t (w: World) =
         let dt = t - w.Time
         if dt <= 0.0 then
@@ -3956,7 +3982,7 @@ module Sim =
                           "LowEnergyShield", v.EnergyShield > 0.0 && p.EnergyShield <= Constants.lowStatusShare * v.EnergyShield
                           // energy shield recharge started in the past 2 seconds: its delay since the last
                           // hit (or damage over time) is over, by no more than 2 s
-                          "ESRechargeStartedRecently", v.EnergyShield > 0.0 && w.Time - p.LastHit >= v.ESRechargeDelay && w.Time - p.LastHit < v.ESRechargeDelay + Constants.esRechargeStartedRecently ]
+                          "ESRechargeStartedRecently", env.AsksESRecharge && v.EnergyShield > 0.0 && w.Time - p.LastHit >= v.ESRechargeDelay && w.Time - p.LastHit < v.ESRechargeDelay + Constants.esRechargeStartedRecently ]
                     // charge states: "while at maximum Power Charges", "while you have no Frenzy Charges"
                     let playerSt = Map.find env.Fight.Player.Name w.Actors
                     let states =
@@ -4110,6 +4136,7 @@ module Sim =
           BerserkLoss = Mods.sumBase Ctx.empty [ Named "LifeLossPercentPerMinutePerRage" ] (ModDb.ofList fight.Player.Mods)
           CharmKeep = Mods.sumBase Ctx.empty [ Named "CharmKeepCharges" ] (ModDb.ofList fight.Player.Mods)
           SlowMagnitude = Mods.inc Ctx.empty [ Named "SlowMagnitude" ] (ModDb.ofList fight.Player.Mods)
+          AsksESRecharge = asksBuff fight "ESRechargeStartedRecently"
           WithBuffs = System.Collections.Generic.Dictionary()
           VitalsSeen = System.Collections.Generic.Dictionary()
           SkillDbs =

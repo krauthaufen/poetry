@@ -1087,6 +1087,8 @@ module Flat =
               Walks: bool
               /// See `Sim.Env.SlowMagnitude`.
               SlowMagnitude: float
+              /// See `Sim.Env.AsksESRecharge`.
+              AsksESRecharge: bool
               /// Whether monsters attack at all (the player or a minion can be hurt).
               Attacked: bool
               /// Infusion remnants: by what inflicting an ailment may drop (the ailment, the
@@ -2151,6 +2153,7 @@ module Flat =
                       AnyPool = anyPool
                       Walks = fight.Player.Vitals.IsSome
                       SlowMagnitude = Mods.inc Ctx.empty [ Named "SlowMagnitude" ] (ModDb.ofList fight.Player.Mods)
+                      AsksESRecharge = Sim.asksBuff fight "ESRechargeStartedRecently"
                       Attacked = fight.Player.Vitals.IsSome || anyBody
                       Remnants = remnants
                       RemnantExtra = (match actor.Infusions with Some inf -> inf.ExtraRemnantChance | None -> 0.0)
@@ -6820,7 +6823,7 @@ module Flat =
         setState s 19 ignited
         setState s 20 ignited
         setState s 21 (v.EnergyShield > 0.0 && s.Shield <= Constants.lowStatusShare * v.EnergyShield)
-        setState s 22 (v.EnergyShield > 0.0 && s.Time - s.LastHit >= v.ESRechargeDelay && s.Time - s.LastHit < v.ESRechargeDelay + Constants.esRechargeStartedRecently)
+        setState s 22 (p.AsksESRecharge && v.EnergyShield > 0.0 && s.Time - s.LastHit >= v.ESRechargeDelay && s.Time - s.LastHit < v.ESRechargeDelay + Constants.esRechargeStartedRecently)
 
     /// What is planted in or beside the enemies (`Sim.step`): seeds set off by the damage
     /// their enemy has taken (or its death: the blast then strikes the enemy aimed at), gone
