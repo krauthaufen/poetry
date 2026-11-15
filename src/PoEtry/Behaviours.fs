@@ -2598,6 +2598,49 @@ module Behaviours =
         |> List.filter (fun (state, _) -> asked.Contains state)
         |> List.map (fun (state, make) -> make state)
 
+    /// "for each different Warcry you've used Recently", "for each different Spell you've Cast
+    /// in the last eight seconds", "for every different Grenade fired in the past 8 seconds",
+    /// "for each type of Ammunition fired in the past 10 seconds": a modifier that counts them
+    /// (`PerStack("Different:<kind>:<seconds>", 1)`, StatMap) becomes one modifier for each of
+    /// the actor's skills of the kind, which holds while that skill was used within the time;
+    /// using the skill starts the time again.
+    let differentUsed (a: Actor) : Actor =
+        let kindOf (c: Cond) =
+            match c with
+            | PerStack (b, _) when b.StartsWith "Different:" ->
+                match b.Split ':' with
+                | [| _; kind; seconds |] -> Some(kind, float seconds)
+                | _ -> None
+            | _ -> None
+        let ofKind (kind: string) (s: Skill) =
+            match kind with
+            | "Warcry" -> s.Tags.Contains Warcry
+            // (a spell that is triggered is not cast)
+            | "Spell" -> s.Tags.Contains Spell && not (s.Tags.Contains Triggered)
+            | "Grenade" -> s.Tags.Contains(Tag "Grenade")
+            | "Ammo" -> s.Tags.Contains Crossbow && s.Clip > 0
+            | _ -> false
+        let state (s: Skill) (seconds: float) = sprintf "Used:%s:%g" s.Name seconds
+        let asked = System.Collections.Generic.HashSet<string * float>()
+        let expand (m: Mod) =
+            match m.Conds |> List.tryPick kindOf with
+            | Some (kind, seconds) ->
+                asked.Add((kind, seconds)) |> ignore
+                let rest = m.Conds |> List.filter (fun c -> (kindOf c).IsNone)
+                a.Skills |> List.filter (ofKind kind) |> List.map (fun s -> { m with Conds = WhileBuff(state s seconds) :: rest })
+            | None -> [ m ]
+        let rec skill (s: Skill) = { s with Mods = s.Mods |> List.collect expand; Parts = s.Parts |> List.map skill }
+        let mods = a.Mods |> List.collect expand
+        let skills = a.Skills |> List.map skill
+        if asked.Count = 0 then a
+        else
+            let rules =
+                [ for (kind, seconds) in asked do
+                    for s in a.Skills do
+                        if ofKind kind s then
+                            yield { Hook = OnUse; Filter = Called s.Name; Chance = 100.0; Reaction = GrantBuff(state s seconds, seconds, 1, []) } ]
+            { a with Mods = mods; Skills = skills; Rules = a.Rules @ rules }
+
     /// Using a totem gem places the totem: the buff its actor waits for, lasting the totem's
     /// duration ("base_totem_duration" x skill duration mods).
     let totemPlacement (db: GameDb) (charMods: ModDb) (setup: GemSetup) (skill: Skill) : Rule list =

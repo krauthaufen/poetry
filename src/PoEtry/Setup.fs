@@ -150,6 +150,24 @@ module Setup =
                                         let setup = { Gem = x.Name; Level = x.Level; Quality = x.Quality; StatSet = 1; Supports = supports }
                                         { x with Level = max 1 (x.Level - Gems.supportLevels db setup); Quality = max 0 (x.Quality - Gems.supportQuality db setup) }) }) }
 
+    /// "+N to Level of all Corrupted Skill Gems", "+N to Level of all Corrupted Spell Skill
+    /// Gems": the skill gems that are Corrupted have so many levels more (a support is no
+    /// skill gem; a spell is a gem whose skill has the type).
+    let corruptedLevels (db: GameDb) (mods: Mod list) (build: PobBuild) =
+        let mdb = ModDb.ofList mods
+        let all = int (Mods.sumBase Ctx.empty [ Named "CorruptedGemLevel" ] mdb)
+        let spells = int (Mods.sumBase Ctx.empty [ Named "CorruptedSpellGemLevel" ] mdb)
+        if all = 0 && spells = 0 then build
+        else
+            { build with
+                Groups =
+                    build.Groups |> List.map (fun g ->
+                        { g with
+                            Gems =
+                                g.Gems |> List.map (fun x ->
+                                    if x.IsSupport || not x.Corrupted then x
+                                    else { x with Level = max 1 (x.Level + all + (if (Gems.ctxOf db x.Name).SkillTags.Contains Spell then spells else 0)) }) }) }
+
     /// Build the character. `read` reads a game data file by name ("tree.json").
     let rec load (read: string -> string) (build: PobBuild) (o: Options) : Loaded =
         loadWith (GameDb.load read) (read "tree.json") build o
@@ -163,7 +181,9 @@ module Setup =
         let build = if o.Bonded then { build with Config = Map.add "bonded" "1" build.Config } else build
         let build = ownLevels db build
         let build = dropGems o.Without build
-        let sheet = Pob.character db tree jewelSlots build |> fun s -> Pob.withPersistentBuffs db s build
+        let sheet = Pob.character db tree jewelSlots build
+        let build = corruptedLevels db sheet.Mods build
+        let sheet = Pob.withPersistentBuffs db sheet build
         // charms: their effects are sheet mods that hold while the charm lasts
         let charms, charmMods = Behaviours.charms db sheet build
         let sheet = { sheet with Mods = sheet.Mods @ charmMods }
@@ -873,6 +893,8 @@ module Setup =
         |> fun (a: Actor) ->
             let rules, periodics = Behaviours.affinity sheet a.Rules a.Periodics
             { a with Rules = rules; Periodics = periodics }
+        // "for each different Warcry / Spell / Grenade / type of Ammunition used in the past ..."
+        |> Behaviours.differentUsed
 
     /// A fight against these enemies.
     and fight (c: Loaded) (o: Options) (player: Actor) (enemies: EnemyDef list) : Fight =

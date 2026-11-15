@@ -2401,7 +2401,9 @@ module Sim =
             // start is paid when the channel begins, not with every use that continues it
             let ownCost =
                 if skill.CostPerSecond <= 0.0 then ownCost
-                else (if st.LastUsed = skill.Name then 0.0 else ownCost) + skill.CostPerSecond * max Constants.serverTick (useTime env actor skill w)
+                // ("Modifiers to Cast / Attack Speed also affect this Skill's cost": so much more
+                // a second as the skill is faster, which is what its unhurried time costs)
+                else (if st.LastUsed = skill.Name then 0.0 else ownCost) + skill.CostPerSecond * (if partFlag skill "CostOverTimeWithSpeed" then skill.BaseTime else max Constants.serverTick (useTime env actor skill w))
             (ownCost + extraCost) * Mods.mult costCtx [ ManaCost ] db / Mods.inc costCtx [ ManaCostEfficiency ] db
         let affordable (skill: Skill) =
             match actor.Vitals, w.Player with
@@ -2476,7 +2478,7 @@ module Sim =
                 elif skill.Clip > 0 && not (st.LoadDue.Contains skill.Name) then 0.0 else skill.Cost
             let ownCost =
                 if skill.CostPerSecond <= 0.0 then ownCost
-                else (if st.LastUsed = skill.Name then 0.0 else ownCost) + skill.CostPerSecond * t
+                else (if st.LastUsed = skill.Name then 0.0 else ownCost) + skill.CostPerSecond * (if partFlag skill "CostOverTimeWithSpeed" then skill.BaseTime else t)
             let cost = (ownCost + extraCost) * Mods.mult costCtx [ ManaCost ] db / Mods.inc costCtx [ ManaCostEfficiency ] db
             // after the last bolt of a load: reload (attack speed and reload speed shorten it;
             // PoB: increases add up, more multiplies), unless the reload is instant

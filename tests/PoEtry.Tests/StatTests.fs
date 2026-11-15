@@ -13,7 +13,7 @@ let private blank : PobBuild =
     { Level = 1; ClassName = "Witch"; Ascendancy = ""; Items = []; TreeNodes = []; TreeNodesSet1 = []; TreeNodesSet2 = []
       Groups = []; MainGroup = 1; Config = Map.empty; TreeOverrides = Map.empty; ExtraLines = [] }
 
-let private gem name = { Name = name; Level = 20; Quality = 0; Enabled = true; IsSupport = false; StatSet = 1; Minion = None; Count = None }
+let private gem name = { Name = name; Level = 20; Quality = 0; Enabled = true; IsSupport = false; StatSet = 1; Minion = None; Count = None; Corrupted = false }
 let private support name = { gem name with Level = 1; IsSupport = true }
 let private group gems = { Label = ""; Slot = ""; Enabled = true; Gems = gems }
 
@@ -2286,3 +2286,47 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         equal 1 (count o "flask:life")
         equal 2 (count (Sim.run (fight false) 1u) "uses:Bolt")
         same (fight true) seeds)
+
+    // ---- round 16 ----
+
+    test "corrupted gems' levels; a channel's cost by the second that goes with its speed; what counts the different skills used" (fun () ->
+        // "+N to Level of all Corrupted (Spell) Skill Gems": the corrupted skill gems, a spell both
+        let b =
+            { blank with
+                Groups = [ group [ { gem "Spark" with Corrupted = true }; { support "Pierce" with Corrupted = true } ]; group [ gem "Fireball" ]; group [ { gem "Lightning Arrow" with Corrupted = true } ] ] }
+        let ms = mods "corrupted_skill_gem_level_+" 1.0 @ mods "corrupted_spell_skill_gem_level_+" 2.0
+        let levels = (Setup.corruptedLevels db.Value ms b).Groups |> List.map (fun g -> g.Gems |> List.map (fun x -> x.Level))
+        equal (box [ [ 23; 1 ]; [ 20 ]; [ 21 ] ]) (box levels)
+        // a channel of 10 mana a second whose use takes 1 s, twice as fast: 5 mana a use; where
+        // speed also affects the cost, 20 a second: 10 a use. 100 mana and none coming in: 20 uses, or 10
+        let beam = { Skill.make "Beam" [ Spell; Channelling ] with BaseDamage = Map.ofList [ Fire, Range.fixedAt 100.0 ]; BaseCrit = 0.0; CostPerSecond = 10.0 }
+        let foe = { EnemyDef.atLevel 83 1e9 with Mods = []; Attack = None }
+        let channel (skill: Skill) =
+            let player =
+                { Actor.make "Player" [ Mod.more Speed 100.0 ] [ skill ] with
+                    Rotation = [ Actor.always "Beam" ]
+                    Vitals = Some { PlayerStats.basic 100.0 100.0 with ManaRegen = 0.0 } }
+            Fight.single foe player 30.5
+        let withSpeed = { beam with Mods = mods "cast_speed_modifiers_apply_to_over_time_cost" 1.0 }
+        equal 20 (count (Sim.run (channel beam) 1u) "uses:Beam")
+        equal 10 (count (Sim.run (channel withSpeed) 1u) "uses:Beam")
+        equal (box (mods "cast_speed_modifiers_apply_to_over_time_cost" 1.0)) (box (mods "attack_speed_modifiers_apply_to_over_time_cost" 1.0))
+        same (channel beam) seeds
+        same (channel withSpeed) seeds
+        // "100% increased Damage for each different Spell you've Cast in the last eight seconds":
+        // two spells of 100 a hit and 1 s a cast, one after the other. The first cast counts
+        // itself (200), from the second on both are counted (300): 200 + 4 x 300 in 5 s
+        let spell name = { Skill.make name [ Spell ] with BaseDamage = Map.ofList [ Fire, Range.fixedAt 100.0 ]; BaseCrit = 0.0 }
+        let counting =
+            { Actor.make "Player" [ Mod.inc (Damage AllDamage) 100.0 |> Mod.whenever (PerStack("Different:Spell:8", 1.0)) ] [ spell "One"; spell "Two"; { spell "Never" with Tags = Set.ofList [ Spell; Triggered ] } ] with
+                Rotation = [ { Use = "Two"; When = fun v -> v.LastUsed = "One" }; Actor.always "One" ] }
+            |> Behaviours.differentUsed
+        equal 2 (counting.Mods.Length)
+        equal 2 (counting.Rules.Length)
+        let f = Fight.single foe counting 5.2
+        near (200.0 + 4.0 * 300.0) ((Sim.run f 1u).DamageBy |> Map.toList |> List.sumBy snd)
+        same f seeds
+        // what the ids are: the rest of the id, once for each
+        equal (box [ PerStack("Different:Warcry:4", 1.0) ]) (box (mods "damage_+%_per_different_warcry_used_recently" 5.0).Head.Conds)
+        equal (box (GainAs(Physical, Fire), 4.0)) (box (let m = (mods "non_skill_base_all_damage_%_to_gain_as_fire_per_different_grenade_type_fired_in_past_8_seconds" 4.0).Head in m.Stat, m.Value))
+        equal (box [ PerStack("Different:Ammo:10", 1.0); SkillIs Crossbow ]) (box (mods "crossbow_damage_+%_per_ammo_type_fired_in_past_10_seconds" 5.0).Head.Conds))

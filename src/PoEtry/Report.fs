@@ -508,7 +508,7 @@ module Report =
         let supports name = Map.tryFind name db.GemVariants |> Option.defaultValue [] |> List.exists (fun g -> g.Support)
         let skills name = Map.tryFind name db.GemVariants |> Option.defaultValue [] |> List.exists (fun g -> not g.Support)
         let n (x: string) = match System.Int32.TryParse(x.Trim()) with | true, v -> v | _ -> 0
-        let gem name level quality support = { Name = name; Level = max 1 level; Quality = quality; Enabled = true; IsSupport = support; StatSet = 1; Minion = None; Count = None }
+        let gem name level quality support = { Name = name; Level = max 1 level; Quality = quality; Enabled = true; IsSupport = support; StatSet = 1; Minion = None; Count = None; Corrupted = false }
         let inGroup (b: PobBuild) at f = { b with Groups = b.Groups |> List.mapi (fun i g -> if i + 1 = at then { g with Gems = f g.Gems } else g) }
         text.Split(';') |> Array.fold (fun (b: PobBuild) (cmd: string) ->
             match cmd.Split('|') |> List.ofArray with
@@ -519,7 +519,7 @@ module Report =
             | [ "del"; g; k ] -> inGroup b (n g) (fun gems -> gems |> List.indexed |> List.filter (fun (i, _) -> i <> n k) |> List.map snd)
             | [ "set"; g; k; level; quality ] -> inGroup b (n g) (List.mapi (fun i x -> if i = n k then { x with Level = max 1 (n level); Quality = n quality } else x))
             | [ "count"; g; k; count ] -> inGroup b (n g) (List.mapi (fun i x -> if i = n k then { x with Count = Some (max 1 (n count)) } else x))
-            | [ "swap"; g; k; name ] -> inGroup b (n g) (List.mapi (fun i x -> if i = n k then { x with Name = name; Minion = None; Count = None } else x))
+            | [ "swap"; g; k; name ] -> inGroup b (n g) (List.mapi (fun i x -> if i = n k then { x with Name = name; Minion = None; Count = None; Corrupted = false } else x))
             | [ "new"; name; level; quality ] -> { b with Groups = b.Groups @ [ { Label = ""; Slot = ""; Enabled = true; Gems = [ gem name (n level) (n quality) false ] } ] }
             | _ -> b) b
 

@@ -5003,7 +5003,10 @@ module Flat =
         let ownCost =
             if skill.CostPerSecond <= 0.0 then ownCost
             else
-                let seconds = if System.Double.IsNaN seconds then max Constants.serverTick (useTime s sid) else seconds
+                // ("Modifiers to Cast / Attack Speed also affect this Skill's cost", see `Sim`)
+                let seconds =
+                    if skill.Mods |> List.exists (fun m -> m.Stat = Named "CostOverTimeWithSpeed") then skill.BaseTime
+                    elif System.Double.IsNaN seconds then max Constants.serverTick (useTime s sid) else seconds
                 (if s.A.LastUsed = sid then 0.0 else ownCost) + skill.CostPerSecond * seconds
         (ownCost + extraCost) * costMult / efficiency
 

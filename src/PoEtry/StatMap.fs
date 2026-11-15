@@ -1492,6 +1492,12 @@ module StatMap =
         | "attack_speed_+%_if_have_blocked_recently" -> one (Mod.inc Speed v |> Mod.whenever (SkillIs Attack) |> Mod.whenever (WhileBuff "BlockedRecently"))
         // "Curses you inflict have infinite Duration": a thousand times as long
         | "curses_never_expire" -> one (Mod.more (Named "CurseDuration") 99900.0)
+        // "Modifiers to Cast Speed / Attack Speed also affect this Skill's cost": the cost by the
+        // second of a channel (the engines: what a use costs)
+        | "cast_speed_modifiers_apply_to_over_time_cost" | "attack_speed_modifiers_apply_to_over_time_cost" -> one (Mod.flag (Named "CostOverTimeWithSpeed"))
+        // "+N to Level of all Corrupted Skill Gems / Corrupted Spell Skill Gems" (Setup.corruptedLevels)
+        | "corrupted_skill_gem_level_+" -> one (Mod.base' (Named "CorruptedGemLevel") v)
+        | "corrupted_spell_skill_gem_level_+" -> one (Mod.base' (Named "CorruptedSpellGemLevel") v)
         | "mark_skill_gem_level_+" -> one (Mod.base' (Named "GemLevel") v |> Mod.whenever (SkillIs(Tag "Type:Mark")))
         | "despair_gem_level_+" -> one (Mod.base' (Named "GemLevel") v |> Mod.whenever (SkillNamed "Despair"))
         // "Increases and Reductions to Spell damage also apply to Attacks" (Behaviours.minionIncreasesOnYou)
@@ -2411,10 +2417,29 @@ module StatMap =
                                         | st -> yield { m with Stat = ForMinions st; Conds = OfOwner(WhileBuff buff) :: m.Conds } |> Mod.from ("Rare modifier " + id)
                             | _ -> () ])
 
+    /// "... for each different Warcry you've used Recently / Spell you've Cast in the last eight
+    /// seconds / Grenade fired in the past 8 seconds / type of Ammunition fired in the past 10
+    /// seconds": what the rest of the id means, once for each of them (Behaviours.differentUsed
+    /// makes the count: one state per skill of the kind).
+    and private perDifferent (id: string) (value: float) : Meaning option =
+        [ "_per_different_warcry_used_recently", "Different:Warcry:4"
+          "_per_num_unique_spells_cast_in_last_8_seconds", "Different:Spell:8"
+          "_per_different_grenade_type_fired_in_past_8_seconds", "Different:Grenade:8"
+          "_per_ammo_type_fired_in_past_10_seconds", "Different:Ammo:10" ]
+        |> List.tryPick (fun (suffix, state) ->
+            if id.EndsWith suffix then
+                match direct (id.Substring(0, id.Length - suffix.Length)) value with
+                | Some (Mods ms) when not ms.IsEmpty -> Some(Mods(ms |> List.map (Mod.whenever (PerStack(state, 1.0)))))
+                | _ -> None
+            else None)
+
     /// What a stat means. Local stats first, then the explicit table, then patterns,
     /// then gem-name prefixes, then the non-offensive bucket. Anything else is Unmapped.
     and meaning (id: string) (value: float) : Meaning =
         if id = "gain_rare_monster_mods_on_kill_ms" then rareModsOnKill () else
+        match perDifferent id value with
+        | Some m -> m
+        | None ->
         match local id value with
         | Some m -> m
         | None ->

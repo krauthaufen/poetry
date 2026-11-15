@@ -231,7 +231,7 @@ module Api =
                       Enabled = true
                       IsSupport = false
                       StatSet = 1
-                      Minion = None; Count = None }
+                      Minion = None; Count = None; Corrupted = (Json.field "corrupted" g = Some(JBool true)) }
                 let supports =
                     // socketed gems: supports, and active spells socketed into meta gems
                     Json.list (Json.field "socketedItems" g)
@@ -243,7 +243,7 @@ module Api =
                           Enabled = true
                           IsSupport = support
                           StatSet = 1
-                          Minion = None; Count = None })
+                          Minion = None; Count = None; Corrupted = (Json.field "corrupted" s = Some(JBool true)) })
                 // a skill an item grants has no place in the skill panel: no inventory id
                 let granted = match Json.field "inventoryId" g with | Some (JStr _) -> false | _ -> true
                 { Label = active.Name
