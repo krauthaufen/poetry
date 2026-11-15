@@ -77,7 +77,10 @@ type EnemyDef =
       Moving: bool
       Attack: EnemyAttack option
       /// Movement speed towards the player, game units per second.
-      Speed: float }
+      Speed: float
+      /// The rare monster modifiers it carries (ids of `RareModsData.mods`); only what a
+      /// player gains by killing it reads them (`Reaction.GainRareMods`).
+      Affixes: string list }
 
 /// Which enemy the player aims at.
 type Targeting =
@@ -189,7 +192,8 @@ module EnemyDef =
           Size = p.Size
           Moving = false
           Attack = Some(defaultAttack level rarity)
-          Speed = 35.0 }
+          Speed = 35.0
+          Affixes = [] }
 
     /// A single target with explicit life, for tests and dummy fights.
     let atLevel level life =
@@ -197,6 +201,37 @@ module EnemyDef =
             Life = life
             Mods = [ Mod.base' Armour (Constants.monsterArmour level) ]
             Attack = None }
+
+/// The modifiers of rare monsters (game data, RareModsData.fs).
+module RareMods =
+    /// "Rare Monsters have up to 4 [modifiers] by default" (poe2db, Monster Modifiers). How
+    /// many of the four a rare has is not known: a GUESS of one to four, all as likely.
+    let mostPerRare = 4
+
+    /// The buff a player has while it has a modifier of a killed rare (Headhunter).
+    let buffName (id: string) = "Rare modifier: " + id
+
+    /// The mods a monster of this level can roll: (id, family, weight).
+    let pool level =
+        RareModsData.mods |> List.filter (fun (_, _, lowest, _, w, _) -> lowest <= level && w > 0.0) |> List.map (fun (id, _, _, fam, w, _) -> id, fam, w)
+
+    /// A rare's modifiers: one to `mostPerRare`, each drawn by its spawn weight from those
+    /// of a family it has none of yet (the game's Families: one aura, one ground effect...).
+    let roll (rng: Rng) level =
+        let n = 1 + min (mostPerRare - 1) (int (rng.Float() * float mostPerRare))
+        let rec draw k (left: (string * int * float) list) acc =
+            if k = 0 || left.IsEmpty then List.rev acc
+            else
+                let total = left |> List.sumBy (fun (_, _, w) -> w)
+                let x = rng.Float() * total
+                let rec pick (rest: (string * int * float) list) sum =
+                    match rest with
+                    | [ last ] -> last
+                    | (id, f, w) :: tail -> if x < sum + w then (id, f, w) else pick tail (sum + w)
+                    | [] -> failwith "empty"
+                let id, fam, _ = pick left 0.0
+                draw (k - 1) (left |> List.filter (fun (_, f, _) -> f <> fam)) (id :: acc)
+        draw n (pool level) []
 
 /// Fight setups.
 module Encounter =
@@ -209,6 +244,8 @@ module Encounter =
     /// player in a ring at `distance` instead.
     let pack level (profile: Rarity -> RarityProfile) (counts: (Rarity * int) list) distance radius around (seed: uint32) =
         let rng = Rng(seed)
+        // (the rares' modifiers from a generator of their own: the places stay what they were)
+        let modRng = Rng(seed ^^^ 0x5A17C0DEu)
         let members = counts |> List.collect (fun (r, n) -> List.replicate n r)
         members
         |> List.mapi (fun i r ->
@@ -220,7 +257,8 @@ module Encounter =
                     let a = rng.Float() * 2.0 * System.Math.PI
                     let d = radius * sqrt (rng.Float())
                     Vec.add (Vec.make distance 0.0) (Vec.scale d (Vec.ofAngle a))
-            EnemyDef.make profile level r (sprintf "%s %d" (Rarity.name r) (i + 1)) pos)
+            let e = EnemyDef.make profile level r (sprintf "%s %d" (Rarity.name r) (i + 1)) pos
+            if r = Rare then { e with Affixes = RareMods.roll modRng level } else e)
 
 /// Who a skill use hits.
 module Geometry =

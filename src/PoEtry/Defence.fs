@@ -152,7 +152,9 @@ module Defence =
         let lifeFull = pool MaxLife (baseLife + lifePerLevel * level + lifePerStr * str + bodyES * Mods.sumBase c [ Named "LifeFromBodyES" ] db / 100.0)
         // "X% of maximum Life converted to / gained as Energy Shield"
         let converted = lifeFull * min 100.0 (Mods.sumBase c [ Named "LifeConvertedToES" ] db) / 100.0
-        let gainedAsES = lifeFull * Mods.sumBase c [ Named "LifeGainedAsES" ] db / 100.0
+        // (and of the life before increases: "base maximum Life", the rare monster modifiers' stat)
+        let baseLife' = baseLife + lifePerLevel * level + lifePerStr * str + bodyES * Mods.sumBase c [ Named "LifeFromBodyES" ] db / 100.0 + Mods.sumBase c [ MaxLife ] db
+        let gainedAsES = lifeFull * Mods.sumBase c [ Named "LifeGainedAsES" ] db / 100.0 + baseLife' * Mods.sumBase c [ Named "BaseLifeGainedAsES" ] db / 100.0
         let life = if ci then 1.0 else lifeFull - converted
         let itemPool = itemPoolIn c
         let esFull = itemPool MaxEnergyShield esFromBodyEvasion + converted + gainedAsES

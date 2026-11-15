@@ -116,6 +116,10 @@ type Reaction =
     /// radius of it (with what it had left of its time), and with this chance (%) each of them
     /// is Hindered for that time too (Herald of Plague).
     | SpreadPoison of radius: float * hinderChance: float
+    /// The killed enemy's modifiers (its `Affixes`) as buffs on the actor for `duration`, one
+    /// buff for each (`RareMods.buffName`), a new one of a name starting its time again ("When
+    /// you kill a Rare monster, you gain its Modifiers for 60 seconds").
+    | GainRareMods of duration: float
 
 /// "Enemies you sufficiently Overkill ... cause an explosion that Ignites nearby enemies
 /// based on the Overkill damage dealt" (Herald of Ash). `Skill` is the explosion among the
@@ -1729,6 +1733,17 @@ module Sim =
                                      let w = poisons |> List.fold (fun w d -> inflict o.Def.Name actor.Name (Dot(Poison, d.Type, d.Dps, d.Expires - w.Time, d.MaxStacks)) w) w
                                      let w = { w with Counts = bump "spread:Poison" w.Counts }
                                      if rng.Chance hinder then addDebuff o.Def.Name "Hindered" longest 1 [] w else w) w
+                         | None -> w
+                     | GainRareMods duration ->
+                         match target with
+                         | Some t ->
+                             w.Enemies.[t].Def.Affixes
+                             |> List.fold (fun w id ->
+                                 let name = RareMods.buffName id
+                                 updateActor actor.Name (fun st ->
+                                     { st with Buffs = Map.add name (stackEffect w.Time (Map.tryFind name st.Buffs) name duration 1 []) st.Buffs }) w
+                                 |> schedule (w.Time + duration) Expire
+                                 |> fun w -> { w with Counts = bump "rare modifiers gained" w.Counts }) w
                          | None -> w
                      | TriggerSkill name -> trigger env rng actor name w
                      | GainEnergy (meta, amount) -> gainEnergy env rng actor meta amount w

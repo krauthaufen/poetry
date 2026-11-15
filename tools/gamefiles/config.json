@@ -28,7 +28,17 @@
         "Stat3Value",
         "Stat4Value",
         "Stat5Value",
-        "Stat6Value"
+        "Stat6Value",
+        "Name",
+        "Families",
+        "SpawnWeight_Tags",
+        "SpawnWeight_Values"
+      ]
+    },
+    {
+      "name": "Tags",
+      "columns": [
+        "Id"
       ]
     },
     {

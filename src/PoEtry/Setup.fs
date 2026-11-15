@@ -733,6 +733,7 @@ module Setup =
                 // ("Buffs on you expire X% faster": the buffs these give the character)
                 Behaviours.buffsExpire sheet (grantRules @ (used |> List.collect (fun (_, p) -> p.Rules)) @ heraldRules @ Behaviours.keywordRules sheet pressedSkills)
                 @ Behaviours.selfIgnite sheet
+                @ Behaviours.rareModsOnKill sheet
                 @ Behaviours.totemRecently sheet pressedSkills
                 @ (match windDancer with Some (_, r, _, _) -> r | None -> [])
                 @ Behaviours.shockedGround sheet

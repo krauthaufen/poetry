@@ -1376,3 +1376,63 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         if o.DamageTaken <= 0.0 then failwith "never hit"
         same { Fight.single monster player 8.0 with MaxTime = 8.0 } seeds
         equal (box [ Mod.base' (Named "RecoupPreventedPhysicalAsLife") 7.0 ]) (box (mods "physical_damage_prevented_recouped_as_life_%" 7.0)))
+
+    test "Headhunter: rares carry one to four modifiers of different families; a kill of one gives the player theirs for 60 s" (fun () ->
+        // what a rare carries: one to four, no two of a family, of those a level 83 monster rolls
+        let pool = RareMods.pool 83 |> List.map (fun (id, f, _) -> id, f) |> Map.ofList
+        let rolls = [ for i in 1u .. 2000u -> RareMods.roll (Rng i) 83 ]
+        for r in rolls do
+            if r.Length < 1 || r.Length > 4 then failwithf "%d modifiers" r.Length
+            if (r |> List.map (fun id -> pool.[id]) |> List.distinct).Length <> r.Length then failwithf "two of a family: %A" r
+        // all four counts as likely: 2.5 on average
+        let mean = rolls |> List.averageBy (fun r -> float r.Length)
+        if abs (mean - 2.5) > 0.1 then failwithf "%.2f modifiers on average" mean
+        // packs give their rares modifiers, and nothing else any
+        let pack = Encounter.pack 83 Rarity.defaults [ Normal, 3; Magic, 2; Rare, 2 ] 35.0 25.0 false 1u
+        for e in pack do
+            if (e.Rarity = Rare) = e.Affixes.IsEmpty then failwithf "%s carries %A" e.Name e.Affixes
+        // the stat: its time, and each modifier's player twin while its buff is up
+        let hh = mods "gain_rare_monster_mods_on_kill_ms" 60000.0
+        let buff = RareMods.buffName
+        let has (m: Mod) = if not (hh |> List.exists (fun x -> x.Stat = m.Stat && x.Kind = m.Kind && x.Value = m.Value && x.Conds = m.Conds)) then failwithf "missing %A" m
+        has (Mod.flag (Named "RareModsOnKill"))
+        has (Mod.inc Speed 30.0 |> Mod.whenever (WhileBuff(buff "MonsterIncreasedSpeed1")))
+        has (Mod.inc CritChance 300.0 |> Mod.whenever (WhileBuff(buff "MonsterCriticalStrikeChance1")))
+        has (Mod.base' (Resist Fire) 50.0 |> Mod.whenever (WhileBuff(buff "MonsterFireResistance1")))
+        has (Mod.base' (MaxResist Fire) 10.0 |> Mod.whenever (WhileBuff(buff "MonsterFireResistance1")))
+        // an aura is for the minions too, while the player has it
+        has (Mod.inc (Damage(OfType Physical)) 40.0 |> Mod.whenever (WhileBuff(buff "MonsterPhysicalDamageAura1")))
+        has { Mod.inc (ForMinions(Damage(OfType Physical))) 40.0 with Conds = [ OfOwner(WhileBuff(buff "MonsterPhysicalDamageAura1")) ] }
+        // Temporal Bubble slows the monsters around its bearer: nothing of it is the player's own
+        if hh |> List.exists (fun m -> m.Conds = [ WhileBuff(buff "MonsterTemporalAura1") ]) then failwith "the Temporal Bubble on the player"
+        // the item line makes the rule: a kill of a rare (or unique, which carries none) by the character
+        let line = "When you kill a Rare monster, you gain its Modifiers for 60 seconds"
+        let c = load { blank with ExtraLines = [ line ] } Options.defaults
+        let plain = load blank Options.defaults
+        let p = Setup.player c Options.defaults [] None
+        match p.Rules |> List.filter (fun r -> match r.Reaction with GainRareMods _ -> true | _ -> false) with
+        | [ { Hook = OnKillOf "RareOrUnique"; Filter = AnySkill; Chance = 100.0; Reaction = GainRareMods d } ] -> near 60.0 d
+        | r -> failwithf "%A" r
+        // defences while the buff is up: +50% fire resistance; 25% of the life before increases as energy shield
+        let at buffs = Defence.computeWith (Map.ofList buffs) c.Bases c.Sheet
+        near (Map.find Fire plain.Vitals.Resist + 50.0) (Map.find Fire (at [ buff "MonsterFireResistance1", 1 ]).Resist)
+        near (plain.Vitals.EnergyShield + 0.25 * plain.Vitals.Life) (at [ buff "MonsterExtraEnergyShield1", 1 ]).EnergyShield
+        near plain.Vitals.EnergyShield (at []).EnergyShield
+        // in a fight: two swings of 100 kill the rare (150 life); every swing after hits the tough
+        // one with 40% increased physical damage, 140, for 60 s
+        let swing = { Skill.make "Swing" [ Attack; Melee ] with BaseDamage = Map.ofList [ Physical, Range.fixedAt 100.0 ]; BaseCrit = 0.0 }
+        let rule = { Hook = OnKillOf "RareOrUnique"; Filter = AnySkill; Chance = 100.0; Reaction = GainRareMods 60.0 }
+        let player = { Actor.make "Player" (Mod.base' (Named "Accuracy") 1e9 :: (hh |> List.filter (fun m -> m.Stat <> Named "RareModsOnKill"))) [ swing ] with Rotation = [ Actor.always "Swing" ]; Rules = [ rule ] }
+        let target name x life = { EnemyDef.atLevel 83 life with Name = name; Position = Vec.make x 0.0; Size = 4.0; Mods = []; Attack = None }
+        let fight affixes =
+            { Fight.single (target "tough" 12.0 1e9) player 8.5 with
+                Enemies = [ { target "rare" 10.0 150.0 with Rarity = Rare; Affixes = affixes }; target "tough" 12.0 1e9 ]
+                Targeting = Nearest }
+        let o = Sim.run (fight [ "MonsterPhysicalDamageAura1"; "MonsterHinderAura1" ]) 1u
+        let hits = count o "hits:Swing"
+        equal 2 (count o "rare modifiers gained")
+        near (150.0 + float (hits - 2) * 140.0) o.DamageBy.["Swing (hit)"]
+        // a rare with nothing of the kind: 100 a swing
+        let bare = Sim.run (fight [ "MonsterHinderAura1" ]) 1u
+        near (150.0 + float (count bare "hits:Swing" - 2) * 100.0) bare.DamageBy.["Swing (hit)"]
+        same (fight [ "MonsterPhysicalDamageAura1"; "MonsterIncreasedSpeed1"; "MonsterFireResistance1" ]) seeds)

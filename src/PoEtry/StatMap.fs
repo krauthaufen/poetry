@@ -807,6 +807,9 @@ module StatMap =
         | "regenerate_energy_shield_instead_of_life" -> one (Mod.flag (Named "RegenESInsteadOfLife"))
         | "maximum_life_%_to_convert_to_maximum_energy_shield" -> one (Mod.base' (Named "LifeConvertedToES") v)
         | "maximum_life_%_to_gain_as_maximum_energy_shield" -> one (Mod.base' (Named "LifeGainedAsES") v)
+        // "X% of base maximum Life to gain as total Energy Shield" (the monsters' and rare monster
+        // modifiers' stat, no description of its own): of the life before it is increased (Defence)
+        | "base_maximum_life_%_to_gain_as_total_energy_shield" -> one (Mod.base' (Named "BaseLifeGainedAsES") v)
         | "base_all_damage_bypass_energy_shield_%" -> one (Mod.base' (Named "BypassES") v)
         // ---- recovery rates ----
         | "life_recovery_rate_+%" -> one (Mod.inc (Named "LifeRecoveryRate") v)
@@ -1125,6 +1128,9 @@ module StatMap =
         | "hit_damage_pin_multiplier_+%" -> one (Mod.inc (Buildup Pin) v)
         | "base_chance_to_shock_%" -> one (Mod.base' (AilmentChance Shock) v)
         | "base_chance_to_ignite_%" -> one (Mod.base' (AilmentChance Ignite) v)
+        // "Hits always Ignite", "Hits always Shock": a chance no less can bring under 100%
+        | "always_ignite" -> one (Mod.base' (AilmentChance Ignite) 1e6)
+        | "always_shock" -> one (Mod.base' (AilmentChance Shock) 1e6)
         | "attacks_inflict_bleeding_on_hit" -> one (Mod.base' (AilmentChance Bleed) 100.0 |> Mod.whenever (SkillIs Attack))
         | "cannot_cause_bleeding" -> one (Mod.more (AilmentChance Bleed) -100.0)
         | "reduce_enemy_elemental_resistance_%" ->
@@ -1346,9 +1352,6 @@ module StatMap =
         // Herald of Plague: "killing a Poisoned enemy spreads its Poison to other nearby enemies,
         // and has a chance to also Hinder them"
         | "herald_of_agony_poison_spread_on_kill_radius_base_magnitude_to_grant" | "hinder_chance_%_on_spreading_poioson" -> Some Structural
-        // "When you kill a Rare monster, you gain its Modifiers for 60 seconds": the monsters of a
-        // fight have no modifiers of their own (only what their rarity makes of them)
-        | "gain_rare_monster_mods_on_kill_ms" -> Some(Unsimulated "rare monsters' modifiers")
         | "critical_strike_chance_+%_if_triggered_skill_recently" -> one (Mod.inc CritChance v |> Mod.whenever (WhileBuff "TriggeredRecently"))
         | "critical_strike_multiplier_+_if_have_not_dealt_critical_strike_recently" -> one (Mod.inc CritBonus v |> Mod.whenever (Not(WhileBuff "CritRecently")))
         | "ailment_chance_+%_vs_exposed" ->
@@ -1735,7 +1738,10 @@ module StatMap =
           // damaging ailments only Ignite is ever on it: "increased Attack Damage if you have been
           // Heavy Stunned Recently", "Cannot be Heavy Stunned while Sprinting", "Damaging Ailments
           // Cannot Be inflicted on you while you already have one"
-          "attack_damage_+%_if_been_heavy_stunned_recently"; "cannot_be_heavy_stunned_while_sprinting"; "cannot_have_more_than_1_damaging_ailment" ]
+          "attack_damage_+%_if_been_heavy_stunned_recently"; "cannot_be_heavy_stunned_while_sprinting"; "cannot_have_more_than_1_damaging_ailment"
+          // "Hexproof": monsters here lay no curses on the player; "X% less Life / Mana / Energy
+          // Shield Leeched from you": monsters do not leech
+          "hexproof"; "life_leeched_from_-permyriad"; "mana_leeched_from_-permyriad"; "energy_shield_leeched_from_-permyriad" ]
         |> List.contains id
 
     /// What decides how a character can be built, and is all there in the build as it is read:
@@ -1836,9 +1842,42 @@ module StatMap =
         || has "collide" || has "targets" || id.StartsWith "can_perform_skill" || id.StartsWith "base_is_"
         || id.StartsWith "is_" || id.EndsWith "_step_distance"
 
+    /// Rare monster modifiers that act on the enemies around their bearer, not on it: a player
+    /// that has them would slow and drain the monsters (Temporal Bubble's lower action speed and
+    /// slower cooldowns, Drought's flask charges), which is not built (RULES.md, "Rare monster
+    /// modifiers").
+    let private actsOnEnemies = set [ "MonsterTemporalAura1"; "MonsterFlaskRemovalAura1" ]
+
+    /// Rare monster modifiers that are auras for their bearer and its allies ("Allies Deal
+    /// Extra Physical Damage", BuffDefinitions): the player's minions have them too.
+    let private alliesToo = set [ "MonsterPhysicalDamageAura1"; "MonsterIncreasedSpeedAura1"; "MonsterEnergyShieldAura1"; "MonsterResistanceAura1" ]
+
+    /// "When you kill a Rare monster, you gain its Modifiers for 60 seconds" (Headhunter): that
+    /// the character has it (the rule is made in Behaviours.rareModsOnKill), and for every modifier a
+    /// rare can have, what its player twin's stats mean ("PlayerMonster..." in Mods.dat,
+    /// RareModsData) while the player has its buff. Of those stats only what is understood as
+    /// modifiers counts; the rest is listed in RULES.md.
+    let rec private rareModsOnKill () =
+        Mods(
+            Mod.flag (Named "RareModsOnKill")
+            :: [ for (id, _, _, _, _, stats) in RareModsData.mods do
+                    if not (actsOnEnemies.Contains id) then
+                        let buff = RareMods.buffName id
+                        for (stat, v) in stats do
+                            match meaning stat v with
+                            | Mods ms ->
+                                for m in ms do
+                                    yield m |> Mod.whenever (WhileBuff buff) |> Mod.from ("Rare modifier " + id)
+                                    if alliesToo.Contains id then
+                                        match m.Stat with
+                                        | ForMinions _ -> ()
+                                        | st -> yield { m with Stat = ForMinions st; Conds = OfOwner(WhileBuff buff) :: m.Conds } |> Mod.from ("Rare modifier " + id)
+                            | _ -> () ])
+
     /// What a stat means. Local stats first, then the explicit table, then patterns,
     /// then gem-name prefixes, then the non-offensive bucket. Anything else is Unmapped.
-    let meaning (id: string) (value: float) : Meaning =
+    and meaning (id: string) (value: float) : Meaning =
+        if id = "gain_rare_monster_mods_on_kill_ms" then rareModsOnKill () else
         match local id value with
         | Some m -> m
         | None ->

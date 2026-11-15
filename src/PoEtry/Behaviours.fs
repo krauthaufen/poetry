@@ -1144,6 +1144,15 @@ module Behaviours =
         let percent = Mods.sumBase Ctx.empty [ Named "IgniteSelfOnCrit" ] (ModDb.ofList sheet.Mods)
         if percent > 0.0 then [ { Hook = OnCrit; Filter = AnySkill; Chance = 100.0; Reaction = IgniteSelf percent } ] else []
 
+    /// "When you kill a Rare monster, you gain its Modifiers for 60 seconds" (Headhunter): a
+    /// kill of the character's own (not its minions') of an enemy that carries modifiers gives
+    /// it one buff for each, which the sheet's mods for that modifier hold on to (StatMap).
+    /// The time is the description's: its text has no number of the stat's in it.
+    let rareModsOnKill (sheet: CharacterSheet) : Rule list =
+        if Mods.flag Ctx.empty (Named "RareModsOnKill") (ModDb.ofList sheet.Mods) then
+            [ { Hook = OnKillOf "RareOrUnique"; Filter = AnySkill; Chance = 100.0; Reaction = GainRareMods 60.0 } ]
+        else []
+
     /// "Buffs on you expire X% faster": time passes that much faster for the buffs the
     /// character's rules give it (Onslaught, Arcane Surge, a skill's buff, Ice Bite): they last
     /// 1 / (1 + X / 100) of their time. Not charges (they are no buffs: the stat is

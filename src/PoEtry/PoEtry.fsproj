@@ -18,6 +18,7 @@
     <Compile Include="Hit.fs" />
     <Compile Include="Ailments.fs" />
     <Compile Include="RarityData.fs" />
+    <Compile Include="RareModsData.fs" />
     <Compile Include="Encounter.fs" />
     <Compile Include="Vitals.fs" />
     <Compile Include="Sim.fs" />

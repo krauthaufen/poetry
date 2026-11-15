@@ -18,7 +18,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
    whose description or behaviour changed.
 5. Go through the lists below; the wiki's version history of a skill says what changed.
 
-## Rules (131)
+## Rules (132)
 
 ### Hit damage
 
@@ -57,6 +57,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 
 | Rule | Source, and what is guessed | Confidence |
 |---|---|---|
+| Rare monster modifiers | Mods.dat (Monster mods of domain 3 with SpawnWeight, Families), generated into RareModsData.fs by `tools/gamefiles/gen_rare_mods.py`; "Rare Monsters have up to 4 by default" (poe2db Monster Modifiers); how many of the four: guess | data; count: guess; on the monster: missing |
 | Projectiles | — | guess (geometry), data (counts) |
 | Default spread | — | guess |
 | Fork | poe2db keyword text (Fork, Chain); the angle: the first game's wiki ("two new projectile travel ... at a 120º angle", via poedb); the remaining range and straight flight are guesses | data / guess |

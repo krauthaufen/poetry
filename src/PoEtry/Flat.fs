@@ -720,6 +720,9 @@ module Flat =
         | RSummonPerCorpse of members: int[] * duration: float * deadMinions: bool * summoned: int
         | RSummonPerWard of members: int[] * wardEach: float * duration: float * summoned: int
         | RGrantOneOf of buffs: int[] * duration: float
+        /// By the enemy of the fight's own a killed one is or stands in for, the buffs of its
+        /// modifiers (`Reaction.GainRareMods`).
+        | RGainRareMods of buffs: int[][] * duration: float * count: int
         /// A pustule on the enemy hit, if it has none (see `Reaction.AttachPustule`).
         | RAttachPustule of part: int * seconds: float * poisonPerPercent: float * capPercent: float * count: int
         | RNone
@@ -1367,6 +1370,7 @@ module Flat =
         | RemoveDebuff _ -> "RemoveDebuff"
         | InflictStatus _ -> "InflictStatus"
         | SpreadPoison _ -> "SpreadPoison"
+        | GainRareMods _ -> "GainRareMods"
         | GainResource _ -> "GainResource"
         | DropRemnant _ -> "DropRemnant"
         | ChargeBuff _ -> "ChargeBuff"
@@ -1635,6 +1639,8 @@ module Flat =
                 | SummonPerCorpse (poolName, duration, deadMinions) -> RSummonPerCorpse(pool poolName, duration, deadMinions, summoned poolName)
                 | SummonPerWard (poolName, wardEach, duration) -> RSummonPerWard(pool poolName, wardEach, duration, summoned poolName)
                 | GrantOneOf (names, duration) -> RGrantOneOf(names |> List.map buff |> Array.ofList, duration)
+                | GainRareMods duration ->
+                    RGainRareMods(enemies |> Array.map (fun e -> e.Affixes |> List.map (fun id -> buff (RareMods.buffName id)) |> Array.ofList), duration, counts.Id "rare modifiers gained")
                 | AttachPustule (part, seconds, per, cap) -> RAttachPustule((match skillIds.TryGetValue part with | true, i -> i | _ -> -1), seconds, per, cap, counts.Id "pustule")
                 | other ->
                     reject ("the reaction " + reactionName other)
@@ -4276,6 +4282,13 @@ module Flat =
                 setBuff s pick 1 (s.Time + duration) []
                 expireAt s (s.Time + duration)
         | RIfBuff (b, next) -> if held s b then perform s rng sid target next
+        | RGainRareMods (buffs, duration, count) ->
+            // (the enemy is dead: what it carried is read all the same)
+            if target >= 0 then
+                let own = at buffs (at s.Foes target).Root
+                for i in 0 .. own.Length - 1 do
+                    grantBuff s (at own i) duration 1 []
+                    bump s count
         | RIfEnemyHas (st, next) ->
             if onTarget () && (let e = at s.Foes target in refreshStatus s e; at e.SHas st) then perform s rng sid target next
         | RGrantBuff (b, duration, maxStacks, mods) -> grantBuff s b duration maxStacks mods

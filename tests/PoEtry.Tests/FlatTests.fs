@@ -748,6 +748,22 @@ let randomFight (case: uint32) : Fight * string =
             { fight with
                 Replace = true
                 Enemies = (fight.Enemies |> List.map (fun e -> if chance 0.6 then { e with Life = between 40.0 3000.0 } else e)) @ extra }
+    // Headhunter: rares carry modifiers, and killing one gives the player what they mean
+    let fight =
+        if not (chance 0.15) then fight
+        else
+            note "rare modifiers"
+            let mods = match StatMap.meaning "gain_rare_monster_mods_on_kill_ms" 60000.0 with Mods ms -> ms | _ -> []
+            let affixRng = Rng(case * 7919u + 13u)
+            { fight with
+                Player =
+                    { fight.Player with
+                        Mods = fight.Player.Mods @ (mods |> List.filter (fun m -> m.Stat <> Named "RareModsOnKill"))
+                        Rules = fight.Player.Rules @ [ { Hook = OnKillOf "RareOrUnique"; Filter = AnySkill; Chance = 100.0; Reaction = GainRareMods(between 0.5 6.0) } ] }
+                Enemies =
+                    fight.Enemies |> List.map (fun e ->
+                        let e = if e.Rarity <> Unique && chance 0.6 then { e with Rarity = Rare; Life = min e.Life (between 40.0 3000.0) } else e
+                        if e.Rarity = Rare then { e with Affixes = RareMods.roll affixRng e.Level } else e) }
     let described =
         sprintf "case %d: %d skills (%s), %d rules (%s), %d mods, %d enemies, vitals %b, %.2f s%s"
             case fight.Player.Skills.Length
