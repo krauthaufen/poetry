@@ -1569,3 +1569,101 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         equal 15 (count o "hits:Shot")
         near (11.0 * 150.0 + 4.0 * 100.0) o.DamageBy.["Shot (hit)"]
         same fight seeds)
+
+    test "stats known by what they are: damage against ailing enemies, speed with elemental skills, faster Bleeding, what the player cannot suffer" (fun () ->
+        equal (box [ Mod.inc (Damage AllDamage) 20.0 |> Mod.whenever (EnemyHas "AnyAilment") ]) (box (mods "hit_damage_+%_vs_enemies_affected_by_ailments" 20.0))
+        equal (box [ Mod.inc Speed 3.0 |> Mod.whenever (SkillIs Attack) |> Mod.whenever (PerStack("Dex", 20.0)) ]) (box (mods "attack_speed_+%_per_20_dex" 3.0))
+        equal (box [ Mod.base' (AilmentChance Bleed) 25.0 |> Mod.whenever IsCrit ]) (box (mods "bleed_on_crit_%" 25.0))
+        equal (box [ Mod.base' CritChance 1.5 |> Mod.whenever (SkillIs Spell) |> Mod.whenever (SkillIs(Tag "Fire")) ]) (box (mods "fire_spell_additional_critical_strike_chance_permyriad" 150.0))
+        equal (box [ Mod.inc (AilmentMagnitude(Some Poison)) 30.0 |> Mod.whenever (Not(EnemyHas "Poisoned")) ]) (box (mods "poison_effect_+%_vs_non_poisoned_enemies" 30.0))
+        equal (box [ Mod.base' (Named "Avoid:Poison") 100.0 ]) (box (mods "immune_to_poison" 1.0))
+        equal (box [ Mod.more (Named "SelfEffect:Ignite") -100.0 ]) (box (mods "unaffected_by_damaging_ailments" 1.0))
+        // a skill of two elements is faster once
+        let speed tags = Mods.inc { Ctx.empty with SkillTags = Set.ofList tags } [ Speed ] (ModDb.ofList (mods "attack_and_cast_speed_+%_with_elemental_skills" 10.0))
+        near 1.1 (speed [ Tag "Fire"; Tag "Cold" ])
+        near 1.1 (speed [ Tag "Lightning" ])
+        near 1.0 (speed [ Tag "Chaos" ])
+        // Bleeding that deals its damage 25% faster: 1.25 times the damage a second for 1 / 1.25 of the time
+        let ctx = { Ctx.empty with SkillTags = Set.ofList [ Attack ] }
+        let hit = { Crit = false; Unmitigated = Map.ofList [ Physical, 1000.0 ]; Dealt = Map.ofList [ Physical, 1000.0 ] }
+        let bleeds extra =
+            Ailments.fromHit (Rng 1u) ctx (ModDb.ofList (Mod.base' (AilmentChance Bleed) 100.0 :: extra)) { Level = 83; Mods = ModDb.ofList [] } hit
+            |> List.pick (function Dot (Bleed, _, dps, seconds, _) -> Some(dps, seconds) | _ -> None)
+        let dps, seconds = bleeds []
+        let fastDps, fastSeconds = bleeds (mods "faster_bleed_%" 25.0)
+        near (dps * 1.25) fastDps
+        near (seconds / 1.25) fastSeconds
+        // "Onslaught" all the time: its 20% increased skill speed and the state by its name
+        let c = load { blank with ExtraLines = [ "Onslaught" ] } Options.defaults
+        let p = Setup.player c Options.defaults [] None
+        equal (box [ "Onslaught", 1 ]) (box (p.Resources |> List.filter (fun (k, _) -> k = "Onslaught")))
+        near 1.2 (Mods.inc Ctx.empty [ Speed ] (ModDb.ofList p.Mods)))
+
+    test "Lose X% of maximum Life and Energy Shield when you use a Chaos Skill: those two, not the mana, and not for other skills" (fun () ->
+        equal (box [ Mod.base' (Named "LoseLifeAndESOnUse") 5.0 |> Mod.whenever (SkillIs(Tag "Chaos")) ]) (box (mods "lose_%_of_life_and_energy_shield_when_you_use_a_chaos_skill" 5.0))
+        let bolt tags = { Skill.make "Bolt" (Spell :: tags) with BaseDamage = Map.ofList [ Chaos, { Min = 100.0; Max = 100.0 } ]; BaseCrit = 0.0 }
+        let fight tags =
+            let player = { Actor.make "Player" (mods "lose_%_of_life_and_energy_shield_when_you_use_a_chaos_skill" 5.0) [ bolt tags ] with Vitals = Some { PlayerStats.basic 1000.0 100.0 with LifeRegen = 0.0 } }
+            Fight.single (EnemyDef.atLevel 83 1e12) player 4.5
+        let o = Sim.run (fight [ Tag "Chaos" ]) 1u
+        // five uses begun in 4.5 s
+        equal 5 (count o "pool loss on use")
+        equal 0 (count (Sim.run (fight [ Tag "Fire" ]) 1u) "pool loss on use")
+        same (fight [ Tag "Chaos" ]) seeds
+        same (fight [ Tag "Fire" ]) seeds)
+
+    test "Thorns: a hit that is neither attack nor spell retaliates against melee hits with the character's Thorns damage" (fun () ->
+        let thornsMods = mods "thorns_minimum_base_physical_damage" 100.0 @ mods "thorns_maximum_base_physical_damage" 100.0
+        equal
+            (box [ Mod.base' (AddedMin Physical) 100.0 |> Mod.whenever (SkillIs(Tag "Thorns")); Mod.base' (AddedMax Physical) 100.0 |> Mod.whenever (SkillIs(Tag "Thorns")) ])
+            (box thornsMods)
+        equal (box [ Mod.inc (Damage AllDamage) 40.0 |> Mod.whenever (SkillIs(Tag "Thorns")) ]) (box (mods "thorns_damage_+%" 40.0))
+        let sheet = (load blank Options.defaults).Sheet
+        equal (box None) (box (Behaviours.thorns sheet))
+        let fight melee extra =
+            let sheet = { sheet with Mods = thornsMods @ extra }
+            let skill, rule = (Behaviours.thorns sheet).Value
+            let monster =
+                { EnemyDef.atLevel 83 1e12 with
+                    Mods = []; Position = Vec.make 5.0 0.0
+                    Attack = Some { Interval = 1.0; Damage = Map.ofList [ Physical, 10.0 ]; Accuracy = 1e9; Range = 10.0; CritChance = 0.0; Melee = melee } }
+            let idle = { Skill.make "Wait" [ Spell ] with Hits = []; Cooldown = Some 100.0 }
+            let player = { Actor.make "Player" sheet.Mods [ idle; skill ] with Vitals = Some(PlayerStats.basic 1e6 0.0); Rotation = [ Actor.always "Wait" ]; Rules = [ rule ] }
+            Fight.single monster player 10.5
+        let dealt f = (Sim.run f 1u).DamageBy |> Map.toList |> List.sumBy snd
+        let hits = count (Sim.run (fight true []) 1u) "hits:Thorns"
+        if hits < 9 || hits > 11 then failwithf "%d thorns hits" hits
+        // every hit the monster lands is answered with 100, 140 with 40% increased Thorns damage
+        near (float hits * 100.0) (dealt (fight true []))
+        near (float hits * 140.0) (dealt (fight true (mods "thorns_damage_+%" 40.0)))
+        // not against a hit that is no melee attack, unless Thorns retaliate against all hits
+        near 0.0 (dealt (fight false []))
+        near (float hits * 100.0) (dealt (fight false (mods "thorns_proc_off_any_hit" 1.0)))
+        same (fight true (mods "thorns_damage_+%" 40.0)) seeds
+        same (fight false (mods "thorns_proc_off_any_hit" 1.0)) seeds)
+
+    test "Scavenged Plating: Fully Breaking Armour gives stacks by the enemy's rarity for the gem's time; an Endurance Charge when a skill Fully Breaks Armour" (fun () ->
+        equal (box [ Mod.more Armour 4.0 |> Mod.whenever (PerStack("ScavengedPlating", 1.0)) ]) (box (mods "scavenged_plating_armour_+%_final_per_stack" 4.0))
+        let sheet = { (load blank Options.defaults).Sheet with Mods = mods "scavenged_plating_maximum_stacks_display" 10.0 }
+        let rules = Behaviours.scavengedPlating db.Value sheet blank
+        equal 11 rules.Length
+        equal 0 (Behaviours.scavengedPlating db.Value (load blank Options.defaults).Sheet blank).Length
+        // the first bolt (0.7 s) fully breaks the armour; the stacks last 8 s: the eleven bolts from
+        // 1.4 s to 8.4 s deal more for each stack, the five after it do not (the armour stays
+        // broken while it is hit, so it is not Fully Broken anew)
+        let bolt = { Skill.make "Bolt" [ Spell ] with BaseDamage = Map.ofList [ Chaos, { Min = 100.0; Max = 100.0 } ]; BaseTime = 0.7; BaseCrit = 0.0 }
+        let perStack = Mod.more (Damage AllDamage) 100.0 |> Mod.whenever (PerStack("ScavengedPlating", 1.0))
+        let fight rarity =
+            let player = { Actor.make "Player" [ perStack; Mod.base' (Named "ArmourBreakFlat") 1e9 ] [ bolt ] with Rules = rules }
+            Fight.single { EnemyDef.atLevel 83 1e12 with Rarity = rarity } player 12.0
+        let dealt f = (Sim.run f 1u).DamageBy |> Map.toList |> List.sumBy snd
+        near (6.0 * 100.0 + 11.0 * 1100.0) (dealt (fight Unique))
+        near (6.0 * 100.0 + 11.0 * 600.0) (dealt (fight Rare))
+        near (6.0 * 100.0 + 11.0 * 300.0) (dealt (fight Magic))
+        near (6.0 * 100.0 + 11.0 * 200.0) (dealt (fight Normal))
+        same (fight Unique) seeds
+        same (fight Magic) seeds
+        let smash = { Skill.make "Smash" [ Attack ] with Mods = mods "chance_to_gain_endurance_charge_on_armour_break_%" 30.0 }
+        equal
+            (box [ { Hook = OnFullBreak; Filter = Called "Smash"; Chance = 30.0; Reaction = GainResource("EnduranceCharge", 1) } ])
+            (box (Behaviours.fullBreakRules [ smash; bolt ])))

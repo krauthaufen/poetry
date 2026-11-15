@@ -668,6 +668,9 @@ module Setup =
                     { p.Skill with Tags = p.Skill.Tags.Add Triggered; Cost = 0.0 }, { rule with Reaction = TriggerSkill p.Skill.Name }))
         let heraldSkills = heraldSkills @ (itemTriggered |> List.map fst)
         let heraldRules = heraldRules @ (itemTriggered |> List.map snd)
+        // Thorns: the hit that retaliates when a monster hits the player
+        let thorns = Behaviours.thorns sheet
+        let heraldSkills = heraldSkills @ (thorns |> Option.map fst |> Option.toList)
         let consumers =
             (used |> List.choose (fun (_, p) -> p.Infused)) @ (metas |> List.collect (fun (_, _, cs) -> cs))
         let grantRules =
@@ -736,6 +739,9 @@ module Setup =
                 @ Behaviours.rareModsOnKill sheet
                 @ Behaviours.totemRecently sheet pressedSkills
                 @ Behaviours.recentStates sheet
+                @ (thorns |> Option.map snd |> Option.toList)
+                @ Behaviours.scavengedPlating db sheet c.Build
+                @ Behaviours.fullBreakRules pressedSkills
                 @ (match windDancer with Some (_, r, _, _) -> r | None -> [])
                 @ Behaviours.shockedGround sheet
                 @ fst (Behaviours.summons db sheet c.Build pressedSkills)
@@ -745,6 +751,10 @@ module Setup =
                        let rate = c.Vitals.Evasion * percent / 100.0 * Mods.mult Ctx.empty [ Named "ESRecoveryRate" ] (ModDb.ofList sheet.Mods)
                        [ { Hook = WhenHit; Filter = AnySkill; Chance = 100.0; Reaction = SpendStack("GhostShroud", RegenES(rate, 4.0)) } ]
                    | _ -> [])
+                // (an effect the character has all the time is not given again for a while)
+                |> (let permanent = Behaviours.permanentEffects sheet
+                    if permanent.IsEmpty then id
+                    else List.filter (fun r -> match r.Reaction with GrantBuff (n, _, _, _) -> not (List.contains n permanent) | _ -> true))
             Metas = metas |> List.map (fun (m, _, _) -> m)
             Infusions = infusionSetup
             // infusions start full (kept up while clearing), scaled like invocations
@@ -754,6 +764,8 @@ module Setup =
                  let has (ms: Mod list) = ms |> List.exists (fun m -> List.contains m.Stat sources && m.Value > 0.0)
                  if has sheet.Mods || (used |> List.exists (fun (_, p) -> has p.Skill.Mods)) then c.Resources
                  else c.Resources |> List.map (fun (k, n) -> if k = "Rage" then k, 0 else k, n))
+                // "Onslaught", "You have Arcane Surge": the state for the whole fight
+                @ (Behaviours.permanentEffects sheet |> List.map (fun name -> name, 1))
                 // shapeshift skills are used in animal form: "while Shapeshifted" holds
                 @ (if used |> List.exists (fun (g, _) -> Gems.data db g |> Option.exists (fun d -> d.Types.Contains "Shapeshift")) then [ "Shapeshifted", 1 ] else [])
                 // "while moving": a character that gains from moving moves, where the skills it

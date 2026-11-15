@@ -586,6 +586,7 @@ module Flat =
     let private qAilChanceMult = perAilment (fun a -> siteMult MSkill [ AilmentChance a ])
     let private qFaster = site MSkill Inc (named "FasterAilments")
     let private qFasterIgnite = site MSkill Inc [ Named "FasterAilments"; Named "FasterIgnite" ]
+    let private qFasterBleed = site MSkill Inc [ Named "FasterAilments"; Named "FasterBleed" ]
     let private qMagnitude = perAilment (fun a -> siteMult MSkill [ AilmentMagnitude(Some a); AilmentMagnitude None ])
     let private qDuration = perAilment (fun a -> siteMult MSkill [ AilmentDuration(Some a); AilmentDuration None ])
     let private qBleedDuration = site MSkill Override (named "BaseBleedDuration")
@@ -648,6 +649,7 @@ module Flat =
     let private qDoubleUses = site MSkill Base (named "DoubleCooldownUses")
     let private qExtraUses = site MSkill Base (named "ExtraCooldownUses")
     let private qLosePools = site MSkill Base (named "LosePoolsOnUse")
+    let private qLoseLifeES = site MSkill Base (named "LoseLifeAndESOnUse")
     let private qDodgeDistance = site MSkill Base (named "DodgeRollDistance")
     let private qRageforgedSpend = site MSkill Base (named "RageforgedSpend")
     let private qRageforgedMore = site MSkill Base (named "RageforgedMore")
@@ -1188,6 +1190,8 @@ module Flat =
               /// By ailment.
               OnInflict: CRule[][]
               WhenHit: CRule[]
+              WhenHitMelee: CRule[]
+              OnFullBreak: CRule[]
               OnBlock: CRule[]
               /// The charge buffs that are up when the fight starts: buff, charge, mods per
               /// stack, seconds per stack, chance (%) of twice the stacks.
@@ -1342,7 +1346,7 @@ module Flat =
         @ [ "Ignited"; "DamagingAilment"; "LowEnergyShield"; "ESRechargeStartedRecently" ]
 
     let private derivedStatuses =
-        [ "Moving"; "Cullable"; "AnyAilment"; "Cursed"; "Marked"; "Immobilised"; "ElementalAilments"; "Exposed"; "RareOrUnique"; "LowLife"; "FullLife" ]
+        [ "Moving"; "Cullable"; "AnyAilment"; "Cursed"; "Marked"; "Immobilised"; "ElementalAilments"; "Exposed"; "RareOrUnique"; "LowLife"; "FullLife"; "Unique"; "Magic" ]
 
     let private matches filter (skill: Skill) =
         match filter with
@@ -1674,6 +1678,8 @@ module Flat =
             let onKillOf = rulesOf (fun h -> match h with OnKillOf _ -> true | _ -> false)
             let onInflict = allAilments |> List.map (fun a -> rulesOf (fun h -> h = OnInflict a)) |> Array.ofList
             let whenHit = rulesOf (fun h -> h = WhenHit)
+            let whenHitMelee = rulesOf (fun h -> h = WhenHitMelee)
+            let onFullBreak = rulesOf (fun h -> h = OnFullBreak)
             let onBlock = rulesOf (fun h -> h = OnBlock)
 
             // ---- meta gems ----
@@ -2258,6 +2264,8 @@ module Flat =
                       OnKillOf = onKillOf |> Array.map fixCurses
                       OnInflict = onInflict |> Array.map (Array.map fixCurses)
                       WhenHit = whenHit |> Array.map fixCurses
+                      WhenHitMelee = whenHitMelee |> Array.map fixCurses
+                      OnFullBreak = onFullBreak |> Array.map fixCurses
                       StartCharged = startCharged
                       Overkill = overkill
                       Metas = metas
@@ -3241,6 +3249,12 @@ module Flat =
             if full then
                 put has (at p.SDerived 10) true
                 put stacks (at p.SDerived 10) 1
+            if def.Rarity = Unique then
+                put has (at p.SDerived 11) true
+                put stacks (at p.SDerived 11) 1
+            elif def.Rarity = Magic then
+                put has (at p.SDerived 12) true
+                put stacks (at p.SDerived 12) 1
             // (the same statuses as before: the enemy's arrays stay, and with them what was worked out for them)
             let mutable same = e.SHas.Length = count
             if same then
@@ -4423,6 +4437,7 @@ module Flat =
             let doubled = skill.Cooldown.IsSome && sumQ ev qDoubleUses > 0.0
             let extraUses = if skill.Cooldown.IsSome then int (sumQ ev qExtraUses) else 0
             let lose = if p.Vitals.IsSome then sumQ ev qLosePools / 100.0 else 0.0
+            let loseLifeES = if p.Vitals.IsSome then lose + sumQ ev qLoseLifeES / 100.0 else 0.0
             let dodge = if p.Metas.Length > 0 && info.IsDodgeRoll then Constants.dodgeRollDistance + sumQ ev qDodgeDistance else 0.0
             let lasting = if info.AsksDuration then multQ ev qSkillDuration else 1.0
             let areaMult = if info.AsksArea then multQ ev qArea else 1.0
@@ -4458,9 +4473,9 @@ module Flat =
             // its own loses the player's by its own measures, where the player has any)
             (match p.Vitals with
              | Some v when s.Main.Vitals.IsSome ->
-                if lose > 0.0 && useTime > 0.0 then
-                    s.Life <- max (min 1.0 s.Life) (s.Life - lose * v.Life)
-                    s.Shield <- max 0.0 (s.Shield - lose * v.EnergyShield)
+                if loseLifeES > 0.0 && useTime > 0.0 then
+                    s.Life <- max (min 1.0 s.Life) (s.Life - loseLifeES * v.Life)
+                    s.Shield <- max 0.0 (s.Shield - loseLifeES * v.EnergyShield)
                     s.Mana <- max 0.0 (s.Mana - lose * v.Mana)
                     bump s p.CPoolLoss
              | _ -> ())
@@ -5423,7 +5438,7 @@ module Flat =
         for place in 0 .. damagingAilments.Length - 1 do
             let a = at damagingAilments place
             if source ev a un > 0.0 && rng.Chance(ailmentChance ev n flammable threshold a un) then
-                let faster = incQ ev (if a = Ignite then qFasterIgnite else qFaster)
+                let faster = incQ ev (if a = Ignite then qFasterIgnite elif a = Bleed then qFasterBleed else qFaster)
                 let dps = source ev a un * Ailments.percentPerSecond a / 100.0 * multQ ev (at qMagnitude (ailmentIndex a)) * faster
                 out.Add(Dot(a, Ailments.dealsType a, dps, ailmentDuration ev a / max 0.1 faster, 1 + int (sumQ ev (at qAilStacks (ailmentIndex a)))))
         if source ev Shock un > 0.0 && rng.Chance(ailmentChance ev n flammable threshold Shock un) then
@@ -5773,7 +5788,9 @@ module Flat =
                                 [ OfType Physical ]
                                 @ (if flagQ ev qBrokenFire then [ OfType Fire ] else [])
                                 @ (if flagQ ev qBrokenColdLightning then [ OfType Cold; OfType Lightning ] else [])
-                        addDebuff s e p.SFullyBroken seconds 1 (scopes |> List.map (fun sc -> Mod.inc (DamageTaken sc) taken |> Mod.from "Fully Broken Armour")))
+                        addDebuff s e p.SFullyBroken seconds 1 (scopes |> List.map (fun sc -> Mod.inc (DamageTaken sc) taken |> Mod.from "Fully Broken Armour"))
+                        // (a break of armour that was not fully broken already)
+                        if brokenBefore < baseArmour && p.OnFullBreak.Length > 0 then react s rng p.OnFullBreak "" sid target)
                 // leech, and what a hit and a kill give back
                 (match (if s.Main.Vitals.IsSome then p.Vitals else None) with
                  | Some v ->
@@ -6658,6 +6675,7 @@ module Flat =
                     s.LastHit <- s.Time
                     gainRage s p.RageWhenHit
                     if p.FirstSkill >= 0 then react s rng p.WhenHit "" p.FirstSkill index
+                    if p.FirstSkill >= 0 && atk.Melee && p.WhenHitMelee.Length > 0 then react s rng p.WhenHitMelee "" p.FirstSkill index
                     // "Rage loss is paused for 4 seconds upon gaining Rage, or after taking damage"
                     s.A.RageAt <- s.Time
                     // charms used when a hit of their damage type is taken (they help from the next hit on)

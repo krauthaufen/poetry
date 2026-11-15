@@ -1060,9 +1060,11 @@ module Behaviours =
     let keywordMods (sheet: CharacterSheet) : Mod list =
         let db = ModDb.ofList sheet.Mods
         let has =
-            sheet.Mods
-            |> List.filter (fun m -> m.Stat = Named "Has:UnholyMight")
-            |> List.collect (fun m -> snd (keywordEffect db "UnholyMight") |> List.map (fun k -> { k with Conds = m.Conds @ k.Conds }))
+            [ "UnholyMight"; "Onslaught"; "ArcaneSurge" ]
+            |> List.collect (fun name ->
+                sheet.Mods
+                |> List.filter (fun m -> m.Stat = Named("Has:" + name))
+                |> List.collect (fun m -> snd (keywordEffect db name) |> List.map (fun k -> { k with Conds = m.Conds @ k.Conds })))
         has
         // Arcane Surge's 20% more mana regeneration (x its effect), or life regeneration instead
         // (where the character's lines speak of Arcane Surge: how it gains it)
@@ -1071,6 +1073,13 @@ module Behaviours =
               yield Mod.more stat (Constants.arcaneSurgeRegen * Mods.inc Ctx.empty [ Named "ArcaneSurgeEffect" ] db) |> Mod.whenever (WhileBuff "ArcaneSurge") |> Mod.from "Arcane Surge" ]
         @ [ Mod.inc Evasion (10.0 * Mods.inc Ctx.empty [ Named "TailwindEffect" ] db) |> Mod.whenever (PerStack("Tailwind", 1.0)) |> Mod.from "Tailwind"
             Mod.base' CritChance 0.5 |> Mod.whenever (PerEnemyStack("CriticalWeakness", 1.0)) |> Mod.from "Critical Weakness" ]
+
+    /// Named effects the character has all the time ("Onslaught", "You have Arcane Surge" with
+    /// no condition): the state by its name is there for the whole fight, and nothing gives
+    /// the effect a second time for a while.
+    let permanentEffects (sheet: CharacterSheet) : string list =
+        [ "Onslaught"; "ArcaneSurge" ]
+        |> List.filter (fun name -> sheet.Mods |> List.exists (fun m -> m.Stat = Named("Has:" + name) && m.Conds.IsEmpty))
 
     /// "Increases and Reductions to Minion Damage also affect you", "... to Companion Damage
     /// also apply to you", "Increases and Reductions to Minion Attack Speed also affect you":
@@ -2157,6 +2166,54 @@ module Behaviours =
             skills
             |> List.filter (fun s -> s.Tags.Contains(Tag "Type:SummonsTotem"))
             |> List.map (fun s -> { Hook = OnUse; Filter = Called s.Name; Chance = 100.0; Reaction = GrantBuff("SummonedTotemRecently", Constants.recentlySeconds, 1, []) })
+
+    /// Thorns: "If you have Thorns damage, you inherently Retaliate against Melee Attack Hits,
+    /// dealing your Thorns damage to the enemy that Hit you" ("against all Hits" with the line
+    /// that says so). The retaliation is a hit that is neither attack nor spell: a skill of its
+    /// own, whose damage is the character's Thorns damage (added damage for the skill "Thorns"),
+    /// set off when a monster hits the player. It goes to the enemy the player aims at, which in
+    /// a fight with one enemy is the one that hit.
+    let thorns (sheet: CharacterSheet) : (Skill * Rule) option =
+        let has =
+            sheet.Mods |> List.exists (fun m ->
+                (match m.Stat with AddedMin _ | AddedMax _ -> m.Value > 0.0 | _ -> false) && List.contains (SkillIs(Tag "Thorns")) m.Conds)
+        if not has then None
+        else
+            let any = Mods.flag Ctx.empty (Named "ThornsAnyHit") (ModDb.ofList sheet.Mods)
+            let skill = { Skill.make "Thorns" [ Triggered; Tag "Thorns" ] with BaseCrit = 0.0; Cost = 0.0 }
+            Some(skill, { Hook = (if any then WhenHit else WhenHitMelee); Filter = AnySkill; Chance = 100.0; Reaction = TriggerSkill skill.Name })
+
+    /// Scavenged Plating: "Fully Breaking an enemy's Armour grants you stacks of Scavenged
+    /// Plating for a duration ... Normal enemies grant 1 stack, Magic enemies grant 2 stacks,
+    /// Rare enemies grant 5 stacks and Unique enemies grant 10 stacks", up to the gem's maximum,
+    /// for the gem's duration (all stacks share it, a new break starts it again).
+    let scavengedPlating (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) : Rule list =
+        let most = int (Mods.sumBase Ctx.empty [ Named "ScavengedPlatingMax" ] (ModDb.ofList sheet.Mods))
+        if most <= 0 then []
+        else
+            let seconds =
+                build.Groups |> List.filter (fun g -> g.Enabled) |> List.collect (fun g -> g.Gems)
+                |> List.tryFind (fun x -> x.Enabled && not x.IsSupport && x.Name = "Scavenged Plating")
+                |> Option.map (fun gem ->
+                    Gems.rawStats db (ModDb.ofList sheet.Mods) { Gem = gem.Name; Level = gem.Level; Quality = gem.Quality; StatSet = 1; Supports = [] }
+                    |> List.filter (fun (k, _) -> k = "base_skill_effect_duration") |> List.sumBy snd)
+                |> Option.filter (fun ms -> ms > 0.0)
+                |> Option.map (fun ms -> ms / 1000.0)
+                |> Option.defaultValue 8.0
+            let seconds = seconds * Mods.mult Ctx.empty [ SkillDuration ] (ModDb.ofList sheet.Mods)
+            let stack = GrantBuff("ScavengedPlating", seconds, most, [])
+            let rule reaction = { Hook = OnFullBreak; Filter = AnySkill; Chance = 100.0; Reaction = reaction }
+            // one stack whatever the enemy, one more of a Magic one, four more of a Rare or Unique one, five more of a Unique one
+            [ rule stack; rule (IfEnemyHas("Magic", stack)) ]
+            @ [ for _ in 1 .. 4 -> rule (IfEnemyHas("RareOrUnique", stack)) ]
+            @ [ for _ in 1 .. 5 -> rule (IfEnemyHas("Unique", stack)) ]
+
+    /// "X% chance to gain an Endurance Charge when Supported Skills Fully Break Armour": the
+    /// skill's own stat, for its hits.
+    let fullBreakRules (skills: Skill list) : Rule list =
+        skills |> List.collect (fun s ->
+            let chance = s.Mods |> List.sumBy (fun m -> if m.Stat = Named "EnduranceChargeOnFullBreak" && m.Kind = Base then m.Value else 0.0)
+            if chance > 0.0 then [ { Hook = OnFullBreak; Filter = Called s.Name; Chance = min 100.0 chance; Reaction = GainResource("EnduranceCharge", 1) } ] else [])
 
     /// States about what the character did or suffered a while ago, kept only where one of its
     /// stats asks for them: a rule gives the state (or one more stack of it, for stats that

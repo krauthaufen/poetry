@@ -134,7 +134,7 @@ module Ailments =
             [ for a in Ailment.damaging do
                   if rolled a then
                       // "deal damage X% faster": the same total in less time
-                      let faster = Mods.inc ctx (Named "FasterAilments" :: (if a = Ignite then [ Named "FasterIgnite" ] else [])) mods
+                      let faster = Mods.inc ctx (Named "FasterAilments" :: (if a = Ignite then [ Named "FasterIgnite" ] elif a = Bleed then [ Named "FasterBleed" ] else [])) mods
                       let dps = source a * percentPerSecond a / 100.0 * magnitudeMult ctx mods a * faster
                       yield Dot(a, dealsType a, dps, duration ctx mods a / max 0.1 faster, maxStacks ctx mods a) ]
 

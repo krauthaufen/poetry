@@ -1412,6 +1412,50 @@ module StatMap =
         | "ascendancy_gemling_enable_thaumaturgy_quality_stats" -> one (Mod.flag (Named "AltQuality"))
         | "all_skill_gem_quality_+" -> one (Mod.base' (Named "GemQuality") v)
         | "damage_+%_if_have_crit_in_past_8_seconds" -> one (Mod.inc (Damage AllDamage) v |> Mod.whenever (WhileBuff "CritInPast8Seconds"))
+        // "increased Damage with Hits against Enemies affected by Ailments"
+        | "hit_damage_+%_vs_enemies_affected_by_ailments" -> one (Mod.inc (Damage AllDamage) v |> Mod.whenever (EnemyHas "AnyAilment"))
+        // "increased Attack and Cast Speed with Elemental Skills": a skill of any of the three elements, once
+        | "attack_and_cast_speed_+%_with_elemental_skills" ->
+            let tag t = SkillIs(Tag t)
+            Some(Mods [ Mod.inc Speed v |> Mod.whenever (tag "Fire")
+                        Mod.inc Speed v |> Mod.whenever (tag "Cold") |> Mod.whenever (Not(tag "Fire"))
+                        Mod.inc Speed v |> Mod.whenever (tag "Lightning") |> Mod.whenever (Not(tag "Fire")) |> Mod.whenever (Not(tag "Cold")) ])
+        | "attack_speed_+%_per_20_dex" -> one (Mod.inc Speed v |> Mod.whenever (SkillIs Attack) |> Mod.whenever (PerStack("Dex", 20.0)))
+        // "increased Damage against Heavy Stunned enemies" (the id says melee, the game's text does not)
+        | "melee_damage_+%_vs_heavy_stunned_enemies" -> one (Mod.inc (Damage AllDamage) v |> Mod.whenever (EnemyHas "HeavilyStunned"))
+        | "bleed_on_crit_%" -> one (Mod.base' (AilmentChance Bleed) v |> Mod.whenever IsCrit)
+        // "Bleeding you inflict deals Damage X% faster"
+        | "faster_bleed_%" -> one (Mod.inc (Named "FasterBleed") v)
+        | "fire_spell_additional_critical_strike_chance_permyriad" ->
+            one (Mod.base' CritChance (v / 100.0) |> Mod.whenever (SkillIs Spell) |> Mod.whenever (SkillIs(Tag "Fire")))
+        // "increased Magnitude of Poison on targets that are not Poisoned"
+        | "poison_effect_+%_vs_non_poisoned_enemies" -> one (Mod.inc (AilmentMagnitude(Some Poison)) v |> Mod.whenever (Not(EnemyHas "Poisoned")))
+        // what the player cannot suffer: of these only its own Ignite is ever on it
+        | "immune_to_poison" -> one (Mod.base' (Named "Avoid:Poison") 100.0)
+        | "base_cannot_be_electrocuted" -> one (Mod.base' (Named "Avoid:Electrocute") 100.0)
+        | "unaffected_by_damaging_ailments" -> one (Mod.more (Named "SelfEffect:Ignite") -100.0)
+        // "Lose X% of maximum Life and Energy Shield when you use a Chaos Skill"
+        | "lose_%_of_life_and_energy_shield_when_you_use_a_chaos_skill" -> one (Mod.base' (Named "LoseLifeAndESOnUse") v |> Mod.whenever (SkillIs(Tag "Chaos")))
+        // "Onslaught", "You have Arcane Surge": the effect all the time (Behaviours.keywordMods)
+        | "base_should_have_onslaught_from_stat" -> one (Mod.flag (Named "Has:Onslaught"))
+        // Thorns: "X to Y Physical Thorns damage" is the damage of the hit that retaliates
+        // (Behaviours.thorns), "increased Thorns damage" what that hit deals more of
+        | id when (id.StartsWith "thorns_minimum_base_" || id.StartsWith "thorns_maximum_base_") && id.EndsWith "_damage" && (typeWord (id.Split('_').[3])).IsSome ->
+            let t = (typeWord (id.Split('_').[3])).Value
+            one (Mod.base' (if id.StartsWith "thorns_minimum" then AddedMin t else AddedMax t) v |> Mod.whenever (SkillIs(Tag "Thorns")))
+        | "thorns_damage_+%" -> one (Mod.inc (Damage AllDamage) v |> Mod.whenever (SkillIs(Tag "Thorns")))
+        | "thorns_proc_off_any_hit" -> one (Mod.flag (Named "ThornsAnyHit"))
+        // Scavenged Plating: Armour and Thorns per stack; the stacks come from Fully Breaking
+        // Armour (Behaviours.scavengedPlating)
+        | "scavenged_plating_armour_+%_final_per_stack" -> one (Mod.more Armour v |> Mod.whenever (PerStack("ScavengedPlating", 1.0)))
+        | "scavenged_plating_thorns_minimum_physical_damage" ->
+            one (Mod.base' (AddedMin Physical) v |> Mod.whenever (SkillIs(Tag "Thorns")) |> Mod.whenever (PerStack("ScavengedPlating", 1.0)))
+        | "scavenged_plating_thorns_maximum_physical_damage" ->
+            one (Mod.base' (AddedMax Physical) v |> Mod.whenever (SkillIs(Tag "Thorns")) |> Mod.whenever (PerStack("ScavengedPlating", 1.0)))
+        | "scavenged_plating_maximum_stacks_display" -> one (Mod.base' (Named "ScavengedPlatingMax") v)
+        // "X% chance to gain an Endurance Charge when Supported Skills Fully Break Armour" (Behaviours.fullBreakRules)
+        | "chance_to_gain_endurance_charge_on_armour_break_%" -> one (Mod.base' (Named "EnduranceChargeOnFullBreak") v)
+        | "base_should_have_arcane_surge_from_stat" -> one (Mod.flag (Named "Has:ArcaneSurge"))
         | _ -> None
 
     // ---- patterns over the words of the id (reversed, so suffixes come first) ----
