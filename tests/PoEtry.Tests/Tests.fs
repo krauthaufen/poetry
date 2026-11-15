@@ -840,6 +840,13 @@ let main _ =
         // bites land at 1 .. 5 s: those at 1 and 2 s are within the three seconds
         near (2.0 * 150.0 + 3.0 * 100.0) o.DamageBy.["Bite (hit)"])
 
+    test "Rage is lost from when its delay is over, not over the whole time since the event before" (fun () ->
+        // 30 Rage, none gained: lost at 5 a second once 4 s have passed. Hits of 100 at 0.7 .. 4.2 s;
+        // at 4.2 s only 0.2 s of losing have passed: 1 Rage lost (not 3.5 for the whole 0.7 s)
+        let player = { Actor.make "Player" [ noIgnite; sure ] [ { strike "Cleave" 100.0 with BaseTime = 0.7 } ] with Resources = [ "Rage", 30 ]; MaxResources = Map.ofList [ "Rage", 30 ] }
+        let o = Sim.run { Fight.single (boss 1e12) player 4.25 with MaxTime = 4.25 } 1u
+        near (5.0 * 130.0 + 129.0) o.DamageBy.["Cleave (hit)"])
+
     test "Rageforged: a use with 10 Rage to spend spends it before its hits for 35% more damage; with a 100% chance to skip, it keeps the Rage" (fun () ->
         let bolt = { fireSpell 100.0 with Mods = [ Mod.base' (Named "RageforgedSpend") 10.0; Mod.base' (Named "RageforgedMore") 35.0 ] }
         let player = { Actor.make "Player" [ noIgnite ] [ bolt ] with Resources = [ "Rage", 20 ]; MaxResources = Map.ofList [ "Rage", 30 ] }

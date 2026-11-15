@@ -1210,6 +1210,17 @@ let run (test: string -> (unit -> unit) -> unit) =
         same fight minionSeeds
         same { fight with Enemies = [ boss 3000.0; { boss 5000.0 with Name = "other"; Position = Vec.make 25.0 10.0 } ] } minionSeeds)
 
+    test "flat: Rage lost from the moment its delay is over, an event falling exactly on it" (fun () ->
+        // (a hit taken 4 s before an expiry that lands on the same moment: the delay ends exactly
+        // at an event; the engines' times may differ in the last bit there)
+        let player =
+            { Actor.make "Player" [ noIgnite; Mod.base' (Named "Accuracy") 1e9; Mod.base' (Named "RageWhenHit") 2.0; Mod.base' (Named "RageRegen") 1.5; Mod.more (Damage AllDamage) 1.0 |> Mod.whenever (PerStack("Rage", 1.0)) ]
+                [ strike "Cleave" 80.0 160.0 ] with
+                MaxResources = Map.ofList [ "Rage", 30 ]; Resources = [ "Rage", 30 ]
+                Vitals = Some(PlayerStats.basic 3000.0 200.0) }
+        let enemy = { boss 1e12 with Attack = Some { Interval = 1.3; Damage = Map.ofList [ Physical, 30.0 ]; Accuracy = 800.0; Range = 6.0; CritChance = 5.0; Melee = true }; Position = Vec.make 8.0 0.0 }
+        same (Fight.single enemy player 20.0) seeds)
+
     test "flat: Rageforged spends Rage before a use's hits, for more damage; now and then it is kept" (fun () ->
         let player =
             { Actor.make "Player" [ noIgnite; Mod.base' (Named "Accuracy") 1e9; Mod.base' (Named "RageWhenHit") 3.0; Mod.more (Damage AllDamage) 1.0 |> Mod.whenever (PerStack("Rage", 1.0)) ]

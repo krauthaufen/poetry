@@ -7043,15 +7043,17 @@ module Flat =
                 // rage: regenerated all the time, lost once none has been gained for a while
                 (let have = stacksOf s p.BRage
                  if not (dt <= 0.0 || p.MaxRage <= 0 || (p.RageRegen <= 0.0 && have = 0)) then
-                    let losing = if s.Time - s.A.RageAt > p.RageDelay then p.RageLoss else 0.0
+                    // Rage is lost from when the delay is over: of dt, the part after it (`Sim.step`)
+                    let losingFor = max 0.0 (s.Time - max (s.Time - dt) (s.A.RageAt + p.RageDelay))
                     // Berserk: life lost for every Rage held while Rage is not being lost (not below 1)
+                    let berserkFor = if p.RageLoss <= p.RageRegen then dt else dt - losingFor
                     (match p.Vitals with
-                     | Some v when losing <= p.RageRegen && have > 0 && p.BerserkLoss > 0.0 ->
-                        let life = max (min s.Life 1.0) (s.Life - p.BerserkLoss / 100.0 / 60.0 * float have * v.Life * dt)
+                     | Some v when berserkFor > 0.0 && have > 0 && p.BerserkLoss > 0.0 ->
+                        let life = max (min s.Life 1.0) (s.Life - p.BerserkLoss / 100.0 / 60.0 * float have * v.Life * berserkFor)
                         s.Life <- life
                         s.MinLife <- min s.MinLife (life / max 1.0 v.Life)
                      | _ -> ())
-                    let carry = s.A.RageCarry + (p.RageRegen - losing) * dt
+                    let carry = s.A.RageCarry + p.RageRegen * dt - p.RageLoss * losingFor
                     let whole = int (System.Math.Truncate carry)
                     let n = max 0 (min p.MaxRage (have + whole))
                     if n <> have then setStacks s false p.BRage n

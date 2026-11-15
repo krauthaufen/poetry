@@ -3883,15 +3883,17 @@ module Sim =
                 let maxRage = Map.tryFind "Rage" env.Fight.Player.MaxResources |> Option.defaultValue 0
                 if dt <= 0.0 || maxRage <= 0 || (regen <= 0.0 && have = 0) then w
                 else
-                    let losing = if w.Time - st.RageAt > delay then loss else 0.0
+                    // Rage is lost from when the delay is over: of dt, the part after it
+                    let losingFor = max 0.0 (w.Time - max (w.Time - dt) (st.RageAt + delay))
                     // Berserk: life lost for every Rage held while Rage is not being lost (not below 1)
+                    let berserkFor = if loss <= regen then dt else dt - losingFor
                     let w =
                         match env.Fight.Player.Vitals, w.Player with
-                        | Some v, Some p when losing <= regen && have > 0 && env.BerserkLoss > 0.0 ->
-                            let life = max (min p.Life 1.0) (p.Life - env.BerserkLoss / 100.0 / 60.0 * float have * v.Life * dt)
+                        | Some v, Some p when berserkFor > 0.0 && have > 0 && env.BerserkLoss > 0.0 ->
+                            let life = max (min p.Life 1.0) (p.Life - env.BerserkLoss / 100.0 / 60.0 * float have * v.Life * berserkFor)
                             { w with Player = Some { p with Life = life; MinLife = min p.MinLife (life / max 1.0 v.Life) } }
                         | _ -> w
-                    let carry = st.RageCarry + (regen - losing) * dt
+                    let carry = st.RageCarry + regen * dt - loss * losingFor
                     let whole = int (System.Math.Truncate carry)
                     let n = max 0 (min maxRage (have + whole))
                     let w = if n <> have then setStacksWith env name false "Rage" n w else w
