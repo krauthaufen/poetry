@@ -1008,6 +1008,11 @@ module StatMap =
         | "minion_damage_increases_and_reductions_also_affects_you" -> one (Mod.flag (Named "MinionDamageAffectsYou"))
         | "companion_damage_increases_and_reductions_also_affects_you" -> one (Mod.flag (Named "CompanionDamageAffectsYou"))
         | "additive_modifiers_to_minion_attack_speed_also_affect_you" -> one (Mod.flag (Named "MinionAttackSpeedAffectsYou"))
+        // "Companions deal X% increased damage per Idol in your Equipment", "+X% to all Elemental
+        // Resistances per non-Idol Augment in your Equipment": counted when the character is read
+        | "companion_damage_+%_per_socketed_idol" ->
+            one (Mod.inc (ForMinions(Damage AllDamage)) v |> Mod.whenever (SkillIs(Tag "Companion")) |> Mod.whenever (OfOwner(PerStack("SocketedIdols", 1.0))))
+        | "resist_all_elements_%_per_socketed_non_idol_augment" -> Some(Mods(Mod.resistAllElemental v |> List.map (Mod.whenever (PerStack("NonIdolAugments", 1.0)))))
         // "X% increased Surrounded Area of Effect": the area enemies surround the player in
         | "surrounded_area_of_effect_+%" -> one (Mod.inc (Named "SurroundedArea") v)
         // "X% increased Attack and Cast Speed if you've summoned a Totem Recently" (Behaviours.totemRecently)

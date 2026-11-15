@@ -145,7 +145,11 @@ module Api =
                 let props = Json.list (Json.field "properties" s) |> List.choose (Json.strField "name")
                 Json.field "support" s <> Some(JBool true) && not (props |> List.exists (fun n -> n = "Level" || n = "Cost" || n.Contains "Support")))
             |> List.length
-        let sockets = (if filled > 0 then [ sprintf "Sockets filled: %d" filled ] else []) @ (if Json.field "corrupted" item = Some(JBool true) then [ "Corrupted" ] else [])
+        // of those, the idols ("per Idol in your Equipment", "per non-Idol Augment")
+        let idols = Json.list (Json.field "socketedItems" item) |> List.filter (fun s -> (Json.strField "typeLine" s |> Option.defaultValue "").Contains "Idol") |> List.length
+        let sockets =
+            (if filled > 0 then [ sprintf "Sockets filled: %d" filled ] else []) @ (if idols > 0 then [ sprintf "Idols socketed: %d" idols ] else [])
+            @ (if Json.field "corrupted" item = Some(JBool true) then [ "Corrupted" ] else [])
         // the item's mods with their stat ids, as the game sends them ("mods": {"explicit":
         // [{"id", "stats": {id: value}}]}): for lines whose text the stat descriptions here
         // don't have (Items.parse, `Items.statsLinePrefix`)

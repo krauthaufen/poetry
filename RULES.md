@@ -216,6 +216,7 @@ Checked against PoB's defensive numbers for 131 public characters (`tools/corpus
 | Slot increases | "increased Evasion Rating from Equipped Body Armour", "increased Energy Shield from Equipped Focus": additive with the global increases, for that item's share | PoB CalcDefence slotCfg | pob |
 | Item-local stats | a weapon's own leech, crit damage bonus, bleed / poison chance, penetration, "always hits": count for attacks with it. Local stats that only change what the item displays are skipped; any other is reported as not simulated | game item text | data |
 | Per socket filled | "+X per Socket filled" counts the runes, soul cores and idols in the item | game item text | data |
+| Per idol, per augment | "per Idol in your Equipment" counts the idols socketed in all the items, "per non-Idol Augment in your Equipment" the runes and soul cores ("Companions deal X% increased damage per Idol", "+X% to all Elemental Resistances per non-Idol Augment"); an idol is a socketed item whose base names it an Idol (the API's typeLine) | stat descriptions; API | data |
 | Reflected ring | "Reflects opposite Ring": the ring is a copy of the other one | Kalandra's Touch | data |
 | Keystone by name | an item line that is just a keystone's name grants that keystone | unique jewels | data |
 | Weapon set passives | passives allocated with weapon set points count only while that set is in use; the sheet is shown for set one | API `specialisations`; PoB counts them differently in some builds | data |

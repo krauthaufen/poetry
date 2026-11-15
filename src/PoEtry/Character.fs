@@ -47,7 +47,7 @@ module Items =
               "Unique ID:"; "League:"; "Rune:"; "LevelReq:"; "Implicits:"; "Prefix:"; "Suffix:"; "Variant:"
               "Selected Variant:"; "Has Alt Variant"; "Selected Alt Variant"; "Allow Duplicate Variants:"; "Crafted:"
               "Unreleased:"; "Catalyst:"; "CatalystQuality:"; "Talisman Tier:"; "Evasion:"; "Ward:"; "ArmourBasePercentile:"
-              "EvasionBasePercentile:"; "EnergyShieldBasePercentile:"; "Cluster Jewel"; "Flask: "; "Runic Ward:"; "Sockets filled:" ]
+              "EvasionBasePercentile:"; "EnergyShieldBasePercentile:"; "Cluster Jewel"; "Flask: "; "Runic Ward:"; "Sockets filled:"; "Idols socketed:" ]
         prefixes |> List.exists (fun p -> line.StartsWith p)
 
     /// Lines that describe the item itself or character-building, with no effect in a fight.

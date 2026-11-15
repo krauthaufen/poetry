@@ -1349,3 +1349,15 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         | [ { Filter = Called "Totem"; Reaction = GrantBuff ("SummonedTotemRecently", 4.0, 1, []) } ] -> ()
         | r -> failwithf "%A" r
         equal 0 (Behaviours.totemRecently (load blank Options.defaults).Sheet [ totem ]).Length)
+
+    test "what sits in the sockets: per Idol in your Equipment, per non-Idol Augment" (fun () ->
+        let helmet = "Helmet", "Rarity: Normal\nRusted Greathelm\n--------\nSockets filled: 3\nIdols socketed: 1\n"
+        let gloves = "Gloves", "Rarity: Normal\nStocky Mitts\n--------\nSockets filled: 1\n"
+        let lines = [ "+2% to all Elemental Resistances per non-Idol Augment in your Equipment"; "Companions deal 10% increased damage per Idol in your Equipment" ]
+        let c = load { blank with Items = [ helmet; gloves ]; ExtraLines = lines } Options.defaults
+        let plain = load { blank with Items = [ helmet; gloves ] } Options.defaults
+        let p = Setup.player c Options.defaults [] None
+        equal (box [ "NonIdolAugments", 3; "SocketedIdols", 1 ]) (box (p.Resources |> List.filter (fun (k, _) -> k = "SocketedIdols" || k = "NonIdolAugments") |> List.sortBy fst))
+        // three augments that are not idols: +6% to each
+        near (Map.find Fire plain.Vitals.Resist + 6.0) (Map.find Fire c.Vitals.Resist)
+        equal (box [ OfOwner(PerStack("SocketedIdols", 1.0)); SkillIs(Tag "Companion") ]) (box (mods "companion_damage_+%_per_socketed_idol" 10.0 |> List.collect (fun m -> m.Conds))))

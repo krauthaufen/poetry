@@ -220,6 +220,12 @@ module Setup =
         // "for each Corrupted Item Equipped"
         let corrupted = Behaviours.corruptedItems build
         let spectrums = build.Items |> List.filter (fun (slot, text) -> slot.StartsWith "Jewel" && text.Contains "Grand Spectrum") |> List.length
+        // what sits in the items' sockets: idols, and the other augments (runes, soul cores)
+        let augments, idols =
+            let count (prefix: string) =
+                build.Items |> List.sumBy (fun (_, text) ->
+                    text.Split('\n') |> Array.sumBy (fun l -> let l = l.Trim() in if l.StartsWith prefix then (match System.Int32.TryParse(l.Substring(prefix.Length).Trim()) with | true, n -> n | _ -> 0) else 0))
+            count "Sockets filled:", count "Idols socketed:"
         // a flask whose effect is constant: "during any Flask effect" always holds
         let flaskFlags =
             let sdb = ModDb.ofList sheet.Mods
@@ -228,7 +234,8 @@ module Setup =
                     yield "Constant" + kind + "Flask", 1 ]
         let maxResources =
             (Pob.maxResources sheet @ flaskFlags @ moteMax @ o.MaxOverrides @ ((equipmentFlags @ supportFlags) |> List.map (fun f -> f, 1)) @ (if corrupted > 0 then [ "CorruptedItems", corrupted ] else [])
-             @ (if spectrums > 0 then [ "GrandSpectrum", spectrums ] else []))
+             @ (if spectrums > 0 then [ "GrandSpectrum", spectrums ] else [])
+             @ (if idols > 0 then [ "SocketedIdols", idols ] else []) @ (if augments - idols > 0 then [ "NonIdolAugments", augments - idols ] else []))
             |> Map.ofList
         let startResources =
             maxResources
