@@ -6731,7 +6731,9 @@ module Flat =
     /// when their time is up; pustules that burst when their time is up or they hold all the
     /// Poison they can use; Ice Crystals destroyed once the enemy beside them has lost as much
     /// life as one withstands, each of which then explodes.
-    let private planted (s: State) =
+    /// Returns the enemies recorded damage killed, in order, and whether the debuff was the player's.
+    let private planted (s: State) : ResizeArray<int * bool> =
+        let killed = ResizeArray<int * bool>()
         if not s.Seeds.IsEmpty then
             let mutable kept = []
             for ((owner, skill, enemy, mark, needed, until) as seed) in s.Seeds do
@@ -6781,9 +6783,13 @@ module Flat =
                         addDamage s (at (at s.Progs owner).Skills skill).RecordSource dealt
                         s.Other <- s.Other + dealt
                         s.OtherSeen <- true
-                        if owed >= e.Life then kill s e s.Time else e.Life <- e.Life - dealt
+                        if owed >= e.Life then
+                            kill s e s.Time
+                            killed.Add((enemy, owner = 0))
+                        else e.Life <- e.Life - dealt
                     else kept <- agony :: kept
             s.Agonies <- List.rev kept
+        killed
 
     /// What has run out of every actor's buffs goes (`Sim.prune`).
     let private pruneAll (s: State) =
@@ -6918,7 +6924,17 @@ module Flat =
             recover s dt
             if s.AliveCount > 0 && alive s then
                 pruneAll s
-                if not (s.Seeds.IsEmpty && s.Pustules.IsEmpty && s.Crystals.IsEmpty && s.Agonies.IsEmpty) then planted s
+                if not (s.Seeds.IsEmpty && s.Pustules.IsEmpty && s.Crystals.IsEmpty && s.Agonies.IsEmpty) then
+                    // kills by recorded damage coming due are kills over time (`Sim.killedOverTime`)
+                    for (target, mine) in planted s do
+                        enter s 0
+                        let e = at s.Foes target
+                        if mine then
+                            reactDot s rng s.P.OnKill "" -1
+                            if s.P.HasKillOf then
+                                refreshStatus s e
+                                statusMap s.P e.SHas e.SStacks |> Map.iter (fun k _ -> reactDot s rng s.P.OnKillOf k e.Index)
+                        dotKillGains s rng e mine
                 // Demon Form: a Demonflame for every second in the form (at most 10), life lost for
                 // each; at 1 life the form ends and its cooldown starts
                 if (at s.A.BHas p.BDemonForm) && p.Vitals.IsSome then

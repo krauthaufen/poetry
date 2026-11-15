@@ -989,6 +989,27 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         equal (box 1) (box (count out "ward remnant"))
         same fight seeds)
 
+    test "a kill by recorded damage coming due is a kill over time: rules for kills, mana on kill" (fun () ->
+        // all of what the enemy lost is recorded; a bolt of 60 leaves 40 of 100, and the 60 owed kills it
+        let agony = { Skill.make "Agony" [ Spell ] with Hits = []; Duration = 4.0; BaseTime = 0.5; Mods = [ Mod.base' (Named "RecordsDamage") 100.0 ] }
+        let bolt = { Skill.make "Bolt" [ Spell ] with BaseDamage = Map.ofList [ Chaos, { Min = 60.0; Max = 60.0 } ]; BaseTime = 0.5; BaseCrit = 0.0; Cost = 300.0 }
+        let fight =
+            let player =
+                { Actor.make "Player" [ Mod.base' ManaOnKill 10.0 ] [ agony; bolt ] with
+                    Vitals = Some(PlayerStats.basic 1e6 1000.0)
+                    Rules = [ { Hook = OnKill; Filter = AnySkill; Chance = 100.0; Reaction = GainResource("Kills", 1) } ]
+                    MaxResources = Map.ofList [ "Kills", 10 ]
+                    Rotation = [ { Use = "Agony"; When = fun v -> v.Time < 0.1 }; { Use = "Bolt"; When = fun _ -> true } ] }
+            // (a second enemy far off keeps the fight going after the kill)
+            let foe name life x = { EnemyDef.atLevel 83 life with Name = name; Position = Vec.make x 0.0; Mods = []; Attack = None }
+            { Fight.single (foe "a" 100.0 20.0) player 6.0 with Enemies = [ foe "a" 100.0 20.0; foe "b" 1e12 500.0 ]; Targeting = Nearest }
+        let out = Sim.run fight 1u
+        equal (box 1) (box out.Kills.Length)
+        near 40.0 (Map.tryFind "Agony" out.DamageBy |> Option.defaultValue 0.0)
+        equal (box 1) (box (count out "gained:Kills"))
+        near 10.0 (Map.tryFind "kill" out.ManaGained |> Option.defaultValue 0.0)
+        same fight seeds)
+
     // ---- life loss from hits put off ----
 
     test "Amanamu's Defiance and life lost over 4 seconds instead: a share of a hit's life loss prevented, a share lost over 4 s" (fun () ->

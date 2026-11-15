@@ -3619,6 +3619,17 @@ module Sim =
             let _, _, _, _, onKill = env.Rage
             gainRage env onKill w |> markRecently player.Name false false true
 
+    /// An enemy killed by damage over time or recorded damage coming due: the player's kill
+    /// (`mine`) sets off the player's rules for kills; what a kill gives follows.
+    let private killedOverTime env rng name mine (w: World) =
+        let player = env.Fight.Player
+        let w =
+            if not mine then w
+            else
+                let w = react env rng player OnKill dotKiller None w
+                status w.Enemies.[name] |> Map.fold (fun w k _ -> react env rng player (OnKillOf k) dotKiller (Some name) w) w
+        dotKillGains env rng w.Enemies.[name] mine w
+
     let private step env rng (w: World) =
         let (KeyValue ((t, sq), ev)) = Seq.head w.Queue
         let dt = t - w.Time
@@ -3669,17 +3680,8 @@ module Sim =
             let n = w.Kills.Length - killsBefore
             if n <= 0 then w
             else
-                let player = env.Fight.Player
                 w.Kills |> List.truncate n |> List.rev
-                |> List.fold (fun w (name, _, at) ->
-                    let e = w.Enemies.[name]
-                    let mine = playersDotKill env e at
-                    let w =
-                        if not mine then w
-                        else
-                            let w = react env rng player OnKill dotKiller None w
-                            status w.Enemies.[name] |> Map.fold (fun w k _ -> react env rng player (OnKillOf k) dotKiller (Some name) w) w
-                    dotKillGains env rng w.Enemies.[name] mine w) w
+                |> List.fold (fun w (name, _, at) -> killedOverTime env rng name (playersDotKill env w.Enemies.[name] at) w) w
         let w = w |> syncPresence env.Fight |> recover env.Fight.Player.Vitals env.Fight.Player.ManaFlask env.Fight.Player.Charms dt
         if allDead w || (w.Player |> Option.exists (fun p -> p.Died.IsSome)) then
             w
@@ -3730,7 +3732,9 @@ module Sim =
             let w =
                 if w.Agonies.IsEmpty then w
                 else
-                    w.Agonies |> List.fold (fun w ((_, skill, enemy, mark, share, until) as a) ->
+                    // (whose debuff killed which enemy, in order)
+                    let killed = ResizeArray<string * string>()
+                    w.Agonies |> List.fold (fun w ((owner, skill, enemy, mark, share, until) as a) ->
                         let drop w = { w with Agonies = w.Agonies |> List.filter (fun x -> x <> a) }
                         match Map.tryFind enemy w.Enemies with
                         | Some e when e.Life > 0.0 ->
@@ -3738,6 +3742,7 @@ module Sim =
                             if w.Time >= until || owed >= e.Life then
                                 let dealt = min owed e.Life
                                 let dead = owed >= e.Life
+                                if dead then killed.Add((enemy, owner))
                                 { drop w with
                                     Enemies = Map.add enemy { e with Life = (if dead then 0.0 else e.Life - dealt) } w.Enemies
                                     DamageBy = addf skill dealt w.DamageBy
@@ -3745,6 +3750,9 @@ module Sim =
                                     Kills = if dead then (enemy, e.Def.Rarity, w.Time) :: w.Kills else w.Kills }
                             else w
                         | _ -> drop w) w
+                    // what they killed, in order: the player's kill when the debuff was the player's
+                    |> fun w ->
+                        killed |> Seq.fold (fun w (name, owner) -> killedOverTime env rng name (owner = env.Fight.Player.Name) w) w
             // Demon Form: a Demonflame for every second in the form (at most 10), life lost for
             // each; at 1 life the form ends and its cooldown starts
             let w =
