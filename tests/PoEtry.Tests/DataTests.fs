@@ -857,7 +857,8 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         near 3.6 (later "Explosive Grenade")
         near 4.0 (later "Frost Bomb")
         equal (box ([]: string list)) (box (Gems.unmodelledTypes db.Value "Frost Bomb" |> List.filter ((=) "DetonatesAfterTime")))
-        equal (box [ "DetonatesAfterTime" ]) (box (Gems.unmodelledTypes db.Value "Explosive Spear" |> List.filter ((=) "DetonatesAfterTime")))
+        // (a lodged Explosive Spear: its explosion waits the detonation time, Behaviours.detonation)
+        equal (box ([]: string list)) (box (Gems.unmodelledTypes db.Value "Explosive Spear" |> List.filter ((=) "DetonatesAfterTime")))
         // a skill with no gem of its own, by its name: Punch (the unarmed attack) is an attack
         match Gems.data db.Value "Punch" with
         | Some d -> equal (box true) (box (d.Types.Contains "Attack" && d.Types.Contains "Melee"))

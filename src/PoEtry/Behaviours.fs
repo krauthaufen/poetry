@@ -2098,6 +2098,50 @@ module Behaviours =
     /// multiplier (+- spread) at its attack time; its skills scale with its level; the gem's
     /// supports apply to them; "Minions deal / have ..." mods of the owner apply.
     /// Returns the actors and notes about what was left out.
+    /// Puppet Master: "X% Surpassing Chance to gain a Puppet Master stack whenever you use a
+    /// Command Skill". A stack: minions deal 10% increased damage with Command skills and have
+    /// 3% increased skill speed, for 8 seconds, up to 5 stacks (x increased effect, duration,
+    /// "+N maximum stacks"). The minions use their Command skills themselves here, so each
+    /// gains its stacks from its own commands; the stacks of one minion run out together.
+    /// (What the buff gives the player's own speed with Command skills is nothing here.)
+    let puppetMaster (sheet: CharacterSheet) : Rule list =
+        let db = ModDb.ofList sheet.Mods
+        let chance = Mods.sumBase Ctx.empty [ Named "PuppetMasterOnCommand" ] db
+        if chance <= 0.0 then []
+        else
+            let effect = Mods.inc Ctx.empty [ Named "PuppetMasterEffect" ] db
+            let stacks = max 1 (5 + int (Mods.sumBase Ctx.empty [ Named "PuppetMasterMaxStacks" ] db))
+            let seconds = 8.0 * Mods.inc Ctx.empty [ Named "PuppetMasterDuration" ] db / buffExpiry sheet
+            let mods =
+                [ Mod.inc (Damage AllDamage) (10.0 * effect) |> Mod.whenever (SkillIs(Tag "Command")); Mod.inc Speed (3.0 * effect) ]
+                |> List.map (Mod.from "Puppet Master")
+            [ { Hook = OnUse; Filter = WithTag(Tag "Command"); Chance = min 100.0 chance; Reaction = GrantBuff("Puppet Master", seconds, stacks, mods) } ]
+
+    let archonOfUndeathName = "Archon of Undeath"
+
+    /// Archon of Undeath (BuffTemplates ArchonUndeath): minions deal 25% more damage and their
+    /// Command skills have 200% more cooldown recovery, x increased Archon effect, for an
+    /// Archon's 10 seconds (x increased Archon duration); then no Archon can be gained for the
+    /// recovery period (20 s, see `elementalArchon`). Gained by chance "when you use a Command
+    /// Skill" or "when you create an Offering". The skill that stands for gaining it has the
+    /// buff's time and the recovery as its cooldown; its use puts the buff on every minion.
+    let archonOfUndeath (sheet: CharacterSheet) (stat: string) (filter: SkillFilter) : (Skill * Rule list) option =
+        let db = ModDb.ofList sheet.Mods
+        let chance = Mods.sumBase Ctx.empty [ Named stat ] db
+        if chance <= 0.0 then None
+        else
+            let effect = Mods.inc Ctx.empty [ Named "ArchonEffect" ] db
+            let seconds = 10.0 * Mods.inc Ctx.empty [ Named "ArchonDuration" ] db / buffExpiry sheet
+            let recovery = if Mods.flag Ctx.empty (Named "ArchonNoRecovery") db then 0.0 else 20.0 / Mods.inc Ctx.empty [ Named "ArchonRecoveryFaster" ] db
+            let mods =
+                [ Mod.more (Damage AllDamage) (25.0 * effect); Mod.more CooldownRecovery (200.0 * effect) |> Mod.whenever (SkillIs(Tag "Command")) ]
+                |> List.map (Mod.from archonOfUndeathName)
+            let skill = { Skill.make archonOfUndeathName [ Triggered ] with BaseCrit = 0.0; Hits = []; Cooldown = Some(seconds + recovery) }
+            Some(
+                skill,
+                [ { Hook = OnUse; Filter = filter; Chance = min 100.0 chance; Reaction = TriggerSkill archonOfUndeathName }
+                  { Hook = OnUse; Filter = Called archonOfUndeathName; Chance = 100.0; Reaction = GrantMinionBuff(archonOfUndeathName, seconds, mods) } ])
+
     let minions (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) : Actor list * string list =
         let charMods = ModDb.ofList sheet.Mods
         // as many of each as the character's Spirit pays for
@@ -2228,6 +2272,16 @@ module Behaviours =
                                   Delivery = AreaAtTarget 20.0 } ]
                     // what the minions do on a hit ("Minions have x% chance to inflict Withered on Hit")
                     let rules = keywordRules { sheet with Mods = minionMods } ordered
+                    // what using a Command skill gives: Puppet Master's stacks to each minion that
+                    // commands, an Archon of Undeath to all (rolled by the first of the gem's
+                    // minions: the player commands them together)
+                    let commands = ordered |> List.exists (fun s -> s.Tags.Contains(Tag "Command"))
+                    let rules = if commands then rules @ puppetMaster sheet else rules
+                    let archon = if commands then archonOfUndeath sheet "ArchonOfUndeathOnCommand" (WithTag(Tag "Command")) else None
+                    let withArchon (i: int) (a: Actor) =
+                        match archon with
+                        | Some (skill, rs) when i = 1 -> { a with Skills = a.Skills @ [ skill ]; Rules = a.Rules @ rs }
+                        | _ -> a
                     // a minion without any damaging skill (a healer) simply doesn't fight
                     if ordered.IsEmpty then [], []
                     else
@@ -2242,7 +2296,7 @@ module Behaviours =
                         let extra = match body with Some b -> explosion b | None -> []
                         let acts = ordered |> List.map (fun s -> Actor.always s.Name)
                         let most = most + int (Mods.sumBase Ctx.empty [ Named "TemporaryMinionLimit" ] (ModDb.ofList minionMods))
-                        [ for i in 1 .. most -> { Actor.make (sprintf "%s %d" m.Name i) minionMods (ordered @ extra) with Body = body; Pool = Some gem.Name; Rules = rules; Rotation = acts } ],
+                        [ for i in 1 .. most -> { Actor.make (sprintf "%s %d" m.Name i) minionMods (ordered @ extra) with Body = body; Pool = Some gem.Name; Rules = rules; Rotation = acts } |> withArchon i ],
                         (if summonedBy raw then [] else [ sprintf "%s: what summons its minions is not simulated" gem.Name ])
                     | None ->
                         // killed, it is revived after the gem's revive time
@@ -2255,7 +2309,7 @@ module Behaviours =
                         let acts = ordered |> List.map (fun s -> Actor.always s.Name)
                         [ for i in 1 .. count ->
                             let name = if count > 1 then sprintf "%s %d" m.Name i else m.Name
-                            { Actor.make name minionMods (ordered @ extra) with Body = Some body; Rules = rules; Rotation = acts } ],
+                            { Actor.make name minionMods (ordered @ extra) with Body = Some body; Rules = rules; Rotation = acts } |> withArchon i ],
                         []))
         |> List.concat
         |> List.unzip
@@ -2597,6 +2651,25 @@ module Behaviours =
           "ProjectileAttackHitInPast8Seconds", (fun s -> rule s OnHit (WithTags([ Attack; Projectile ], [])) 8.0 1) ]
         |> List.filter (fun (state, _) -> asked.Contains state)
         |> List.map (fun (state, make) -> make state)
+
+    /// A spear that lodges and "explodes after a delay" (Explosive Spear): its Explosion strikes
+    /// the detonation time after the spear's own hit ("base_skill_detonation_time", x Fast
+    /// Forward's less, x increased Detonation Time). The explosion with a Frenzy Charge
+    /// ("explode immediately") is another part and does not wait.
+    let detonation (db: GameDb) (charMods: ModDb) (setup: GemSetup) (skill: Skill) : Skill =
+        match Gems.data db setup.Gem with
+        | Some d when d.Types.Contains "DetonatesAfterTime" && Gems.lodged.Contains d.Name ->
+            let raw = Gems.rawStats db charMods setup
+            let sum id = raw |> List.filter (fun (k, _) -> k = id) |> List.sumBy snd
+            let ctx = { Ctx.empty with SkillTags = skill.Tags; SkillName = skill.Name }
+            let seconds =
+                sum "base_skill_detonation_time" / 1000.0 * (1.0 + sum "support_fast_forward_detonation_time_+%_final" / 100.0)
+                * Mods.inc ctx [ Named "DetonationTime" ] (ModDb.addList skill.Mods charMods)
+            if seconds <= 0.0 then skill
+            else
+                { skill with
+                    Parts = skill.Parts |> List.map (fun p -> if p.Name.EndsWith ": Explosion" then { p with Mods = p.Mods @ [ Mod.base' (Named "PartDelay") seconds |> Mod.from "detonation time" ] } else p) }
+        | _ -> skill
 
     /// "for each different Warcry you've used Recently", "for each different Spell you've Cast
     /// in the last eight seconds", "for every different Grenade fired in the past 8 seconds",

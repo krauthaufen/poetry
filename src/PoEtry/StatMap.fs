@@ -1495,6 +1495,13 @@ module StatMap =
         // "Modifiers to Cast Speed / Attack Speed also affect this Skill's cost": the cost by the
         // second of a channel (the engines: what a use costs)
         | "cast_speed_modifiers_apply_to_over_time_cost" | "attack_speed_modifiers_apply_to_over_time_cost" -> one (Mod.flag (Named "CostOverTimeWithSpeed"))
+        // Puppet Master and Archon of Undeath (Behaviours.puppetMaster, archonOfUndeath)
+        | "surpassing_chance_%_to_gain_1_puppeteer_stack_on_using_command_skill" -> one (Mod.base' (Named "PuppetMasterOnCommand") v)
+        | "max_puppet_master_stacks_+" -> one (Mod.base' (Named "PuppetMasterMaxStacks") v)
+        | "puppet_master_effect_+%" -> one (Mod.inc (Named "PuppetMasterEffect") v)
+        | "puppet_master_duration_+%" -> one (Mod.inc (Named "PuppetMasterDuration") v)
+        | "chance_%_to_gain_archon_of_undeath_on_using_command_skill" -> one (Mod.base' (Named "ArchonOfUndeathOnCommand") v)
+        | "chance_%_to_gain_archon_of_undeath_when_you_create_an_offering" -> one (Mod.base' (Named "ArchonOfUndeathOnOffering") v)
         // "+N to Level of all Corrupted Skill Gems / Corrupted Spell Skill Gems" (Setup.corruptedLevels)
         | "corrupted_skill_gem_level_+" -> one (Mod.base' (Named "CorruptedGemLevel") v)
         | "corrupted_spell_skill_gem_level_+" -> one (Mod.base' (Named "CorruptedSpellGemLevel") v)
@@ -1697,7 +1704,15 @@ module StatMap =
         | "support_blazing_crits_gain_%_fire_damage_with_attacks_on_critical_hit" | "support_blazing_crits_base_duration_ms" -> Some Structural
         // a detonation after a time: read where a skill's hit waits for it (Gems: grenades, Frost
         // Bomb; Behaviours.toxicDomain), elsewhere not played
-        | "base_skill_detonation_time" | "support_fast_forward_detonation_time_+%_final" | "skill_detonation_time_+%" -> Some(Unsimulated "detonation time")
+        | "base_skill_detonation_time" | "support_fast_forward_detonation_time_+%_final" -> Some(Unsimulated "detonation time")
+        // "X% increased Detonation Time" (Gems.fuse: a grenade's fuse; Behaviours.detonation: a lodged spear's)
+        | "skill_detonation_time_+%" -> one (Mod.inc (Named "DetonationTime") v)
+        // how many of a part that waits to be set off can wait at once (the engines: `Sim.waitLimit`):
+        // "Maximum of N active Bolts" (Stormblast Bolts' explosions wait for a Detonator), "Limit N
+        // Spikes" (Earthshatter's wait for a warcry), the spears of Rapid Assault a Detonator sets
+        // off, Forge Hammer's fissures that wait for a warcry
+        | "stormblast_bolts_maximum_active_bolt_count" | "spike_slam_max_spikes" | "rapid_assault_attached_spear_limit" | "forge_hammer_base_maximum_number_of_fissures" ->
+            one (Mod.base' (Named "WaitLimit") v)
         // how a skill is aimed, queued and animated, and markers the game keeps for its own
         // texts: a fight that plays uses by their times and hits by their places has nothing
         // these could change

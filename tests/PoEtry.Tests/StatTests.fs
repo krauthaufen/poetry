@@ -1932,7 +1932,7 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         // what the engine does not read stays listed
         equal (box true) (box (List.contains "volcano_delay_between_slams_ms" volcano))
         equal (box false) (box (List.contains "Hazard" (Gems.unmodelledTypes db.Value "Spearfield")))
-        equal (box true) (box (List.contains "DetonatesAfterTime" (Gems.unmodelledTypes db.Value "Explosive Spear")))
+        equal (box true) (box (List.contains "CreatesGroundEffect" (Gems.unmodelledTypes db.Value "Explosive Spear")))
         equal (box false) (box (List.contains "Orb" (Gems.unmodelledTypes db.Value "Orb of Storms"))))
 
     test "stats: elemental conversion, consumed states, culling under its other id, states of a while ago, spell increases for attacks" (fun () ->
@@ -2330,3 +2330,85 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         equal (box [ PerStack("Different:Warcry:4", 1.0) ]) (box (mods "damage_+%_per_different_warcry_used_recently" 5.0).Head.Conds)
         equal (box (GainAs(Physical, Fire), 4.0)) (box (let m = (mods "non_skill_base_all_damage_%_to_gain_as_fire_per_different_grenade_type_fired_in_past_8_seconds" 4.0).Head in m.Stat, m.Value))
         equal (box [ PerStack("Different:Ammo:10", 1.0); SkillIs Crossbow ]) (box (mods "crossbow_damage_+%_per_ammo_type_fired_in_past_10_seconds" 5.0).Head.Conds))
+
+    test "what waits to be set off waits up to the skill's own limit; a lodged spear's explosion comes after its detonation time" (fun () ->
+        let foe = { EnemyDef.atLevel 83 1e9 with Mods = []; Attack = None }
+        let hit name dmg tags = { Skill.make name tags with BaseDamage = Map.ofList [ Physical, Range.fixedAt dmg ]; BaseCrit = 0.0 }
+        // a bolt whose explosion waits for a Detonator, and a Detonator with a cooldown of 5.5 s:
+        // it is used at 0 (nothing waits) and at 6, after five bolts. With "Maximum of 3 active
+        // Bolts" three explosions go off, without it all five
+        let bolts (limit: Mod list) =
+            let explosion = { hit "Bolt: Explosion" 100.0 [ Attack ] with Mods = Mod.flag (Named "DetonatedBy:Type:Detonator") :: limit }
+            let bolt = { hit "Bolt" 10.0 [ Attack ] with Parts = [ explosion ] }
+            let spark = { hit "Spark" 1.0 [ Attack; Tag "Type:Detonator" ] with Cooldown = Some 5.5 }
+            let player = { Actor.make "Player" [ Mod.base' (Named "Accuracy") 1e9 ] [ spark; bolt ] with Rotation = [ Actor.always "Spark"; Actor.always "Bolt" ] }
+            Fight.single foe player 7.5
+        equal 5 (count (Sim.run (bolts []) 1u) "hits:Bolt: Explosion")
+        equal 3 (count (Sim.run (bolts (mods "stormblast_bolts_maximum_active_bolt_count" 3.0)) 1u) "hits:Bolt: Explosion")
+        equal (box (mods "spike_slam_max_spikes" 6.0)) (box [ Mod.base' (Named "WaitLimit") 6.0 ])
+        same (bolts (mods "stormblast_bolts_maximum_active_bolt_count" 3.0)) seeds
+        // a spear of 1 s a throw whose explosion comes 2.5 s after it lands: in 6.2 s six spears
+        // land (at 1 .. 6) and the first three have exploded (at 3.5, 4.5, 5.5)
+        let lodged =
+            let explosion = { hit "Spear: Explosion" 100.0 [ Attack ] with Mods = [ Mod.base' (Named "PartDelay") 2.5 ] }
+            let player = { Actor.make "Player" [ Mod.base' (Named "Accuracy") 1e9 ] [ { hit "Spear" 10.0 [ Attack ] with Parts = [ explosion ] } ] with Rotation = [ Actor.always "Spear" ] }
+            Fight.single foe player 6.2
+        let o = Sim.run lodged 1u
+        equal 6 (count o "hits:Spear")
+        equal 3 (count o "hits:Spear: Explosion")
+        same lodged seeds
+        // the gem: 2.5 s, and 30% less with Fast Forward if the support says so
+        let b = { blank with Level = 90; Groups = [ group [ gem "Explosive Spear" ] ]; Items = [ "Weapon 1", "Rarity: Normal\nHardwood Spear\n" ] }
+        let c = load b Options.defaults
+        match Setup.pressed c Options.defaults "Explosive Spear" with
+        | Some p ->
+            let delays = p.Skill.Parts |> List.map (fun part -> part.Name, Sim.partDelay part)
+            equal (box [ "Explosive Spear: Explosion", 2.5; "Explosive Spear: Frenzy-Charged", 0.0 ]) (box delays)
+        | None -> failwith "Explosive Spear cannot be pressed"
+        equal (box ([]: string list)) (box (Gems.unmodelledTypes db.Value "Explosive Spear" |> List.filter (fun t -> t = "DetonatesAfterTime")))
+        equal (box (Mod.inc (Named "DetonationTime") 20.0)) (box (mods "skill_detonation_time_+%" 20.0).Head))
+
+    test "Puppet Master's stacks from the minions' Command skills; an Archon of Undeath for ten seconds and its recovery" (fun () ->
+        let foe = { EnemyDef.atLevel 83 1e9 with Mods = []; Attack = None }
+        let hit name dmg seconds tags = { Skill.make name tags with BaseDamage = Map.ofList [ Physical, Range.fixedAt dmg ]; BaseCrit = 0.0; BaseTime = seconds }
+        let sheet (ms: Mod list) = { (load blank Options.defaults).Sheet with Mods = ms }
+        let idle = { Actor.make "Player" [] [] with Rotation = [] }
+        let sure = [ Mod.base' (Named "Accuracy") 1e9 ]
+        let dealt (o: Outcome) (k: string) = Map.tryFind k o.DamageBy |> Option.defaultValue 0.0
+        // Puppet Master, 100% to gain a stack with every command, +1 to maximum stacks, 50%
+        // increased effect: 15% increased damage with Command skills a stack, up to 6. The n-th
+        // command hits with min(n, 6) stacks (its own stack is gained as it starts)
+        let puppet = Behaviours.puppetMaster (sheet (mods "surpassing_chance_%_to_gain_1_puppeteer_stack_on_using_command_skill" 100.0 @ mods "max_puppet_master_stacks_+" 1.0 @ mods "puppet_master_effect_+%" 50.0))
+        match puppet with
+        | [ { Hook = OnUse; Chance = 100.0; Reaction = GrantBuff ("Puppet Master", seconds, 6, ms) } ] ->
+            near 8.0 seconds
+            equal (box [ Damage AllDamage, 15.0; Speed, 4.5 ]) (box (ms |> List.map (fun m -> m.Stat, m.Value)))
+        | other -> failwithf "unexpected %A" other
+        equal 0 (Behaviours.puppetMaster (sheet [])).Length
+        let commanded =
+            let minion = { Actor.make "Brute" sure [ hit "Brute: Smash" 100.0 1.0 [ Attack; Tag "Command" ]; hit "Brute: Jab" 100.0 1.0 [ Attack ] ] with Rotation = [ Actor.always "Brute: Smash" ]; Rules = puppet }
+            { Fight.single foe idle 12.2 with Minions = [ minion ] }
+        let o = Sim.run commanded 1u
+        let n = count o "hits:Brute: Smash"
+        equal (box true) (box (n >= 12))
+        near ([ 1 .. n ] |> List.sumBy (fun k -> 100.0 * (1.0 + 0.15 * float (min k 6)))) (dealt o "Brute: Smash (hit)")
+        same commanded seeds
+        // Archon of Undeath, 100% on a command: 25% more damage for all minions for 10 s, then
+        // 20 s in which none is gained. A commander that hits every 0.7 s and a follower every
+        // 0.9 s, 20.2 s: 14 of 28 and 11 of 22 hits fall into the ten seconds
+        let undeath = Behaviours.archonOfUndeath (sheet (mods "chance_%_to_gain_archon_of_undeath_on_using_command_skill" 100.0)) "ArchonOfUndeathOnCommand" (WithTag(Tag "Command"))
+        match undeath with
+        | Some (skill, rules) ->
+            near 30.0 skill.Cooldown.Value
+            let commander = { Actor.make "Mage" sure [ hit "Mage: Bomb" 100.0 0.7 [ Spell; Tag "Command" ]; skill ] with Rotation = [ Actor.always "Mage: Bomb" ]; Rules = rules }
+            let follower = { Actor.make "Warrior" sure [ hit "Warrior: Slash" 100.0 0.9 [ Attack ] ] with Rotation = [ Actor.always "Warrior: Slash" ] }
+            let f = { Fight.single foe idle 20.2 with Minions = [ commander; follower ] }
+            let o = Sim.run f 1u
+            equal 1 (count o "trigger:Archon of Undeath")
+            near (14.0 * 125.0 + 14.0 * 100.0) (dealt o "Mage: Bomb (hit)")
+            near (11.0 * 125.0 + 11.0 * 100.0) (dealt o "Warrior: Slash (hit)")
+            same f seeds
+        | None -> failwith "no Archon of Undeath"
+        equal (box true) (box (Behaviours.archonOfUndeath (sheet []) "ArchonOfUndeathOnCommand" AnySkill).IsNone)
+        equal (box (Named "ArchonOfUndeathOnOffering")) (box (mods "chance_%_to_gain_archon_of_undeath_when_you_create_an_offering" 20.0).Head.Stat)
+        equal (box (Mod.inc (Named "PuppetMasterDuration") 30.0)) (box (mods "puppet_master_duration_+%" 30.0).Head))

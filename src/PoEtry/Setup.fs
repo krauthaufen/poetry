@@ -495,7 +495,7 @@ module Setup =
                         @ Behaviours.oilGround db charMods setup s @ Behaviours.whirlwind db setup s
                     let rules = cryRules @ biteRules @ (match lasting with Some (_, rs) -> rs | None -> []) @ Behaviours.useRules db charMods setup s.Name o.Pickup @ Behaviours.buffRules db charMods setup s @ Behaviours.totemPlacement db charMods setup s @ curseRules
                     let grants = Behaviours.verisiumGrant db charMods setup
-                    let s = Behaviours.applyObserved s |> Behaviours.lifeCost charMods
+                    let s = Behaviours.applyObserved s |> Behaviours.lifeCost charMods |> Behaviours.detonation db charMods setup
                     // Entangle: the vines are a skill of their own, on a clock, against what a fissure hit
                     let vines = Behaviours.entangle db charMods setup s
                     let s = match vines with Some (main, _, _, _) -> main | None -> s
@@ -734,6 +734,9 @@ module Setup =
         // Thorns: the hit that retaliates when a monster hits the player
         let thorns = Behaviours.thorns sheet
         let heraldSkills = heraldSkills @ (thorns |> Option.map fst |> Option.toList)
+        // "X% to gain Archon of Undeath when you create an Offering"
+        let undeath = Behaviours.archonOfUndeath sheet "ArchonOfUndeathOnOffering" (WithTag(Tag "Type:Offering"))
+        let heraldSkills = heraldSkills @ (undeath |> Option.map fst |> Option.toList)
         // Arctic Armour: the burst a melee hit on the player sets off
         let arctic = Behaviours.arcticArmour db sheet c.Build
         let heraldSkills = heraldSkills @ (match arctic with Some (s, _, _, _) -> [ s ] | None -> [])
@@ -813,6 +816,7 @@ module Setup =
                 @ Behaviours.totemRecently sheet pressedSkills
                 @ Behaviours.recentStates sheet pressedSkills @ Behaviours.intimidateOnImmobilise sheet @ Behaviours.debilitateOnWarcry sheet @ Behaviours.fearIncarnate sheet pressedSkills
                 @ (thorns |> Option.map snd |> Option.toList)
+                @ (undeath |> Option.map snd |> Option.defaultValue [])
                 @ (match arctic with Some (_, r, _, _) -> r | None -> [])
                 @ Behaviours.scavengedPlating db sheet c.Build
                 @ Behaviours.fullBreakRules pressedSkills

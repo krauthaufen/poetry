@@ -951,6 +951,10 @@ module Flat =
           /// A part that waits until another skill sets it off; the waiting parts of other
           /// skills that a use of this skill sets off, and where that is counted.
           Waits: bool
+          /// How many of it can wait at once (`Sim.waitLimit`), and how long after the skill's
+          /// own hit it strikes (`Sim.partDelay`).
+          WaitLimit: int
+          PartDelay: float
           SetsOff: int[]
           CDetonated: int
           /// The Glory and Combo the skill needs to be used (counter, amount), and the stacks
@@ -2021,6 +2025,8 @@ module Flat =
                       Takes = (match named' "Takes:" with Some st -> statuses.Id st | None -> -1)
                       CTakes = (match named' "Takes:" with Some st -> counts.Id("consumed:" + st) | None -> -1)
                       Waits = (named' "DetonatedBy:").IsSome
+                      WaitLimit = Sim.waitLimit s
+                      PartDelay = Sim.partDelay s
                       SetsOff =
                         [| for o in actor.Skills do
                             for part in o.Parts do
@@ -4720,7 +4726,7 @@ module Flat =
                         let n = pi.SeqHits
                         for i in 1 .. n do
                             if pi.Passing then schedule s at EPassing part target mult (at - s.Time)
-                            else schedule s (if n = 1 then at else s.Time + (at - s.Time) * float i / float n) EStrike part target mult 0.0
+                            else schedule s ((if n = 1 then at else s.Time + (at - s.Time) * float i / float n) + (if part = sid then 0.0 else pi.PartDelay)) EStrike part target mult 0.0
             // what happens when the use lands: when its first hit is due, after that hit
             if first < infinity && p.OnLand.Length > 0 && p.OnLand |> Array.exists (fun r -> at r.Applies sid) then
                 schedule s first ELand sid target 0.0 0.0
@@ -4800,7 +4806,7 @@ module Flat =
                         let infusion = pi.OnlyInfused
                         if (at s.A.BHas infusion) && (at s.A.BStacks infusion) > 1 then setBuff s infusion ((at s.A.BStacks infusion) - 1) (at s.A.BExpires infusion) (at s.A.BMods infusion)
                         else removeBuff s infusion
-                    elif pi.Waits && part >= 0 then put s.A.Waiting part (min 20 ((at s.A.Waiting part) + 1))
+                    elif pi.Waits && part >= 0 then put s.A.Waiting part (min pi.WaitLimit ((at s.A.Waiting part) + 1))
             // a detonator (or a warcry) sets off everything of that kind that waits
             // (how many wait is seen before any is set off: two parts of one name are each set
             // off for all that wait by that name)
