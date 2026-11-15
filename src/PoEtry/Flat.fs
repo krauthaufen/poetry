@@ -3861,7 +3861,7 @@ module Flat =
         | Status (Chill, magnitude, duration) ->
             addDebuff s e p.SChilled duration 1 [ Mod.base' (Named "ChillMagnitude") magnitude ]
         | Status (a, _, duration) -> addDebuff s e (at p.AilmentStatus (ailmentIndex a)) duration 1 []
-        | AddBuildup (a, pct) ->
+        | AddBuildup (a, pct, lasts) ->
             let ai = ailmentIndex a
             let had =
                 let had = (at e.Buildup ai)
@@ -3871,10 +3871,10 @@ module Flat =
             let total = had + pct
             if total >= 100.0 && not (at e.Has ((at p.AilmentStatus ai))) then
                 put e.Buildup ai (0.0)
-                addDebuff s e (at p.AilmentStatus ai) (Constants.buildupDuration a) 1 []
+                addDebuff s e (at p.AilmentStatus ai) lasts 1 []
                 let more, seconds = Constants.afterBuildup a
                 if more > 0.0 then
-                    addDebuff s e (at p.AilmentResistant ai) (Constants.buildupDuration a + seconds) 1 [ Mod.more (Named(Ailment.name a + "Threshold")) more ]
+                    addDebuff s e (at p.AilmentResistant ai) (lasts + seconds) 1 [ Mod.more (Named(Ailment.name a + "Threshold")) more ]
                 bump s (at p.CInflict ai)
             else e.Buildup.[ai] <- min total 100.0
 
@@ -5381,7 +5381,8 @@ module Flat =
                     * (if hasStatus ev (at p.AilmentStatus (ailmentIndex Daze)) then 1.5 else 1.0)
                 | _ -> source ev a un
             if enabled && dmg > 0.0 then
-                out.Add(AddBuildup(a, dmg * Constants.buildupScale a / nPoise n a * multQ ev (at qBuildup (ailmentIndex a)) * 100.0))
+                let lasts = match a with Freeze | Electrocute -> ailmentDuration ev a | _ -> Constants.buildupDuration a
+                out.Add(AddBuildup(a, dmg * Constants.buildupScale a / nPoise n a * multQ ev (at qBuildup (ailmentIndex a)) * 100.0, lasts))
         out
 
     /// Whether a hit inflicted the ailment, or (on a killing hit) built it up to the full.
@@ -5390,7 +5391,7 @@ module Flat =
         for k in 0 .. inflicted.Count - 1 do
             match inflicted.[k] with
             | Dot (x, _, _, _, _) | Status (x, _, _) -> if x = a then found <- true
-            | AddBuildup (x, pct) -> if x = a && (at e.Buildup (ailmentIndex x)) + pct >= 100.0 then found <- true
+            | AddBuildup (x, pct, _) -> if x = a && (at e.Buildup (ailmentIndex x)) + pct >= 100.0 then found <- true
         found
 
     /// Whether a hit ignited.
@@ -5759,13 +5760,13 @@ module Flat =
                     for k in 0 .. inflicted.Count - 1 do
                         let i = inflicted.[k]
                         // (a bar that this hit fills: the status is there after it and was not before)
-                        let had = match i with AddBuildup (a, _) -> at e.Has (at p.AilmentStatus (ailmentIndex a)) | _ -> true
+                        let had = match i with AddBuildup (a, _, _) -> at e.Has (at p.AilmentStatus (ailmentIndex a)) | _ -> true
                         inflict s e i
                         match i with
                         | Dot (a, _, _, _, _) | Status (a, _, _) ->
                             bump s (at p.CInflict (ailmentIndex a))
                             react s rng (at p.OnInflict (ailmentIndex a)) "" sid target
-                        | AddBuildup (a, _) ->
+                        | AddBuildup (a, _, _) ->
                             if not had && (at e.Has (at p.AilmentStatus (ailmentIndex a))) then react s rng (at p.OnInflict (ailmentIndex a)) "" sid target
                 // the skill's own damage over time: one instance per skill and type, the strongest stays
                 if not (dead || info.Dots.Length = 0) then
@@ -5884,7 +5885,7 @@ module Flat =
                                     let mutable full = false
                                     for j in 0 .. inflicted.Count - 1 do
                                         match inflicted.[j] with
-                                        | AddBuildup (Freeze, pct) -> if (at e.Buildup (ailmentIndex Freeze)) + pct >= 100.0 then full <- true
+                                        | AddBuildup (Freeze, pct, _) -> if (at e.Buildup (ailmentIndex Freeze)) + pct >= 100.0 then full <- true
                                         | _ -> ()
                                     full
                                 else (at e.SHas frozen) && not (at beforeHas frozen)

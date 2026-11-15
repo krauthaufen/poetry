@@ -1059,6 +1059,24 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         let swift = ModDb.ofList (mods "support_swift_affliction_skill_effect_and_damaging_ailment_duration_+%_final" 25.0)
         for a in [ Ignite; Bleed; Poison ] do near (Ailments.baseDuration a * 1.25) (Ailments.duration Ctx.empty swift a)
         near (Ailments.baseDuration Shock) (Ailments.duration Ctx.empty swift Shock)
+        // "increased Duration of Elemental Ailments": Ignite, Chill, Freeze, Shock, Electrocute; a stun and a pin keep theirs
+        let elemental = ModDb.ofList (mods "base_elemental_status_ailment_duration_+%" 50.0)
+        for a in [ Ignite; Chill; Shock ] do near (Ailments.baseDuration a * 1.5) (Ailments.duration Ctx.empty elemental a)
+        for a in [ Freeze; Electrocute ] do near (Constants.buildupDuration a * 1.5) (Ailments.buildupSeconds Ctx.empty elemental a)
+        for a in [ HeavyStun; Pin ] do near (Constants.buildupDuration a) (Ailments.buildupSeconds Ctx.empty elemental a)
+        near (Ailments.baseDuration Poison) (Ailments.duration Ctx.empty elemental Poison)
+        // a freeze lasts as long as "increased Freeze Duration" makes it, in a fight
+        let frozen ms =
+            let bolt = { Skill.make "Bolt" [ Spell ] with BaseDamage = Map.ofList [ Cold, { Min = 1e9; Max = 1e9 } ]; BaseTime = 0.25; BaseCrit = 0.0; Mods = ms }
+            let player = { Actor.make "Player" [] [ bolt ] with Rotation = [ { Use = "Bolt"; When = fun v -> v.Time < 0.1 } ] }
+            let fight = Fight.single { EnemyDef.atLevel 83 1e15 with Mods = []; Attack = None } player 20.0
+            fight, Map.tryFind "Frozen" (Sim.run fight 1u).Uptime |> Option.defaultValue 0.0
+        let plainFight, plain = frozen []
+        let longerFight, longer = frozen (mods "freeze_duration_+%" 50.0)
+        near (Constants.buildupDuration Freeze) plain
+        near (plain * 1.5) longer
+        same plainFight seeds
+        same longerFight seeds
         near 1.25 (Mods.mult Ctx.empty [ SkillDuration ] swift)
         near 0.7 (Mods.mult Ctx.empty [ SkillDuration ] (ModDb.ofList (mods "support_limit_skill_effect_duration_+%_final" -30.0)))
         // "20% increased Flask Effect Duration": the same amount over 1.2 times the time

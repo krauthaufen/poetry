@@ -7,8 +7,9 @@ type Inflict =
     | Dot of ailment: Ailment * damageType: DamageType * dps: float * duration: float * maxStacks: int
     /// A status with a magnitude (shock: % increased damage taken, chill: % slow, 0 for plain statuses).
     | Status of ailment: Ailment * magnitude: float * duration: float
-    /// Add buildup (percent of the full bar) towards freeze / electrocute / heavy stun / pin.
-    | AddBuildup of ailment: Ailment * percent: float
+    /// Add buildup (percent of the full bar) towards freeze / electrocute / heavy stun / pin,
+    /// and how long the status lasts if this fills the bar (`buildupSeconds`).
+    | AddBuildup of ailment: Ailment * percent: float * seconds: float
 
 module Ailments =
     /// Damage types each ailment scales from, and the type it deals.
@@ -66,6 +67,14 @@ module Ailments =
             | Poison -> Mods.override' ctx (Named "BasePoisonDuration") mods |> Option.defaultValue (baseDuration a)
             | _ -> baseDuration a
         baseD * Mods.mult ctx [ AilmentDuration(Some a); AilmentDuration None ] mods
+
+    /// How long a filled bar's status lasts: Freeze and Electrocute are ailments, which their
+    /// duration modifiers lengthen ("increased Freeze Duration on Enemies"); Heavy Stun and Pin
+    /// are not, and last the game's fixed time.
+    let buildupSeconds (ctx: Ctx) mods a =
+        match a with
+        | Freeze | Electrocute -> duration ctx mods a
+        | _ -> Constants.buildupDuration a
 
     let maxStacks (ctx: Ctx) mods a =
         1 + int (Mods.sumBase ctx [ AilmentStacks a ] mods)
@@ -164,7 +173,7 @@ module Ailments =
                   if enabled && dmg > 0.0 then
                       let pct =
                           dmg * Constants.buildupScale a / poise defender a * Mods.mult ctx [ Buildup a ] mods * 100.0
-                      yield AddBuildup(a, pct) ]
+                      yield AddBuildup(a, pct, buildupSeconds ctx mods a) ]
 
         damaging @ shock @ chill @ flat @ buildup
 

@@ -994,6 +994,9 @@ module StatMap =
             Some(Mods(Mod.more SkillDuration v :: (Ailment.damaging |> List.map (fun a -> Mod.more (AilmentDuration(Some a)) v))))
         // "X% increased Duration of Ignite, Shock and Chill on Enemies"
         | "ignite_shock_chill_duration_+%" -> Some(Mods([ Ignite; Shock; Chill ] |> List.map (fun a -> Mod.inc (AilmentDuration(Some a)) v)))
+        // "X% increased Duration of Elemental Ailments on Enemies": Ignite, Chill, Freeze, Shock, Electrocute
+        | "base_elemental_status_ailment_duration_+%" ->
+            Some(Mods([ Ignite; Chill; Freeze; Shock; Electrocute ] |> List.map (fun a -> Mod.inc (AilmentDuration(Some a)) v)))
         // "X% increased Flask Effect Duration": a life or mana flask's recovery takes longer, the amount the same
         | "flask_duration_+%" -> one (Mod.inc (Named "FlaskDuration") v)
         // "Banner Skills have X% increased Duration"

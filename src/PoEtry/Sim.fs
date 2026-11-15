@@ -1273,7 +1273,7 @@ module Sim =
             // the slow is read back by the monster's attack timing
             addDebuff target "Chilled" duration 1 [ Mod.base' (Named "ChillMagnitude") magnitude ] w
         | Status (a, _, duration) -> addDebuff target (Ailment.status a) duration 1 [] w
-        | AddBuildup (a, pct) ->
+        | AddBuildup (a, pct, seconds) ->
             let e = w.Enemies.[target]
             // the Heavy Stun bar drains once it has gone a while without any buildup
             let had =
@@ -1284,12 +1284,12 @@ module Sim =
             let total = had + pct
             if total >= 100.0 && not (Map.containsKey (Ailment.status a) e.Debuffs) then
                 updateEnemy target (fun e -> { e with Buildup = Map.add a 0.0 e.Buildup }) w
-                |> addDebuff target (Ailment.status a) (Constants.buildupDuration a) 1 []
+                |> addDebuff target (Ailment.status a) seconds 1 []
                 |> fun w ->
                     // afterwards the monster is much harder to freeze / electrocute / stun / pin again for a while
-                    let more, seconds = Constants.afterBuildup a
+                    let more, after = Constants.afterBuildup a
                     if more > 0.0 then
-                        addDebuff target (Ailment.name a + "Resistant") (Constants.buildupDuration a + seconds) 1
+                        addDebuff target (Ailment.name a + "Resistant") (seconds + after) 1
                             [ Mod.more (Named(Ailment.name a + "Threshold")) more ] w
                     else w
                 |> fun w -> { w with Counts = bump ("inflict:" + Ailment.name a) w.Counts }
@@ -2681,12 +2681,12 @@ module Sim =
                             (fun w i ->
                                 // (a bar that this hit fills: the enemy is Frozen, Electrocuted,
                                 // Heavily Stunned or Pinned by it, and was not before)
-                                let had = match i with AddBuildup (a, _) -> Map.containsKey (Ailment.status a) w.Enemies.[target].Debuffs | _ -> true
+                                let had = match i with AddBuildup (a, _, _) -> Map.containsKey (Ailment.status a) w.Enemies.[target].Debuffs | _ -> true
                                 let w = inflict target actor.Name i w
                                 match i with
                                 | Dot (a, _, _, _, _) | Status (a, _, _) ->
                                     react env rng actor (OnInflict a) skill (Some target) { w with Counts = bump ("inflict:" + Ailment.name a) w.Counts }
-                                | AddBuildup (a, _) when not had && Map.containsKey (Ailment.status a) w.Enemies.[target].Debuffs ->
+                                | AddBuildup (a, _, _) when not had && Map.containsKey (Ailment.status a) w.Enemies.[target].Debuffs ->
                                     react env rng actor (OnInflict a) skill (Some target) w
                                 | AddBuildup _ -> w)
                             w
@@ -2795,7 +2795,7 @@ module Sim =
                                 |> List.exists (fun i ->
                                     match i with
                                     | Dot (x, _, _, _, _) | Status (x, _, _) -> x = a
-                                    | AddBuildup (x, pct) -> x = a && (Map.tryFind x e.Buildup |> Option.defaultValue 0.0) + pct >= 100.0)
+                                    | AddBuildup (x, pct, _) -> x = a && (Map.tryFind x e.Buildup |> Option.defaultValue 0.0) + pct >= 100.0)
                             else after.ContainsKey (Ailment.status a) && not (before.ContainsKey (Ailment.status a))
                         actor.Metas
                         |> List.fold
@@ -2820,7 +2820,7 @@ module Sim =
                             match a with
                             | Freeze ->
                                 if dead then
-                                    inflicted |> List.exists (function AddBuildup (Freeze, pct) -> (Map.tryFind Freeze e.Buildup |> Option.defaultValue 0.0) + pct >= 100.0 | _ -> false)
+                                    inflicted |> List.exists (function AddBuildup (Freeze, pct, _) -> (Map.tryFind Freeze e.Buildup |> Option.defaultValue 0.0) + pct >= 100.0 | _ -> false)
                                 else (status w.Enemies.[target]).ContainsKey (Ailment.status Freeze) && not ((status e).ContainsKey (Ailment.status Freeze))
                             | _ -> inflicted |> List.exists (function Dot (x, _, _, _, _) | Status (x, _, _) -> x = a | _ -> false)
                         inf.Remnants
