@@ -3543,7 +3543,7 @@ module Flat =
     /// twice as much of it), a share of the rest from mana, life down to 1, then Runic Ward;
     /// death when nothing is left. Starts recoup, and drinks the life flask when life drops
     /// below half (`Sim.takeDamage`).
-    let private takeDamage (s: State) (pools: PlayerStats) (damage: Map<DamageType, float>) =
+    let private takeDamage (s: State) (fromHit: bool) (pools: PlayerStats) (damage: Map<DamageType, float>) =
         if alive s then
             let dmg = damage |> Map.toList |> List.sumBy snd
             if dmg > 0.0 then
@@ -3562,13 +3562,17 @@ module Flat =
                 let rest = rest - toLife
                 let toWard = min s.Ward rest
                 let rest = rest - toWard
-                let life = s.Life - toLife - rest
+                // life loss from a hit put off (`Sim.takeDamage`)
+                let deferred = fromHit && pools.DeferPrevent > 0.0
+                let life = s.Life - toLife * (if deferred then 1.0 - pools.DeferPrevent / 100.0 else 1.0) - rest
+                let later = if deferred then toLife * pools.DeferLose / 100.0 else 0.0
                 let recoups =
                     pools.Recoup
                     |> List.choose (fun (pool, types, pct) ->
                         let rate = match pool with "Life" -> pools.LifeRecoveryRate | "Mana" -> pools.ManaRecoveryRate | _ -> pools.ESRecoveryRate
                         let amount = (types |> List.sumBy (fun t -> Map.tryFind t damage |> Option.defaultValue 0.0)) * pct / 100.0 * rate
                         if amount > 0.0 then Some(s.Time + pools.RecoupSeconds, amount / pools.RecoupSeconds, poolOf pool) else None)
+                let recoups = (if later > 0.0 then [ s.Time + Constants.deferredLossSeconds, -later / Constants.deferredLossSeconds, poolOf "Life" ] else []) @ recoups
                 // (the lowest life counts the ward as it was before this damage)
                 s.MinLife <- min s.MinLife ((max 0.0 life + s.Ward) / max 1.0 (pools.Life + pools.Ward))
                 s.Mana <- s.Mana - fromMana
@@ -3657,6 +3661,8 @@ module Flat =
             s.Ward <- (if s.Ward >= v.Ward then s.Ward else min v.Ward (s.Ward + v.WardRegen * dt))
             if not s.Recoups.IsEmpty && s.Recoups |> List.exists (fun (until, _, _) -> not (until > s.Time)) then
                 s.Recoups <- s.Recoups |> List.filter (fun (until, _, _) -> until > s.Time)
+            // (life lost over time down to nothing: dead)
+            if s.Life <= 0.0 && alive s then s.Died <- s.Time
             if not s.Burning.IsEmpty then
                 let dots =
                     s.Burning
@@ -3666,7 +3672,7 @@ module Flat =
                 // damage over time keeps energy shield from recharging
                 if burning then
                     s.LastHit <- s.Time
-                    takeDamage s v dots
+                    takeDamage s false v dots
         | _ -> ()
 
     let private gainMana (s: State) (v: PlayerStats) (slot: int) (amount: float) =
@@ -4941,7 +4947,7 @@ module Flat =
                         let burn = (pools.Life + pools.EnergyShield) * p.InfernalBurn / 100.0 * (1.0 - fireRes / 100.0)
                         s.InfernalFlame <- 0.0
                         bump s p.CInfernalBurn
-                        takeDamage s pools (Map.ofList [ Fire, burn ])
+                        takeDamage s false pools (Map.ofList [ Fire, burn ])
                     else s.InfernalFlame <- flame
                     useNow s rng sid t
                 elif s.Mana < cost - 1e-9 * max 1.0 cost && cost > pools.Mana then
@@ -6551,7 +6557,7 @@ module Flat =
                             bump s p.CMinionTook
                             hurtMinion s rng guard (taken |> Map.map (fun _ d -> d * k))
                             taken |> Map.map (fun _ d -> d * (1.0 - k))
-                    takeDamage s pools taken
+                    takeDamage s true pools taken
                     if preventedRecoup > 0.0 then s.Recoups <- (s.Time + v.RecoupSeconds, preventedRecoup / v.RecoupSeconds, PES) :: s.Recoups
                     s.LastHit <- s.Time
                     gainRage s p.RageWhenHit

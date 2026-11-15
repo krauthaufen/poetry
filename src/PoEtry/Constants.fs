@@ -238,6 +238,9 @@ module Constants =
     /// the line each. Not in the data of this game. A guess.
     let forkAngle = 60.0
 
+    /// Life loss from hits that is prevented and then lost "over 4 seconds" (stat descriptions).
+    let deferredLossSeconds = 4.0
+
     /// "Shocked Ground ... lasts 6 seconds by default" (keyword text, poe2db).
     let shockedGroundSeconds = 6.0
 

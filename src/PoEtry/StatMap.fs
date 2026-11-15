@@ -1210,6 +1210,11 @@ module StatMap =
         | "minions_get_amulet_stats_instead_of_you" | "keystone_ancestral_bond" ->
             Some(Unsimulated "minions / allies")
         | "keystone_bulwark" -> Some(Unsimulated "movement")
+        // "When taking damage from Hits, 20% of Life Loss is prevented, then 150% of Life Loss
+        // prevented this way is Lost over 4 seconds"; "X% of Life Loss from Hits is prevented,
+        // then that much Life is lost over 4 seconds instead"
+        | "keystone_amanamus_defiance" -> Some(Mods [ Mod.base' (Named "DeferLifeLossPrevent") 20.0; Mod.base' (Named "DeferLifeLossLose") 30.0 ])
+        | "lose_%_of_life_loss_over_4_seconds_instead" -> Some(Mods [ Mod.base' (Named "DeferLifeLossPrevent") v; Mod.base' (Named "DeferLifeLossLose") v ])
         // "X% chance on Shocking Enemies to create Shocked Ground" (Behaviours.shockedGround)
         | "chance_%_to_create_shocking_ground_on_shock" -> one (Mod.base' (Named "ShockedGroundOnShock") v)
         // Herald of Blood's explosion: "partially based on their accumulated Blood Loss", "has a

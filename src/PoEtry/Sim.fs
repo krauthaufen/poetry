@@ -1052,7 +1052,7 @@ module Sim =
     /// twice as much of it), a share of the rest from mana ("damage taken from mana before
     /// life"), life down to 1, then Runic Ward; death when nothing is left. Starts recoup,
     /// and drinks the life flask when life drops below half.
-    let private takeDamage (pools: PlayerStats) (damage: Map<DamageType, float>) (w: World) =
+    let private takeDamage (fromHit: bool) (pools: PlayerStats) (damage: Map<DamageType, float>) (w: World) =
         match w.Player with
         | Some p when p.Died.IsNone ->
             let dmg = damage |> Map.toList |> List.sumBy snd
@@ -1073,13 +1073,17 @@ module Sim =
             let rest = rest - toLife
             let toWard = min p.Ward rest
             let rest = rest - toWard
-            let life = p.Life - toLife - rest
+            // life loss from a hit put off: a share prevented, a share lost over 4 s (a negative recoup)
+            let deferred = fromHit && pools.DeferPrevent > 0.0
+            let life = p.Life - toLife * (if deferred then 1.0 - pools.DeferPrevent / 100.0 else 1.0) - rest
+            let later = if deferred then toLife * pools.DeferLose / 100.0 else 0.0
             let recoups =
                 pools.Recoup
                 |> List.choose (fun (pool, types, pct) ->
                     let rate = match pool with "Life" -> pools.LifeRecoveryRate | "Mana" -> pools.ManaRecoveryRate | _ -> pools.ESRecoveryRate
                     let amount = (types |> List.sumBy (fun t -> Map.tryFind t damage |> Option.defaultValue 0.0)) * pct / 100.0 * rate
                     if amount > 0.0 then Some(w.Time + pools.RecoupSeconds, amount / pools.RecoupSeconds, pool) else None)
+            let recoups = (if later > 0.0 then [ w.Time + Constants.deferredLossSeconds, -later / Constants.deferredLossSeconds, "Life" ] else []) @ recoups
             let p =
                 { p with
                     Mana = p.Mana - fromMana
@@ -1170,7 +1174,12 @@ module Sim =
                                 // damage over time keeps energy shield from recharging
                                 LastHit = (if burning then w.Time else p.LastHit)
                                 ManaGained = gained } }
-            if burning then takeDamage v dots w else w
+            // (life lost over time down to nothing: dead)
+            let w =
+                match w.Player with
+                | Some p when p.Life <= 0.0 && p.Died.IsNone -> { w with Player = Some { p with Died = Some w.Time } }
+                | _ -> w
+            if burning then takeDamage false v dots w else w
         | _ -> w
 
     let private gainMana (v: PlayerStats) source amount (w: World) =
@@ -2273,7 +2282,7 @@ module Sim =
                         let fireRes = Map.tryFind Fire v.Resist |> Option.defaultValue 0.0
                         let burn = (v.Life + v.EnergyShield) * Mods.sumBase Ctx.empty [ Named "InfernalFlameBurn" ] (ModDb.ofList actor.Mods) / 100.0 * (1.0 - fireRes / 100.0)
                         { w with Player = Some { p with InfernalFlame = 0.0 }; Counts = bump "infernal flame burn" w.Counts }
-                        |> takeDamage v (Map.ofList [ Fire, burn ])
+                        |> takeDamage false v (Map.ofList [ Fire, burn ])
                     else { w with Player = Some { p with InfernalFlame = flame } }
                 go w
             | Some v, Some p when p.Mana < cost - 1e-9 * max 1.0 cost && cost > v.Mana ->
@@ -3309,7 +3318,7 @@ module Sim =
                         | None -> taken, w
                     let p = w.Player |> Option.defaultValue p
                     let w = if w.Tracing then { w with Shown = Hurt(w.Time, name, taken |> Map.fold (fun s _ v -> s + v) 0.0) :: w.Shown } else w
-                    let w = takeDamage pools taken { w with Player = Some p } |> fun w -> { w with Player = w.Player |> Option.map (fun p -> { p with LastHit = w.Time }) }
+                    let w = takeDamage true pools taken { w with Player = Some p } |> fun w -> { w with Player = w.Player |> Option.map (fun p -> { p with LastHit = w.Time }) }
                     let w =
                         if preventedRecoup > 0.0 then
                             { w with Player = w.Player |> Option.map (fun p -> { p with Recoups = (w.Time + v.RecoupSeconds, preventedRecoup / v.RecoupSeconds, "ES") :: p.Recoups }) }

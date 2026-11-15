@@ -967,6 +967,37 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         if poison out <= poison (Sim.run (fight false) 1u) + 1.0 then failwith "the poison did not go on"
         same (fight true) seeds)
 
+    // ---- life loss from hits put off ----
+
+    test "Amanamu's Defiance and life lost over 4 seconds instead: a share of a hit's life loss prevented, a share lost over 4 s" (fun () ->
+        let mods = mods "keystone_amanamus_defiance" 1.0
+        let v = (load { blank with ExtraLines = [ "When taking damage from Hits, 20% of Life Loss is prevented, then 150% of Life Loss prevented this way is Lost over 4 seconds" ] } Options.defaults).Vitals
+        equal (box 2) (box mods.Length)
+        near 20.0 v.DeferPrevent
+        near 30.0 v.DeferLose
+        let w = (load { blank with ExtraLines = [ "10% of Life Loss from Hits is prevented, then that much Life is lost over 4 seconds instead" ] } Options.defaults).Vitals
+        near 10.0 w.DeferPrevent
+        near 10.0 w.DeferLose
+        // one hit of 250 on 300 life: 50 left; with 20% put off, 100 left, then what is lost over 4 s
+        let brute =
+            { EnemyDef.make Rarity.defaults 70 Unique "brute" (Vec.make 5.0 0.0) with
+                Life = 1e9; Mods = []
+                Attack = Some { Interval = 100.0; Damage = Map.ofList [ Physical, 250.0 ]; Accuracy = 1e9; Range = 20.0; CritChance = 0.0; Melee = true } }
+        let bolt = { Skill.make "Bolt" [ Spell ] with BaseDamage = Map.ofList [ Chaos, { Min = 1.0; Max = 1.0 } ]; BaseTime = 0.5 }
+        let fight prevent lose =
+            let vitals = { PlayerStats.basic 300.0 0.0 with StunThreshold = 1e9; AilmentThreshold = 1e9; DeferPrevent = prevent; DeferLose = lose }
+            Fight.single brute { Actor.make "Player" [] [ bolt ] with Vitals = Some vitals } 120.0
+        let died f = (Sim.run f 1u).Died
+        equal (box None) (box (died (fight 0.0 0.0)))
+        // 75 more lost: 25 left
+        equal (box None) (box (died (fight 20.0 30.0)))
+        // 250 more lost over 4 s: dead within them
+        match died (fight 20.0 100.0) with
+        | Some t -> if t > 105.0 then failwithf "died at %f" t
+        | None -> failwith "alive"
+        same (fight 20.0 30.0) seeds
+        same (fight 20.0 100.0) seeds)
+
     // ---- Scarred Faith ----
 
     test "Scarred Faith: prevented physical damage recouped as energy shield per enemy power; no regeneration; none above armour" (fun () ->
