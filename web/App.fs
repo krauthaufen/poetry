@@ -311,7 +311,7 @@ type Model =
       Sharing : string
       /// What a rotation's conditions can count besides what the fight begins with: the infusions the skills consume.
       Countable : (string * int) list
-      /// When the fight's picture was last drawn anew (the frame's time; it is drawn 20 times a second).
+      /// When the fight's picture was last drawn anew (the frame's time; it is drawn 15 times a second).
       Drawn : float
       NewOf : string
       /// Passives bought with weapon set points: the larger of the two sets (they come out of the same points).
@@ -624,15 +624,18 @@ let private warming (m : Model) : string =
 /// as it is fought.
 let private pace (m : Model) = 1.0
 
+/// (the picture's triangles have no texture: one coordinate for all their corners)
+let private noUv = V2f (0.0f, 0.0f)
+
 let private disc (c : V2d) (r : float) (z : float) : V3f list =
-    let n = 20
+    let n = 16
     let pt (i : int) = let a = 6.283185307 * float i / float n in V3f (float32 (c.X + r * cos a), float32 (c.Y + r * sin a), float32 z)
     let mid = V3f (float32 c.X, float32 c.Y, float32 z)
     [ for i in 0 .. n - 1 do
         yield! [ mid; pt i; pt (i + 1) ] ]
 
 let private band (c : V2d) (r : float) (width : float) (z : float) : V3f list =
-    let n = 48
+    let n = 32
     let pt (i : int) (rad : float) = let a = 6.283185307 * float i / float n in V3f (float32 (c.X + rad * cos a), float32 (c.Y + rad * sin a), float32 z)
     [ for i in 0 .. n - 1 do
         let a0, a1, b0, b1 = pt i (r - width / 2.0), pt (i + 1) (r - width / 2.0), pt i (r + width / 2.0), pt (i + 1) (r + width / 2.0)
@@ -805,7 +808,7 @@ let private stage (m : Model) (c : float) : Layer list * Map<string, V2d> =
     let hurts =
         m.Happened |> List.filter (fun h -> h.Kind = "h" && h.T <= c && h.T > c - w * 0.5)
         |> List.collect (fun h -> stroke (place h.Who) (V2d (0.0, 0.0)) (u * 0.6) 6.0)
-    let layer (r : float) (g : float) (b : float) (points : V3f list) = { Color = V4d (r, g, b, 1.0); Points = Data.pack (Data.ofList points); Uvs = Data.pack (Data.ofList (points |> List.map (fun _ -> V2f (0.0f, 0.0f)))) }
+    let layer (r : float) (g : float) (b : float) (points : V3f list) = { Color = V4d (r, g, b, 1.0); Points = Data.pack (Data.ofList points); Uvs = Data.pack (Data.ofArray (Array.create (List.length points) noUv)) }
     [ layer 0.55 0.2 0.18 (foes "normal")
       layer 0.4 0.45 0.95 (foes "magic")
       layer 0.95 0.95 0.4 (foes "rare")
@@ -1800,7 +1803,7 @@ let rec private step (msg : Msg) (m : Model) : Model =
         if m.Happened.IsEmpty || m.Tab <> "character" then m
         // (every frame's picture is some hundred kilobytes of triangles made and thrown away:
         // at the screen's rate 10 MB a second, which a phone's browser does not forgive)
-        elif m.Drawn >= 0.0 && t >= m.Drawn && t - m.Drawn < 0.05 then m
+        elif m.Drawn >= 0.0 && t >= m.Drawn && t - m.Drawn < 0.066 then m
         else
             let began = if m.Began < 0.0 then t else m.Began
             // the fight, a breath, and again
