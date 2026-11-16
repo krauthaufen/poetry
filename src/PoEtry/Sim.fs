@@ -539,13 +539,16 @@ type March =
       /// From one pack's middle to the next.
       Spacing: float
       /// How near the player must come for a monster to wake: it walks and attacks from then on,
-      /// and sleeps again when the player is further off.
+      /// also when the player has gone on (none is lost: the map is cleared when all are dead).
       Aggro: float
       /// How near an enemy must be for the player to use its skills (it walks on till then).
       Engage: float
       /// The player stands while an enemy is that near (it finishes what it meets); else it
       /// walks on also then, as far as the skill it uses lets it, and may leave enemies behind.
       Hold: bool
+      /// How many packs the map has; after the last comes what `Pack` gives for this number
+      /// (the map's boss), and the map is cleared when all of them are dead.
+      Packs: int
       /// The pack of this number (0, 1, ...): its monsters, placed around its middle.
       Pack: int -> EnemyDef list }
 
@@ -838,6 +841,8 @@ module Sim =
           WalkKept: float
           Front: float
           Packs: int
+          /// Those that have woken (by name).
+          Woken: Set<string>
           /// What skills have left on the ground, oldest first.
           Grounds: GroundState list
           Enemies: Map<string, EnemyState>
@@ -1326,7 +1331,14 @@ module Sim =
                     let d = Vec.length e.Def.Position
                     let gap = d - e.Def.Size - atk.Range
                     // (on a march a monster the player is not near enough to sleeps)
-                    let asleep = match env.Fight.March with Some m -> d - e.Def.Size > m.Aggro | None -> false
+                    // (and wakes for good once the player is, or when there is nothing ahead of the player any more)
+                    let asleep, w =
+                        match env.Fight.March with
+                        | Some m when not (w.Woken.Contains e.Def.Name) ->
+                            if d - e.Def.Size <= m.Aggro || w.Packs > m.Packs && not (w.Enemies |> Map.exists (fun _ x -> x.Life > 0.0 && x.Def.Position.X > 0.0))
+                            then false, { w with Woken = w.Woken.Add e.Def.Name }
+                            else true, w
+                        | _ -> false, w
                     if stopped || asleep || gap <= 0.0 then w
                     else
                         let step = min gap (e.Def.Speed * slow * dt)
@@ -1341,7 +1353,9 @@ module Sim =
                 | Some m when w.Player |> Option.forall (fun p -> p.Died.IsNone) ->
                     let held = max 0.0 (min t w.WalkHeldUntil - w.Time)
                     let met = m.Hold && (alive w |> List.exists (fun e -> Vec.length e.Def.Position - e.Def.Size <= m.Engage))
-                    let way = if met then 0.0 else m.Speed * (held * w.WalkKept + (dt - held))
+                    // (with nothing ahead any more it stands: what it left behind comes to it)
+                    let ahead = w.Packs <= m.Packs || (w.Enemies |> Map.exists (fun _ e -> e.Life > 0.0 && e.Def.Position.X > 0.0))
+                    let way = if met || not ahead then 0.0 else m.Speed * (held * w.WalkKept + (dt - held))
                     if way <= 0.0 then w
                     else
                         { w with
@@ -4231,7 +4245,7 @@ module Sim =
     let private enemyAttack env (rng: Rng) name (w: World) =
         let e = w.Enemies.[name]
         let minions = env.Fight.Minions |> List.filter (fun m -> m.Body.IsSome && not (Map.find m.Name w.Actors).Gone)
-        let asleep = match env.Fight.March with Some m -> Vec.length e.Def.Position - e.Def.Size > m.Aggro | None -> false
+        let asleep = env.Fight.March.IsSome && not (w.Woken.Contains name)
         match e.Def.Attack with
         | Some atk when asleep && e.Life > 0.0 -> schedule (w.Time + atk.Interval) (EnemyAttack name) w
         | Some atk when e.Life > 0.0 && env.Fight.Minions |> List.exists (fun m -> m.Body.IsSome) ->
@@ -4982,7 +4996,8 @@ module Sim =
               WalkHeldUntil = 0.0
               WalkKept = 1.0
               Front = (match fight.March with Some m -> m.Engage | None -> 0.0)
-              Packs = 0 }
+              Packs = 0
+              Woken = Set.empty }
             // (a temporary minion starts acting when it is summoned)
             |> fun w -> actors |> List.fold (fun w a -> if a.Pool.IsSome then w else schedule 0.0 (Ready a.Name) w) w
             |> fun w -> actors |> List.fold (fun w a -> a.Cycles |> List.fold (fun w c -> schedule 0.0 (CycleTick(a.Name, c.Name)) w) w) w
@@ -4999,18 +5014,13 @@ module Sim =
             |> schedule fight.MaxTime Expire
         // a fight that needs more events than this is a runaway (a zero-time loop): stop it
         // A march's packs: one after the other as far ahead as twice the monsters' aggro, each a
-        // spacing after the one before; and a monster the player has left far behind is gone
-        // (not killed).
+        // spacing after the one before, and after the last of them the map's boss.
         let supply (w: World) : World =
             match fight.March with
             | None -> w
             | Some m ->
-                let w =
-                    alive w |> List.fold (fun (w: World) e ->
-                        if e.Def.Position.X >= -1.5 * m.Aggro then w
-                        else { w with Enemies = Map.add e.Def.Name { e with Life = 0.0 } w.Enemies; Counts = bump "march:left behind" w.Counts }) w
                 let rec more (w: World) =
-                    if w.Front >= 2.0 * m.Aggro + m.Spacing || w.Packs > 100000 then w
+                    if w.Front >= 2.0 * m.Aggro + m.Spacing || w.Packs > m.Packs then w
                     else
                         let at = w.Front + m.Spacing
                         let w =
@@ -5026,7 +5036,7 @@ module Sim =
         let rec loop n (w: World) =
             let died = w.Player |> Option.exists (fun p -> p.Died.IsSome)
             // (a march has no last enemy: the packs go on)
-            if died || (allDead w && fight.March.IsNone) || Map.isEmpty w.Queue || fst (Seq.head w.Queue).Key > fight.MaxTime then w
+            if died || (allDead w && (match fight.March with Some m -> w.Packs > m.Packs | None -> true)) || Map.isEmpty w.Queue || fst (Seq.head w.Queue).Key > fight.MaxTime then w
             elif n >= maxEvents then { w with Counts = bump "aborted: too many events" w.Counts }
             else
                 let before = w.Kills

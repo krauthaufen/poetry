@@ -453,20 +453,25 @@ module Report =
                 let dead (os: Outcome list) = os |> List.forall (fun o -> o.Ttk.IsSome)
                 let better = if dead a && dead b then time b < 0.99 * time a elif dead a || dead b then dead b else dealt b > 1.01 * dealt a
                 if better then held, heldPlayer else steps, player
-        // "map": a march through packs in a line (`Fight.March`). A pack every "spacing" units,
-        // "pack" monsters each: a rare in every third, a quarter of the others magic; every
-        // third normal one attacks from afar. The player uses its skills on what is within
-        // "engage" units. (How near a monster wakes, 60 units, is a guess.)
+        // "map": a march through a map (`Fight.March`): "packs" packs, one every "spacing" units,
+        // of "pack" monsters each (a rare in every third, a quarter of the others magic; every
+        // third normal one attacks from afar), and the map's boss after the last. It is cleared
+        // when all of them are dead. The player uses its skills on what is within "engage"
+        // units. (How near a monster wakes, 60 units, is a guess.)
         let march =
             if scenario <> "map" then None
             else
-                let size = max 1 (int (n "pack" 12.0))
+                let size = max 1 (int (n "pack" 20.0))
+                let packs = max 1 (int (n "packs" 40.0))
                 Some { Speed = fst (Defence.movement c.Sheet)
-                       Spacing = max 5.0 (n "spacing" 40.0)
+                       Spacing = max 5.0 (n "spacing" (1500.0 / float packs))
+                       Packs = packs
                        Aggro = 60.0
                        Engage = max 5.0 (n "engage" 45.0)
                        Hold = n "hold" 1.0 > 0.0
                        Pack = fun k ->
+                         if k >= packs then Encounter.boss level profile 0.0 |> List.map (fun e -> { e with Name = "Map boss" })
+                         else
                            let rare = if k % 3 = 2 then 1 else 0
                            let magic = (size - rare) / 4
                            Encounter.pack level profile [ Normal, size - rare - magic; Magic, magic; Rare, rare ] 0.0 15.0 false (uint32 (1000 + k))
@@ -477,7 +482,8 @@ module Report =
         // ("engine": "reference" asks for the reference engine whatever the fight)
         let made (k: float) =
             let f = Setup.fight c o player (if k = 1.0 then enemies else enemies |> List.map (fun e -> { e with Life = e.Life * k }))
-            let f = match march with Some m -> { f with March = Some m; Enemies = []; Replace = false } | None -> f
+            // (on a march the player aims at what is nearest: the strongest may be three packs on)
+            let f = match march with Some m -> { f with March = Some m; Enemies = []; Replace = false; Targeting = Nearest } | None -> f
             if s "engine" "" = "reference" then f, Sim.run f, "reference (asked for)"
             else
                 match Flat.compile f with
