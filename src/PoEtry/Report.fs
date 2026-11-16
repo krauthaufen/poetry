@@ -296,10 +296,15 @@ module Report =
                 | Struck (time, enemy, damage, crit) -> time, JArr [ JStr "s"; t time; JStr enemy; num (System.Math.Round damage); JBool crit ]
                 | Moved (time, enemy, p) -> time, JArr [ JStr "m"; t time; JStr enemy; r p.X; r p.Y ]
                 | Hurt (time, enemy, damage) -> time, JArr [ JStr "h"; t time; JStr enemy; num (System.Math.Round damage) ]
-                | Entered (time, e) -> time, JArr [ JStr "e"; t time; JStr e.Name; r e.Position.X; r e.Position.Y; r e.Size; JStr(Rarity.name e.Rarity) ])
+                | Entered (time, e) -> time, JArr [ JStr "e"; t time; JStr e.Name; r e.Position.X; r e.Position.Y; r e.Size; JStr(Rarity.name e.Rarity) ]
+                | Walked (time, distance) -> time, JArr [ JStr "w"; t time; JStr ""; r distance ])
         let kills = o.Kills |> List.map (fun (enemy, _, time) -> time, JArr [ JStr "k"; t time; JStr enemy ])
         obj
             [ "duration", num o.Duration
+              // a map: how long a room is, and how far ahead of the player the first one began
+              "rooms", (match f.March with
+                        | Some m -> obj [ "length", num m.Spacing; "first", num (m.Engage + m.Spacing / 2.0); "count", num (float (m.Packs + 1)) ]
+                        | None -> JNull)
               "enemies", JArr(f.Enemies |> List.map (fun e ->
                   obj [ "name", JStr e.Name; "x", r e.Position.X; "y", r e.Position.Y; "size", r e.Size; "rarity", JStr(Rarity.name e.Rarity); "life", num e.Life ]))
               "actors", JArr((f.Player :: f.Minions) |> List.map (fun a ->

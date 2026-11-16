@@ -657,6 +657,8 @@ type Shown =
     | Moved of time: float * enemy: string * position: Vec
     | Hurt of time: float * enemy: string * damage: float
     | Entered of time: float * enemy: EnemyDef
+    /// On a march: how far the player has walked by then (game units).
+    | Walked of time: float * distance: float
 
 type Outcome =
     { /// What happened, in order (only of a run that was asked to keep it: `Sim.shown`).
@@ -846,6 +848,8 @@ module Sim =
           Packs: int
           /// Those that have woken (by name).
           Woken: Set<string>
+          /// How far the player had walked when that was last noted for showing.
+          ShownWalked: float
           /// What skills have left on the ground, oldest first.
           Grounds: GroundState list
           Enemies: Map<string, EnemyState>
@@ -5025,7 +5029,8 @@ module Sim =
               WalkKept = 1.0
               Front = (match fight.March with Some m -> m.Engage | None -> 0.0)
               Packs = 0
-              Woken = Set.empty }
+              Woken = Set.empty
+              ShownWalked = 0.0 }
             // (a temporary minion starts acting when it is summoned)
             |> fun w -> actors |> List.fold (fun w a -> if a.Pool.IsSome then w else schedule 0.0 (Ready a.Name) w) w
             |> fun w -> actors |> List.fold (fun w a -> a.Cycles |> List.fold (fun w c -> schedule 0.0 (CycleTick(a.Name, c.Name)) w) w) w
@@ -5086,6 +5091,10 @@ module Sim =
                                 let w = { w with Enemies = Map.add d.Name (fresh d) w.Enemies; Shown = (if w.Tracing then Entered(w.Time, d) :: w.Shown else w.Shown) }
                                 if fight.Player.Vitals.IsNone && fight.Minions |> List.forall (fun m -> m.Body.IsNone) then w
                                 else match d.Attack with Some a -> schedule (w.Time + rng.Float() * a.Interval) (EnemyAttack d.Name) w | None -> w) w
+                // (a march: how far the player has come, for showing the map go by)
+                let w =
+                    if w.Tracing && fight.March.IsSome && w.Walked - w.ShownWalked >= 1.0 then { w with Shown = Walked(w.Time, w.Walked) :: w.Shown; ShownWalked = w.Walked }
+                    else w
                 // where the enemies are now, for showing: those that moved since last noted
                 let w =
                     if not w.Tracing then w

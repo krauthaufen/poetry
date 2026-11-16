@@ -416,6 +416,12 @@ type Model =
       /// starts), and when each was killed. Made once when the fight arrives (`tracks`).
       Moves : Map<string, (float * V2d)[]>
       Kills : Map<string, float>
+      /// A map shown: how far the player has walked by when (time, game units), in the order
+      /// of time; how long a room is, how far ahead the first began, how many there are.
+      Walk : (float * float)[]
+      RoomLength : float
+      RoomFirst : float
+      RoomCount : int
       Lasts : float
       Field : float
       /// (the middle of what is shown: between the player and the enemies)
@@ -438,7 +444,7 @@ type Model =
 let init : Model =
     { Build = ""; Scenario = "map"; Status = "locating"; Title = ""; Class = ""; Ascendancy = ""; Tab = "character"
       Pools = []; Guards = []; Survival = []; Defences = []; Resistances = []; Minions = []
-      NotUnderstood = 0; Fighting = false; Gem = ""; Dps = []; Shares = []; Groups = []; Items = []; Bag = []; Swapped = Map.empty; Wearing = []; Equip = ""; Aim = ""; Pasting = false; Draft = ""; Dropped = Set.empty; GemEdits = []; Picker = ""; States = []; Standing = []; Editing = ""; Offers = []; Wanted = ""; Offered = []; Probe = ""; ProbeRound = 0; Probing = false; Tuning = ""; TuneSaid = ""; Probed = ""; Worth = []; Play = []; Rotation = []; Pressable = []; EnemyLevel = ""; EnemyEle = ""; EnemyChaos = ""; CustomDraft = ""; Custom = ""; Calcs = []; CanLogin = false; Asked = false; Player = ""; Characters = []; Running = []; Lasting = []; Going = ""; Kept = ""; Restored = false; Notes = ""; NotesWere = ""; NodeWorth = Map.empty; Among = ""; CalcShown = []; Pinned = ""; Deltas = []; DeltaOf = ""; Ask = ""; AskMore = ""; Anointed = Set.empty; Types = []; Counts = []; Start = Map.empty; Switches = Set.empty; Link = ""; Importing = ""; ImportSaid = ""; Sharing = ""; MapWay = ""; PointsSaid = ""; Countable = []; Moves = Map.empty; Kills = Map.empty; Drawn = -1.0; NewOf = "Warrior|Titan"; SetPoints = 0; NewAt = "90"; ShareLink = ""; ShareSaid = ""
+      NotUnderstood = 0; Fighting = false; Gem = ""; Dps = []; Shares = []; Groups = []; Items = []; Bag = []; Swapped = Map.empty; Wearing = []; Equip = ""; Aim = ""; Pasting = false; Draft = ""; Dropped = Set.empty; GemEdits = []; Picker = ""; States = []; Standing = []; Editing = ""; Offers = []; Wanted = ""; Offered = []; Probe = ""; ProbeRound = 0; Probing = false; Tuning = ""; TuneSaid = ""; Probed = ""; Worth = []; Play = []; Rotation = []; Pressable = []; EnemyLevel = ""; EnemyEle = ""; EnemyChaos = ""; CustomDraft = ""; Custom = ""; Calcs = []; CanLogin = false; Asked = false; Player = ""; Characters = []; Running = []; Lasting = []; Going = ""; Kept = ""; Restored = false; Notes = ""; NotesWere = ""; NodeWorth = Map.empty; Among = ""; CalcShown = []; Pinned = ""; Deltas = []; DeltaOf = ""; Ask = ""; AskMore = ""; Anointed = Set.empty; Types = []; Counts = []; Start = Map.empty; Switches = Set.empty; Link = ""; Importing = ""; ImportSaid = ""; Sharing = ""; MapWay = ""; PointsSaid = ""; Countable = []; Moves = Map.empty; Kills = Map.empty; Walk = [||]; RoomLength = 0.0; RoomFirst = 0.0; RoomCount = 0; Drawn = -1.0; NewOf = "Warrior|Titan"; SetPoints = 0; NewAt = "90"; ShareLink = ""; ShareSaid = ""
       Passives = [||]; Ascendancies = []; Shown = []; AscendancyWeb = Data.pack (Data.ofList ([] : V3f list)); Path = Data.pack (Data.ofList ([] : V3f list))
       Loaded = false; Capacity = 0
       WebUv = Data.pack (Data.ofList ([] : V2f list)); AscendancyWebUv = Data.pack (Data.ofList ([] : V2f list)); PathUv = Data.pack (Data.ofList ([] : V2f list)); Art = ""; Links = [||]; Neighbours = Map.empty; Web = Data.pack (Data.ofList ([] : V3f list)); Allocated = Set.empty; Edited = false
@@ -820,8 +826,33 @@ let private stage (m : Model) (c : float) : Layer list * Map<string, V2d> =
     let hurts =
         m.Happened |> List.filter (fun h -> h.Kind = "h" && h.T <= c && h.T > c - w * 0.5)
         |> List.collect (fun h -> stroke (place h.Who) (V2d (0.0, 0.0)) (u * 0.6) 6.0)
+    // A map goes by behind it all: the rooms' walls and a mark every metre along both sides,
+    // where the player has walked to by now (between two notes of it: evenly).
+    let backdrop =
+        if m.RoomLength <= 0.0 || m.Walk.Length = 0 then []
+        else
+            let mutable i = 0
+            while i + 1 < m.Walk.Length && fst m.Walk.[i + 1] <= c do i <- i + 1
+            let t0, d0 = m.Walk.[i]
+            let walked =
+                if c < t0 then d0 * c / max 1e-6 t0
+                elif i + 1 >= m.Walk.Length then d0
+                else (let t1, d1 = m.Walk.[i + 1] in d0 + (d1 - d0) * (c - t0) / max 1e-6 (t1 - t0))
+            let left, right = m.Middle.X - m.Field / 2.0 - 5.0, m.Middle.X + m.Field / 2.0 + 5.0
+            let high = m.Field / 4.0
+            let walls =
+                [ for k in 0 .. m.RoomCount do
+                    let x = m.RoomFirst + float k * m.RoomLength - walked
+                    if x > left && x < right then yield! stroke (V2d (x, -high)) (V2d (x, high)) (u * 0.5) 0.5 ]
+            let marks =
+                [ for k in int (floor ((walked + left) / 10.0)) .. int (ceil ((walked + right) / 10.0)) do
+                    let x = float k * 10.0 - walked
+                    yield! stroke (V2d (x, -high)) (V2d (x, -high + u * 2.5)) (u * 0.35) 0.5
+                    yield! stroke (V2d (x, high - u * 2.5)) (V2d (x, high)) (u * 0.35) 0.5 ]
+            walls @ marks
     let layer (r : float) (g : float) (b : float) (points : V3f list) = { Color = V4d (r, g, b, 1.0); Points = Data.pack (Data.ofList points); Uvs = Data.pack (Data.ofArray (Array.create (List.length points) flatUv)) }
-    [ layer 0.55 0.2 0.18 (foes "normal")
+    [ layer 0.3 0.25 0.19 backdrop
+      layer 0.55 0.2 0.18 (foes "normal")
       layer 0.4 0.45 0.95 (foes "magic")
       layer 0.95 0.95 0.4 (foes "rare")
       layer 0.8 0.42 0.14 (foes "unique")
@@ -883,7 +914,7 @@ let private readReplay (j : Json) (m : Model) : Model =
                         match kind, rest with
                         | "u", [ _; marks ] -> Json.list marks |> List.map (fun s -> match Json.list s with | sort :: nums -> { Sort = Json.string sort; Nums = nums |> List.map Json.number } | [] -> { Sort = ""; Nums = [] })
                         | _ -> []
-                    let x, y = (match kind, rest with | "m", [ x; y ] -> Json.number x, Json.number y | _ -> 0.0, 0.0)
+                    let x, y = (match kind, rest with | "m", [ x; y ] -> Json.number x, Json.number y | "w", [ d ] -> Json.number d, 0.0 | _ -> 0.0, 0.0)
                     { Kind = kind; T = Json.number t; Who = Json.string who; Shapes = shapes; X = x; Y = y }
                 | _ -> { Kind = ""; T = 0.0; Who = ""; Shapes = []; X = 0.0; Y = 0.0 })
         // the field: the player (with room for the minions beside) and the enemies, a margin around
@@ -906,6 +937,10 @@ let private readReplay (j : Json) (m : Model) : Model =
             Happened = happened
             Moves = fst (tracks happened (foes @ came))
             Kills = snd (tracks happened (foes @ came))
+            Walk = happened |> List.filter (fun h -> h.Kind = "w") |> List.map (fun h -> h.T, h.X) |> Array.ofList
+            RoomLength = Json.number (Json.field "length" (Json.field "rooms" r))
+            RoomFirst = Json.number (Json.field "first" (Json.field "rooms" r))
+            RoomCount = Json.int (Json.field "count" (Json.field "rooms" r))
             Lasts = max 0.5 (Json.number (Json.field "duration" r))
             // (the picture is wider than high: what is high counts for more)
             // (a map is seen as it scrolls by: the player near the left edge, 17 m of the map in
