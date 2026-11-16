@@ -161,15 +161,16 @@
       const bases = new Map();
       // (depth 0: at once and rough; depth 1: asked after it, more and longer fights)
       const scenes = (depth) => depth
-        ? [["pack", 8, 0, 32, 0], ["boss", 30, 0, 32, 0], ["pinnacle", 30, 0, 32, 0], ["endless", 30, 0, 32, 4]]
-        : [["pack", 6, 0, 8, 0], ["boss", 30, 0, 8, 0], ["pinnacle", 30, 0, 8, 0], ["endless", 30, 0, 8, 4]];
+        ? [["pack", 8, 0, 32, 0], ["burst", 30, 0, 32, 5], ["endless", 60, 0, 16, 30]]
+        : [["pack", 6, 0, 8, 0], ["burst", 30, 0, 8, 5], ["endless", 60, 0, 6, 30]];
       // (a scene: its name, how long at most, the enemies' life if it is given, how many
       // fights, and how long a fight lasts at least.) A boss dies for real, with so much life
       // that a fight lasts at least so many seconds (the simulator finds how much, "scale" in
       // its answer); the fights that are compared have the same boss: that of the fight as it
-      // is. A pack has the life the game gives it, and who dies is replaced. The map boss and
-      // the pinnacle boss have the game's life and die when they die; "endless" is the
-      // pinnacle boss with the life that makes it last.
+      // is. A pack has the life the game gives it, and who dies is replaced. "burst" and
+      // "endless" are the pinnacle boss with the life that makes it last 5 and 30 seconds: a
+      // boss with the game's own life dies to a strong character's first use whatever it wears,
+      // and how soon then says nothing (a weak character's fight lasts so long as it is).
       // What a fight is measured by: the damage a second; of a boss with the game's life, how
       // soon it is dead (one over the seconds; not dead: over the whole time). (Not its damage
       // with the overkill counted: that is the one hit that kills, a small one as often as a

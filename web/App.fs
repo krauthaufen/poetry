@@ -610,10 +610,14 @@ let private spotName (m : Model) (spot : string) : string =
     | None -> slotOf spot + " (empty)"
 
 let private sheetUrl (m : Model) = "__sim?op=character" + knobs m + passives m + "&build=" + m.Build
-let private fightOf (m : Model) (scenario : string) (ask : string) = "__sim?op=fight&runs=96" + (if scenario = "pack" then "&time=8" elif scenario = "endless" then "&time=30&least=4" else "&time=30") + ask + "&scenario=" + scenario + (if m.Pressing <> "" then "&gem=" + m.Pressing.Replace (" ", "%20") else "") + fightKnobs m + knobs m + passives m + "&build=" + m.Build
+let private fightOf (m : Model) (scenario : string) (ask : string) = "__sim?op=fight&runs=96" + (if scenario = "pack" then "&time=8" elif scenario = "endless" then "&time=60&least=30" else "&time=30&least=5") + ask + "&scenario=" + scenario + (if m.Pressing <> "" then "&gem=" + m.Pressing.Replace (" ", "%20") else "") + fightKnobs m + knobs m + passives m + "&build=" + m.Build
 let private fightUrl (m : Model) = fightOf m m.Scenario ("&round=" + string m.Round)
 
-let private scenarios = [ "pack"; "boss"; "pinnacle"; "endless" ]
+let private scenarios = [ "pack"; "burst"; "endless" ]
+
+/// A scenario as it is said: "burst" is the boss that lasts 5 seconds.
+let private sceneSaid (name : string) : string =
+    match name with "pack" -> "Pack" | "burst" -> "Boss, 5 s" | "endless" -> "Boss, 30 s" | other -> other
 
 /// The scenario whose fights are asked ahead now: the first not shown and not asked yet,
 /// once the shown one's fights are all in.
@@ -2125,7 +2129,7 @@ let private analyse (m : Model) (about : string) : Node<Msg> =
         Dom.Class "analyse"
         button { Dom.Class "act"; Dom.OnClick (fun _ -> Analyse); label }
         span { Dom.Class "depth"; about }
-        span { Dom.Class "depth"; "The four numbers: pack, map boss and pinnacle (how soon they are dead), and the pinnacle that lasts (damage)." }
+        span { Dom.Class "depth"; "The three numbers: the pack, and the damage on a boss that lasts 5 seconds and on one that lasts 30." }
         span { Dom.Class "legend"; span { Dom.Class "w3"; "much" }; span { Dom.Class "w2"; "some" }; span { Dom.Class "w1"; "little" }; span { Dom.Class "w0"; "none" }; span { Dom.Class "wneg"; "costs damage" } }
     }
 
@@ -2298,7 +2302,7 @@ let private item (m : Model) (i : Item) (where : string) : Node<Msg> =
                             for (name, by, off) in m.Deltas do
                                 div {
                                     Dom.Class (if abs by <= 2.0 * off then "delta unsure" elif by > 0.05 then "delta up" elif by < -0.05 then "delta down" else "delta")
-                                    span { name }
+                                    span { sceneSaid name }
                                     span { Dom.Class "by"; Dom.Attr ("data-check", "delta"); sprintf "%+.1f%% damage" by }
                                     span { Dom.Class "pm"; margin off }
                                 }
@@ -2647,7 +2651,7 @@ let private tooltip (m : Model) : Node<Msg> =
                         for (name, by, off) in m.Deltas do
                             div {
                                 Dom.Class (if abs by <= 2.0 * off then "delta unsure" elif by > 0.05 then "delta up" elif by < -0.05 then "delta down" else "delta")
-                                span { name }
+                                span { sceneSaid name }
                                 span { Dom.Class "by"; Dom.Attr ("data-check", "delta"); sprintf "%+.1f%% damage" by }
                                 span { Dom.Class "pm"; margin off }
                             }
@@ -2780,9 +2784,8 @@ let view (m : Model) : Node<Msg> =
                     Dom.Class "survival"
                     nav {
                         scenario m "pack" "Pack"
-                        scenario m "boss" "Map boss"
-                        scenario m "pinnacle" "Pinnacle"
-                        scenario m "endless" "Endless"
+                        scenario m "burst" "Boss, 5 s"
+                        scenario m "endless" "Boss, 30 s"
                     }
                     panel "In this fight" m.Survival
                 }
@@ -2905,9 +2908,8 @@ let view (m : Model) : Node<Msg> =
                     Dom.Class "column wide"
                     nav {
                         scenario m "pack" "Pack"
-                        scenario m "boss" "Map boss"
-                        scenario m "pinnacle" "Pinnacle"
-                        scenario m "endless" "Endless"
+                        scenario m "burst" "Boss, 5 s"
+                        scenario m "endless" "Boss, 30 s"
                     }
                     section {
                         Dom.Class "panel going"

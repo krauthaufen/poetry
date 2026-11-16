@@ -334,7 +334,9 @@ module Report =
     let prepare (c: Loaded) (request: Json) : Ready =
         let n key d = Json.numField key request |> Option.defaultValue d
         let s key d = Json.strField key request |> Option.defaultValue d
-        let level = int (n "level" 83.0)
+        // (not said: an endgame map's, or the character's own level while that is lower: a
+        // character still in the campaign fights what is there for it)
+        let level = int (n "level" (float (min 83 (max 1 c.Sheet.Level))))
         // how the character goes into the fight: "start" is "PowerCharge:3,Rage:0" (counts to
         // begin with), the others are switches (1: on)
         let on key = n key 0.0 > 0.0
@@ -351,8 +353,8 @@ module Report =
         let least = if n "life" 0.0 > 0.0 then 0.0 else n "least" 0.0
         let o = { o with Replace = (s "scenario" "boss" = "pack" || s "scenario" "boss" = "surrounded") && n "life" 0.0 <= 0.0 && least <= 0.0 }
         let scenario = s "scenario" "boss"
-        // ("endless": the pinnacle boss, asked with "least" so that it lasts)
-        let pinnacle = scenario = "pinnacle" || scenario = "endless"
+        // ("burst", "endless": the pinnacle boss, asked with "least" so that it lasts 5 and 30 seconds)
+        let pinnacle = scenario = "pinnacle" || scenario = "endless" || scenario = "burst"
         let profile r =
             let p = Rarity.defaults r
             let p = if pinnacle && r = Unique then { p with ElementalResist = 50.0 } else p
