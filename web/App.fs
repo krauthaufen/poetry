@@ -310,6 +310,8 @@ type Model =
       /// The request that shares the build, its address once there, or why not.
       Sharing : string
       NewOf : string
+      /// Passives bought with weapon set points: the larger of the two sets (they come out of the same points).
+      SetPoints : int
       NewAt : string
       ShareLink : string
       ShareSaid : string
@@ -423,7 +425,7 @@ type Model =
 let init : Model =
     { Build = ""; Scenario = "pack"; Status = "locating"; Title = ""; Class = ""; Ascendancy = ""; Tab = "character"
       Pools = []; Guards = []; Survival = []; Defences = []; Resistances = []; Minions = []
-      NotUnderstood = 0; Fighting = false; Gem = ""; Dps = []; Shares = []; Groups = []; Items = []; Bag = []; Swapped = Map.empty; Wearing = []; Equip = ""; Aim = ""; Pasting = false; Draft = ""; Dropped = Set.empty; GemEdits = []; Picker = ""; States = []; Standing = []; Editing = ""; Offers = []; Wanted = ""; Offered = []; Probe = ""; ProbeRound = 0; Probing = false; Tuning = ""; TuneSaid = ""; Probed = ""; Worth = []; Play = []; Rotation = []; Pressable = []; EnemyLevel = ""; EnemyEle = ""; EnemyChaos = ""; CustomDraft = ""; Custom = ""; Calcs = []; CanLogin = false; Asked = false; Player = ""; Characters = []; Running = []; Lasting = []; Going = ""; Kept = ""; Restored = false; Notes = ""; NotesWere = ""; NodeWorth = Map.empty; Among = ""; CalcShown = []; Pinned = ""; Deltas = []; DeltaOf = ""; Ask = ""; AskMore = ""; Anointed = Set.empty; Types = []; Counts = []; Start = Map.empty; Switches = Set.empty; Link = ""; Importing = ""; ImportSaid = ""; Sharing = ""; NewOf = "Warrior|Titan"; NewAt = "90"; ShareLink = ""; ShareSaid = ""
+      NotUnderstood = 0; Fighting = false; Gem = ""; Dps = []; Shares = []; Groups = []; Items = []; Bag = []; Swapped = Map.empty; Wearing = []; Equip = ""; Aim = ""; Pasting = false; Draft = ""; Dropped = Set.empty; GemEdits = []; Picker = ""; States = []; Standing = []; Editing = ""; Offers = []; Wanted = ""; Offered = []; Probe = ""; ProbeRound = 0; Probing = false; Tuning = ""; TuneSaid = ""; Probed = ""; Worth = []; Play = []; Rotation = []; Pressable = []; EnemyLevel = ""; EnemyEle = ""; EnemyChaos = ""; CustomDraft = ""; Custom = ""; Calcs = []; CanLogin = false; Asked = false; Player = ""; Characters = []; Running = []; Lasting = []; Going = ""; Kept = ""; Restored = false; Notes = ""; NotesWere = ""; NodeWorth = Map.empty; Among = ""; CalcShown = []; Pinned = ""; Deltas = []; DeltaOf = ""; Ask = ""; AskMore = ""; Anointed = Set.empty; Types = []; Counts = []; Start = Map.empty; Switches = Set.empty; Link = ""; Importing = ""; ImportSaid = ""; Sharing = ""; NewOf = "Warrior|Titan"; SetPoints = 0; NewAt = "90"; ShareLink = ""; ShareSaid = ""
       Passives = [||]; Ascendancies = []; Shown = []; AscendancyWeb = Data.pack (Data.ofList ([] : V3f list)); Path = Data.pack (Data.ofList ([] : V3f list))
       Loaded = false; Capacity = 0
       WebUv = Data.pack (Data.ofList ([] : V2f list)); AscendancyWebUv = Data.pack (Data.ofList ([] : V2f list)); PathUv = Data.pack (Data.ofList ([] : V2f list)); Art = ""; Links = [||]; Neighbours = Map.empty; Web = Data.pack (Data.ofList ([] : V3f list)); Allocated = Set.empty; Edited = false
@@ -1713,6 +1715,7 @@ let rec private step (msg : Msg) (m : Model) : Model =
                     Class = Json.string (Json.field "class" j)
                     Ascendancy = Json.string (Json.field "ascendancy" j)
                     // what the character has allocated, until it is changed here
+                    SetPoints = max (Json.field "passivesSet1" j |> Json.list |> List.length) (Json.field "passivesSet2" j |> Json.list |> List.length)
                     Allocated = Set.union (if m.Edited then m.Allocated else Json.field "passives" j |> Json.list |> List.map Json.int |> Set.ofList) (Json.field "anointed" j |> Json.list |> List.map Json.int |> Set.ofList)
                     Anointed = Json.field "anointed" j |> Json.list |> List.map Json.int |> Set.ofList
                     Choices = (if m.Edited then m.Choices else Json.field "choices" j |> Json.list |> List.map (fun c -> Json.int (Json.field "id" c), Json.string (Json.field "name" c)) |> Map.ofList)
@@ -2473,13 +2476,14 @@ let private points (m : Model) : string =
     let granted = m.Allocated.Count - spent.Count - leapt
     // (the class's start on the tree, which a build file lists, is no point)
     let origin = m.Passives |> Array.filter (fun p -> p.Kind = "start" && spent.Contains p.Id) |> Array.length
-    let used = spent.Count - asc - starts - origin + leapt
+    // (a passive of a weapon set costs a point as any other does: the larger set counts, PoB Build.lua)
+    let used = spent.Count - asc - starts - origin + leapt + m.SetPoints
     let has = m.Level - 1 + 24
     // the level that has so many: one point a level after the first, with all 24 of the quests
     let needs = max 1 (used - 24 + 1)
     let left = if used < has then sprintf " (%d free)" (has - used) elif used > has then sprintf " (%d too many)" (used - has) else ""
     let level = if used = 0 then "" elif needs > 100 then ", more than level 100 has" else sprintf ", needs level %d" needs
-    sprintf "%d of %d points%s%s, %d ascendancy%s" used has left level asc (if granted > 0 then sprintf ", %d granted" granted else "")
+    sprintf "%d of %d points%s%s, %d ascendancy%s%s" used has left level asc (if m.SetPoints > 0 then sprintf ", %d of them by weapon set" m.SetPoints else "") (if granted > 0 then sprintf ", %d granted" granted else "")
 
 /// The tooltip of the pinned passive (with what can be done to it) or the one under the mouse.
 let private tooltip (m : Model) : Node<Msg> =
