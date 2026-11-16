@@ -6279,6 +6279,15 @@ module Flat =
                 let dead = life <= 1e-9
                 (match s.Tell with Some tell -> tell s.Time (if crit then "crit" else "hit") def0.Name skill.Name dealt | None -> ())
                 if not (isNull s.Rec) then s.Rec.Add(Struck(s.Time, def0.Name, min dealt lifeBefore, crit))
+                // (on a march a hit wakes who it lands on, and in rooms the whole of its pack: `Sim`)
+                (match s.Main.Fight.March with
+                 | Some m when not e.Woken ->
+                     if not m.Rooms then e.Woken <- true
+                     else
+                         for k in 0 .. s.Live.Length - 1 do
+                             let x = at s.Foes (at s.Live k)
+                             if x.Life > 0.0 && x.Pack = e.Pack then x.Woken <- true
+                 | _ -> ())
                 // what the armour break below reads of the enemy as it was before the hit
                 let brokenBefore =
                     if taken then s.BrokenWas

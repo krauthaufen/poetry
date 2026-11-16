@@ -3293,6 +3293,15 @@ module Sim =
                         Agonies = w.Agonies |> List.map (fun ((o, s, en, recorded, share, until) as a) -> if en = target && until > w.Time then (o, s, en, recorded + min dealt e.Life, share, until) else a)
                         Counts = w.Counts |> bump ("hits:" + skill.Name) |> (if hit.Crit then bump ("crits:" + skill.Name) else id)
                         Shown = (if w.Tracing then Struck(w.Time, target, min dealt e.Life, hit.Crit) :: w.Shown else w.Shown)
+                        // (on a march a hit wakes who it lands on, and in rooms the whole of its pack)
+                        Woken =
+                            (match env.Fight.March with
+                             | Some m when not (w.Woken.Contains target) ->
+                                 if not m.Rooms then w.Woken.Add target
+                                 else
+                                     let pack = target.Substring(target.LastIndexOf '#')
+                                     w.Enemies |> Map.fold (fun (woken: Set<string>) name x -> if x.Life > 0.0 && name.TrimEnd('+').EndsWith pack then woken.Add name else woken) w.Woken
+                             | _ -> w.Woken)
                         Kills = if dead then (target, e.Def.Rarity, w.Time) :: w.Kills else w.Kills }
                 // overkill explosions: nearby enemies are ignited for a share of the overkill
                 let w =
