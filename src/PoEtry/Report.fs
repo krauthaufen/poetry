@@ -330,7 +330,9 @@ module Report =
           Run: uint32 -> Outcome
           Engine: string
           /// How many times their own life the enemies have (see "least").
-          Scale: float }
+          Scale: float
+          /// A map: how the character plays it (found by playing, or as asked).
+          Way: string }
 
     let prepare (c: Loaded) (request: Json) : Ready =
         let n key d = Json.numField key request |> Option.defaultValue d
@@ -458,32 +460,56 @@ module Report =
         // third normal one attacks from afar), and the map's boss after the last. It is cleared
         // when all of them are dead. The player uses its skills on what is within "engage"
         // units. (How near a monster wakes, 60 units, is a guess.)
-        let march =
-            if scenario <> "map" then None
+        let size = max 1 (int (n "pack" 20.0))
+        let packs = max 1 (int (n "packs" 40.0))
+        let spacing = max 5.0 (n "spacing" (1500.0 / float packs))
+        // (a map of so many packs, played so: `engage`, `hold` of `Sim.March`)
+        let marchOf (count: int) (engage: float) (hold: bool) : March =
+            { Speed = fst (Defence.movement c.Sheet)
+              Spacing = spacing
+              Packs = count
+              Aggro = 60.0
+              Engage = engage
+              Hold = hold
+              Pack = fun k ->
+                  if k >= count then Encounter.boss level profile 0.0 |> List.map (fun e -> { e with Name = "Map boss" })
+                  else
+                      let rare = if k % 3 = 2 then 1 else 0
+                      let magic = (size - rare) / 4
+                      Encounter.pack level profile [ Normal, size - rare - magic; Magic, magic; Rare, rare ] 0.0 15.0 false (uint32 (1000 + k))
+                      |> List.mapi (fun i e ->
+                          match e.Attack with
+                          | Some a when e.Rarity = Normal && i % 3 = 2 -> { e with Attack = Some { a with Range = 60.0 } }
+                          | _ -> e) }
+        let marching (m: March) (f: Fight) = { f with March = Some m; Enemies = []; Replace = false; Targeting = Nearest }
+        // How the map is played is found by playing: a short map of the same packs is played
+        // every way (standing until what is near is dead, or walking on; using the skills from
+        // 1, 2.5, 4.5 and 7 m), and the way that clears it soonest is the character's way.
+        // (Not cleared, or dead: the more it killed the better.) "engage" and "hold" say the
+        // way themselves.
+        let march, way =
+            if scenario <> "map" then None, ""
             else
-                let size = max 1 (int (n "pack" 20.0))
-                let packs = max 1 (int (n "packs" 40.0))
-                Some { Speed = fst (Defence.movement c.Sheet)
-                       Spacing = max 5.0 (n "spacing" (1500.0 / float packs))
-                       Packs = packs
-                       Aggro = 60.0
-                       Engage = max 5.0 (n "engage" 45.0)
-                       Hold = n "hold" 1.0 > 0.0
-                       Pack = fun k ->
-                         if k >= packs then Encounter.boss level profile 0.0 |> List.map (fun e -> { e with Name = "Map boss" })
-                         else
-                           let rare = if k % 3 = 2 then 1 else 0
-                           let magic = (size - rare) / 4
-                           Encounter.pack level profile [ Normal, size - rare - magic; Magic, magic; Rare, rare ] 0.0 15.0 false (uint32 (1000 + k))
-                           |> List.mapi (fun i e ->
-                               match e.Attack with
-                               | Some a when e.Rarity = Normal && i % 3 = 2 -> { e with Attack = Some { a with Range = 60.0 } }
-                               | _ -> e) }
+                let said (engage: float) (hold: bool) =
+                    sprintf "%s, using its skills on what is within %.1f m" (if hold then "stands until what is near is dead" else "walks on") (engage / 10.0)
+                match Json.numField "engage" request, Json.numField "hold" request with
+                | Some engage, hold -> (let hold = hold <> Some 0.0 in Some (marchOf packs (max 5.0 engage) hold), said (max 5.0 engage) hold)
+                | None, Some hold -> Some (marchOf packs 45.0 (hold > 0.0)), said 45.0 (hold > 0.0)
+                | None, None ->
+                    let trial (engage: float, hold: bool) =
+                        let f = marching (marchOf (min packs 8) engage hold) { Setup.fight c o player enemies with MaxTime = 150.0 }
+                        let run = match Flat.compile f with | Ok program -> Flat.runner program | Error _ -> Sim.run f
+                        let o = run 7001u
+                        match o.Ttk with
+                        | Some t when o.Died.IsNone -> t
+                        | _ -> 1e6 - float o.Kills.Length
+                    let engage, hold = [ for hold in [ true; false ] do for engage in [ 10.0; 25.0; 45.0; 70.0 ] -> engage, hold ] |> List.minBy trial
+                    Some (marchOf packs engage hold), said engage hold
         // ("engine": "reference" asks for the reference engine whatever the fight)
         let made (k: float) =
             let f = Setup.fight c o player (if k = 1.0 then enemies else enemies |> List.map (fun e -> { e with Life = e.Life * k }))
             // (on a march the player aims at what is nearest: the strongest may be three packs on)
-            let f = match march with Some m -> { f with March = Some m; Enemies = []; Replace = false; Targeting = Nearest } | None -> f
+            let f = match march with Some m -> marching m f | None -> f
             if s "engine" "" = "reference" then f, Sim.run f, "reference (asked for)"
             else
                 match Flat.compile f with
@@ -514,7 +540,7 @@ module Report =
                 | 1.0 -> 1.0
                 | k -> between (k / 3.0) k 3
         let f, run, engine = made scale
-        { Gem = gem; Scenario = scenario; Steps = steps; Fight = f; Run = run; Engine = engine; Scale = scale }
+        { Gem = gem; Scenario = scenario; Steps = steps; Fight = f; Run = run; Engine = engine; Scale = scale; Way = way }
 
     let fought (ready: Ready) (request: Json) : Json =
         let n key d = Json.numField key request |> Option.defaultValue d
@@ -529,6 +555,7 @@ module Report =
         obj
             [ "gem", JStr gem
               "engine", JStr ready.Engine
+              "way", JStr ready.Way
               "scale", num ready.Scale
               // what is pressed, first to last
               "play", JArr(steps |> List.collect (fun (p, code) ->
