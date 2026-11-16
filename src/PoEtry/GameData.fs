@@ -260,6 +260,16 @@ module GameData =
             |> Map.ofList
         | _ -> Map.empty
 
+    /// bases.json: what an armour base takes from its wearer's movement speed, as a part of
+    /// it (a body armour 0.03 to 0.05, a shield 0.015 to 0.03).
+    let parseMovePenalties (json: string) : Map<string, float> =
+        match Json.parse json with
+        | JObj m ->
+            m |> Map.toList |> List.choose (fun (name, j) ->
+                Json.field "armour" j |> Option.bind (Json.numField "MovementPenalty") |> Option.filter (fun p -> p > 0.0) |> Option.map (fun p -> name, p))
+            |> Map.ofList
+        | _ -> Map.empty
+
     /// bases.json: weapon bases only.
     let parseWeapons (json: string) : Map<string, WeaponBase> =
         match Json.parse json with

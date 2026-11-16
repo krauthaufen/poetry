@@ -8,6 +8,8 @@ type GameDb =
       GemVariants: Map<string, GemData list>
       Weapons: Map<string, WeaponBase>
       Flasks: Map<string, FlaskBase>
+      /// Armour base name -> the part of the movement speed it takes.
+      MovePenalties: Map<string, float>
       Minions: Map<string, MinionData>
       /// Every item base name (weapons, armour, jewellery...).
       BaseNames: Set<string>
@@ -60,6 +62,7 @@ module GameDb =
           GemVariants = GameData.parseGemList (read "gems.json") |> List.groupBy (fun g -> g.Name) |> Map.ofList
           Weapons = GameData.parseWeapons (read "bases.json")
           Flasks = GameData.parseFlasks (read "bases.json")
+          MovePenalties = GameData.parseMovePenalties (read "bases.json")
           Minions = GameData.parseMinions (read "minions.json")
           BaseNames =
             match Json.parse (read "bases.json") with

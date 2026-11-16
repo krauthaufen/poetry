@@ -794,6 +794,10 @@ module StatMap =
         | "ascendancy_shaman_+_spirit_per_empty_charm_slot" -> one (Mod.base' (Named "SpiritPerEmptyCharmSlot") v)
         | "unique_prism_guardian_spirit_+_per_X_maximum_life" -> one (Mod.base' (Named "SpiritPerLife") v)
         | "cannot_gain_spirit_from_equipment" -> one (Mod.flag (Named "NoSpiritFromEquipment"))
+        // the player's own movement speed (`Defence.movement`); what holds only now and then
+        // ("while on full life", "per Frenzy Charge") is not read yet
+        | "base_movement_velocity_+%" | "movement_velocity_+%" -> one (Mod.inc (Named "OwnMoveSpeed") v)
+        | "ignore_armour_movement_penalties" -> one (Mod.flag (Named "NoArmourMovementPenalty"))
         | "spirit_does_not_exist" -> one (Mod.flag (Named "NoSpirit"))
         | "base_spirit_reservation_efficiency_+%" | "base_reservation_efficiency_+%" -> one (Mod.inc (Named "ReservationEfficiency") v)
         | "reservation_efficiency_+%_of_meta_skills" -> one (Mod.inc (Named "ReservationEfficiency") v |> Mod.whenever (SkillIs(Tag "Type:Meta")))

@@ -1324,6 +1324,14 @@ Rune: None
         equal false (List.contains "+10% to Cold Resistance" b.ExtraLines)
         equal true (List.contains "+40 to Spirit" b.ExtraLines && List.contains "+5% to Fire Resistance" b.ExtraLines))
 
+    test "movement: the base speed, less the armour's part, with the increases" (fun () ->
+        let sheet mods = { Mods = mods; MainHand = None; Weapons = []; ItemDefences = []; Level = 1; ClassName = ""; ManaFlask = None; LifeFlask = None; Coverage = Coverage.empty }
+        let speed, more = Defence.movement (sheet [ Mod.base' (Named "OwnMovePenalty") 5.0; Mod.inc (Named "OwnMoveSpeed") 30.0 ])
+        near (37.0 * 0.95 * 1.3) speed
+        near (0.95 * 1.3 * 100.0 - 100.0) more
+        // "ignore armour movement penalties"
+        near 37.0 (fst (Defence.movement (sheet [ Mod.base' (Named "OwnMovePenalty") 5.0; Mod.flag (Named "NoArmourMovementPenalty") ]))))
+
     DataTests.run test near (fun a b -> equal a b)
 
     StatTests.run test near (fun a b -> equal a b)

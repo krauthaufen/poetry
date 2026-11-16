@@ -371,6 +371,15 @@ module Defence =
 
     let compute bases sheet = computeWith Map.empty bases sheet
 
+    /// How fast the character runs: game units a second, and how much more than a character
+    /// with nothing on (percent). The base speed, less what the armour takes (unless it is
+    /// ignored), with the increases (PoB CalcDefence MovementSpeedMod: (1 + bases) x increased).
+    let movement (sheet: CharacterSheet) : float * float =
+        let db = ModDb.ofList sheet.Mods
+        let taken = if Mods.flag Ctx.empty (Named "NoArmourMovementPenalty") db then 0.0 else Mods.sumBase Ctx.empty [ Named "OwnMovePenalty" ] db
+        let factor = max 0.0 (1.0 - taken / 100.0) * Mods.mult Ctx.empty [ Named "OwnMoveSpeed" ] db
+        Constants.playerBaseSpeed * factor, (factor - 1.0) * 100.0
+
     /// Damage taken from one unblocked, unevaded, non-critical hit of `raw` damage of one type.
     let taken (v: PlayerStats) (t: DamageType) (melee: bool) (raw: float) =
         let d =

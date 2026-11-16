@@ -1821,7 +1821,8 @@ let rec private step (msg : Msg) (m : Model) : Model =
                     // (Runic Ward beside life and energy shield, for a character that has any)
                     Pools = [ row "Life" (n [ "pools"; "life" ]); row "Energy Shield" (n [ "pools"; "energyShield" ]) ] @ (if n [ "pools"; "ward" ] > 0.0 then [ row "Runic Ward" (n [ "pools"; "ward" ]) ] else []) @ [ row "Mana" (n [ "pools"; "mana" ]); row "Spirit" (n [ "pools"; "spirit" ]) ]
                     Guards = guards j
-                    Defences = [ row "Armour" (n [ "defences"; "armour" ]); row "Evasion" (n [ "defences"; "evasion" ]); row "Deflection" (n [ "defences"; "deflection" ]); row "Block" (n [ "defences"; "block" ]) ]
+                    Defences = [ row "Armour" (n [ "defences"; "armour" ]); row "Evasion" (n [ "defences"; "evasion" ]); row "Deflection" (n [ "defences"; "deflection" ]); row "Block" (n [ "defences"; "block" ])
+                                 { Label = "Movement speed"; Value = sprintf "%+.0f%% (%.1f m/s)" (n [ "movement"; "percent" ]) (n [ "movement"; "speed" ] / 10.0) } ]
                     Resistances = named "resistances"
                     Minions = named "minions"
                     NotUnderstood = missing

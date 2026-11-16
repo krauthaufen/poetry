@@ -205,6 +205,7 @@ module Report =
               "defences",
               obj [ "armour", num v.Armour; "evasion", num v.Evasion; "deflection", num v.Deflection; "block", num v.Block
                     "stunThreshold", num v.StunThreshold; "ailmentThreshold", num v.AilmentThreshold ]
+              "movement", (let speed, more = Defence.movement c.Sheet in obj [ "speed", num speed; "percent", num more ])
               "resistances", JArr [ for t in DamageType.all do if t <> Physical then yield obj [ "name", JStr(DamageType.name t); "value", num (Map.tryFind t v.Resist |> Option.defaultValue 0.0) ] ]
               // what a hit must get through: the largest hit of each type survived from full
               // pools (-1: immune), how often a monster of level 83 connects, what recovers

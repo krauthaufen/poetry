@@ -28,6 +28,9 @@ module Constants =
     /// damage rolls, 2 to 5-8 by class, are PoE2's too). A guess.
     let unarmedAttacksPerSecond = 1.2
     let unarmedCritChance = 0.0
+    /// How fast a character runs, game units a second (10 = 1 m): the game's
+    /// Metadata/Characters/Character.ot, base_speed = 37. (Sprinting is 50% more: not walked here.)
+    let playerBaseSpeed = 37.0
     /// Onslaught: 20% increased skill speed (game keyword text).
     let onslaughtSpeed = 20.0
     /// Arcane Surge: 20% more mana regeneration rate (game keyword text; wiki Arcane Surge).

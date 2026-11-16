@@ -347,6 +347,11 @@ module Items =
         let mods, locals, cov = interpret stats
         let rescued, unknown = rescue db unknown
         let mods = mods @ rescued
+        // an armour base slows its wearer (the base's own, on no line of the item)
+        let mods =
+            match lines |> List.tryPick (fun l -> Map.tryFind l db.MovePenalties) with
+            | Some p -> mods @ [ Mod.base' (Named "OwnMovePenalty") (p * 100.0) ]
+            | None -> mods
         // Other item-local stats. Some only change what the item already displays (its
         // defences, requirements, sockets, quality) or how it can be crafted: nothing to add.
         // The rest act when the item is used: a weapon's ("Leeches 8% of Physical Damage as
