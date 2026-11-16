@@ -625,7 +625,7 @@ let private warming (m : Model) : string =
 let private pace (m : Model) = 1.0
 
 /// (the picture's triangles have no texture: one coordinate for all their corners)
-let private noUv = V2f (0.0f, 0.0f)
+let private flatUv = V2f (0.0f, 0.0f)
 
 let private disc (c : V2d) (r : float) (z : float) : V3f list =
     let n = 16
@@ -808,7 +808,7 @@ let private stage (m : Model) (c : float) : Layer list * Map<string, V2d> =
     let hurts =
         m.Happened |> List.filter (fun h -> h.Kind = "h" && h.T <= c && h.T > c - w * 0.5)
         |> List.collect (fun h -> stroke (place h.Who) (V2d (0.0, 0.0)) (u * 0.6) 6.0)
-    let layer (r : float) (g : float) (b : float) (points : V3f list) = { Color = V4d (r, g, b, 1.0); Points = Data.pack (Data.ofList points); Uvs = Data.pack (Data.ofArray (Array.create (List.length points) noUv)) }
+    let layer (r : float) (g : float) (b : float) (points : V3f list) = { Color = V4d (r, g, b, 1.0); Points = Data.pack (Data.ofList points); Uvs = Data.pack (Data.ofArray (Array.create (List.length points) flatUv)) }
     [ layer 0.55 0.2 0.18 (foes "normal")
       layer 0.4 0.45 0.95 (foes "magic")
       layer 0.95 0.95 0.4 (foes "rare")
