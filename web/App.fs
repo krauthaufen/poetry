@@ -310,7 +310,7 @@ type Model =
       /// The request that shares the build, its address once there, or why not.
       Sharing : string
       /// What a rotation's conditions can count besides what the fight begins with: the infusions the skills consume.
-      Asked : (string * int) list
+      Countable : (string * int) list
       /// When the fight's picture was last drawn anew (the frame's time; it is drawn 20 times a second).
       Drawn : float
       NewOf : string
@@ -429,7 +429,7 @@ type Model =
 let init : Model =
     { Build = ""; Scenario = "pack"; Status = "locating"; Title = ""; Class = ""; Ascendancy = ""; Tab = "character"
       Pools = []; Guards = []; Survival = []; Defences = []; Resistances = []; Minions = []
-      NotUnderstood = 0; Fighting = false; Gem = ""; Dps = []; Shares = []; Groups = []; Items = []; Bag = []; Swapped = Map.empty; Wearing = []; Equip = ""; Aim = ""; Pasting = false; Draft = ""; Dropped = Set.empty; GemEdits = []; Picker = ""; States = []; Standing = []; Editing = ""; Offers = []; Wanted = ""; Offered = []; Probe = ""; ProbeRound = 0; Probing = false; Tuning = ""; TuneSaid = ""; Probed = ""; Worth = []; Play = []; Rotation = []; Pressable = []; EnemyLevel = ""; EnemyEle = ""; EnemyChaos = ""; CustomDraft = ""; Custom = ""; Calcs = []; CanLogin = false; Asked = false; Player = ""; Characters = []; Running = []; Lasting = []; Going = ""; Kept = ""; Restored = false; Notes = ""; NotesWere = ""; NodeWorth = Map.empty; Among = ""; CalcShown = []; Pinned = ""; Deltas = []; DeltaOf = ""; Ask = ""; AskMore = ""; Anointed = Set.empty; Types = []; Counts = []; Start = Map.empty; Switches = Set.empty; Link = ""; Importing = ""; ImportSaid = ""; Sharing = ""; Asked = []; Drawn = -1.0; NewOf = "Warrior|Titan"; SetPoints = 0; NewAt = "90"; ShareLink = ""; ShareSaid = ""
+      NotUnderstood = 0; Fighting = false; Gem = ""; Dps = []; Shares = []; Groups = []; Items = []; Bag = []; Swapped = Map.empty; Wearing = []; Equip = ""; Aim = ""; Pasting = false; Draft = ""; Dropped = Set.empty; GemEdits = []; Picker = ""; States = []; Standing = []; Editing = ""; Offers = []; Wanted = ""; Offered = []; Probe = ""; ProbeRound = 0; Probing = false; Tuning = ""; TuneSaid = ""; Probed = ""; Worth = []; Play = []; Rotation = []; Pressable = []; EnemyLevel = ""; EnemyEle = ""; EnemyChaos = ""; CustomDraft = ""; Custom = ""; Calcs = []; CanLogin = false; Asked = false; Player = ""; Characters = []; Running = []; Lasting = []; Going = ""; Kept = ""; Restored = false; Notes = ""; NotesWere = ""; NodeWorth = Map.empty; Among = ""; CalcShown = []; Pinned = ""; Deltas = []; DeltaOf = ""; Ask = ""; AskMore = ""; Anointed = Set.empty; Types = []; Counts = []; Start = Map.empty; Switches = Set.empty; Link = ""; Importing = ""; ImportSaid = ""; Sharing = ""; Countable = []; Drawn = -1.0; NewOf = "Warrior|Titan"; SetPoints = 0; NewAt = "90"; ShareLink = ""; ShareSaid = ""
       Passives = [||]; Ascendancies = []; Shown = []; AscendancyWeb = Data.pack (Data.ofList ([] : V3f list)); Path = Data.pack (Data.ofList ([] : V3f list))
       Loaded = false; Capacity = 0
       WebUv = Data.pack (Data.ofList ([] : V2f list)); AscendancyWebUv = Data.pack (Data.ofList ([] : V2f list)); PathUv = Data.pack (Data.ofList ([] : V2f list)); Art = ""; Links = [||]; Neighbours = Map.empty; Web = Data.pack (Data.ofList ([] : V3f list)); Allocated = Set.empty; Edited = false
@@ -1766,7 +1766,7 @@ let rec private step (msg : Msg) (m : Model) : Model =
                     Pressable = Json.field "pressable" j |> Json.list |> List.map Json.string
                     States = (match Json.field "states" (Json.field "conditions" j) |> Json.list |> List.map Json.string with | [] -> [ "Ignite"; "Shock"; "Chill"; "Freeze"; "Bleed"; "Poison" ] | xs -> xs)
                     Standing = Json.field "skills" (Json.field "conditions" j) |> Json.list |> List.map Json.string
-                    Asked = Json.field "counts" (Json.field "conditions" j) |> Json.list |> List.map (fun x -> Json.string (Json.field "name" x), Json.int (Json.field "max" x)) |> List.filter (fun (_, most) -> most > 0)
+                    Countable = Json.field "counts" (Json.field "conditions" j) |> Json.list |> List.map (fun x -> Json.string (Json.field "name" x), Json.int (Json.field "max" x)) |> List.filter (fun (_, most) -> most > 0)
                     // (Runic Ward beside life and energy shield, for a character that has any)
                     Pools = [ row "Life" (n [ "pools"; "life" ]); row "Energy Shield" (n [ "pools"; "energyShield" ]) ] @ (if n [ "pools"; "ward" ] > 0.0 then [ row "Runic Ward" (n [ "pools"; "ward" ]) ] else []) @ [ row "Mana" (n [ "pools"; "mana" ]); row "Spirit" (n [ "pools"; "spirit" ]) ]
                     Guards = guards j
@@ -2060,8 +2060,8 @@ let private conditions (m : Model) (p : Pressed) : Node<Msg> =
     let free (cs : (string * string) list) = cs |> List.filter (fun (c, _) -> not (List.contains c parts))
     let rows =
         [ "pressed", free [ "ready", "when ready"; "buff", "kept up"; "curse", "kept on the enemy" ]
-          "when out of", free (m.Counts @ m.Asked |> List.map (fun (k, _) -> "below:" + k + ":1", spaced k))
-          "while not full of", free (m.Counts @ m.Asked |> List.filter (fun (_, most) -> most > 1) |> List.map (fun (k, most) -> "below:" + k + ":" + string most, spaced k))
+          "when out of", free (m.Counts @ m.Countable |> List.map (fun (k, _) -> "below:" + k + ":1", spaced k))
+          "while not full of", free (m.Counts @ m.Countable |> List.filter (fun (_, most) -> most > 1) |> List.map (fun (k, most) -> "below:" + k + ":" + string most, spaced k))
           "enemy has", free (m.States |> List.map (fun x -> "has:" + x, x))
           "enemy lacks", free (m.States |> List.map (fun x -> "lacks:" + x, x))
           "stands", free (m.Standing |> List.map (fun x -> "up:" + x, x))
