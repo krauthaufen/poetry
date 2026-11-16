@@ -1332,6 +1332,16 @@ Rune: None
         // "ignore armour movement penalties"
         near 37.0 (fst (Defence.movement (sheet [ Mod.base' (Named "OwnMovePenalty") 5.0; Mod.flag (Named "NoArmourMovementPenalty") ]))))
 
+    test "movement while using a skill: held slow, then easing to the character's own speed" (fun () ->
+        let skill mods = { Skill.make "Bolt" [ Spell ] with Mods = mods }
+        // one that cannot be used on the move: the character stands
+        near 0.0 (Channel.walked (skill []) 1.0)
+        // 70% less for half of a second's use, then 160% a second faster: 0.15 + 0.3 * 0.4375 + 1.6 * 0.4375^2 / 2 + 0.0625
+        let moving = skill [ Mod.flag (Named "UsedWhileMoving"); Mod.base' (Named "MoveWhileUsing") -70.0; Mod.base' (Named "MoveEasing") 160.0; Mod.base' (Named "MoveHeld") 50.0 ]
+        near (0.15 + 0.3 * 0.4375 + 1.6 * 0.4375 * 0.4375 / 2.0 + 0.0625) (Channel.walked moving 1.0)
+        // no slowing said: as if it did nothing
+        near 1.0 (Channel.walked (skill [ Mod.flag (Named "UsedWhileMoving") ]) 0.8))
+
     DataTests.run test near (fun a b -> equal a b)
 
     StatTests.run test near (fun a b -> equal a b)

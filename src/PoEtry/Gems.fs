@@ -782,6 +782,22 @@ module Gems =
                       for t in DamageType.all do
                           yield Mod.base' (GainAs(t, Fire)) gainFire |> Mod.from "stages" ]
         let mods = mods @ stageMods
+        // Using it on the move (`Channel.walked`): whether it can be at all; then how much slower
+        // the character walks as the use begins (percent, "70% less"), by how much a second that
+        // eases, and for how much of the use (percent) it does not ease yet.
+        let moveMods =
+            [ if set.Stats |> List.contains "can_perform_skill_while_moving" then
+                  yield Mod.flag (Named "UsedWhileMoving") |> Mod.from "movement"
+                  match statOf "movement_speed_+%_final_while_performing_action" with
+                  | Some slower when slower <> 0.0 -> yield Mod.base' (Named "MoveWhileUsing") slower |> Mod.from "movement"
+                  | _ -> ()
+                  match statOf "movement_speed_acceleration_+%_per_second_while_performing_action" with
+                  | Some eases when eases <> 0.0 -> yield Mod.base' (Named "MoveEasing") eases |> Mod.from "movement"
+                  | _ -> ()
+                  match statOf "movement_speed_while_performing_action_locked_duration_%" with
+                  | Some held when held <> 0.0 -> yield Mod.base' (Named "MoveHeld") held |> Mod.from "movement"
+                  | _ -> () ]
+        let mods = mods @ moveMods
         let time =
             if staged then time * stages + (statOf "channel_skill_end_animation_duration_override_ms" |> Option.defaultValue 0.0) / 1000.0 else time
         // A channelled skill with a cooldown (Flame Breath) is held for its minimum channel time:

@@ -66,6 +66,24 @@ type Ground =
       Speed: float }
 
 module Channel =
+    /// How far the character gets, as a part of what it walks in that time, while it uses a
+    /// skill once (0: it stands; 1: as if it did nothing). A skill that cannot be used on the
+    /// move: 0. Else it walks at 100 + `MoveWhileUsing` percent of its speed while `MoveHeld`
+    /// percent of the use lasts, then faster by `MoveEasing` percent of its speed a second,
+    /// up to its own speed (the game's "movement speed while performing action" stats).
+    let walked (skill: Skill) (seconds: float) : float =
+        let v name = skill.Mods |> List.sumBy (fun m -> if m.Stat = Named name && m.Conds.IsEmpty && m.Kind = Base then m.Value else 0.0)
+        if not (skill.Mods |> List.exists (fun m -> m.Stat = Named "UsedWhileMoving")) || seconds <= 0.0 then 0.0
+        else
+            let start = max 0.0 (min 1.0 (1.0 + v "MoveWhileUsing" / 100.0))
+            let held = seconds * max 0.0 (min 1.0 (v "MoveHeld" / 100.0))
+            let eases = v "MoveEasing" / 100.0
+            let rest = seconds - held
+            // from `start` up by `eases` a second, no faster than 1
+            let rising = if eases <= 0.0 then rest else min rest ((1.0 - start) / eases)
+            let way = start * held + start * rising + eases * rising * rising / 2.0 + (rest - rising)
+            way / seconds
+
     /// The unhurried seconds a cost by the second is paid for: a staged channel's time without
     /// its release ("Modifiers to Cast Speed also affect this skill's cost").
     let paidSeconds (skill: Skill) =
