@@ -1479,6 +1479,16 @@ let private classes =
       "Witch", [ "Infernalist"; "Blood Mage"; "Lich"; "Abyssal Lich" ]
       "Druid", [ "Oracle"; "Shaman" ] ]
 
+/// The picture of the character's ascendancy: the tree's once that is read, before that by
+/// the ascendancy's name as the pictures are named ("art/class-blood-mage.png").
+let private classArt (m : Model) : string =
+    if m.Art <> "" then m.Art
+    else
+        let known = classes |> List.collect snd
+        match [ m.Ascendancy; m.Class ] |> List.tryFind (fun n -> List.contains n known) with
+        | Some n -> "art/class-" + n.ToLowerInvariant().Replace (" ", "-") + ".png"
+        | None -> ""
+
 let private storeKey (m : Model) : string = m.Build.Replace("%", "%25").Replace("&", "%26").Replace("#", "%23").Replace("+", "%2B")
 let private saveUrl (m : Model) : string = "__store?op=put&key=" + storeKey m + "&value=" + esc m.Kept
 let private restoreUrl (m : Model) : string = "__store?op=get&key=" + storeKey m
@@ -2672,7 +2682,10 @@ let view (m : Model) : Node<Msg> =
             if m.Tab = "calcs" && m.Title <> "" then span { Dom.Fetch (calcsUrl m, Sources) }
             if (m.Tab = "tree" || m.Tab = "items") && m.Ask <> "" && (m.DeltaOf = m.Ask || m.DeltaOf = m.AskMore) then span { Dom.Fetch (m.AskMore, Compared) }
         }
-        span { Dom.Fetch ("tree.json", TreeData) }
+        // (the passive tree is read when it is first looked at: its passives, connections and
+        // pictures are most of what the page holds, and a phone's browser closed a page that
+        // read it beside the fights of a character just opened)
+        if m.Tab = "tree" || m.Passives.Length > 0 then span { Dom.Fetch ("tree.json", TreeData) }
         span { Dom.Fetch ("__poe?op=account", Account) }
         div {
             if m.Tab = "tree" then
@@ -2696,7 +2709,7 @@ let view (m : Model) : Node<Msg> =
             }
         header {
             h1 { "PoEtry" }
-            if m.Art <> "" then img { Dom.Class "crest"; Dom.Attr ("src", m.Art); Dom.Attr ("alt", "") }
+            if classArt m <> "" then img { Dom.Class "crest"; Dom.Attr ("src", classArt m); Dom.Attr ("alt", "") }
             if m.Characters.IsEmpty then
                 div { Dom.Class "title"; Dom.Attr ("data-check", "title"); named }
             if not m.Characters.IsEmpty then
