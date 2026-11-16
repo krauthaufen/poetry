@@ -2483,7 +2483,9 @@ let private points (m : Model) : string =
     // (the class's start on the tree, which a build file lists, is no point)
     let origin = m.Passives |> Array.filter (fun p -> p.Kind = "start" && spent.Contains p.Id) |> Array.length
     // (a passive of a weapon set costs a point as any other does: the larger set counts, PoB Build.lua)
-    let used = spent.Count - asc - starts - origin + leapt + m.SetPoints
+    // (a notable an item allocates is free also where it touches the tree)
+    let gifted = m.Anointed |> Set.filter (fun i -> spent.Contains i) |> Set.count
+    let used = spent.Count - asc - starts - origin - gifted + leapt + m.SetPoints
     // "Grants 4 Passive Skill Point" on an ascendancy's passives (Pathfinder six in all, Oracle two)
     let more =
         m.Passives |> Array.sumBy (fun p ->
@@ -2500,7 +2502,7 @@ let private points (m : Model) : string =
     // one more, none two: one point more is from somewhere not known here, and not called too many)
     let left = if used < has then sprintf " (%d free)" (has - used) elif used > has + 1 then sprintf " (%d too many)" (used - has) else ""
     let level = if used = 0 then "" elif needs > 101 then ", more than level 100 has" else sprintf ", needs level %d" (min 100 needs)
-    sprintf "%d of %d points%s%s, %d ascendancy%s%s" used has left level asc (if m.SetPoints > 0 then sprintf ", %d of them by weapon set" m.SetPoints else "") (if granted > 0 then sprintf ", %d granted" granted else "")
+    sprintf "%d of %d points%s%s, %d ascendancy%s%s" used has left level asc (if m.SetPoints > 0 then sprintf ", %d of them by weapon set" m.SetPoints else "") (if granted + gifted > 0 then sprintf ", %d granted" (granted + gifted) else "")
 
 /// The tooltip of the pinned passive (with what can be done to it) or the one under the mouse.
 let private tooltip (m : Model) : Node<Msg> =
