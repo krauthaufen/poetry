@@ -662,6 +662,12 @@ let rec private pairs (xs : float list) : V2d list =
 let private lengthOf (points : V2d list) : float =
     List.pairwise points |> List.sumBy (fun (a, b) -> sqrt ((b.X - a.X) * (b.X - a.X) + (b.Y - a.Y) * (b.Y - a.Y)))
 
+/// Where the minions stand, by name. Built here and not in `stage`: a map keeps its comparer,
+/// a closure, and a closure keeps the scope it was made in. Made in `stage` that scope holds
+/// the model before, whose map holds the one before it: every frame's model stayed for good
+/// (1.2 MB a second; a phone's browser closed the page).
+let private standing (xs : (string * V2d) list) : Map<string, V2d> = Map.ofList xs
+
 /// The picture of the fight at a time of it: the enemies where they are (by rarity), the
 /// player in the middle with the minions around (they have no place of their own in the
 /// simulation), the marks of the uses just made (the player's, the minions'), the enemies'
@@ -789,7 +795,7 @@ let private stage (m : Model) (c : float) : Layer list * Map<string, V2d> =
       layer 0.45 0.85 0.5 (marks false)
       layer 1.0 0.22 0.18 hurts
       layer 1.0 1.0 1.0 flashes ],
-    (placed |> List.map (fun (a, p) -> a.Named, p) |> Map.ofList)
+    standing (placed |> List.map (fun (a, p) -> a.Named, p))
 
 /// The fight to show, out of a fight's answer (none: what is shown stays).
 /// Damage by skill: a skill's lines (infused or not, each gem that triggers it) are one line,
@@ -2481,8 +2487,9 @@ let private points (m : Model) : string =
     let has = m.Level - 1 + 24
     // the level that has so many: one point a level after the first, with all 24 of the quests
     let needs = max 1 (used - 24 + 1)
-    let left = if used < has then sprintf " (%d free)" (has - used) elif used > has then sprintf " (%d too many)" (used - has) else ""
-    let level = if used = 0 then "" elif needs > 100 then ", more than level 100 has" else sprintf ", needs level %d" needs
+    // (how many points the quests give now is not sure: more than there are is not called too many)
+    let left = if used < has then sprintf " (%d free)" (has - used) else ""
+    let level = if used = 0 || needs > 100 then "" else sprintf ", needs level %d" needs
     sprintf "%d of %d points%s%s, %d ascendancy%s%s" used has left level asc (if m.SetPoints > 0 then sprintf ", %d of them by weapon set" m.SetPoints else "") (if granted > 0 then sprintf ", %d granted" granted else "")
 
 /// The tooltip of the pinned passive (with what can be done to it) or the one under the mouse.
