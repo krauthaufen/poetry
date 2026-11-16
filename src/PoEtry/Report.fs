@@ -455,14 +455,16 @@ module Report =
                 let dead (os: Outcome list) = os |> List.forall (fun o -> o.Ttk.IsSome)
                 let better = if dead a && dead b then time b < 0.99 * time a elif dead a || dead b then dead b else dealt b > 1.01 * dealt a
                 if better then held, heldPlayer else steps, player
-        // "map": a march through a map (`Fight.March`): "packs" packs, one every "spacing" units,
+        // "map": a march through a map (`Fight.March`): "packs" packs (10), one every "spacing" units,
         // of "pack" monsters each (a rare in every third, a quarter of the others magic; every
         // third normal one attacks from afar), and the map's boss after the last. It is cleared
         // when all of them are dead. The player uses its skills on what is within "engage"
         // units. (How near a monster wakes, 60 units, is a guess.)
         let size = max 1 (int (n "pack" 20.0))
-        let packs = max 1 (int (n "packs" 40.0))
-        let spacing = max 5.0 (n "spacing" (1500.0 / float packs))
+        // (ten packs, 3.75 m from one to the next: a quarter of a map of 150 m and 40 packs, which
+        // takes a quarter of the time to play and tells the same of a character)
+        let packs = max 1 (int (n "packs" 10.0))
+        let spacing = max 5.0 (n "spacing" 37.5)
         // (a map of so many packs, played so: `engage`, `hold` of `Sim.March`)
         let marchOf (count: int) (engage: float) (hold: bool) : March =
             { Speed = fst (Defence.movement c.Sheet)
@@ -483,8 +485,8 @@ module Report =
                           | _ -> e) }
         let marching (m: March) (f: Fight) = { f with March = Some m; Enemies = []; Replace = false; Targeting = Nearest }
         // How the map is played is found by playing: a short map of the same packs is played
-        // every way (standing until what is near is dead, or walking on; using the skills from
-        // 1, 2.5, 4.5 and 7 m), and the way that clears it soonest is the character's way.
+        // in six ways (walking on, using the skills from 1, 2.5, 4.5 or 7 m; standing until what
+        // is near is dead, from 2.5 or 4.5 m), and the way that clears it soonest is the character's way.
         // (Not cleared, or dead: the more it killed the better.) "engage" and "hold" say the
         // way themselves.
         let march, way =
@@ -497,13 +499,13 @@ module Report =
                 | None, Some hold -> Some (marchOf packs 45.0 (hold > 0.0)), said 45.0 (hold > 0.0)
                 | None, None ->
                     let trial (engage: float, hold: bool) =
-                        let f = marching (marchOf (min packs 8) engage hold) { Setup.fight c o player enemies with MaxTime = 150.0 }
+                        let f = marching (marchOf (min packs 3) engage hold) { Setup.fight c o player enemies with MaxTime = 60.0 }
                         let run = match Flat.compile f with | Ok program -> Flat.runner program | Error _ -> Sim.run f
                         let o = run 7001u
                         match o.Ttk with
                         | Some t when o.Died.IsNone -> t
                         | _ -> 1e6 - float o.Kills.Length
-                    let engage, hold = [ for hold in [ true; false ] do for engage in [ 10.0; 25.0; 45.0; 70.0 ] -> engage, hold ] |> List.minBy trial
+                    let engage, hold = [ 10.0, false; 25.0, false; 45.0, false; 70.0, false; 25.0, true; 45.0, true ] |> List.minBy trial
                     Some (marchOf packs engage hold), said engage hold
         // ("engine": "reference" asks for the reference engine whatever the fight)
         let made (k: float) =

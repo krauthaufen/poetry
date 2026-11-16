@@ -3703,8 +3703,8 @@ module Flat =
                             | Some m when not e.Woken ->
                                 let mutable ahead = false
                                 if not (d - e.Def.Size <= m.Aggro) && s.Packs > m.Packs then
-                                    for k in 0 .. s.Foes.Length - 1 do
-                                        let x = at s.Foes k
+                                    for k in 0 .. s.Live.Length - 1 do
+                                        let x = at s.Foes (at s.Live k)
                                         if x.Life > 0.0 && x.Def.Position.X > 0.0 then ahead <- true
                                 if d - e.Def.Size <= m.Aggro || (s.Packs > m.Packs && not ahead) then
                                     e.Woken <- true
@@ -3732,8 +3732,8 @@ module Flat =
                 let held = max 0.0 (min t s.WalkHeldUntil - s.Time)
                 let mutable met = false
                 let mutable ahead = s.Packs <= m.Packs
-                for k in 0 .. s.Foes.Length - 1 do
-                    let e = at s.Foes k
+                for k in 0 .. s.Live.Length - 1 do
+                    let e = at s.Foes (at s.Live k)
                     if e.Life > 0.0 then
                         if m.Hold && Vec.length e.Def.Position - e.Def.Size <= m.Engage then met <- true
                         if e.Def.Position.X > 0.0 then ahead <- true
@@ -3741,8 +3741,8 @@ module Flat =
                 if not (way <= 0.0) then
                     s.Walked <- s.Walked + way
                     s.Front <- s.Front - way
-                    for k in 0 .. s.Foes.Length - 1 do
-                        let e = at s.Foes k
+                    for k in 0 .. s.Live.Length - 1 do
+                        let e = at s.Foes (at s.Live k)
                         if e.Life > 0.0 then e.Def <- { e.Def with Position = { e.Def.Position with X = e.Def.Position.X - way } }
                     s.AliveStale <- true
             | _ -> ()
@@ -5585,8 +5585,8 @@ module Flat =
              && (match s.Main.Fight.March with
                  | Some m ->
                      let mutable near = false
-                     for k in 0 .. s.Foes.Length - 1 do
-                         let e = at s.Foes k
+                     for k in 0 .. s.Live.Length - 1 do
+                         let e = at s.Foes (at s.Live k)
                          if e.Life > 0.0 && Vec.length e.Def.Position - e.Def.Size <= m.Engage then near <- true
                      not near
                  | None -> false) then
