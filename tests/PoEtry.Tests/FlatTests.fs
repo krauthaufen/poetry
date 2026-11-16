@@ -753,6 +753,7 @@ let randomFight (case: uint32) : Fight * string =
                     { d with Life = between 40.0 1500.0; Speed = between 5.0 60.0; Attack = (if chance 0.5 then d.Attack else None) } ]
             { fight with
                 Replace = true
+                March = None
                 Enemies = (fight.Enemies |> List.map (fun e -> if chance 0.6 then { e with Life = between 40.0 3000.0 } else e)) @ extra }
     // Headhunter: rares carry modifiers, and killing one gives the player what they mean
     let fight =

@@ -142,6 +142,7 @@ module Scenarios =
                   CascadeSpacing = 1.0
                   BankedInvocations = 0.0
                   Replace = false
+                  March = None
                   EnemyAuras = []
                   Presence = infinity
                   PresenceAuras = []

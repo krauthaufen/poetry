@@ -1459,6 +1459,8 @@ module Flat =
         let fight = Fight.apart fight
         let no = ResizeArray<string>()
         let reject (what: string) = if not (no.Contains what) then no.Add what
+        // (a march through a map is the reference's alone so far)
+        if fight.March.IsSome then reject "a march"
         let buffs = Names()
         let statuses = Names()
         let counts = Names()

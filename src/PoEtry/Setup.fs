@@ -1039,6 +1039,7 @@ module Setup =
           CascadeSpacing = o.CascadeSpacing
           BankedInvocations = o.Banked
           Replace = o.Replace
+          March = None
           Walls = []
           MaxTime = o.MaxTime }
 

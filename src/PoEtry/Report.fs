@@ -453,9 +453,31 @@ module Report =
                 let dead (os: Outcome list) = os |> List.forall (fun o -> o.Ttk.IsSome)
                 let better = if dead a && dead b then time b < 0.99 * time a elif dead a || dead b then dead b else dealt b > 1.01 * dealt a
                 if better then held, heldPlayer else steps, player
+        // "map": a march through packs in a line (`Fight.March`). A pack every "spacing" units,
+        // "pack" monsters each: a rare in every third, a quarter of the others magic; every
+        // third normal one attacks from afar. The player uses its skills on what is within
+        // "engage" units. (How near a monster wakes, 60 units, is a guess.)
+        let march =
+            if scenario <> "map" then None
+            else
+                let size = max 1 (int (n "pack" 12.0))
+                Some { Speed = fst (Defence.movement c.Sheet)
+                       Spacing = max 5.0 (n "spacing" 40.0)
+                       Aggro = 60.0
+                       Engage = max 5.0 (n "engage" 45.0)
+                       Hold = n "hold" 1.0 > 0.0
+                       Pack = fun k ->
+                           let rare = if k % 3 = 2 then 1 else 0
+                           let magic = (size - rare) / 4
+                           Encounter.pack level profile [ Normal, size - rare - magic; Magic, magic; Rare, rare ] 0.0 15.0 false (uint32 (1000 + k))
+                           |> List.mapi (fun i e ->
+                               match e.Attack with
+                               | Some a when e.Rarity = Normal && i % 3 = 2 -> { e with Attack = Some { a with Range = 60.0 } }
+                               | _ -> e) }
         // ("engine": "reference" asks for the reference engine whatever the fight)
         let made (k: float) =
             let f = Setup.fight c o player (if k = 1.0 then enemies else enemies |> List.map (fun e -> { e with Life = e.Life * k }))
+            let f = match march with Some m -> { f with March = Some m; Enemies = []; Replace = false } | None -> f
             if s "engine" "" = "reference" then f, Sim.run f, "reference (asked for)"
             else
                 match Flat.compile f with
@@ -516,6 +538,11 @@ module Report =
               "killRate", num summary.KillRate
               "clear", (match summary.Ttk with Some t -> stats t | None -> JNull)
               "dps", stats summary.Dps
+              // a march: monsters killed a second, metres walked a second, how many were left behind
+              "kills", num (outcomes |> List.averageBy (fun o -> float o.Kills.Length / max 1e-9 o.Duration))
+              "walked", num (outcomes |> List.averageBy (fun o -> float (Map.tryFind "march:walked" o.Counts |> Option.defaultValue 0) / 10.0 / max 1e-9 o.Duration))
+              "leftBehind", num (outcomes |> List.averageBy (fun o -> float (Map.tryFind "march:left behind" o.Counts |> Option.defaultValue 0)))
+              "diedIn", num (outcomes |> List.averageBy (fun o -> if o.Died.IsSome then 1.0 else 0.0))
               "dpsEvened", num summary.DpsEvened
               "dpsOverkill", num summary.DpsOverkill
               "damageShare", pairs summary.DamageShare

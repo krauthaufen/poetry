@@ -530,6 +530,25 @@ module Actor =
 
     let always skill = { Use = skill; When = fun _ -> true }
 
+/// A map walked through: packs in a line ahead, more of them as the player comes on. The
+/// player walks whenever it is not held by a skill it uses (`Channel.walked`); what happens is
+/// reckoned around the player, so that it is the map that comes towards it.
+type March =
+    { /// How fast the player walks, game units a second.
+      Speed: float
+      /// From one pack's middle to the next.
+      Spacing: float
+      /// How near the player must come for a monster to wake: it walks and attacks from then on,
+      /// and sleeps again when the player is further off.
+      Aggro: float
+      /// How near an enemy must be for the player to use its skills (it walks on till then).
+      Engage: float
+      /// The player stands while an enemy is that near (it finishes what it meets); else it
+      /// walks on also then, as far as the skill it uses lets it, and may leave enemies behind.
+      Hold: bool
+      /// The pack of this number (0, 1, ...): its monsters, placed around its middle.
+      Pack: int -> EnemyDef list }
+
 type Fight =
     { Enemies: EnemyDef list
       Player: Actor
@@ -559,6 +578,8 @@ type Fight =
       /// A dead enemy is replaced by a new one of its kind that walks in from further out
       /// (a pack that never ends: the fight lasts until MaxTime).
       Replace: bool
+      /// The fight is a march through a map (the enemies are its packs, not `Enemies`).
+      March: March option
       MaxTime: float }
 
 module Fight =
@@ -577,6 +598,7 @@ module Fight =
           PresenceAuras = []
           PresenceEntry = []
           Replace = false
+          March = None
           MaxTime = maxTime }
 
     /// The fight with every actor under a name of its own: the engines keep an actor's
@@ -808,6 +830,14 @@ module Sim =
     type private World =
         { Player: PlayerState option
           Time: float
+          /// A march: how far the player has walked; until when the skill it uses holds it and
+          /// what part of its walking it keeps till then; where the furthest pack's middle is
+          /// (ahead of the player) and how many packs there have been.
+          Walked: float
+          WalkHeldUntil: float
+          WalkKept: float
+          Front: float
+          Packs: int
           /// What skills have left on the ground, oldest first.
           Grounds: GroundState list
           Enemies: Map<string, EnemyState>
@@ -1295,13 +1325,30 @@ module Sim =
                     let slow = if e.Debuffs.IsEmpty then slow else slow * max 0.0 (Mods.more Ctx.empty [ Named "MovementSpeed" ] (defender e).Mods)
                     let d = Vec.length e.Def.Position
                     let gap = d - e.Def.Size - atk.Range
-                    if stopped || gap <= 0.0 then w
+                    // (on a march a monster the player is not near enough to sleeps)
+                    let asleep = match env.Fight.March with Some m -> d - e.Def.Size > m.Aggro | None -> false
+                    if stopped || asleep || gap <= 0.0 then w
                     else
                         let step = min gap (e.Def.Speed * slow * dt)
                         let pos = Vec.scale ((d - step) / d) e.Def.Position
                         updateEnemyDef e.Def.Name pos w
                 | _ -> w
             let w = alive w |> List.fold move w
+            // a march: the player walks on, less so while a skill it uses holds it; reckoned
+            // around the player, that is every enemy (and the packs to come) coming nearer
+            let w =
+                match env.Fight.March with
+                | Some m when w.Player |> Option.forall (fun p -> p.Died.IsNone) ->
+                    let held = max 0.0 (min t w.WalkHeldUntil - w.Time)
+                    let met = m.Hold && (alive w |> List.exists (fun e -> Vec.length e.Def.Position - e.Def.Size <= m.Engage))
+                    let way = if met then 0.0 else m.Speed * (held * w.WalkKept + (dt - held))
+                    if way <= 0.0 then w
+                    else
+                        { w with
+                            Walked = w.Walked + way
+                            Front = w.Front - way
+                            Enemies = w.Enemies |> Map.map (fun _ e -> if e.Life > 0.0 then { e with Def = { e.Def with Position = { e.Def.Position with X = e.Def.Position.X - way } } } else e) }
+                | _ -> w
             { w with Time = t }
 
     /// Auras on enemies in the player's Presence: an enemy has them from when its body reaches
@@ -2867,6 +2914,9 @@ module Sim =
                     | _ -> w
                 let w = startUse env rng actor skill t w
                 let w, extra = reload w
+                let w =
+                    if env.Fight.March.IsNone || name <> env.Fight.Player.Name then w
+                    else { w with WalkHeldUntil = w.Time + t + extra; WalkKept = (if extra > 0.0 then 0.0 else Channel.walked skill t) }
                 schedule (w.Time + t + extra) (Ready name) w
             // drink the mana flask when mana is getting low and it isn't already running
             let w =
@@ -2962,6 +3012,12 @@ module Sim =
             | None -> true
         match w.Player with
         | Some p when name = env.Fight.Player.Name && p.LockedUntil > w.Time -> schedule p.LockedUntil (Ready name) w
+        // on a march the player walks on until an enemy is near enough to use its skills on
+        | Some _ when name = env.Fight.Player.Name
+                      && (match env.Fight.March with
+                          | Some m -> not (alive w |> List.exists (fun e -> Vec.length e.Def.Position - e.Def.Size <= m.Engage))
+                          | None -> false) ->
+            schedule (w.Time + Constants.serverTick) (Ready name) w
         // a totem that isn't placed waits
         | _ when not standing -> schedule (w.Time + 0.1) (Ready name) w
         // a melee minion that finds no room at the enemy waits for some
@@ -4175,7 +4231,9 @@ module Sim =
     let private enemyAttack env (rng: Rng) name (w: World) =
         let e = w.Enemies.[name]
         let minions = env.Fight.Minions |> List.filter (fun m -> m.Body.IsSome && not (Map.find m.Name w.Actors).Gone)
+        let asleep = match env.Fight.March with Some m -> Vec.length e.Def.Position - e.Def.Size > m.Aggro | None -> false
         match e.Def.Attack with
+        | Some atk when asleep && e.Life > 0.0 -> schedule (w.Time + atk.Interval) (EnemyAttack name) w
         | Some atk when e.Life > 0.0 && env.Fight.Minions |> List.exists (fun m -> m.Body.IsSome) ->
             let playerUp = env.Fight.Player.Vitals.IsSome && (w.Player |> Option.exists (fun p -> p.Died.IsNone))
             let inRange = Vec.length e.Def.Position - e.Def.Size <= atk.Range + 1e-6
@@ -4919,7 +4977,12 @@ module Sim =
               Boned = Set.empty
               Pustules = []
               Cause = ""
-              Aim = "" }
+              Aim = ""
+              Walked = 0.0
+              WalkHeldUntil = 0.0
+              WalkKept = 1.0
+              Front = (match fight.March with Some m -> m.Engage | None -> 0.0)
+              Packs = 0 }
             // (a temporary minion starts acting when it is summoned)
             |> fun w -> actors |> List.fold (fun w a -> if a.Pool.IsSome then w else schedule 0.0 (Ready a.Name) w) w
             |> fun w -> actors |> List.fold (fun w a -> a.Cycles |> List.fold (fun w c -> schedule 0.0 (CycleTick(a.Name, c.Name)) w) w) w
@@ -4935,14 +4998,39 @@ module Sim =
                     |> List.fold (fun w e -> match e.Attack with Some a -> schedule (rng.Float() * a.Interval) (EnemyAttack e.Name) w | None -> w) w
             |> schedule fight.MaxTime Expire
         // a fight that needs more events than this is a runaway (a zero-time loop): stop it
+        // A march's packs: one after the other as far ahead as twice the monsters' aggro, each a
+        // spacing after the one before; and a monster the player has left far behind is gone
+        // (not killed).
+        let supply (w: World) : World =
+            match fight.March with
+            | None -> w
+            | Some m ->
+                let w =
+                    alive w |> List.fold (fun (w: World) e ->
+                        if e.Def.Position.X >= -1.5 * m.Aggro then w
+                        else { w with Enemies = Map.add e.Def.Name { e with Life = 0.0 } w.Enemies; Counts = bump "march:left behind" w.Counts }) w
+                let rec more (w: World) =
+                    if w.Front >= 2.0 * m.Aggro + m.Spacing || w.Packs > 100000 then w
+                    else
+                        let at = w.Front + m.Spacing
+                        let w =
+                            m.Pack w.Packs |> List.fold (fun (w: World) (d: EnemyDef) ->
+                                let d = { d with Name = sprintf "%s #%d" d.Name w.Packs; Position = Vec.add (Vec.make at 0.0) d.Position }
+                                let w = { w with Enemies = Map.add d.Name (fresh d) w.Enemies; Shown = (if w.Tracing then Entered(w.Time, d) :: w.Shown else w.Shown) }
+                                if fight.Player.Vitals.IsNone && fight.Minions |> List.forall (fun m -> m.Body.IsNone) then w
+                                else match d.Attack with Some a -> schedule (w.Time + rng.Float() * a.Interval) (EnemyAttack d.Name) w | None -> w) w
+                        more { w with Front = at; Packs = w.Packs + 1 }
+                more w
+        let w0 = supply w0
         let maxEvents = 3000000
         let rec loop n (w: World) =
             let died = w.Player |> Option.exists (fun p -> p.Died.IsSome)
-            if died || allDead w || Map.isEmpty w.Queue || fst (Seq.head w.Queue).Key > fight.MaxTime then w
+            // (a march has no last enemy: the packs go on)
+            if died || (allDead w && fight.March.IsNone) || Map.isEmpty w.Queue || fst (Seq.head w.Queue).Key > fight.MaxTime then w
             elif n >= maxEvents then { w with Counts = bump "aborted: too many events" w.Counts }
             else
                 let before = w.Kills
-                let w = step env rng w
+                let w = supply (step env rng w)
                 // those that just died are replaced: one of the same kind comes from where the
                 // first of them began, further out and somewhat to the side, and walks in
                 let w =
@@ -4977,7 +5065,7 @@ module Sim =
           Kills = List.rev w.Kills
           DamageBy = w.DamageBy
           DamageByType = w.DamageByType
-          Counts = w.Counts
+          Counts = (if fight.March.IsSome then Map.add "march:walked" (int w.Walked) w.Counts else w.Counts)
           Uptime = w.Uptime
           Died = w.Player |> Option.bind (fun p -> p.Died)
           DamageTaken = w.Player |> Option.map (fun p -> p.Taken) |> Option.defaultValue 0.0
