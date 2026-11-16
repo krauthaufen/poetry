@@ -7673,6 +7673,9 @@ module Flat =
             syncPresence s
             syncGround s
             recover s dt
+            // (on a march the field is empty between a pack and the next: the player's turn comes again, `Sim.stepEvent`)
+            if s.AliveCount = 0 && alive s && kind = EReady && who = 0 && (match s.Main.Fight.March with Some m -> s.Packs <= m.Packs | None -> false) then
+                schedule s (s.Time + Constants.serverTick) EReady 0 0 0.0 0.0
             if s.AliveCount > 0 && alive s then
                 pruneAll s
                 if not (s.Seeds.IsEmpty && s.Pustules.IsEmpty && s.Crystals.IsEmpty && s.Agonies.IsEmpty) then

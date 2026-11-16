@@ -4504,7 +4504,12 @@ module Sim =
         let rates = match env.Fight.Player.Vitals with Some v when not v.RatesVary -> Some v | _ -> vitalsNow env w
         let w = w |> recover env.Fight.Player.Vitals rates env.Fight.Player.ManaFlask env.Fight.Player.Charms dt
         if allDead w || (w.Player |> Option.exists (fun p -> p.Died.IsSome)) then
-            w
+            // (on a march the field is empty between a pack and the next: the fight is not
+            // over, and the player's turn comes again; what else was due is lost as ever)
+            match ev, env.Fight.March with
+            | Ready name, Some m when name = env.Fight.Player.Name && w.Packs <= m.Packs && (w.Player |> Option.forall (fun p -> p.Died.IsNone)) ->
+                schedule (w.Time + Constants.serverTick) (Ready name) w
+            | _ -> w
         else
             let w = prune w
             // seeds: set off by the damage their enemy has taken (or its death: the blast then
