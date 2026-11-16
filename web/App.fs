@@ -2400,9 +2400,10 @@ let private scenario (m : Model) (key : string) (name : string) : Node<Msg> =
 /// Under the scenarios: what the one looked at is (a phone shows no tooltips), and for the
 /// map how the character plays it.
 let private aboutScenario (m : Model) : Node<Msg> =
+    let asks = if m.Scenario = "map" && m.MapWay <> "" then "The character " + m.MapWay + ". What is this?" else "What is this?"
     details {
         Dom.Class "about-scenario"
-        summary { (if m.Scenario = "map" && m.MapWay <> "" then "The character " + m.MapWay + ". What is this?" else "What is this?") }
+        summary { asks }
         div { Dom.Class "depth"; scenarioSaid m.Scenario }
     }
 
