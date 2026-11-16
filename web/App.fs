@@ -407,6 +407,10 @@ type Model =
       Foes : Foe list
       Allies : Ally list
       Happened : Happening list
+      /// Of the fight shown: every enemy's places in the order of time (the first: where it
+      /// starts), and when each was killed. Made once when the fight arrives (`tracks`).
+      Moves : Map<string, (float * V2d)[]>
+      Kills : Map<string, float>
       Lasts : float
       Field : float
       /// (the middle of what is shown: between the player and the enemies)
@@ -429,7 +433,7 @@ type Model =
 let init : Model =
     { Build = ""; Scenario = "pack"; Status = "locating"; Title = ""; Class = ""; Ascendancy = ""; Tab = "character"
       Pools = []; Guards = []; Survival = []; Defences = []; Resistances = []; Minions = []
-      NotUnderstood = 0; Fighting = false; Gem = ""; Dps = []; Shares = []; Groups = []; Items = []; Bag = []; Swapped = Map.empty; Wearing = []; Equip = ""; Aim = ""; Pasting = false; Draft = ""; Dropped = Set.empty; GemEdits = []; Picker = ""; States = []; Standing = []; Editing = ""; Offers = []; Wanted = ""; Offered = []; Probe = ""; ProbeRound = 0; Probing = false; Tuning = ""; TuneSaid = ""; Probed = ""; Worth = []; Play = []; Rotation = []; Pressable = []; EnemyLevel = ""; EnemyEle = ""; EnemyChaos = ""; CustomDraft = ""; Custom = ""; Calcs = []; CanLogin = false; Asked = false; Player = ""; Characters = []; Running = []; Lasting = []; Going = ""; Kept = ""; Restored = false; Notes = ""; NotesWere = ""; NodeWorth = Map.empty; Among = ""; CalcShown = []; Pinned = ""; Deltas = []; DeltaOf = ""; Ask = ""; AskMore = ""; Anointed = Set.empty; Types = []; Counts = []; Start = Map.empty; Switches = Set.empty; Link = ""; Importing = ""; ImportSaid = ""; Sharing = ""; Countable = []; Drawn = -1.0; NewOf = "Warrior|Titan"; SetPoints = 0; NewAt = "90"; ShareLink = ""; ShareSaid = ""
+      NotUnderstood = 0; Fighting = false; Gem = ""; Dps = []; Shares = []; Groups = []; Items = []; Bag = []; Swapped = Map.empty; Wearing = []; Equip = ""; Aim = ""; Pasting = false; Draft = ""; Dropped = Set.empty; GemEdits = []; Picker = ""; States = []; Standing = []; Editing = ""; Offers = []; Wanted = ""; Offered = []; Probe = ""; ProbeRound = 0; Probing = false; Tuning = ""; TuneSaid = ""; Probed = ""; Worth = []; Play = []; Rotation = []; Pressable = []; EnemyLevel = ""; EnemyEle = ""; EnemyChaos = ""; CustomDraft = ""; Custom = ""; Calcs = []; CanLogin = false; Asked = false; Player = ""; Characters = []; Running = []; Lasting = []; Going = ""; Kept = ""; Restored = false; Notes = ""; NotesWere = ""; NodeWorth = Map.empty; Among = ""; CalcShown = []; Pinned = ""; Deltas = []; DeltaOf = ""; Ask = ""; AskMore = ""; Anointed = Set.empty; Types = []; Counts = []; Start = Map.empty; Switches = Set.empty; Link = ""; Importing = ""; ImportSaid = ""; Sharing = ""; Countable = []; Moves = Map.empty; Kills = Map.empty; Drawn = -1.0; NewOf = "Warrior|Titan"; SetPoints = 0; NewAt = "90"; ShareLink = ""; ShareSaid = ""
       Passives = [||]; Ascendancies = []; Shown = []; AscendancyWeb = Data.pack (Data.ofList ([] : V3f list)); Path = Data.pack (Data.ofList ([] : V3f list))
       Loaded = false; Capacity = 0
       WebUv = Data.pack (Data.ofList ([] : V2f list)); AscendancyWebUv = Data.pack (Data.ofList ([] : V2f list)); PathUv = Data.pack (Data.ofList ([] : V2f list)); Art = ""; Links = [||]; Neighbours = Map.empty; Web = Data.pack (Data.ofList ([] : V3f list)); Allocated = Set.empty; Edited = false
@@ -666,6 +670,26 @@ let rec private pairs (xs : float list) : V2d list =
 let private lengthOf (points : V2d list) : float =
     List.pairwise points |> List.sumBy (fun (a, b) -> sqrt ((b.X - a.X) * (b.X - a.X) + (b.Y - a.Y) * (b.Y - a.Y)))
 
+/// What the picture asks of a fight every frame, found once: every enemy's places in the
+/// order of time (the first where it starts), and when each was killed. (Going through all
+/// that happened for it frame after frame made megabytes of garbage a frame.)
+let private tracks (happened : Happening list) (foes : Foe list) : Map<string, (float * V2d)[]> * Map<string, float> =
+    let moved =
+        happened |> List.filter (fun h -> h.Kind = "m") |> List.groupBy (fun h -> h.Who)
+        |> List.map (fun (who, hs) -> who, hs |> List.map (fun h -> h.T, V2d (h.X, h.Y)))
+    let starts = foes |> List.map (fun f -> f.Called, f.Start) |> Map.ofList
+    let names = (foes |> List.map (fun f -> f.Called)) @ (moved |> List.map fst) |> List.distinct
+    let found = Map.ofList moved
+    let moves =
+        names |> List.map (fun n ->
+            let later = Map.tryFind n found |> Option.defaultValue []
+            n, Array.ofList (match Map.tryFind n starts with Some p -> (0.0, p) :: later | None -> later))
+        |> List.filter (fun (_, ps) -> ps.Length > 0)
+        |> Map.ofList
+    // (the first time it dies)
+    let kills = happened |> List.filter (fun h -> h.Kind = "k") |> List.rev |> List.map (fun h -> h.Who, h.T) |> Map.ofList
+    moves, kills
+
 /// Where the minions stand, by name. Built here and not in `stage`: a map keeps its comparer,
 /// a closure, and a closure keeps the scope it was made in. Made in `stage` that scope holds
 /// the model before, whose map holds the one before it: every frame's model stayed for good
@@ -680,36 +704,30 @@ let private stage (m : Model) (c : float) : Layer list * Map<string, V2d> =
     let speed = pace m
     let w = 0.45 * speed
     let u = m.Field / 110.0
-    let gone =
-        (m.Happened |> List.filter (fun h -> h.Kind = "k" && h.T <= c - w * 0.3) |> List.map (fun h -> h.Who))
-        @ (m.Foes |> List.filter (fun f -> f.From > c) |> List.map (fun f -> f.Called))
-        |> Set.ofList
+    let gone (f : Foe) = f.From > c || (match Map.tryFind f.Called m.Kills with Some t -> t <= c - w * 0.3 | None -> false)
     // where an enemy is: between the two places noted around this time, walking from the one
     // to the other (when the next was noted much later it stood still first: frozen, stunned)
-    let noted =
-        m.Happened |> List.fold (fun (p : Map<string, (float * V2d) * (float * V2d) option>) h ->
-            if h.Kind <> "m" then p
-            elif h.T <= c then Map.add h.Who ((h.T, V2d (h.X, h.Y)), None) p
-            else
-                match Map.tryFind h.Who p with
-                | Some (was, None) -> Map.add h.Who (was, Some (h.T, V2d (h.X, h.Y))) p
-                | _ -> p)
-            (m.Foes |> List.map (fun f -> f.Called, ((0.0, f.Start), None)) |> Map.ofList)
     let place (name : string) =
-        match Map.tryFind name noted with
-        | Some ((_, a), None) -> a
-        | Some ((t0, a), Some (t1, b)) ->
-            let from = max t0 (t1 - 0.5)
-            let k = if c <= from then 0.0 else (c - from) / max 1e-6 (t1 - from)
-            V2d (a.X + (b.X - a.X) * k, a.Y + (b.Y - a.Y) * k)
+        match Map.tryFind name m.Moves with
         | None -> V2d (0.0, 0.0)
+        | Some ps ->
+            let mutable i = 0
+            while i + 1 < ps.Length && fst ps.[i + 1] <= c do i <- i + 1
+            let t0, a = ps.[i]
+            // (a place noted before the fight's time and none yet: the first to come is where it goes)
+            if fst ps.[i] > c || i + 1 >= ps.Length then a
+            else
+                let t1, b = ps.[i + 1]
+                let from = max t0 (t1 - 0.5)
+                let k = if c <= from then 0.0 else (c - from) / max 1e-6 (t1 - from)
+                V2d (a.X + (b.X - a.X) * k, a.Y + (b.Y - a.Y) * k)
     let struck = m.Happened |> List.filter (fun h -> h.Kind = "s" && h.T <= c && h.T > c - w * 0.3) |> List.map (fun h -> h.Who) |> Set.ofList
-    let foes (rank : string) = m.Foes |> List.filter (fun f -> f.Rank = rank && not (gone.Contains f.Called)) |> List.collect (fun f -> disc (place f.Called) f.Radius 1.0)
+    let foes (rank : string) = m.Foes |> List.filter (fun f -> f.Rank = rank && not (gone f)) |> List.collect (fun f -> disc (place f.Called) f.Radius 1.0)
     let flashes = m.Foes |> List.filter (fun f -> struck.Contains f.Called) |> List.collect (fun f -> disc (place f.Called) (f.Radius * 0.55) 9.0)
     // The simulation gives minions no place. Shown where they would be: those that fight in
     // melee around the enemy nearest to the player (ring after ring, as many as fit), the
     // others in an arc beside the player.
-    let alive = m.Foes |> List.filter (fun f -> not (gone.Contains f.Called))
+    let alive = m.Foes |> List.filter (fun f -> not (gone f))
     let focus = alive |> List.sortBy (fun f -> let p = place f.Called in p.X * p.X + p.Y * p.Y) |> List.tryHead
     let body (a : Ally) = if a.Body > 0.0 then max (u * 0.9) (a.Body * 0.7) else u * 1.1
     let melee, ranged = m.Allies |> List.filter (fun a -> a.Minion) |> List.partition (fun a -> a.Melee && focus.IsSome)
@@ -871,6 +889,8 @@ let private readReplay (j : Json) (m : Model) : Model =
                     { Named = Json.string (Json.field "name" a); Minion = Json.bool (Json.field "minion" a); Melee = Json.bool (Json.field "melee" a)
                       Body = Json.number (Json.field "size" a); Companion = Json.bool (Json.field "companion" a) })
             Happened = happened
+            Moves = fst (tracks happened (foes @ came))
+            Kills = snd (tracks happened (foes @ came))
             Lasts = max 0.5 (Json.number (Json.field "duration" r))
             // (the picture is wider than high: what is high counts for more)
             Field = max 60.0 (max ((x1 - x0) * 1.15) ((y1 - y0) * 2.1))
