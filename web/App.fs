@@ -137,6 +137,11 @@ type Msg =
     | Among of string
     /// What was changed here is kept in the browser (by character) and comes back on the next visit.
     | Saved of Fetched
+    /// A character from outside the account: what is pasted (a Path of Building code, a pobb.in
+    /// link, a poe.ninja character's address), it is opened, what came of it.
+    | Link of string
+    | Import
+    | Imported of Fetched
     /// The game account (where the page is hosted for it): who is logged in and their
     /// characters arrive; logging in and out; another character is opened.
     | Account of Fetched
@@ -289,6 +294,11 @@ type Model =
       Counts : (string * int) list
       Start : Map<string, int>
       Switches : Set<string>
+      /// What was pasted to open a character from outside the account, the question that opens
+      /// it while it is asked, and why it could not be opened.
+      Link : string
+      Importing : string
+      ImportSaid : string
       /// The passive tree: its passives and connections, who neighbours whom, the ribbons of
       /// all connections as one mesh, what is allocated (and whether that was changed here).
       /// (Arrays: read by the update alone, and as arrays they are one value each to the view,
@@ -399,7 +409,7 @@ type Model =
 let init : Model =
     { Build = ""; Scenario = "boss"; Status = "locating"; Title = ""; Class = ""; Ascendancy = ""; Tab = "character"
       Pools = []; Guards = []; Survival = []; Defences = []; Resistances = []; Minions = []
-      NotUnderstood = 0; Fighting = false; Gem = ""; Dps = []; Shares = []; Groups = []; Items = []; Bag = []; Swapped = Map.empty; Wearing = []; Equip = ""; Aim = ""; Pasting = false; Draft = ""; Dropped = Set.empty; GemEdits = []; Picker = ""; States = []; Standing = []; Editing = ""; Offers = []; Wanted = ""; Offered = []; Probe = ""; ProbeRound = 0; Probing = false; Tuning = ""; TuneSaid = ""; Probed = ""; Worth = []; Play = []; Rotation = []; Pressable = []; EnemyLevel = ""; EnemyEle = ""; EnemyChaos = ""; CustomDraft = ""; Custom = ""; Calcs = []; CanLogin = false; Asked = false; Player = ""; Characters = []; Running = []; Lasting = []; Going = ""; Kept = ""; Restored = false; Notes = ""; NotesWere = ""; NodeWorth = Map.empty; Among = ""; CalcShown = []; Pinned = ""; Deltas = []; DeltaOf = ""; Ask = ""; AskMore = ""; Anointed = Set.empty; Types = []; Counts = []; Start = Map.empty; Switches = Set.empty
+      NotUnderstood = 0; Fighting = false; Gem = ""; Dps = []; Shares = []; Groups = []; Items = []; Bag = []; Swapped = Map.empty; Wearing = []; Equip = ""; Aim = ""; Pasting = false; Draft = ""; Dropped = Set.empty; GemEdits = []; Picker = ""; States = []; Standing = []; Editing = ""; Offers = []; Wanted = ""; Offered = []; Probe = ""; ProbeRound = 0; Probing = false; Tuning = ""; TuneSaid = ""; Probed = ""; Worth = []; Play = []; Rotation = []; Pressable = []; EnemyLevel = ""; EnemyEle = ""; EnemyChaos = ""; CustomDraft = ""; Custom = ""; Calcs = []; CanLogin = false; Asked = false; Player = ""; Characters = []; Running = []; Lasting = []; Going = ""; Kept = ""; Restored = false; Notes = ""; NotesWere = ""; NodeWorth = Map.empty; Among = ""; CalcShown = []; Pinned = ""; Deltas = []; DeltaOf = ""; Ask = ""; AskMore = ""; Anointed = Set.empty; Types = []; Counts = []; Start = Map.empty; Switches = Set.empty; Link = ""; Importing = ""; ImportSaid = ""
       Passives = [||]; Ascendancies = []; Shown = []; AscendancyWeb = Data.pack (Data.ofList ([] : V3f list)); Path = Data.pack (Data.ofList ([] : V3f list))
       Loaded = false; Capacity = 0
       WebUv = Data.pack (Data.ofList ([] : V2f list)); AscendancyWebUv = Data.pack (Data.ofList ([] : V2f list)); PathUv = Data.pack (Data.ofList ([] : V2f list)); Art = ""; Links = [||]; Neighbours = Map.empty; Web = Data.pack (Data.ofList ([] : V3f list)); Allocated = Set.empty; Edited = false
@@ -1525,14 +1535,23 @@ let rec private step (msg : Msg) (m : Model) : Model =
          | _ -> m)
     | Among text -> among { m with Among = text }
     | Saved _ -> m
+    | Link t -> { m with Link = t; ImportSaid = "" }
+    | Import -> if m.Link.Trim () = "" then m else { m with Importing = "__poe?op=paste&text=" + esc (m.Link.Trim ()); ImportSaid = "" }
+    | Imported r ->
+        (match Native.parseJson r.Text with
+         | Ok j when Json.string (Json.field "error" j) <> "" -> { m with Importing = ""; ImportSaid = Json.string (Json.field "error" j) }
+         | Ok _ -> m
+         | _ -> { m with Importing = ""; ImportSaid = "that did not work" })
     | Account r ->
         (match r.Status, Native.parseJson r.Text with
          | 200, Ok j ->
             let failed = Json.string (Json.field "error" j)
+            // (a character from outside the account goes by its address and says what it is itself)
+            let said (c : Json) = if Json.bool (Json.field "outside" c) then Json.string (Json.field "about" c) else Json.string (Json.field "name" c) + ": " + Json.string (Json.field "about" c)
             let leagues (lasting : bool) =
                 Json.field "characters" j |> Json.list |> List.filter (fun c -> Json.bool (Json.field "lasting" c) = lasting)
                 |> List.groupBy (fun c -> Json.string (Json.field "league" c))
-                |> List.map (fun (league, cs) -> league, string cs.Length, cs |> List.map (fun c -> Json.string (Json.field "name" c), Json.string (Json.field "name" c) + ": " + Json.string (Json.field "about" c)))
+                |> List.map (fun (league, cs) -> league, string cs.Length, cs |> List.map (fun c -> Json.string (Json.field "name" c), said c))
             { m with
                 Asked = true
                 Running = leagues false
@@ -1541,7 +1560,7 @@ let rec private step (msg : Msg) (m : Model) : Model =
                 // (the one that is open first: a list shows its first)
                 Characters =
                     Json.field "characters" j |> Json.list
-                    |> List.map (fun c -> Json.string (Json.field "name" c), Json.string (Json.field "name" c) + ": " + Json.string (Json.field "about" c), Json.string (Json.field "url" c))
+                    |> List.map (fun c -> Json.string (Json.field "name" c), said c, Json.string (Json.field "url" c))
                     |> List.sortBy (fun (_, _, url) -> if url = m.Build then 0 else 1)
                 Status = (if failed <> "" then failed elif m.Build = "" && Json.bool (Json.field "can" j) then (if Json.string (Json.field "name" j) = "" then "log in to see your characters" else "choose a character") else m.Status) }
          | _ -> m)
@@ -1775,7 +1794,7 @@ let update (msg : Msg) (m : Model) : Model =
     // (what is kept between visits: after anything but the pointer, a frame, an answer)
     let n =
         match msg with
-        | PointerDown _ | PointerMove _ | PointerUp _ | Zoom _ | Sized _ | Tick _ | Fought _ | Warmed _ | Compared _ | Analysed _ | Tuned _ | Sources _ | Saved _ | TreeData _ | Sheet _ | Picked _ -> n
+        | PointerDown _ | PointerMove _ | PointerUp _ | Zoom _ | Sized _ | Tick _ | Fought _ | Warmed _ | Compared _ | Analysed _ | Tuned _ | Sources _ | Saved _ | Link _ | Import | Imported _ | TreeData _ | Sheet _ | Picked _ -> n
         | _ when not n.Restored -> n
         | _ -> (let k = kept n in if k = n.Kept then n else { n with Kept = k })
     // (what the passive looked at would take or give back, drawn on the tree)
@@ -2529,6 +2548,7 @@ let view (m : Model) : Node<Msg> =
     let tune = if m.Tuning <> "" then "Trying minion counts ..." else "Best minion counts"
     let here = m.Characters |> List.exists (fun (_, _, url) -> url = m.Build)
     let found = if m.Sought.Trim().Length >= 2 then string m.Hits + " found" else ""
+    let opening = if m.Importing <> "" then "Opening ..." else "Open"
     let analysing = if m.Probing then "Analysing " + m.Probed else "Analyse"
     let named = if m.Title = "" then "" else sprintf "Level %d %s" m.Level (if m.Ascendancy <> "" then m.Ascendancy else m.Class)
     let chosen' = if named = "" then "choose a character" else named
@@ -2691,8 +2711,16 @@ let view (m : Model) : Node<Msg> =
                     button { Dom.Class "act enter"; Dom.OnClick (fun _ -> Login); "Log in with your Path of Exile account" }
                 if not m.Asked then
                     div { Dom.Class "depth waiting"; "looking for your characters ..." }
-                if m.Asked && not m.CanLogin then
-                    div { Dom.Class "depth"; "no character: add ?build=<url of a character or a PoB build> to the address" }
+                div {
+                    Dom.Class "import"
+                    textarea { Dom.Class "draft"; Dom.Attr ("rows", "3"); Dom.Attr ("placeholder", "or paste a build: a Path of Building code, a pobb.in link, or the address of a character's page on poe.ninja"); Dom.OnInput Link }
+                    div {
+                        Dom.Class "actions"
+                        button { Dom.Class "act"; Dom.OnClick (fun _ -> Import); opening }
+                        if m.ImportSaid <> "" then span { Dom.Class "said"; m.ImportSaid }
+                    }
+                    if m.Importing <> "" then span { Dom.Fetch (m.Importing, Imported) }
+                }
                 for (league, count, heroes) in m.Running do
                     details {
                         Dom.Attr ("open", "open")

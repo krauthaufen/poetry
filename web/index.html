@@ -382,7 +382,7 @@
         const ask = async (q) => {
           if (returning) await returning;
           const op = q.get("op");
-          const saved = (listed) => savedList().filter((e) => !listed.some((c) => c.url === e.url)).map((e) => ({ name: e.name, about: e.about + ", saved here", url: e.url, league: e.league || "", level: e.level || 0 }));
+          const saved = (listed) => savedList().filter((e) => !listed.some((c) => c.url === e.url)).map((e) => ({ name: outside.mine(e.url) ? e.url : e.name, outside: outside.mine(e.url), about: e.about + ", saved here", url: e.url, league: e.league || "", level: e.level || 0 }));
           // By league, the running ones first: a league that ends moves its characters to the
           // lasting ones (Standard, Hardcore and their solo kinds), so whatever is not one of
           // those is running now; the league with the highest character first, in a league
@@ -394,6 +394,12 @@
             return [...list].sort((a, b) => (lasting(a.league) - lasting(b.league)) || (a.league === b.league ? b.level - a.level : (top.get(b.league) - top.get(a.league)) || (a.league < b.league ? -1 : 1)))
               .map((c) => ({ ...c, league: c.league || "No league", lasting: lasting(c.league) }));
           };
+          if (op === "paste") {
+            try { location.search = "?build=" + (await outside.pasted(q.get("text"))); return { ok: true }; }
+            catch (err) { return { error: String(err && err.message || err) }; }
+          }
+          if (op === "home") { location.href = location.pathname; return { ok: true }; }
+          if (op === "open" && outside.mine(q.get("name") || "")) { location.search = "?build=" + q.get("name"); return { ok: true }; }
           if (!hosted) return { can: false, name: "", characters: ordered(saved([])) };
           if (op === "login") { await login(); return { ok: true }; }
           if (op === "logout") { put("token", null); sessionStorage.clear(); location.href = location.pathname; return { ok: true }; }
@@ -413,8 +419,11 @@
         const savedList = () => get("saved") || [];
         const save = (url, text) => {
           try {
-            const c = JSON.parse(text).character || {};
-            const entry = { url, name: c.name || url.split("/").pop(), about: "Level " + c.level + " " + ascendancy(c.class), league: c.league || "", level: c.level || 0, at: Date.now() };
+            // (a Path of Building build says its level and class in its <Build> element)
+            const pob = text.trimStart().startsWith("<") ? (text.match(/<Build [^>]*>/) || [""])[0] : null;
+            const said = (k) => ((pob || "").match(new RegExp(" " + k + '="([^"]*)"')) || [])[1] || "";
+            const c = pob != null ? { name: "Path of Building build", level: Number(said("level")) || 0, class: (said("ascendClassName") !== "None" && said("ascendClassName")) || said("className"), league: "" } : JSON.parse(text).character || {};
+            const entry = { url, name: c.name || url.split("/").pop(), about: "Level " + c.level + " " + ascendancy(c.class) + (pob != null ? " (Path of Building)" : url.startsWith("ninja/") ? " " + c.name + " (poe.ninja)" : ""), league: c.league || "", level: c.level || 0, at: Date.now() };
             const list = [entry, ...savedList().filter((e) => e.url !== url)];
             for (const gone of list.slice(8)) localStorage.removeItem("poe:char:" + gone.url);
             for (let keep = Math.min(8, list.length); keep > 0; keep--) {
@@ -423,11 +432,115 @@
             }
           } catch {}
         };
+        // A character from outside the account, by what was pasted: a Path of Building code (or
+        // its XML, or a character as the game's servers give it), a pobb.in link, a poe.ninja
+        // character link. Links are fetched through this site's server (neither answers a
+        // browser of another site) and open for whoever has the address ("ninja/<league>/
+        // <account>/<name>", "pobb/<id>"); a pasted code stays in this browser ("paste/<id>").
+        const outside = (() => {
+          const base = hosted ? "" : "https://poetry.awx.at";
+          const fetched = async (path, what) => {
+            const r = await plain(base + path).catch(() => { throw new Error(what + " cannot be reached"); });
+            if (r.status === 404) throw new Error(what + " has no such build");
+            if (!r.ok) throw new Error(what + " answered status " + r.status);
+            return r.text();
+          };
+          const inflate = async (code) => {
+            try {
+              const bin = atob(code.trim().replace(/\s+/g, "").replace(/-/g, "+").replace(/_/g, "/"));
+              const bytes = Uint8Array.from(bin, (ch) => ch.charCodeAt(0));
+              const text = await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate"))).text();
+              if (!text.includes("<PathOfBuilding")) throw new Error("no build");
+              return text;
+            } catch { throw new Error("this is no Path of Building code"); }
+          };
+          // poe.ninja's character as the game's servers would give it (tools/corpus/fetch.py `convert`)
+          let tree = null;
+          const treeText = () => (tree ??= plain("tree.json").then((r) => r.text()).catch(() => ""));
+          const item = (it) => {
+            it = { ...it };
+            const expl = (it.explicitMods || []).map((m) => (typeof m === "object" ? m : { description: m }));
+            const seen = new Map(expl.map((m) => [m.description, m]));
+            for (const [key, flag] of [["fracturedMods", "fractured"], ["craftedMods", "crafted"], ["desecratedMods", "desecrated"]]) {
+              for (const m of it[key] || []) {
+                if (typeof m === "object") expl.push(m);
+                else if (seen.has(m)) (seen.get(m).flags ??= {})[flag] = true;
+                else expl.push({ description: m, flags: { [flag]: true } });
+              }
+              delete it[key];
+            }
+            it.explicitMods = expl;
+            it.implicitMods = (it.implicitMods || []).map((m) => (typeof m === "object" ? m : { description: m }));
+            if (it.socketedItems && it.socketedItems.length) it.socketedItems = it.socketedItems.map(item);
+            return it;
+          };
+          const override = (oid, text) => {
+            let m = /^generic_attribute_(strength|dexterity|intelligence)_?$/.exec(oid || "");
+            if (m) { const name = m[1][0].toUpperCase() + m[1].slice(1); return { id: oid, name, ["granted" + name]: 5, stats: ["+5 to [" + name + "]"] }; }
+            m = /^[a-z]+_alternate_generic_attribute_(\w+)$/.exec(oid || "");
+            if (m) {
+              const word = { damage: "Damage", defences: "Armour", cost_efficiency: "Cost Efficiency" }[m[1]];
+              for (const line of text.matchAll(/Attribute Passive Skills can instead grant ([^"]*)/g)) if (word && line[1].includes(word)) return { id: oid, name: line[1], stats: [line[1]], alternate: true };
+            }
+            return { id: oid, stats: [] };
+          };
+          const convert = (raw, text) => {
+            const overrides = {};
+            for (const [h, oid] of Object.entries(raw.passiveSkillOverrides || {})) overrides[String(h)] = override(oid, text);
+            const s1 = raw.passiveSelectionSet1 || [], s2 = raw.passiveSelectionSet2 || [];
+            const wrap = (key) => (raw[key] || []).filter((x) => x.itemData).map((x) => item(x.itemData));
+            const league = [];
+            for (const k of raw.keystones || []) if (!text.includes('"' + k.name + '"')) for (const st of k.stats || []) league.push(...st.split("\n"));
+            return { character: {
+              name: raw.name, realm: "poe2", class: raw.class, league: raw.league, level: raw.level,
+              equipment: [...wrap("items"), ...wrap("flasks")],
+              skills: (raw.skills || []).map((g) => (g.allGems || [])[0]).filter((g) => g && g.itemData).map((g) => item(g.itemData)),
+              jewels: wrap("jewels"),
+              passives: { hashes: raw.passiveSelection || [], specialisations: s1.length || s2.length ? { set1: s1, set2: s2 } : {}, skill_overrides: overrides, jewel_data: {}, quest_stats: [...(raw.questStats || []), ...league] },
+              metadata: { version: raw.passiveTreeName, source: "poe.ninja" } } };
+          };
+          const ninja = async (rest) => {
+            const [league, account, name] = rest.split("/").map(decodeURIComponent);
+            const index = JSON.parse(await fetched("/ninja-api/data/index-state", "poe.ninja"));
+            const shot = (index.snapshotVersions || []).find((v) => v.url === league);
+            if (!shot) throw new Error("poe.ninja has no league \"" + league + "\"");
+            const raw = JSON.parse(await fetched("/ninja-api/builds/" + shot.version + "/character?" + new URLSearchParams({ account, name, overview: shot.snapshotName, type: "exp" }), "poe.ninja"));
+            if (!raw || !raw.name) throw new Error("poe.ninja has no such character");
+            return JSON.stringify(convert(raw, await treeText()));
+          };
+          const read = (url) =>
+            url.startsWith("ninja/") ? ninja(url.slice(6))
+            : url.startsWith("pobb/") ? fetched("/pobb/" + encodeURIComponent(url.slice(5)), "pobb.in").then(inflate)
+            : Promise.reject(new Error("this build was pasted in another browser: paste it again"));
+          // (what was pasted: the address the page opens for it)
+          const pasted = async (text) => {
+            text = (text || "").trim();
+            if (!text) throw new Error("nothing pasted");
+            const path = (p) => p.split("/").map((x) => encodeURIComponent(decodeURIComponent(x))).join("/");
+            let m = /poe\.ninja\/poe2\/builds\/([^\/?#\s]+)\/character\/([^\/?#\s]+)\/([^\/?#\s]+)/.exec(text);
+            if (m) return "ninja/" + path(m[1] + "/" + m[2] + "/" + m[3]);
+            if (/poe\.ninja\/(?!poe2\/)/.test(text)) throw new Error("this is a link to the first Path of Exile: only Path of Exile 2 is fought here");
+            if (/poe\.ninja\//.test(text)) throw new Error("of poe.ninja a character's page is read: open the character there and paste its address");
+            m = /pobb\.in\/([\w-]+)/.exec(text);
+            if (m) return "pobb/" + m[1];
+            if (/^https?:\/\//.test(text)) throw new Error("links of pobb.in and poe.ninja are read, or the code itself");
+            const build = text.startsWith("<") || text.startsWith("{") ? text : await inflate(text);
+            if (text.startsWith("{")) { try { if (!JSON.parse(text).character) throw 0; } catch { throw new Error("this is no character"); } }
+            let h = 2166136261;
+            for (let i = 0; i < build.length; i++) h = Math.imul(h ^ build.charCodeAt(i), 16777619) >>> 0;
+            const url = "paste/" + h.toString(36);
+            save(url, build);
+            if (localStorage.getItem("poe:char:" + url) == null) throw new Error("this browser keeps nothing: the build cannot be opened");
+            return url;
+          };
+          const mine = (url) => /^(ninja|pobb|paste)\//.test(url);
+          return { read, pasted, mine };
+        })();
         const character = async (url) => {
-          try { const text = await kept(url, 120, () => api(url.slice(8))); save(url, text); return text; }
+          try { const text = await kept(url, outside.mine(url) ? 600 : 120, () => (outside.mine(url) ? outside.read(url) : api(url.slice(8)))); save(url, text); return text; }
           catch (err) { const text = localStorage.getItem("poe:char:" + url); if (text) return text; throw err; }
         };
-        return { ask, character };
+        return { ask, character, mine: outside.mine };
       })();
       window.fetch = async (input, init) => {
         const url = typeof input === "string" ? input : input.url;
@@ -458,7 +571,7 @@
         const key = JSON.stringify(request) + "|" + buildUrl;
         try {
           // (a character of the account logged in: from the game's servers, with the login)
-          if (!builds.has(buildUrl)) builds.set(buildUrl, buildUrl.startsWith("poe-api/") ? poe.character(buildUrl) : plain(buildUrl, { cache: "no-cache" }).then((r) => { if (!r.ok) throw new Error(`${buildUrl}: status ${r.status}`); return r.text(); }));
+          if (!builds.has(buildUrl)) builds.set(buildUrl, buildUrl.startsWith("poe-api/") || poe.mine(buildUrl) ? poe.character(buildUrl) : plain(buildUrl, { cache: "no-cache" }).then((r) => { if (!r.ok) throw new Error(`${buildUrl}: status ${r.status}`); return r.text(); }));
           request.build = await builds.get(buildUrl);
         } catch (err) {
           builds.delete(buildUrl);
@@ -868,6 +981,11 @@
     #app .main.landing button.act.enter { text-align: center; font-size: 19px; padding: 18px; border-color: #d8a050; color: #ffe6b0; margin-top: 12vh; }
     /* (nothing open: no tabs to go to) */
     #app:has(.main.landing) header > nav { visibility: hidden; }
+    #app .main.landing .import { display: flex; flex-direction: column; gap: 6px; margin: 10px 0 14px; }
+    #app .main.landing .import .draft { width: 100%; box-sizing: border-box; font: 13px/1.3 monospace; padding: 8px; }
+    #app .main.landing .import .actions { display: flex; align-items: center; gap: 12px; }
+    #app .main.landing .import button.act { padding: 8px 18px; font-size: 15px; }
+    #app .main.landing .import .said { color: #e08060; font-size: 13px; }
     #app .main.landing details { border: 1px solid #4a3a28; background: linear-gradient(180deg, #17120d, #0d0a08); }
     #app .main.landing summary { padding: 12px 16px; cursor: pointer; color: #d8b878; font-family: "Fontin SmallCaps", "Fontin", serif; font-size: 18px; letter-spacing: 1px; }
     #app .main.landing summary .count { color: #8a7a64; font-size: 13px; margin-left: 8px; }
