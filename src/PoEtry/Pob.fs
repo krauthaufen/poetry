@@ -75,7 +75,7 @@ module Pob =
 
     /// A build file lists what sits in an item's sockets ("Rune: Fox Idol"); the game's own
     /// data counts them ("Sockets filled: 5", "Idols socketed: 3"), which is what is read.
-    /// An idol says so in its name; Carved Majesty is one with a name of its own.
+    /// An idol says so in its name, but for the four carved ones (the game's item bases).
     let private socketCounts (text: string) =
         // ("Rarity: RARE" is the game's "Rarity: Rare"; a relic is a unique item)
         let text =
@@ -89,7 +89,7 @@ module Pob =
         else
             let runes =
                 text.Split('\n') |> Array.choose (fun l -> let l = l.Trim() in if l.StartsWith "Rune: " && l <> "Rune: None" then Some(l.Substring 6) else None)
-            let idols = runes |> Array.filter (fun r -> r.Contains "Idol" || r = "Carved Majesty") |> Array.length
+            let idols = runes |> Array.filter (fun r -> r.Contains "Idol" || List.contains r [ "Carved Cunning"; "Carved Majesty"; "Carved Mischief"; "Carved Tenacity" ]) |> Array.length
             if runes.Length = 0 then text
             else text.TrimEnd() + sprintf "\nSockets filled: %d" runes.Length + (if idols > 0 then sprintf "\nIdols socketed: %d" idols else "")
 
