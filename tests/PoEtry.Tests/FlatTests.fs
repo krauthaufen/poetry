@@ -1391,6 +1391,35 @@ let run (test: string -> (unit -> unit) -> unit) =
                 Rules = [ { Hook = OnUse; Filter = Called "Bind"; Chance = 100.0; Reaction = SummonPerWard("Casters", 30.0, 2.5) } ] }
         same { Fight.single (boss 1e12) binder 12.0 with Minions = casters } minionSeeds)
 
+    test "flat: a march through a map: packs that come, sleepers, the player walking between uses" (fun () ->
+        let pack (k: int) =
+            if k >= 6 then [ { EnemyDef.make Rarity.defaults 75 Unique "Boss" (Vec.make 0.0 0.0) with Life = 6000.0; Speed = 25.0 } ]
+            else
+                [ for i in 0 .. 4 ->
+                    let e = { EnemyDef.make Rarity.defaults 75 (if i = 0 && k % 2 = 1 then Magic else Normal) (sprintf "m%d" i) (Vec.make (float (i % 3) * 5.0 - 5.0) (float i * 4.0 - 8.0)) with Life = 500.0 + 100.0 * float i; Speed = 25.0 }
+                    // (one of them attacks from afar)
+                    match e.Attack with Some a when i = 3 -> { e with Attack = Some { a with Range = 50.0 } } | _ -> e ]
+        let player (mods: Mod list) =
+            { Actor.make "Player" [ Mod.inc CritChance 50.0 ] [ { spell "Nova" Fire 150.0 300.0 with Delivery = AreaAroundSelf 30.0; BaseTime = 0.5; Mods = mods } ] with
+                Vitals = Some { PlayerStats.basic 9000.0 500.0 with Evasion = 900.0; LifeRegen = 200.0; ManaRegen = 60.0 } }
+        let march hold = { Speed = 40.0; Spacing = 35.0; Aggro = 60.0; Engage = 30.0; Hold = hold; Packs = 6; Pack = pack }
+        let fight hold mods = { Fight.single (pack 0).Head (player mods) 120.0 with Enemies = []; Targeting = Nearest; March = Some (march hold) }
+        let moving = [ Mod.flag (Named "UsedWhileMoving"); Mod.base' (Named "MoveWhileUsing") -70.0; Mod.base' (Named "MoveEasing") 160.0; Mod.base' (Named "MoveHeld") 50.0 ]
+        for hold in [ true; false ] do
+            for mods in [ []; moving ] do
+                same (fight hold mods) [ 1u; 2u; 3u ]
+        // the map is cleared: every monster of the six packs and the boss, none before it came
+        let o = Sim.run (fight true []) 1u
+        if o.Ttk.IsNone || o.Kills.Length <> 31 then failwithf "expected the map cleared with 31 kills: %A, %d kills" o.Ttk o.Kills.Length
+        // the player has walked the map's length, give or take where it stood for the last
+        let walked = Map.tryFind "march:walked" o.Counts |> Option.defaultValue 0
+        if walked < 150 || walked > 280 then failwithf "walked %d units" walked
+        // a skill used on the move clears it sooner than the same skill that holds the player
+        let standing, onTheMove = Sim.run (fight false []) 1u, Sim.run (fight false moving) 1u
+        match standing.Ttk, onTheMove.Ttk with
+        | Some a, Some b when b < a -> ()
+        | a, b -> failwithf "expected the moving one sooner: %A, %A" a b)
+
     test "flat: a pack whose dead are replaced; minions beside the player in it" (fun () ->
         let weak i = { EnemyDef.make Rarity.defaults 75 (if i % 3 = 0 then Magic else Normal) (sprintf "pack %d" i) (Vec.make (12.0 + 4.0 * float i) (float (i % 4) * 6.0 - 9.0)) with Life = 400.0 + 150.0 * float i; Speed = 25.0 }
         let pack = [ for i in 1 .. 11 -> weak i ]

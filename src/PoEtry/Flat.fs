@@ -1459,8 +1459,12 @@ module Flat =
         let fight = Fight.apart fight
         let no = ResizeArray<string>()
         let reject (what: string) = if not (no.Contains what) then no.Add what
-        // (a march through a map is the reference's alone so far)
-        if fight.March.IsSome then reject "a march"
+        // (a march's enemies: every pack's, under the names they come by, placed around their
+        // packs' middles; none is there when the fight begins, see `supply`)
+        let fight =
+            match fight.March with
+            | Some m -> { fight with Enemies = [ for k in 0 .. m.Packs do for d in m.Pack k -> { d with Name = sprintf "%s #%d" d.Name k } ] }
+            | None -> fight
         let buffs = Names()
         let statuses = Names()
         let counts = Names()
@@ -2647,6 +2651,8 @@ module Flat =
           Root: int
           AttackKey: uint32
           mutable AttackN: int
+          /// On a march: it has woken (the player came near enough).
+          mutable Woken: bool
           /// The enemy as it is now (it walks).
           mutable Def: EnemyDef
           mutable Life: float
@@ -2968,6 +2974,14 @@ module Flat =
           mutable Taken: float
           mutable MinLife: float
           mutable LockedUntil: float
+          /// A march (`Sim.March`): how far the player has walked; until when the skill it uses
+          /// holds it and what part of its walking it keeps till then; where the furthest
+          /// pack's middle is and how many packs there have been.
+          mutable Walked: float
+          mutable WalkHeldUntil: float
+          mutable WalkKept: float
+          mutable Front: float
+          mutable Packs: int
           mutable FreezeBuildup: float
           /// What a hit that takes a state off an enemy still reads of the enemy as it was:
           /// its shock, and how far its armour was broken.
@@ -3683,8 +3697,22 @@ module Flat =
                     | Some atk when e.Life > 0.0 ->
                         let d = Vec.length e.Def.Position
                         let gap = d - e.Def.Size - atk.Range
+                        // (on a march one sleeps until the player is near enough, or nothing is ahead of the player any more)
+                        let asleep =
+                            match s.Main.Fight.March with
+                            | Some m when not e.Woken ->
+                                let mutable ahead = false
+                                if not (d - e.Def.Size <= m.Aggro) && s.Packs > m.Packs then
+                                    for k in 0 .. s.Foes.Length - 1 do
+                                        let x = at s.Foes k
+                                        if x.Life > 0.0 && x.Def.Position.X > 0.0 then ahead <- true
+                                if d - e.Def.Size <= m.Aggro || (s.Packs > m.Packs && not ahead) then
+                                    e.Woken <- true
+                                    false
+                                else true
+                            | _ -> false
                         // (one that has arrived walks no further: its statuses are not asked)
-                        if not (gap <= 0.0) && not (stopped s e true) then
+                        if not asleep && not (gap <= 0.0) && not (stopped s e true) then
                             let ailments = s.P.AilmentStatus
                             let slow =
                                 (if (at e.SHas (at ailments 10)) then max 0.0 (1.0 - Constants.maimSlow * s.P.SlowMagnitude / 100.0) else 1.0)
@@ -3698,6 +3726,26 @@ module Flat =
                             e.Def <- { e.Def with Position = Vec.scale ((d - step) / d) e.Def.Position }
                             s.AliveStale <- true
                     | _ -> ()
+            // a march: the player walks on (`Sim.advance`)
+            match s.Main.Fight.March with
+            | Some m when System.Double.IsNaN s.Died ->
+                let held = max 0.0 (min t s.WalkHeldUntil - s.Time)
+                let mutable met = false
+                let mutable ahead = s.Packs <= m.Packs
+                for k in 0 .. s.Foes.Length - 1 do
+                    let e = at s.Foes k
+                    if e.Life > 0.0 then
+                        if m.Hold && Vec.length e.Def.Position - e.Def.Size <= m.Engage then met <- true
+                        if e.Def.Position.X > 0.0 then ahead <- true
+                let way = if met || not ahead then 0.0 else m.Speed * (held * s.WalkKept + (dt - held))
+                if not (way <= 0.0) then
+                    s.Walked <- s.Walked + way
+                    s.Front <- s.Front - way
+                    for k in 0 .. s.Foes.Length - 1 do
+                        let e = at s.Foes k
+                        if e.Life > 0.0 then e.Def <- { e.Def with Position = { e.Def.Position with X = e.Def.Position.X - way } }
+                    s.AliveStale <- true
+            | _ -> ()
             s.Time <- t
 
     let private standing (s: State) : Map<string, int> =
@@ -5325,6 +5373,9 @@ module Flat =
             s.A.Energy <- s.A.Energy |> Map.add info.WindowKey (s.Time + info.WindowSecs) |> Map.add info.WindowNextKey (s.Time + info.WindowSecs + info.WindowRecharge)
         if clip <= 0 then
             startUse s rng sid t
+            if p.IsPlayer && s.Main.Fight.March.IsSome then
+                s.WalkHeldUntil <- s.Time + t + 0.0
+                s.WalkKept <- Channel.walked info.Skill t
             schedule s (s.Time + t + 0.0) EReady 0 0 0.0 0.0
         else
             // after the last bolt of a load: reload (attack speed and reload speed shorten
@@ -5352,6 +5403,9 @@ module Flat =
                     bump s info.CReload
                     seconds
             release s
+            if p.IsPlayer && s.Main.Fight.March.IsSome then
+                s.WalkHeldUntil <- s.Time + t + extra
+                s.WalkKept <- (if extra > 0.0 then 0.0 else Channel.walked info.Skill t)
             schedule s (s.Time + t + extra) EReady 0 0 0.0 0.0
 
     /// The player is free to act: the first step of the rotation that can be used and paid
@@ -5527,6 +5581,16 @@ module Flat =
             p.ActiveBuff < 0
             || (let player = at s.Agents 0 in (at player.BHas p.ActiveBuff) && (at player.BExpires p.ActiveBuff) > s.Time)
         if p.IsPlayer && p.Vitals.IsSome && s.LockedUntil > s.Time then schedule s s.LockedUntil EReady 0 0 0.0 0.0
+        elif p.IsPlayer && p.Vitals.IsSome
+             && (match s.Main.Fight.March with
+                 | Some m ->
+                     let mutable near = false
+                     for k in 0 .. s.Foes.Length - 1 do
+                         let e = at s.Foes k
+                         if e.Life > 0.0 && Vec.length e.Def.Position - e.Def.Size <= m.Engage then near <- true
+                     not near
+                 | None -> false) then
+            schedule s (s.Time + Constants.serverTick) EReady 0 0 0.0 0.0
         elif not standing then schedule s (s.Time + 0.1) EReady 0 0 0.0 0.0
         elif crowdedOut s then
             bump s p.CMinionNoRoom
@@ -7268,6 +7332,7 @@ module Flat =
         let p = s.P
         let e = at s.Foes index
         match e.Def.Attack with
+        | Some atk when s.Main.Fight.March.IsSome && not e.Woken && e.Life > 0.0 -> schedule s (s.Time + atk.Interval) EEnemyAttack index 0 0.0 0.0
         | Some atk when e.Life > 0.0 && p.Bodies.Length > 0 ->
             let playerUp = p.Vitals.IsSome && alive s
             let inRange = Vec.length e.Def.Position - e.Def.Size <= atk.Range + 1e-6
@@ -7736,6 +7801,7 @@ module Flat =
               Root = root
               AttackKey = Sim.streamHash ("E|" + def.Name)
               AttackN = 0
+              Woken = false
               Def = def
               Life = def.Life
               Has = Array.create ns false
@@ -7972,6 +8038,11 @@ module Flat =
               Taken = 0.0
               MinLife = 1.0
               LockedUntil = 0.0
+              Walked = 0.0
+              WalkHeldUntil = 0.0
+              WalkKept = 1.0
+              Front = (match p.Fight.March with Some m -> m.Engage | None -> 0.0)
+              Packs = 0
               FreezeBuildup = 0.0
               ShockWas = 0.0
               BrokenWas = 0.0
@@ -8023,7 +8094,8 @@ module Flat =
             s.P.Periodics |> Array.iteri (fun i pd -> schedule s (s.Rng.Float() * pd.First) EPeriodic i 0 0.0 0.0)
         enter s 0
         // monsters start attacking at random points in their first interval
-        for place in 0 .. p.Attackers.Length - 1 do
+        if p.Fight.March.IsNone then
+          for place in 0 .. p.Attackers.Length - 1 do
             let (i, interval) = at p.Attackers place
             schedule s (s.Rng.Float() * interval) EEnemyAttack i 0 0.0 0.0
         expireAt s fight.MaxTime
@@ -8076,20 +8148,63 @@ module Flat =
             |> Array.map (fun e -> e.Index)
         s.AliveStale <- true
 
+    /// A march's packs as they come (`Sim.runWith`, `supply`): one after the other as far
+    /// ahead as twice the monsters' aggro, and after the last of them the map's boss. Each
+    /// enemy takes the place the program has for it.
+    let private supply (s: State) =
+        let p = s.Main
+        match p.Fight.March with
+        | None -> ()
+        | Some m ->
+            let ns = p.StatusNames.Length
+            let mutable came = false
+            while not (s.Front >= 2.0 * m.Aggro + m.Spacing || s.Packs > m.Packs) do
+                let middle = s.Front + m.Spacing
+                for d in m.Pack s.Packs do
+                    let name = sprintf "%s #%d" d.Name s.Packs
+                    let index = s.FoeIds.[name]
+                    let old = at s.Foes index
+                    let def = { d with Name = name; Position = Vec.add (Vec.make middle 0.0) d.Position }
+                    put s.Foes index (makeFoe s.Entropies ns p.Roots.[name] index old.Root def)
+                    s.AliveCount <- s.AliveCount + 1
+                    s.RoomAt <- -2
+                    if p.Attacked then
+                        match d.Attack with
+                        | Some attack -> schedule s (s.Time + s.Rng.Float() * attack.Interval) EEnemyAttack index 0 0.0 0.0
+                        | None -> ()
+                s.Front <- middle
+                s.Packs <- s.Packs + 1
+                came <- true
+            if came then
+                s.Live <-
+                    [| for e in s.Foes do if e.Life > 0.0 then yield e |]
+                    |> Array.sortWith (fun a b -> compare a.Def.Name b.Def.Name)
+                    |> Array.map (fun e -> e.Index)
+                s.AliveStale <- true
+
     /// The fight played, for at most so many events.
     let private played (p: Program) (seed: uint32) (tell: (float -> string -> string -> string -> float -> unit) option) (maxEvents: int) (kept: Kept) : State =
         let s = start p seed tell kept
         let maxTime = p.Fight.MaxTime
+        // (a march: none of its enemies is there yet; the first packs come now)
+        let packs = match p.Fight.March with Some m -> m.Packs | None -> -1
+        if packs >= 0 then
+            for k in 0 .. s.Foes.Length - 1 do (at s.Foes k).Life <- 0.0
+            s.AliveCount <- 0
+            s.Live <- [||]
+            s.AliveStale <- true
+            supply s
         let mutable n = 0
         let mutable go = true
         while go do
-            if not (alive s) || s.AliveCount = 0 || s.Queue.Count = 0 || s.Queue.Next > maxTime then go <- false
+            if not (alive s) || (s.AliveCount = 0 && s.Packs > packs) || s.Queue.Count = 0 || s.Queue.Next > maxTime then go <- false
             elif n >= maxEvents then
                 bump s p.CAborted
                 go <- false
             else
                 let before = s.Kills.Count
                 step s
+                supply s
                 if p.Fight.Replace && s.Kills.Count > before then replace s before
                 n <- n + 1
         s
@@ -8120,6 +8235,7 @@ module Flat =
             (let mutable m = Map.empty
              for i in 0 .. p.CountNames.Length - 1 do
                  if (at s.Counts i) > 0 then m <- Map.add (at p.CountNames i) (at s.Counts i) m
+             if p.Fight.March.IsSome then m <- Map.add "march:walked" (int s.Walked) m
              m)
           Uptime = floats p.StatusNames s.Uptime s.UptimeSeen
           Died = (if alive s then None else Some s.Died)
