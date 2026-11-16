@@ -179,6 +179,7 @@ module Setup =
     /// The same with the tree read already (one character loaded again and again: a front end).
     and loadParsed (db: GameDb) (tree: Map<int, TreeNode>) (jewelSlots: int list) (classBases: Map<string, float * float * float>) (build: PobBuild) (o: Options) : Loaded =
         let build = if o.Bonded then { build with Config = Map.add "bonded" "1" build.Config } else build
+        let build = Pob.withoutLooseJewels tree build
         let build = ownLevels db build
         let build = dropGems o.Without build
         let sheet = Pob.character db tree jewelSlots build

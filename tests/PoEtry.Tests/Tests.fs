@@ -1279,6 +1279,51 @@ let main _ =
             equal [ PerStack("PowerCharge", 1.0) ] m.Conds
         | other -> failwithf "unexpected meaning %A" other)
 
+    test "build file: jewels, weapon set passives, chosen attributes, quest rewards, sockets" (fun () ->
+        let xml =
+            """<PathOfBuilding2><Build level="90" className="Mercenary" ascendClassName="Gemling Legionnaire" mainSocketGroup="1"/>
+<Items activeItemSet="1">
+<Item id="1">
+Rarity: RARE
+Foe Ember
+Ruby
+8% increased Fire Damage
+</Item>
+<Item id="2">
+Rarity: RELIC
+Some Regalia
+Grand Regalia
+Rune: Fox Idol
+Rune: Carved Majesty
+Rune: Soul Core of Jiquani
+Rune: None
+{enchant}{rune}Bonded: 5% increased Spirit
+{enchant}{rune}Idols socketed in this item gain the benefits of their Bonded modifiers
+</Item>
+<ItemSet id="1"><Slot name="Body Armour" itemId="2"/></ItemSet>
+</Items>
+<Tree activeSpec="1"><Spec nodes="1,2,3,4">
+<WeaponSet1 nodes="3"/><WeaponSet2 nodes="4"/>
+<Sockets><Socket itemId="1" nodeId="2"/><Socket itemId="0" nodeId="9"/></Sockets>
+<Overrides><AttributeOverride dexNodes="" intNodes="1" strNodes=""/></Overrides>
+</Spec></Tree>
+<Skills activeSkillSet="1"><SkillSet id="1"><Skill><Gem nameSpec="Flameblast" level="20" corruptLevel="1" quality="20"/></Skill><Skill source="Tree:1"><Gem nameSpec="Flameblast" level="1"/></Skill><Skill source="Item:2:x"><Gem nameSpec="Firebolt" level="20"/></Skill></SkillSet></Skills>
+<Config><Input name="questAct 1ClearfellBeira" boolean="false"/><Input name="questAct 4Halls Of The DeadTest" string="+5% to Fire Resistance"/></Config>
+</PathOfBuilding2>"""
+        let b = Pob.read xml
+        equal [ 1; 2 ] b.TreeNodes
+        equal ([ 3 ], [ 4 ]) (b.TreeNodesSet1, b.TreeNodesSet2)
+        equal (Some [ "+5 to Intelligence" ]) (Map.tryFind 1 b.TreeOverrides)
+        equal [ "Body Armour"; "Jewel 2" ] (b.Items |> List.map fst)
+        let body = snd b.Items.Head
+        equal true (body.Contains "Rarity: Unique" && body.Contains "Sockets filled: 3" && body.Contains "Idols socketed: 2")
+        equal true ((snd b.Items.[1]).Contains "Rarity: Rare")
+        equal 21 b.Groups.Head.Gems.Head.Level
+        // the granted Flameblast is the one with its own group; the granted Firebolt stays
+        equal [ "Flameblast"; "Firebolt" ] (b.Groups |> List.map (fun g -> g.Gems.Head.Name))
+        equal false (List.contains "+10% to Cold Resistance" b.ExtraLines)
+        equal true (List.contains "+40 to Spirit" b.ExtraLines && List.contains "+5% to Fire Resistance" b.ExtraLines))
+
     DataTests.run test near (fun a b -> equal a b)
 
     StatTests.run test near (fun a b -> equal a b)

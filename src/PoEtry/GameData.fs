@@ -102,6 +102,15 @@ type GemData =
       /// Weapon base types the skill needs ("Bow", "Two Hand Mace", "Quarterstaff", "Any Martial Weapon"...).
       WeaponRequirements: string list }
 
+/// A flask base: what it recovers, over how long, and its charges.
+type FlaskBase =
+    { /// "Life" or "Mana".
+      Pool: string
+      Amount: float
+      Duration: float
+      ChargesUsed: float
+      ChargesMax: float }
+
 type WeaponBase =
     { Name: string
       Type: string
@@ -231,6 +240,25 @@ module GameData =
     /// gems.json, keyed by gem name (the first entry of a name).
     let parseGems (json: string) : Map<string, GemData> =
         parseGemList json |> List.rev |> List.map (fun g -> g.Name, g) |> Map.ofList
+
+    /// bases.json: the life and mana flasks.
+    let parseFlasks (json: string) : Map<string, FlaskBase> =
+        match Json.parse json with
+        | JObj m ->
+            m
+            |> Map.toList
+            |> List.choose (fun (name, j) ->
+                Json.field "flask" j
+                |> Option.bind (fun f ->
+                    let num k = Json.numField k f |> Option.defaultValue 0.0
+                    match Json.numField "life" f, Json.numField "mana" f with
+                    | Some v, _ -> Some("Life", v)
+                    | _, Some v -> Some("Mana", v)
+                    | _ -> None
+                    |> Option.map (fun (pool, amount) ->
+                        name, { Pool = pool; Amount = amount; Duration = num "duration"; ChargesUsed = num "chargesUsed"; ChargesMax = num "chargesMax" })))
+            |> Map.ofList
+        | _ -> Map.empty
 
     /// bases.json: weapon bases only.
     let parseWeapons (json: string) : Map<string, WeaponBase> =

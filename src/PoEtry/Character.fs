@@ -47,7 +47,7 @@ module Items =
               "Unique ID:"; "League:"; "Rune:"; "LevelReq:"; "Implicits:"; "Prefix:"; "Suffix:"; "Variant:"
               "Selected Variant:"; "Has Alt Variant"; "Selected Alt Variant"; "Allow Duplicate Variants:"; "Crafted:"
               "Unreleased:"; "Catalyst:"; "CatalystQuality:"; "Talisman Tier:"; "Evasion:"; "Ward:"; "ArmourBasePercentile:"
-              "EvasionBasePercentile:"; "EnergyShieldBasePercentile:"; "Cluster Jewel"; "Flask: "; "Runic Ward:"; "Sockets filled:"; "Idols socketed:" ]
+              "EvasionBasePercentile:"; "EnergyShieldBasePercentile:"; "Cluster Jewel"; "Flask: "; "Runic Ward:"; "Sockets filled:"; "Idols socketed:"; "Grants Skill:" ]
         prefixes |> List.exists (fun p -> line.StartsWith p)
 
     /// Lines that describe the item itself or character-building, with no effect in a fight.
@@ -456,6 +456,7 @@ module Items =
                 elif l.StartsWith "Energy Shield:" then value "Energy Shield:" |> Option.map (fun v -> MaxEnergyShield, v)
                 elif l.StartsWith "Block chance:" then value "Block chance:" |> Option.map (fun v -> Named "ShieldBlock", v)
                 elif l.StartsWith "Runic Ward:" then value "Runic Ward:" |> Option.map (fun v -> Named "Ward", v)
+                elif l.StartsWith "Ward:" then value "Ward:" |> Option.map (fun v -> Named "Ward", v)
                 elif l.StartsWith "Spirit:" then value "Spirit:" |> Option.map (fun v -> Named "Spirit", v)
                 else None)
         let numbers (l: string) =
@@ -465,7 +466,24 @@ module Items =
             let consumes = lines |> List.tryFind (fun l -> l.StartsWith "Flask: Consumes")
             match recovers |> Option.map numbers, consumes |> Option.map numbers with
             | Some [ amount; duration ], Some [ use'; maxC ] -> Some(amount, duration, use', maxC)
-            | _ -> None
+            | _ ->
+                // a build file names the flask and its modifiers, not what it then shows: from
+                // the base (the longest base name within the item's), its quality and its lines
+                let named = db.Flasks |> Map.toList |> List.filter (fun (b, f) -> f.Pool = pool && lines |> List.exists (fun l -> not (isHeader l) && l.Contains b))
+                match recovers, (if named.IsEmpty then None else Some(named |> List.maxBy (fun (b, _) -> b.Length) |> snd)) with
+                | None, Some f ->
+                    // "50% reduced Amount Recovered": the line is exactly the number and these words
+                    let changed (what: string) =
+                        lines |> List.sumBy (fun l ->
+                            if l.EndsWith("% increased " + what) then (match System.Double.TryParse(l.Substring(0, l.IndexOf '%')) with | true, v -> v | _ -> 0.0)
+                            elif l.EndsWith("% reduced " + what) then (match System.Double.TryParse(l.Substring(0, l.IndexOf '%')) with | true, v -> -v | _ -> 0.0)
+                            else 0.0)
+                    let scaled v what = v * (1.0 + changed what / 100.0)
+                    Some(floor (scaled (f.Amount * (1.0 + quality lines / 100.0)) "Amount Recovered"),
+                         f.Duration / (1.0 + changed "Recovery rate" / 100.0),
+                         floor (scaled f.ChargesUsed "Charges per use"),
+                         floor (scaled f.ChargesMax "Charges"))
+                | _ -> None
         let flask = flaskOf "Mana"
         { Name = name
           BaseName = baseName |> Option.defaultValue ""

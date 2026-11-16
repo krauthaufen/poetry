@@ -68,17 +68,62 @@ module Pob =
             | _ -> d
         | None -> d
 
+    /// A line of a build file's item without its marks ("{enchant}{rune}Bonded: ...").
+    let private unmarked (line: string) =
+        let rec go (l: string) = if l.StartsWith "{" && l.IndexOf '}' > 0 then go (l.Substring(l.IndexOf '}' + 1)) else l
+        go (line.Trim())
+
+    /// A build file lists what sits in an item's sockets ("Rune: Fox Idol"); the game's own
+    /// data counts them ("Sockets filled: 5", "Idols socketed: 3"), which is what is read.
+    /// An idol says so in its name; Carved Majesty is one with a name of its own.
+    let private socketCounts (text: string) =
+        // ("Rarity: RARE" is the game's "Rarity: Rare"; a relic is a unique item)
+        let text =
+            text.Split('\n') |> Array.map (fun l ->
+                let t = l.Trim()
+                if t = "Rarity: RELIC" then "Rarity: Unique"
+                elif t.StartsWith "Rarity: " && t.Length > 9 then "Rarity: " + t.Substring(8, 1).ToUpperInvariant() + t.Substring(9).ToLowerInvariant()
+                else l)
+            |> String.concat "\n"
+        if text.Contains "Sockets filled:" then text
+        else
+            let runes =
+                text.Split('\n') |> Array.choose (fun l -> let l = l.Trim() in if l.StartsWith "Rune: " && l <> "Rune: None" then Some(l.Substring 6) else None)
+            let idols = runes |> Array.filter (fun r -> r.Contains "Idol" || r = "Carved Majesty") |> Array.length
+            if runes.Length = 0 then text
+            else text.TrimEnd() + sprintf "\nSockets filled: %d" runes.Length + (if idols > 0 then sprintf "\nIdols socketed: %d" idols else "")
+
+    /// Quest rewards without a choice (PoB Data/QuestRewards.lua): a build file has them
+    /// unless it says otherwise, under these names. The chosen ones it spells out.
+    let private questRewards =
+        [ "questAct 1ClearfellBeira", "+10% to Cold Resistance"
+          "questAct 1FreythornKing In The Mists", "+30 to Spirit"
+          "questAct 1Ogham ManorCandlemass", "+20 to maximum Life"
+          "questAct 2Spires of DesharSisters of Garukhan Shrine", "+10% to Lightning Resistance"
+          "questAct 3Azak BogIgnagduk", "+30 to Spirit"
+          "questAct 3Jiquani's MachinariumBlackjaw", "+10% to Fire Resistance"
+          "questAct 4Eye of HinekoraSilent Hall", "5% increased maximum Mana"
+          "questInterlude 2Khari CrossingMolten Shrine", "5% increased maximum Life"
+          "questInterlude 3Kriar VillageLythara", "+40 to Spirit" ]
+
     let read (xmlText: string) : PobBuild =
         let root = Xml.parse xmlText
         let build = Xml.child "Build" root
+        let ids (s: string option) =
+            s |> Option.map (fun s -> s.Split(',') |> Array.choose (fun x -> match System.Int32.TryParse(x.Trim()) with | true, v -> Some v | _ -> None) |> List.ofArray)
+            |> Option.defaultValue []
+        let itemTexts =
+            match Xml.child "Items" root with
+            | None -> Map.empty
+            | Some itemsNode ->
+                Xml.children "Item" itemsNode
+                |> List.choose (fun it -> Xml.attr "id" it |> Option.map (fun id -> id, socketCounts it.Text))
+                |> Map.ofList
         let items =
             match Xml.child "Items" root with
             | None -> []
             | Some itemsNode ->
-                let byId =
-                    Xml.children "Item" itemsNode
-                    |> List.choose (fun it -> Xml.attr "id" it |> Option.map (fun id -> id, it.Text))
-                    |> Map.ofList
+                let byId = itemTexts
                 let activeSet = Xml.attr "activeItemSet" itemsNode
                 let sets = Xml.children "ItemSet" itemsNode
                 let set =
@@ -100,10 +145,25 @@ module Pob =
                 match active with
                 | Some a -> specs |> List.tryItem (int' (Some a) 1 - 1)
                 | None -> List.tryHead specs)
+        // passives bought with weapon set points are listed among the nodes and once more by set
+        let setNodes name = spec |> Option.bind (Xml.child name) |> Option.bind (Xml.attr "nodes") |> ids
+        let set1, set2 = setNodes "WeaponSet1", setNodes "WeaponSet2"
         let nodes =
-            spec
-            |> Option.bind (Xml.attr "nodes")
-            |> Option.map (fun s -> s.Split(',') |> Array.choose (fun x -> match System.Int32.TryParse(x.Trim()) with | true, v -> Some v | _ -> None) |> List.ofArray)
+            let ofSets = Set.ofList (set1 @ set2)
+            spec |> Option.bind (Xml.attr "nodes") |> ids |> List.filter (fun n -> not (ofSets.Contains n))
+        // the jewels of the tree: socket node -> item ("Jewel <node>")
+        let jewels =
+            spec |> Option.bind (Xml.child "Sockets") |> Option.map (Xml.children "Socket") |> Option.defaultValue []
+            |> List.choose (fun s ->
+                match Xml.attr "nodeId" s, Xml.attr "itemId" s with
+                | Some node, Some id when id <> "0" -> Map.tryFind id itemTexts |> Option.map (fun t -> "Jewel " + node, t)
+                | _ -> None)
+        // attribute passives: which attribute was chosen
+        let overrides =
+            spec |> Option.bind (Xml.child "Overrides") |> Option.bind (Xml.child "AttributeOverride")
+            |> Option.map (fun o ->
+                [ "strNodes", "Strength"; "dexNodes", "Dexterity"; "intNodes", "Intelligence" ]
+                |> List.collect (fun (key, attribute) -> ids (Xml.attr key o) |> List.map (fun n -> n, [ "+5 to " + attribute ])))
             |> Option.defaultValue []
         let skills = Xml.child "Skills" root
         let skillSet =
@@ -134,12 +194,22 @@ module Pob =
                         let skillId = Xml.attr "skillId" gem |> Option.defaultValue ""
                         let gemId = Xml.attr "gemId" gem |> Option.defaultValue ""
                         { Name = Xml.attr "nameSpec" gem |> Option.defaultValue ""
-                          Level = int' (Xml.attr "level" gem) 20
+                          // (a corrupted gem's level more or less is kept apart)
+                          Level = int' (Xml.attr "level" gem) 20 + int' (Xml.attr "corruptLevel" gem) 0
                           Quality = int' (Xml.attr "quality" gem) 20
                           Enabled = Xml.attr "enabled" gem <> Some "false"
                           IsSupport = gemId.Contains "SupportGem" || skillId.StartsWith "Support" || skillId.Contains "SupportPlayer"
                           StatSet = int' (Xml.attr "statSetIndex" gem) 1
                           Minion = Xml.attr "skillMinion" gem |> Option.filter (fun s -> s <> ""); Count = None; Corrupted = (Xml.attr "corrupted" gem = Some "true") }) })
+        // a skill an item or the tree grants, listed once more as the group it has its supports
+        // in (a character exported by a site): it is one skill, the one with the supports
+        let groups =
+            let own =
+                groups |> List.filter (fun g -> g.Slot <> "granted" && g.Slot <> "tree" && g.Enabled)
+                |> List.collect (fun g -> g.Gems |> List.filter (fun x -> not x.IsSupport) |> List.map (fun x -> x.Name)) |> Set.ofList
+            groups |> List.filter (fun g ->
+                let actives = g.Gems |> List.filter (fun x -> not x.IsSupport)
+                not ((g.Slot = "granted" || g.Slot = "tree") && not actives.IsEmpty && actives.Length = g.Gems.Length && actives |> List.forall (fun x -> own.Contains x.Name)))
         let config =
             Xml.descendants "Input" root
             |> List.choose (fun i ->
@@ -156,15 +226,31 @@ module Pob =
         { Level = build |> Option.bind (Xml.attr "level") |> fun l -> int' l 1
           ClassName = build |> Option.bind (Xml.attr "className") |> Option.defaultValue ""
           Ascendancy = build |> Option.bind (Xml.attr "ascendClassName") |> Option.defaultValue ""
-          Items = items
+          Items = items @ (jewels |> List.filter (fun (slot, _) -> not (items |> List.exists (fun (s, _) -> s = slot))))
           TreeNodes = nodes
-          TreeNodesSet1 = []
-          TreeNodesSet2 = []
+          TreeNodesSet1 = set1
+          TreeNodesSet2 = set2
           Groups = groups
           MainGroup = build |> Option.bind (Xml.attr "mainSocketGroup") |> fun m -> int' m 1
           Config = config
-          TreeOverrides = Map.empty
-          ExtraLines = [] }
+          TreeOverrides = Map.ofList overrides
+          ExtraLines =
+            (questRewards |> List.choose (fun (key, line) -> if Map.tryFind key config = Some "false" then None else Some line))
+            @ (config |> Map.toList |> List.collect (fun (key, v) ->
+                if key.StartsWith "quest" && v <> "true" && v <> "false" && v <> "None" && not (questRewards |> List.exists (fun (k, _) -> k = key))
+                then v.Split('\n') |> Array.map (fun l -> l.Trim()) |> Array.filter ((<>) "") |> List.ofArray
+                else [])) }
+
+    /// A jewel left in a socket of the tree that is not allocated does nothing. (A socket an
+    /// item gives - "Sinister Jewel Socket", an allocated notable with one - is no "Jewel Socket".)
+    let withoutLooseJewels (tree: Map<int, TreeNode>) (build: PobBuild) : PobBuild =
+        let allocated = Set.ofList (build.TreeNodes @ build.TreeNodesSet1 @ build.TreeNodesSet2)
+        let loose (slot: string) =
+            slot.StartsWith "Jewel "
+            && (match System.Int32.TryParse(slot.Substring 6) with
+                | true, n when n >= 1000 -> not (allocated.Contains n) && (match Map.tryFind n tree with Some node -> node.Name = "Jewel Socket" | None -> false)
+                | _ -> false)
+        { build with Items = build.Items |> List.filter (fun (slot, _) -> not (loose slot)) }
 
     /// Slots whose items always apply. Flasks and charms only apply while active.
     let private alwaysOn (slot: string) =
@@ -192,7 +278,7 @@ module Pob =
                 && (slotIsBody || lines |> Array.exists (fun l -> l.Contains "as though it was a Body Armour")))
         lines
         |> Array.choose (fun l ->
-            let t = l.Trim()
+            let t = unmarked l
             if t.StartsWith "Bonded: " then (if enabled then Some(t.Substring 8) else None)
             elif t.Contains "gain the benefits of their Bonded modifiers" then None
             else Some l)
@@ -241,7 +327,7 @@ module Pob =
         texts
         |> List.collect (fun t -> t.Split('\n') |> List.ofArray)
         |> List.choose (fun l ->
-            let l = l.Trim()
+            let l = unmarked l
             if l.StartsWith "Allocates " then
                 let name = l.Substring 10
                 tree |> Map.tryPick (fun id n -> if n.Name = name && (n.IsNotable || n.IsKeystone) then Some id else None)

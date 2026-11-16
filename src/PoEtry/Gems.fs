@@ -7,6 +7,7 @@ type GameDb =
       /// Every entry of a gem name (Mace Strike: one per weapon type).
       GemVariants: Map<string, GemData list>
       Weapons: Map<string, WeaponBase>
+      Flasks: Map<string, FlaskBase>
       Minions: Map<string, MinionData>
       /// Every item base name (weapons, armour, jewellery...).
       BaseNames: Set<string>
@@ -58,6 +59,7 @@ module GameDb =
           Gems = GameData.parseGems (read "gems.json")
           GemVariants = GameData.parseGemList (read "gems.json") |> List.groupBy (fun g -> g.Name) |> Map.ofList
           Weapons = GameData.parseWeapons (read "bases.json")
+          Flasks = GameData.parseFlasks (read "bases.json")
           Minions = GameData.parseMinions (read "minions.json")
           BaseNames =
             match Json.parse (read "bases.json") with
