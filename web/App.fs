@@ -908,8 +908,10 @@ let private readReplay (j : Json) (m : Model) : Model =
             Kills = snd (tracks happened (foes @ came))
             Lasts = max 0.5 (Json.number (Json.field "duration" r))
             // (the picture is wider than high: what is high counts for more)
-            Field = max 60.0 (max ((x1 - x0) * 1.15) ((y1 - y0) * 2.1))
-            Middle = V2d ((x0 + x1) / 2.0, (y0 + y1) / 2.0)
+            // (a map is seen as it scrolls by: the player near the left edge, 17 m of the map in
+            // the picture, 3 m of it behind the player; what is further ahead comes in from the right)
+            Field = (if m.Scenario = "map" then 170.0 else max 60.0 (max ((x1 - x0) * 1.15) ((y1 - y0) * 2.1)))
+            Middle = (if m.Scenario = "map" then V2d (55.0, 0.0) else V2d ((x0 + x1) / 2.0, (y0 + y1) / 2.0))
             Began = -1.0
             Stands = Map.empty
             Clock = 0.0 }
