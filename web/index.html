@@ -398,6 +398,10 @@
             try { location.search = "?build=" + (await outside.pasted(q.get("text"))); return { ok: true }; }
             catch (err) { return { error: String(err && err.message || err) }; }
           }
+          if (op === "share") {
+            try { return { url: await outside.share(q.get("name") || "") }; }
+            catch (err) { return { error: String(err && err.message || err) }; }
+          }
           if (op === "home") { location.href = location.pathname; return { ok: true }; }
           if (op === "open" && outside.mine(q.get("name") || "")) { location.search = "?build=" + q.get("name"); return { ok: true }; }
           if (!hosted) return { can: false, name: "", characters: ordered(saved([])) };
@@ -508,8 +512,44 @@
             if (!raw || !raw.name) throw new Error("poe.ninja has no such character");
             return JSON.stringify(convert(raw, await treeText()));
           };
+          // A shared build ("share/<key>"): the character as it was and what was set up for it
+          // (rotation, edits), packed and kept by pob.awx.at's paste store through this site's
+          // server. Whoever opens the address starts with that setup; changes stay with them.
+          const pack = async (text) => {
+            const bytes = new Uint8Array(await new Response(new Blob([text]).stream().pipeThrough(new CompressionStream("deflate"))).arrayBuffer());
+            let bin = "";
+            for (let i = 0; i < bytes.length; i += 8192) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
+            return btoa(bin);
+          };
+          const unpack = async (code) => {
+            const bytes = Uint8Array.from(atob(code.trim()), (ch) => ch.charCodeAt(0));
+            return new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate"))).text();
+          };
+          const share = async (url) => {
+            if (!url) throw new Error("no build is open");
+            let build = localStorage.getItem("poe:char:" + url);
+            if (build == null) build = mine(url) || url.startsWith("poe-api/") ? await character(url) : await plain(url).then((r) => { if (!r.ok) throw new Error("the build cannot be read"); return r.text(); });
+            const body = await pack(JSON.stringify({ poetry: 1, build, kept: localStorage.getItem("poetry:" + url) || "" }));
+            if (body.length > 380000) throw new Error("this build is too large to share");
+            const r = await plain(base + "/share/documents", { method: "POST", headers: { "content-type": "text/plain" }, body }).catch(() => { throw new Error("the build store cannot be reached"); });
+            if (r.status === 429 || r.status === 503) throw new Error("too many builds were shared just now: try again in a minute");
+            if (!r.ok) throw new Error("the build store answered status " + r.status);
+            const key = (JSON.parse(await r.text()) || {}).key;
+            if (!key) throw new Error("the build store gave no address");
+            const link = location.origin + location.pathname + "?build=share/" + key;
+            try { await navigator.clipboard.writeText(link); } catch {}
+            return link;
+          };
+          const shared = async (key) => {
+            let doc;
+            try { doc = JSON.parse(await unpack(await fetched("/share/raw/" + encodeURIComponent(key), "the build store"))); } catch (err) { if (/build store/.test(String(err && err.message))) throw err; throw new Error("this is no shared build"); }
+            if (!doc || typeof doc.build !== "string") throw new Error("this is no shared build");
+            try { if (doc.kept && localStorage.getItem("poetry:share/" + key) == null) localStorage.setItem("poetry:share/" + key, doc.kept); } catch {}
+            return doc.build;
+          };
           const read = (url) =>
-            url.startsWith("ninja/") ? ninja(url.slice(6))
+            url.startsWith("share/") ? shared(url.slice(6))
+            : url.startsWith("ninja/") ? ninja(url.slice(6))
             : url.startsWith("pobb/") ? fetched("/pobb/" + encodeURIComponent(url.slice(5)), "pobb.in").then(inflate)
             : Promise.reject(new Error("this build was pasted in another browser: paste it again"));
           // (what was pasted: the address the page opens for it)
@@ -533,8 +573,8 @@
             if (localStorage.getItem("poe:char:" + url) == null) throw new Error("this browser keeps nothing: the build cannot be opened");
             return url;
           };
-          const mine = (url) => /^(ninja|pobb|paste)\//.test(url);
-          return { read, pasted, mine };
+          const mine = (url) => /^(ninja|pobb|paste|share)\//.test(url);
+          return { read, pasted, mine, share };
         })();
         const character = async (url) => {
           try { const text = await kept(url, outside.mine(url) ? 600 : 120, () => (outside.mine(url) ? outside.read(url) : api(url.slice(8)))); save(url, text); return text; }
@@ -551,7 +591,9 @@
           const q = new URLSearchParams(url.slice(kept + 8));
           try {
             if (q.get("op") === "put") { localStorage.setItem("poetry:" + q.get("key"), q.get("value") || ""); return answer(JSON.stringify({ ok: true })); }
-            return answer(JSON.stringify({ value: localStorage.getItem("poetry:" + q.get("key")) || "" }));
+            const key = q.get("key") || "";
+            if (key.startsWith("share/") && localStorage.getItem("poetry:" + key) == null) await poe.character(key).catch(() => {});
+            return answer(JSON.stringify({ value: localStorage.getItem("poetry:" + key) || "" }));
           } catch (err) { return answer(JSON.stringify({ value: "", error: String(err) })); }
         }
         const account = url.indexOf("__poe?");
@@ -928,6 +970,9 @@
     }
     #app header .login { flex: 0 0 auto; background: none; border: 0; color: var(--dim); font: inherit; font-size: 13px; cursor: pointer; padding: 0; text-decoration: underline dotted; overflow: visible; }
     #app header .login:hover { color: var(--ink); }
+    #app .shared { position: fixed; left: 0; right: 0; bottom: 0; z-index: 60; display: flex; gap: 8px; align-items: center; padding: 10px 16px; background: #14110f; border-top: 1px solid var(--edge); font-size: 14px; }
+    #app .shared input { flex: 1 1 auto; min-width: 0; background: #0c0a09; color: var(--ink); border: 1px solid var(--edge); font: inherit; font-size: 16px; padding: 6px 8px; }
+    #app .shared .said { flex: 1 1 auto; color: var(--dim); }
     #app header select.pick { flex: 0 1 auto; min-width: 90px; background: #14110f; color: var(--rare); border: 1px solid var(--edge); font: inherit; font-size: 16px; padding: 4px 6px; }
     #app .main.notes .panel { flex: 1 1 100%; max-width: 760px; }
     #app .main.defence { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; align-items: start; max-width: 1100px; }
@@ -999,6 +1044,7 @@
       #app header select.pick { flex: 1 1 110px; min-width: 0; max-width: none; }
       #app:has(.main.landing) header select.tabs { display: none; }
       #app:not(:has(.main.landing)) header .login { display: none; }
+      #app:not(:has(.main.landing)) header .login.share { display: block; }
       #app header { gap: 8px; }
       #app header .crest { width: 38px; height: 38px; margin-right: 0; flex: 0 0 auto; }
       #app header .headline { font-size: 15px; }

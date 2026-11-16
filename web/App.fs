@@ -142,6 +142,10 @@ type Msg =
     | Link of string
     | Import
     | Imported of Fetched
+    /// Share the build as it is set up: a short address anyone can open.
+    | Share
+    | Shared of Fetched
+    | Unshare
     /// The game account (where the page is hosted for it): who is logged in and their
     /// characters arrive; logging in and out; another character is opened.
     | Account of Fetched
@@ -299,6 +303,10 @@ type Model =
       Link : string
       Importing : string
       ImportSaid : string
+      /// The request that shares the build, its address once there, or why not.
+      Sharing : string
+      ShareLink : string
+      ShareSaid : string
       /// The passive tree: its passives and connections, who neighbours whom, the ribbons of
       /// all connections as one mesh, what is allocated (and whether that was changed here).
       /// (Arrays: read by the update alone, and as arrays they are one value each to the view,
@@ -407,9 +415,9 @@ type Model =
       Level : int }
 
 let init : Model =
-    { Build = ""; Scenario = "boss"; Status = "locating"; Title = ""; Class = ""; Ascendancy = ""; Tab = "character"
+    { Build = ""; Scenario = "pack"; Status = "locating"; Title = ""; Class = ""; Ascendancy = ""; Tab = "character"
       Pools = []; Guards = []; Survival = []; Defences = []; Resistances = []; Minions = []
-      NotUnderstood = 0; Fighting = false; Gem = ""; Dps = []; Shares = []; Groups = []; Items = []; Bag = []; Swapped = Map.empty; Wearing = []; Equip = ""; Aim = ""; Pasting = false; Draft = ""; Dropped = Set.empty; GemEdits = []; Picker = ""; States = []; Standing = []; Editing = ""; Offers = []; Wanted = ""; Offered = []; Probe = ""; ProbeRound = 0; Probing = false; Tuning = ""; TuneSaid = ""; Probed = ""; Worth = []; Play = []; Rotation = []; Pressable = []; EnemyLevel = ""; EnemyEle = ""; EnemyChaos = ""; CustomDraft = ""; Custom = ""; Calcs = []; CanLogin = false; Asked = false; Player = ""; Characters = []; Running = []; Lasting = []; Going = ""; Kept = ""; Restored = false; Notes = ""; NotesWere = ""; NodeWorth = Map.empty; Among = ""; CalcShown = []; Pinned = ""; Deltas = []; DeltaOf = ""; Ask = ""; AskMore = ""; Anointed = Set.empty; Types = []; Counts = []; Start = Map.empty; Switches = Set.empty; Link = ""; Importing = ""; ImportSaid = ""
+      NotUnderstood = 0; Fighting = false; Gem = ""; Dps = []; Shares = []; Groups = []; Items = []; Bag = []; Swapped = Map.empty; Wearing = []; Equip = ""; Aim = ""; Pasting = false; Draft = ""; Dropped = Set.empty; GemEdits = []; Picker = ""; States = []; Standing = []; Editing = ""; Offers = []; Wanted = ""; Offered = []; Probe = ""; ProbeRound = 0; Probing = false; Tuning = ""; TuneSaid = ""; Probed = ""; Worth = []; Play = []; Rotation = []; Pressable = []; EnemyLevel = ""; EnemyEle = ""; EnemyChaos = ""; CustomDraft = ""; Custom = ""; Calcs = []; CanLogin = false; Asked = false; Player = ""; Characters = []; Running = []; Lasting = []; Going = ""; Kept = ""; Restored = false; Notes = ""; NotesWere = ""; NodeWorth = Map.empty; Among = ""; CalcShown = []; Pinned = ""; Deltas = []; DeltaOf = ""; Ask = ""; AskMore = ""; Anointed = Set.empty; Types = []; Counts = []; Start = Map.empty; Switches = Set.empty; Link = ""; Importing = ""; ImportSaid = ""; Sharing = ""; ShareLink = ""; ShareSaid = ""
       Passives = [||]; Ascendancies = []; Shown = []; AscendancyWeb = Data.pack (Data.ofList ([] : V3f list)); Path = Data.pack (Data.ofList ([] : V3f list))
       Loaded = false; Capacity = 0
       WebUv = Data.pack (Data.ofList ([] : V2f list)); AscendancyWebUv = Data.pack (Data.ofList ([] : V2f list)); PathUv = Data.pack (Data.ofList ([] : V2f list)); Art = ""; Links = [||]; Neighbours = Map.empty; Web = Data.pack (Data.ofList ([] : V3f list)); Allocated = Set.empty; Edited = false
@@ -1542,6 +1550,13 @@ let rec private step (msg : Msg) (m : Model) : Model =
          | Ok j when Json.string (Json.field "error" j) <> "" -> { m with Importing = ""; ImportSaid = Json.string (Json.field "error" j) }
          | Ok _ -> m
          | _ -> { m with Importing = ""; ImportSaid = "that did not work" })
+    | Share -> if m.Build = "" || m.Sharing <> "" then m else { m with Sharing = "__poe?op=share&name=" + storeKey m; ShareLink = ""; ShareSaid = "sharing ..." }
+    | Shared r ->
+        (match Native.parseJson r.Text with
+         | Ok j when Json.string (Json.field "url" j) <> "" -> { m with Sharing = ""; ShareLink = Json.string (Json.field "url" j); ShareSaid = "" }
+         | Ok j when Json.string (Json.field "error" j) <> "" -> { m with Sharing = ""; ShareSaid = Json.string (Json.field "error" j) }
+         | _ -> { m with Sharing = ""; ShareSaid = "that did not work" })
+    | Unshare -> { m with ShareLink = ""; ShareSaid = "" }
     | Account r ->
         (match r.Status, Native.parseJson r.Text with
          | 200, Ok j ->
@@ -1794,7 +1809,7 @@ let update (msg : Msg) (m : Model) : Model =
     // (what is kept between visits: after anything but the pointer, a frame, an answer)
     let n =
         match msg with
-        | PointerDown _ | PointerMove _ | PointerUp _ | Zoom _ | Sized _ | Tick _ | Fought _ | Warmed _ | Compared _ | Analysed _ | Tuned _ | Sources _ | Saved _ | Link _ | Import | Imported _ | TreeData _ | Sheet _ | Picked _ -> n
+        | PointerDown _ | PointerMove _ | PointerUp _ | Zoom _ | Sized _ | Tick _ | Fought _ | Warmed _ | Compared _ | Analysed _ | Tuned _ | Sources _ | Saved _ | Link _ | Import | Imported _ | Share | Shared _ | Unshare | TreeData _ | Sheet _ | Picked _ -> n
         | _ when not n.Restored -> n
         | _ -> (let k = kept n in if k = n.Kept then n else { n with Kept = k })
     // (what the passive looked at would take or give back, drawn on the tree)
@@ -2569,6 +2584,7 @@ let view (m : Model) : Node<Msg> =
             if m.Tuning <> "" then span { Dom.Fetch (m.Tuning, Tuned) }
             if m.Build <> "" then span { Dom.Fetch (restoreUrl m, Restore) }
             if m.Going <> "" then span { Dom.Fetch ("__poe?op=" + m.Going, Saved) }
+            if m.Sharing <> "" then span { Dom.Fetch (m.Sharing, Shared) }
             if m.Restored && m.Kept <> "" then span { Dom.Fetch (saveUrl m, Saved) }
             if m.Picker <> "" then span { Dom.Fetch (pickUrl m, Picked) }
             if m.Tab = "calcs" && m.Title <> "" then span { Dom.Fetch (calcsUrl m, Sources) }
@@ -2589,6 +2605,13 @@ let view (m : Model) : Node<Msg> =
                     button { Dom.Class "act"; Dom.Attr ("title", "what every notable and keystone allocated is worth: each is given back alone and the fight fought without it"); Dom.OnClick (fun _ -> Analyse); analysing }
                 }
         }
+        if m.ShareLink <> "" || m.ShareSaid <> "" then
+            div {
+                Dom.Class "shared"
+                if m.ShareLink <> "" then input { Dom.Attr ("type", "text"); Dom.Attr ("readonly", "readonly"); Dom.Attr ("value", m.ShareLink); Dom.Attr ("onfocus", "this.select()") }
+                if m.ShareSaid <> "" then span { Dom.Class "said"; m.ShareSaid }
+                if m.Sharing = "" then button { Dom.Class "act"; Dom.OnClick (fun _ -> Unshare); "close" }
+            }
         header {
             h1 { "PoEtry" }
             if m.Art <> "" then img { Dom.Class "crest"; Dom.Attr ("src", m.Art); Dom.Attr ("alt", "") }
@@ -2603,6 +2626,7 @@ let view (m : Model) : Node<Msg> =
                         option { Dom.Attr ("value", name); about }
                     option { Dom.Attr ("value", "*"); "all characters ..." }
                 }
+            if m.Build <> "" then button { Dom.Class "login share"; Dom.Attr ("title", "a short address for this build as it is set up here: rotation, changed gems, items and passives"); Dom.OnClick (fun _ -> Share); "share" }
             if m.CanLogin && m.Player = "" then button { Dom.Class "login"; Dom.OnClick (fun _ -> Login); "login" }
             if m.CanLogin && m.Player <> "" then button { Dom.Class "login"; Dom.Attr ("title", "logged in as " + m.Player); Dom.OnClick (fun _ -> Logout); "logout" }
             // (on a phone the tabs are a list to choose from)
