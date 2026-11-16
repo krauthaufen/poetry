@@ -605,7 +605,12 @@ module Report =
               "damageTakenPerSecond", num summary.DamageTakenPerSecond
               "lowestLife", obj [ "mean", num (fst summary.MinLife); "worst", num (snd summary.MinLife) ]
               "waitingForMana", num summary.Starved
-              "replay", (if not tracing then JNull elif march then replay ready.Shown (Sim.shown ready.Shown (uint32 first)) else replay f outcomes.Head) ]
+              // (a map is shown by the fast engine's record of the run itself: the reference would take too long)
+              "replay", (if not tracing then JNull
+                         elif march then (match Flat.compile f with
+                                          | Ok program -> replay f (Flat.shown program (uint32 first))
+                                          | Error _ -> replay ready.Shown (Sim.shown ready.Shown (uint32 first)))
+                         else replay f outcomes.Head) ]
 
     let fight (c: Loaded) (request: Json) : Json = fought (prepare c request) request
 

@@ -2980,6 +2980,11 @@ module Flat =
           /// holds it and what part of its walking it keeps till then; where the furthest
           /// pack's middle is and how many packs there have been.
           mutable Walked: float
+          /// What happens, kept for showing it (`Sim.shown`); null: not kept. Where each enemy
+          /// was when that was last noted, and how far the player had walked.
+          mutable Rec: ResizeArray<Shown>
+          ShownAt: Dictionary<int, Vec>
+          mutable ShownWalked: float
           mutable WalkHeldUntil: float
           mutable WalkKept: float
           mutable Front: float
@@ -6273,6 +6278,7 @@ module Flat =
                 let life = lifeBefore - dealt
                 let dead = life <= 1e-9
                 (match s.Tell with Some tell -> tell s.Time (if crit then "crit" else "hit") def0.Name skill.Name dealt | None -> ())
+                if not (isNull s.Rec) then s.Rec.Add(Struck(s.Time, def0.Name, min dealt lifeBefore, crit))
                 // what the armour break below reads of the enemy as it was before the hit
                 let brokenBefore =
                     if taken then s.BrokenWas
@@ -6785,13 +6791,15 @@ module Flat =
                 release s
                 let r = match delivery with AreaAtTarget r | AreaAroundSelf r -> Geometry.radius r areaMult | _ -> 0.0
                 let turn = rng.Float() * 2.0 * System.Math.PI
-                for place in 0 .. 3 * arms do
-                    let centre =
+                let centreOf (place: int) =
                         if place = 0 then Vec.make 0.0 0.0
                         else
                             let arm = (place - 1) / arms
                             let k = (place - 1) % arms + 1
                             Vec.scale (float k * r * p.Fight.CascadeSpacing) (Vec.ofAngle (turn + float arm * 2.0 * System.Math.PI / 3.0))
+                if not (isNull s.Rec) then s.Rec.Add(Used(s.Time, p.Actor.Name, info.Skill.Name, [ for place in 0 .. 3 * arms -> Ring(centreOf place, r, 0.0) ]))
+                for place in 0 .. 3 * arms do
+                    let centre = centreOf place
                     let mutable rest = alive
                     while not rest.IsEmpty do
                         let d = rest.Head
@@ -6816,6 +6824,7 @@ module Flat =
                     let reach = if k = 0 then centreR else Geometry.radius r (areaMult * moreQ ev qCascadeArea)
                     release s
                     let centre = Vec.add primaryDef.Position (Vec.scale (float k * step) axis)
+                    if not (isNull s.Rec) then s.Rec.Add(Used(s.Time, p.Actor.Name, info.Skill.Name, [ Ring(centre, reach, 0.0) ]))
                     let mutable rest = alive
                     while not rest.IsEmpty do
                         let d = rest.Head
@@ -6847,31 +6856,49 @@ module Flat =
                     | _ -> None
                 if novaAt.IsSome then bump s info.COnBolt
                 let strike () =
+                    let note (marks: Mark list) = if not (isNull s.Rec) then s.Rec.Add(Used(s.Time, p.Actor.Name, info.Skill.Name, marks))
                     if direct then
+                        note [ Line(Vec.zero, primaryDef.Position) ]
                         if primary = aimedAt then hitEnemy s rng impact mult aimedAt
                     else
                         match delivery with
                         | AreaAroundSelf r when novaAt.IsSome ->
                             let rr = Geometry.radius r areaMult
+                            note [ Ring(novaAt.Value, rr, 0.0) ]
                             alive |> List.filter (Geometry.within novaAt.Value rr) |> List.map (fun e -> e.Name) |> hitAll
                         | Projectiles pr when not passing && pr.Passing > 0.0 && pr.HitInterval > 0.0 ->
                             // what is inside the projectiles as they travel: every hit at its own time
+                            note [ Flight [ Vec.zero; primaryDef.Position ] ]
                             for (t, target) in Geometry.dwellHits rng p.Fight.Walls pr p.Fight.Reach areaMult primaryDef alive do
                                 if t <= 0.0 then hitEnemy s rng impact mult s.FoeIds.[target]
                                 else schedule s (s.Time + t) EDirect sid s.FoeIds.[target] mult 0.0
                         | Projectiles pr when passing && pr.Passing > 0.0 ->
                             // where the projectile is by now, on its way towards where it was aimed
                             let spot = Vec.scale (pr.Speed * elapsed) (Vec.ofAngle (Vec.angle primaryDef.Position))
+                            note [ Ring(spot, Geometry.radius pr.Passing areaMult, 0.0) ]
                             alive |> List.filter (Geometry.within spot (Geometry.radius pr.Passing areaMult)) |> List.map (fun e -> e.Name) |> hitAll
                         | Single ->
                             // "X% chance to deal Splash Damage" (`Sim`)
                             let c = sumQ ev qSplashChance
                             if c > 0.0 && rng.Chance c then
-                                let hit, _ = Geometry.targetsParted rng p.Fight.Walls p.Fight.Reach (AreaAtTarget Constants.splashRadius) areaMult primaryDef alive
-                                hitAll hit
-                            else hitEnemy s rng impact mult primary
+                                if isNull s.Rec then
+                                    let hit, _ = Geometry.targetsParted rng p.Fight.Walls p.Fight.Reach (AreaAtTarget Constants.splashRadius) areaMult primaryDef alive
+                                    hitAll hit
+                                else
+                                    let hit, _, marks = Geometry.targetsShown rng p.Fight.Walls p.Fight.Reach (AreaAtTarget Constants.splashRadius) areaMult primaryDef alive
+                                    note marks
+                                    hitAll hit
+                            else
+                                // (as the reference's `targetsShown` shows a single strike)
+                                if not (isNull s.Rec) then (let _, _, marks = Geometry.targetsShown (Rng(1u)) p.Fight.Walls p.Fight.Reach Single areaMult primaryDef alive in note marks)
+                                hitEnemy s rng impact mult primary
                         | _ ->
-                            let hit, forked = Geometry.targetsParted rng p.Fight.Walls p.Fight.Reach delivery areaMult primaryDef alive
+                            let hit, forked =
+                                if isNull s.Rec then Geometry.targetsParted rng p.Fight.Walls p.Fight.Reach delivery areaMult primaryDef alive
+                                else
+                                    let hit, forked, marks = Geometry.targetsShown rng p.Fight.Walls p.Fight.Reach delivery areaMult primaryDef alive
+                                    note marks
+                                    hit, forked
                             hitAll hit
                             // forked projectiles: "Forked Projectiles deal N% less damage" (Fork)
                             if not forked.IsEmpty then
@@ -7259,6 +7286,7 @@ module Flat =
                             bump s p.CMinionTook
                             hurtMinion s rng guard (taken |> Map.map (fun _ d -> d * k))
                             taken |> Map.map (fun _ d -> d * (1.0 - k))
+                    if not (isNull s.Rec) then s.Rec.Add(Hurt(s.Time, (at s.Foes index).Def.Name, taken |> Map.fold (fun a _ v -> a + v) 0.0))
                     takeDamage s true pools taken
                     if preventedRecoup > 0.0 then s.Recoups <- (s.Time + v.RecoupSeconds, preventedRecoup / v.RecoupSeconds, PES) :: s.Recoups
                     if preventedLife > 0.0 then s.Recoups <- (s.Time + v.RecoupSeconds, preventedLife / v.RecoupSeconds, PLife) :: s.Recoups
@@ -8071,6 +8099,9 @@ module Flat =
               MinLife = 1.0
               LockedUntil = 0.0
               Walked = 0.0
+              Rec = null
+              ShownAt = Dictionary<int, Vec>()
+              ShownWalked = 0.0
               WalkHeldUntil = 0.0
               WalkKept = 1.0
               Front = (match p.Fight.March with Some m -> m.Engage | None -> 0.0)
@@ -8168,6 +8199,7 @@ module Flat =
                         s.FoeIds.[def.Name] <- index
                         s.AliveCount <- s.AliveCount + 1
                         index
+                if not (isNull s.Rec) then s.Rec.Add(Entered(s.Time, def))
                 if p.Attacked then
                     match d.Attack with
                     | Some attack -> schedule s (s.Time + s.Rng.Float() * attack.Interval) EEnemyAttack index 0 0.0 0.0
@@ -8200,6 +8232,7 @@ module Flat =
                     let fresh = makeFoe s.Entropies ns p.Roots.[name] index old.Root def
                     fresh.Pack <- s.Packs
                     put s.Foes index fresh
+                    if not (isNull s.Rec) then s.Rec.Add(Entered(s.Time, def))
                     s.AliveCount <- s.AliveCount + 1
                     s.RoomAt <- -2
                     if p.Attacked then
@@ -8217,8 +8250,12 @@ module Flat =
                 s.AliveStale <- true
 
     /// The fight played, for at most so many events.
+    /// Whether the fight played next keeps what happens for showing it (`shown`).
+    let private keeping : bool[] = [| false |]
+
     let private played (p: Program) (seed: uint32) (tell: (float -> string -> string -> string -> float -> unit) option) (maxEvents: int) (kept: Kept) : State =
         let s = start p seed tell kept
+        if keeping.[0] then s.Rec <- ResizeArray<Shown>()
         let maxTime = p.Fight.MaxTime
         // (a march: none of its enemies is there yet; the first packs come now)
         let packs = match p.Fight.March with Some m -> m.Packs | None -> -1
@@ -8240,6 +8277,18 @@ module Flat =
                 step s
                 supply s
                 if p.Fight.Replace && s.Kills.Count > before then replace s before
+                if not (isNull s.Rec) then
+                    if p.Fight.March.IsSome && s.Walked - s.ShownWalked >= 1.0 then
+                        s.Rec.Add(Walked(s.Time, s.Walked))
+                        s.ShownWalked <- s.Walked
+                    for k in 0 .. s.Live.Length - 1 do
+                        let e = at s.Foes (at s.Live k)
+                        if e.Life > 0.0 then
+                            match s.ShownAt.TryGetValue e.Index with
+                            | true, was when Vec.dist was e.Def.Position < 1.0 -> ()
+                            | _ ->
+                                s.Rec.Add(Moved(s.Time, e.Def.Name, e.Def.Position))
+                                s.ShownAt.[e.Index] <- e.Def.Position
                 n <- n + 1
         s
 
@@ -8257,7 +8306,7 @@ module Flat =
             for i in 0 .. names.Length - 1 do
                 if (at seen i) then m <- Map.add (at names i) (at values i) m
             m
-        { Shown = []
+        { Shown = (if isNull s.Rec then [] else List.ofSeq s.Rec)
           Ttk = cleared
           Duration = (match cleared with Some t -> t | None -> min s.Time maxTime)
           Kills = List.ofSeq s.Kills
@@ -8291,6 +8340,14 @@ module Flat =
     let runner (p: Program) : uint32 -> Outcome =
         let kept = newKept p
         fun seed -> play p seed None kept
+
+    /// The same fight (the same numbers), with what happened kept for showing it: where the
+    /// enemies were, what was used and where, who was struck (`Sim.shown`; the order of what
+    /// is noted at one moment may differ from the reference's).
+    let shown (p: Program) (seed: uint32) : Outcome =
+        keeping.[0] <- true
+        try play p seed None (newKept p)
+        finally keeping.[0] <- false
 
     /// The same, telling `tell` what `Sim.traced` tells: every event as it is taken from the
     /// queue and every hit that lands.

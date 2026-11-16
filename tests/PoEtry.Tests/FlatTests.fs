@@ -1413,6 +1413,22 @@ let run (test: string -> (unit -> unit) -> unit) =
         for hold in [ true; false ] do
             same (rooms hold moving) [ 1u; 2u ]
         if (Sim.run (rooms true []) 1u).Kills.Length <> 31 then failwith "expected the rooms cleared"
+        // the fast engine's record of a run, for showing it: the same run, and what the picture needs
+        match Flat.compile (rooms false moving) with
+        | Error why -> failwithf "does not compile: %s" why
+        | Ok program ->
+            let plain, kept = Flat.run program 2u, Flat.shown program 2u
+            if plain.Ttk <> kept.Ttk || plain.Kills <> kept.Kills || plain.DamageBy <> kept.DamageBy then failwith "the kept run is another run"
+            if not plain.Shown.IsEmpty then failwith "a run that is not kept has nothing shown"
+            let count pick = kept.Shown |> List.filter pick |> List.length
+            if count (fun x -> match x with Entered _ -> true | _ -> false) <> 31 then failwithf "entered: %d" (count (fun x -> match x with Entered _ -> true | _ -> false))
+            if count (fun x -> match x with Walked _ -> true | _ -> false) < 100 then failwith "the walk is not kept"
+            if count (fun x -> match x with Used _ -> true | _ -> false) = 0 || count (fun x -> match x with Struck _ -> true | _ -> false) < 31 || count (fun x -> match x with Moved _ -> true | _ -> false) = 0 then failwith "uses, strikes or moves are not kept"
+            // and the reference keeps as many strikes, uses and entries of the same run
+            let ref' = Sim.shown (rooms false moving) 2u
+            let n (o: Outcome) pick = o.Shown |> List.filter pick |> List.length
+            for (what, pick) in [ "uses", (fun x -> match x with Used _ -> true | _ -> false); "strikes", (fun x -> match x with Struck _ -> true | _ -> false); "entries", (fun x -> match x with Entered _ -> true | _ -> false) ] do
+                if n ref' pick <> n kept pick then failwithf "%s: the reference keeps %d, the fast engine %d" what (n ref' pick) (n kept pick)
         // the map is cleared: every monster of the six packs and the boss, none before it came
         let o = Sim.run (fight true []) 1u
         if o.Ttk.IsNone || o.Kills.Length <> 31 then failwithf "expected the map cleared with 31 kills: %A, %d kills" o.Ttk o.Kills.Length
