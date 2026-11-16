@@ -2470,7 +2470,7 @@ let private tab (m : Model) (key : string) (name : string) : Node<Msg> =
     }
 
 /// Passive points spent of those a character of this level has (one a level after the
-/// first, 24 from quests), the ascendancy's apart; what a jewel or an item allocates
+/// first, 25 from quests), the ascendancy's apart; what a jewel or an item allocates
 /// without a way to it costs none.
 let private points (m : Model) : string =
     let spent = hanging m m.Allocated
@@ -2484,12 +2484,22 @@ let private points (m : Model) : string =
     let origin = m.Passives |> Array.filter (fun p -> p.Kind = "start" && spent.Contains p.Id) |> Array.length
     // (a passive of a weapon set costs a point as any other does: the larger set counts, PoB Build.lua)
     let used = spent.Count - asc - starts - origin + leapt + m.SetPoints
-    let has = m.Level - 1 + 24
-    // the level that has so many: one point a level after the first, with all 24 of the quests
-    let needs = max 1 (used - 24 + 1)
-    // (how many points the quests give now is not sure: more than there are is not called too many)
-    let left = if used < has then sprintf " (%d free)" (has - used) else ""
-    let level = if used = 0 || needs > 100 then "" else sprintf ", needs level %d" needs
+    // "Grants 4 Passive Skill Point" on an ascendancy's passives (Pathfinder six in all, Oracle two)
+    let more =
+        m.Passives |> Array.sumBy (fun p ->
+            if not (spent.Contains p.Id) then 0
+            else
+                p.Stats |> List.sumBy (fun (l : string) ->
+                    if l.StartsWith "Grants " && l.Contains "Passive Skill Point" then (match System.Int32.TryParse (l.Split(' ').[1]) with | true, n -> n | _ -> 0) else 0))
+    // one a level after the first, 24 from the quests and one from the Martyr (the user, 2026-11-16)
+    let quests = 25 + more
+    let has = m.Level - 1 + quests
+    // the level that has so many, with all of the quests done
+    let needs = max 1 (used - quests + 1)
+    // (of the level 100 characters on poe.ninja two in three have exactly these and one in three
+    // one more, none two: one point more is from somewhere not known here, and not called too many)
+    let left = if used < has then sprintf " (%d free)" (has - used) elif used > has + 1 then sprintf " (%d too many)" (used - has) else ""
+    let level = if used = 0 then "" elif needs > 101 then ", more than level 100 has" else sprintf ", needs level %d" (min 100 needs)
     sprintf "%d of %d points%s%s, %d ascendancy%s%s" used has left level asc (if m.SetPoints > 0 then sprintf ", %d of them by weapon set" m.SetPoints else "") (if granted > 0 then sprintf ", %d granted" granted else "")
 
 /// The tooltip of the pinned passive (with what can be done to it) or the one under the mouse.
