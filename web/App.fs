@@ -309,6 +309,10 @@ type Model =
       ImportSaid : string
       /// The request that shares the build, its address once there, or why not.
       Sharing : string
+      /// What a rotation's conditions can count besides what the fight begins with: the infusions the skills consume.
+      Asked : (string * int) list
+      /// When the fight's picture was last drawn anew (the frame's time; it is drawn 20 times a second).
+      Drawn : float
       NewOf : string
       /// Passives bought with weapon set points: the larger of the two sets (they come out of the same points).
       SetPoints : int
@@ -425,7 +429,7 @@ type Model =
 let init : Model =
     { Build = ""; Scenario = "pack"; Status = "locating"; Title = ""; Class = ""; Ascendancy = ""; Tab = "character"
       Pools = []; Guards = []; Survival = []; Defences = []; Resistances = []; Minions = []
-      NotUnderstood = 0; Fighting = false; Gem = ""; Dps = []; Shares = []; Groups = []; Items = []; Bag = []; Swapped = Map.empty; Wearing = []; Equip = ""; Aim = ""; Pasting = false; Draft = ""; Dropped = Set.empty; GemEdits = []; Picker = ""; States = []; Standing = []; Editing = ""; Offers = []; Wanted = ""; Offered = []; Probe = ""; ProbeRound = 0; Probing = false; Tuning = ""; TuneSaid = ""; Probed = ""; Worth = []; Play = []; Rotation = []; Pressable = []; EnemyLevel = ""; EnemyEle = ""; EnemyChaos = ""; CustomDraft = ""; Custom = ""; Calcs = []; CanLogin = false; Asked = false; Player = ""; Characters = []; Running = []; Lasting = []; Going = ""; Kept = ""; Restored = false; Notes = ""; NotesWere = ""; NodeWorth = Map.empty; Among = ""; CalcShown = []; Pinned = ""; Deltas = []; DeltaOf = ""; Ask = ""; AskMore = ""; Anointed = Set.empty; Types = []; Counts = []; Start = Map.empty; Switches = Set.empty; Link = ""; Importing = ""; ImportSaid = ""; Sharing = ""; NewOf = "Warrior|Titan"; SetPoints = 0; NewAt = "90"; ShareLink = ""; ShareSaid = ""
+      NotUnderstood = 0; Fighting = false; Gem = ""; Dps = []; Shares = []; Groups = []; Items = []; Bag = []; Swapped = Map.empty; Wearing = []; Equip = ""; Aim = ""; Pasting = false; Draft = ""; Dropped = Set.empty; GemEdits = []; Picker = ""; States = []; Standing = []; Editing = ""; Offers = []; Wanted = ""; Offered = []; Probe = ""; ProbeRound = 0; Probing = false; Tuning = ""; TuneSaid = ""; Probed = ""; Worth = []; Play = []; Rotation = []; Pressable = []; EnemyLevel = ""; EnemyEle = ""; EnemyChaos = ""; CustomDraft = ""; Custom = ""; Calcs = []; CanLogin = false; Asked = false; Player = ""; Characters = []; Running = []; Lasting = []; Going = ""; Kept = ""; Restored = false; Notes = ""; NotesWere = ""; NodeWorth = Map.empty; Among = ""; CalcShown = []; Pinned = ""; Deltas = []; DeltaOf = ""; Ask = ""; AskMore = ""; Anointed = Set.empty; Types = []; Counts = []; Start = Map.empty; Switches = Set.empty; Link = ""; Importing = ""; ImportSaid = ""; Sharing = ""; Asked = []; Drawn = -1.0; NewOf = "Warrior|Titan"; SetPoints = 0; NewAt = "90"; ShareLink = ""; ShareSaid = ""
       Passives = [||]; Ascendancies = []; Shown = []; AscendancyWeb = Data.pack (Data.ofList ([] : V3f list)); Path = Data.pack (Data.ofList ([] : V3f list))
       Loaded = false; Capacity = 0
       WebUv = Data.pack (Data.ofList ([] : V2f list)); AscendancyWebUv = Data.pack (Data.ofList ([] : V2f list)); PathUv = Data.pack (Data.ofList ([] : V2f list)); Art = ""; Links = [||]; Neighbours = Map.empty; Web = Data.pack (Data.ofList ([] : V3f list)); Allocated = Set.empty; Edited = false
@@ -1762,6 +1766,7 @@ let rec private step (msg : Msg) (m : Model) : Model =
                     Pressable = Json.field "pressable" j |> Json.list |> List.map Json.string
                     States = (match Json.field "states" (Json.field "conditions" j) |> Json.list |> List.map Json.string with | [] -> [ "Ignite"; "Shock"; "Chill"; "Freeze"; "Bleed"; "Poison" ] | xs -> xs)
                     Standing = Json.field "skills" (Json.field "conditions" j) |> Json.list |> List.map Json.string
+                    Asked = Json.field "counts" (Json.field "conditions" j) |> Json.list |> List.map (fun x -> Json.string (Json.field "name" x), Json.int (Json.field "max" x)) |> List.filter (fun (_, most) -> most > 0)
                     // (Runic Ward beside life and energy shield, for a character that has any)
                     Pools = [ row "Life" (n [ "pools"; "life" ]); row "Energy Shield" (n [ "pools"; "energyShield" ]) ] @ (if n [ "pools"; "ward" ] > 0.0 then [ row "Runic Ward" (n [ "pools"; "ward" ]) ] else []) @ [ row "Mana" (n [ "pools"; "mana" ]); row "Spirit" (n [ "pools"; "spirit" ]) ]
                     Guards = guards j
@@ -1773,6 +1778,9 @@ let rec private step (msg : Msg) (m : Model) : Model =
         | s, _ -> { m with Status = "the simulator did not answer (status " + string s + ")" }
     | Tick t ->
         if m.Happened.IsEmpty || m.Tab <> "character" then m
+        // (every frame's picture is some hundred kilobytes of triangles made and thrown away:
+        // at the screen's rate 10 MB a second, which a phone's browser does not forgive)
+        elif m.Drawn >= 0.0 && t >= m.Drawn && t - m.Drawn < 0.05 then m
         else
             let began = if m.Began < 0.0 then t else m.Began
             // the fight, a breath, and again
@@ -1780,7 +1788,7 @@ let rec private step (msg : Msg) (m : Model) : Model =
             let shown = t - began
             let c = (shown - whole * floor (shown / whole)) * pace m
             let layers, stands = stage m c
-            { m with Began = began; Stage = layers; Stands = stands; Clock = c }
+            { m with Began = began; Stage = layers; Stands = stands; Clock = c; Drawn = t }
     | Warmed r -> { m with Warm = (warming m) :: m.Warm }
     | Fought r when r.Url <> fightUrl m -> m
     | Fought r ->
@@ -1860,7 +1868,7 @@ let private panel (title : string) (rows : Row list) : Node<Msg> =
 
 /// "PowerCharge" as it is said: "Power Charge".
 let private spaced (name : string) : string =
-    name.Replace("Mote:", "Mote ").Replace("Charge", " Charge")
+    name.Replace("Mote:", "Mote ").Replace("Charge", " Charge").Replace("Infusion", " Infusion")
 
 /// A count to begin the fight with: fewer, the count (pressed: as the fight decides again), more.
 let private count (m : Model) (name : string) (most : int) : Node<Msg> =
@@ -2041,7 +2049,7 @@ let private condition (c : string) : string =
     | [ "ready" ] -> "when ready" | [ "buff" ] -> "kept up" | [ "curse" ] -> "kept on the enemy" | [ "held" ] -> "when ready, not first"
     | "below" :: _ ->
         let r, n = c.Substring (6, c.LastIndexOf ':' - 6), rest (c.LastIndexOf ':')
-        if n = "1" then "when out of " + r else "while below " + n + " " + r
+        if n = "1" then "when out of " + spaced r else "while below " + n + " " + spaced r
     | "has" :: _ -> "enemy has " + rest 3 | "lacks" :: _ -> "enemy lacks " + rest 5
     | "up" :: _ -> rest 2 + " stands" | "down" :: _ -> "no " + rest 4 + " stands"
     | _ -> c
@@ -2052,8 +2060,8 @@ let private conditions (m : Model) (p : Pressed) : Node<Msg> =
     let free (cs : (string * string) list) = cs |> List.filter (fun (c, _) -> not (List.contains c parts))
     let rows =
         [ "pressed", free [ "ready", "when ready"; "buff", "kept up"; "curse", "kept on the enemy" ]
-          "when out of", free (m.Counts |> List.map (fun (k, _) -> "below:" + k + ":1", k))
-          "while not full of", free (m.Counts |> List.filter (fun (_, most) -> most > 1) |> List.map (fun (k, most) -> "below:" + k + ":" + string most, k))
+          "when out of", free (m.Counts @ m.Asked |> List.map (fun (k, _) -> "below:" + k + ":1", spaced k))
+          "while not full of", free (m.Counts @ m.Asked |> List.filter (fun (_, most) -> most > 1) |> List.map (fun (k, most) -> "below:" + k + ":" + string most, spaced k))
           "enemy has", free (m.States |> List.map (fun x -> "has:" + x, x))
           "enemy lacks", free (m.States |> List.map (fun x -> "lacks:" + x, x))
           "stands", free (m.Standing |> List.map (fun x -> "up:" + x, x))

@@ -1174,3 +1174,12 @@ module Setup =
         (all |> List.filter (fun (_, p) -> stands p) |> List.map fst)
         @ (triggered |> List.choose (fun r -> match r.Reaction with LayGround g -> Some g.Skill | _ -> None))
         |> List.distinct
+
+    /// The infusions the character's skills consume, with the most there can be of each: what
+    /// a rotation's "below:ColdInfusion:1" can ask about.
+    let infusionsAsked (c: Loaded) (o: Options) : (string * int) list =
+        let most = Behaviours.infusionMaxima c.Sheet
+        pressable c
+        |> List.choose (fun g -> pressed c o g |> Option.bind (fun p -> p.Infused) |> Option.map (fun (_, element, _) -> element))
+        |> List.distinct
+        |> List.choose (fun e -> Map.tryFind e most |> Option.map (fun n -> e, n))

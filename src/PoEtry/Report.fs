@@ -227,7 +227,7 @@ module Report =
               "pressable", strs (Setup.pressable c)
               // what a rotation's conditions can ask about: the states an enemy can have in this
               // character's fights ("has:", "lacks:"), its skills that leave something standing ("up:", "down:")
-              "conditions", (let states, skills = Setup.conditions c Options.defaults in obj [ "states", strs states; "skills", strs skills ])
+              "conditions", (let states, skills = Setup.conditions c Options.defaults in obj [ "states", strs states; "skills", strs skills; "counts", JArr(Setup.infusionsAsked c Options.defaults |> List.map (fun (k, n) -> obj [ "name", JStr k; "max", num (float n) ])) ])
               "groups",
               JArr
                   [ for (i, g) in List.indexed groups do
