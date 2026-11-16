@@ -332,7 +332,10 @@ module Report =
           /// How many times their own life the enemies have (see "least").
           Scale: float
           /// A map: how the character plays it (found by playing, or as asked).
-          Way: string }
+          Way: string
+          /// The fight that is shown (`Sim.shown`, the reference's): the fight itself, or of a
+          /// map its first two rooms and the boss, which the reference plays in reasonable time.
+          Shown: Fight }
 
     let prepare (c: Loaded) (request: Json) : Ready =
         let n key d = Json.numField key request |> Option.defaultValue d
@@ -546,7 +549,10 @@ module Report =
                 | 1.0 -> 1.0
                 | k -> between (k / 3.0) k 3
         let f, run, engine = made scale
-        { Gem = gem; Scenario = scenario; Steps = steps; Fight = f; Run = run; Engine = engine; Scale = scale; Way = way }
+        { Gem = gem; Scenario = scenario; Steps = steps; Fight = f; Run = run; Engine = engine; Scale = scale; Way = way
+          Shown = (match march with
+                   | Some m -> marching (marchOf (min packs 2) m.Engage m.Hold) (Setup.fight c o player enemies)
+                   | None -> f) }
 
     let fought (ready: Ready) (request: Json) : Json =
         let n key d = Json.numField key request |> Option.defaultValue d
@@ -556,7 +562,9 @@ module Report =
         let first = max 1 (int (n "seed" 1.0))
         // (`trace`: the first run is kept for showing, see `replay`; that one is the reference's)
         let tracing = n "trace" 0.0 > 0.0
-        let outcomes = [ for seed in first .. first + runs - 1 -> if tracing && seed = first then Sim.shown f (uint32 seed) else ready.Run (uint32 seed) ]
+        // (a map is shown by a short one of its own, beside the runs that count)
+        let march = f.March.IsSome
+        let outcomes = [ for seed in first .. first + runs - 1 -> if tracing && seed = first && not march then Sim.shown f (uint32 seed) else ready.Run (uint32 seed) ]
         let summary = outcomes |> Summary.ofOutcomes
         obj
             [ "gem", JStr gem
@@ -592,7 +600,7 @@ module Report =
               "damageTakenPerSecond", num summary.DamageTakenPerSecond
               "lowestLife", obj [ "mean", num (fst summary.MinLife); "worst", num (snd summary.MinLife) ]
               "waitingForMana", num summary.Starved
-              "replay", (if tracing then replay f outcomes.Head else JNull) ]
+              "replay", (if not tracing then JNull elif march then replay ready.Shown (Sim.shown ready.Shown (uint32 first)) else replay f outcomes.Head) ]
 
     let fight (c: Loaded) (request: Json) : Json = fought (prepare c request) request
 

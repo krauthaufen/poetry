@@ -309,6 +309,8 @@ type Model =
       ImportSaid : string
       /// The request that shares the build, its address once there, or why not.
       Sharing : string
+      /// How the character plays the map, as the simulator found it ("walks on, using its skills on what is within 1.0 m").
+      MapWay : string
       /// The line of the tree's bar: the points spent of those there are. Said anew by `update`
       /// when what it reads has changed (the view does not see the tree's passives arrive).
       PointsSaid : string
@@ -434,9 +436,9 @@ type Model =
       Level : int }
 
 let init : Model =
-    { Build = ""; Scenario = "pack"; Status = "locating"; Title = ""; Class = ""; Ascendancy = ""; Tab = "character"
+    { Build = ""; Scenario = "map"; Status = "locating"; Title = ""; Class = ""; Ascendancy = ""; Tab = "character"
       Pools = []; Guards = []; Survival = []; Defences = []; Resistances = []; Minions = []
-      NotUnderstood = 0; Fighting = false; Gem = ""; Dps = []; Shares = []; Groups = []; Items = []; Bag = []; Swapped = Map.empty; Wearing = []; Equip = ""; Aim = ""; Pasting = false; Draft = ""; Dropped = Set.empty; GemEdits = []; Picker = ""; States = []; Standing = []; Editing = ""; Offers = []; Wanted = ""; Offered = []; Probe = ""; ProbeRound = 0; Probing = false; Tuning = ""; TuneSaid = ""; Probed = ""; Worth = []; Play = []; Rotation = []; Pressable = []; EnemyLevel = ""; EnemyEle = ""; EnemyChaos = ""; CustomDraft = ""; Custom = ""; Calcs = []; CanLogin = false; Asked = false; Player = ""; Characters = []; Running = []; Lasting = []; Going = ""; Kept = ""; Restored = false; Notes = ""; NotesWere = ""; NodeWorth = Map.empty; Among = ""; CalcShown = []; Pinned = ""; Deltas = []; DeltaOf = ""; Ask = ""; AskMore = ""; Anointed = Set.empty; Types = []; Counts = []; Start = Map.empty; Switches = Set.empty; Link = ""; Importing = ""; ImportSaid = ""; Sharing = ""; PointsSaid = ""; Countable = []; Moves = Map.empty; Kills = Map.empty; Drawn = -1.0; NewOf = "Warrior|Titan"; SetPoints = 0; NewAt = "90"; ShareLink = ""; ShareSaid = ""
+      NotUnderstood = 0; Fighting = false; Gem = ""; Dps = []; Shares = []; Groups = []; Items = []; Bag = []; Swapped = Map.empty; Wearing = []; Equip = ""; Aim = ""; Pasting = false; Draft = ""; Dropped = Set.empty; GemEdits = []; Picker = ""; States = []; Standing = []; Editing = ""; Offers = []; Wanted = ""; Offered = []; Probe = ""; ProbeRound = 0; Probing = false; Tuning = ""; TuneSaid = ""; Probed = ""; Worth = []; Play = []; Rotation = []; Pressable = []; EnemyLevel = ""; EnemyEle = ""; EnemyChaos = ""; CustomDraft = ""; Custom = ""; Calcs = []; CanLogin = false; Asked = false; Player = ""; Characters = []; Running = []; Lasting = []; Going = ""; Kept = ""; Restored = false; Notes = ""; NotesWere = ""; NodeWorth = Map.empty; Among = ""; CalcShown = []; Pinned = ""; Deltas = []; DeltaOf = ""; Ask = ""; AskMore = ""; Anointed = Set.empty; Types = []; Counts = []; Start = Map.empty; Switches = Set.empty; Link = ""; Importing = ""; ImportSaid = ""; Sharing = ""; MapWay = ""; PointsSaid = ""; Countable = []; Moves = Map.empty; Kills = Map.empty; Drawn = -1.0; NewOf = "Warrior|Titan"; SetPoints = 0; NewAt = "90"; ShareLink = ""; ShareSaid = ""
       Passives = [||]; Ascendancies = []; Shown = []; AscendancyWeb = Data.pack (Data.ofList ([] : V3f list)); Path = Data.pack (Data.ofList ([] : V3f list))
       Loaded = false; Capacity = 0
       WebUv = Data.pack (Data.ofList ([] : V2f list)); AscendancyWebUv = Data.pack (Data.ofList ([] : V2f list)); PathUv = Data.pack (Data.ofList ([] : V2f list)); Art = ""; Links = [||]; Neighbours = Map.empty; Web = Data.pack (Data.ofList ([] : V3f list)); Allocated = Set.empty; Edited = false
@@ -610,14 +612,14 @@ let private spotName (m : Model) (spot : string) : string =
     | None -> slotOf spot + " (empty)"
 
 let private sheetUrl (m : Model) = "__sim?op=character" + knobs m + passives m + "&build=" + m.Build
-let private fightOf (m : Model) (scenario : string) (ask : string) = "__sim?op=fight&runs=96" + (if scenario = "pack" then "&time=8" elif scenario = "endless" then "&time=60&least=30" else "&time=30&least=5") + ask + "&scenario=" + scenario + (if m.Pressing <> "" then "&gem=" + m.Pressing.Replace (" ", "%20") else "") + fightKnobs m + knobs m + passives m + "&build=" + m.Build
+let private fightOf (m : Model) (scenario : string) (ask : string) = "__sim?op=fight&runs=" + (if scenario = "map" then "8&time=300" elif scenario = "endless" then "96&time=60&least=30" else "96&time=30&least=5") + ask + "&scenario=" + scenario + (if m.Pressing <> "" then "&gem=" + m.Pressing.Replace (" ", "%20") else "") + fightKnobs m + knobs m + passives m + "&build=" + m.Build
 let private fightUrl (m : Model) = fightOf m m.Scenario ("&round=" + string m.Round)
 
-let private scenarios = [ "pack"; "burst"; "endless" ]
+let private scenarios = [ "map"; "burst"; "endless" ]
 
 /// A scenario as it is said: "burst" is the boss that lasts 5 seconds.
 let private sceneSaid (name : string) : string =
-    match name with "pack" -> "Pack" | "burst" -> "Boss, 5 s" | "endless" -> "Boss, 30 s" | other -> other
+    match name with "map" -> "Map" | "pack" -> "Pack" | "burst" -> "Boss, 5 s" | "endless" -> "Boss, 30 s" | other -> other
 
 /// The scenario whose fights are asked ahead now: the first not shown and not asked yet,
 /// once the shown one's fights are all in.
@@ -1852,9 +1854,10 @@ let rec private step (msg : Msg) (m : Model) : Model =
             let rate = Json.number (Json.field "killRate" j)
             let clear k = Json.field "clear" j |> Json.field k |> Json.number
             let killed =
-                if m.Scenario <> "boss" && m.Scenario <> "pinnacle" then []
-                elif rate >= 1.0 then [ { Label = "Dead in"; Value = sprintf "%.2f s" (clear "mean") }; { Label = "one in ten slower than"; Value = sprintf "%.2f s" (clear "p90") } ]
-                else [ { Label = "Dead in"; Value = sprintf "%.0f%% of fights" (100.0 * rate) } ]
+                // (the map: how soon it is cleared comes first)
+                if m.Scenario <> "map" then []
+                elif rate >= 1.0 then [ { Label = "Cleared in"; Value = sprintf "%.1f s" (clear "mean") }; { Label = "one in ten slower than"; Value = sprintf "%.1f s" (clear "p90") } ]
+                else [ { Label = "Cleared in"; Value = sprintf "%.0f%% of runs" (100.0 * rate) } ]
             // (while runs are still out the fight is asked again: the next answer is of more of them)
             let more = Json.bool (Json.field "more" j)
             let m = if m.Round = 0 || m.Happened.IsEmpty then readReplay j m else m
@@ -1869,6 +1872,7 @@ let rec private step (msg : Msg) (m : Model) : Model =
                 More = more
                 Round = (if more then m.Round + 1 else m.Round)
                 Gem = Json.string (Json.field "gem" j)
+                MapWay = Json.string (Json.field "way" j)
                 Play = Json.field "play" j |> Json.list |> List.map (fun x -> { Skill = Json.string (Json.field "gem" x); How = Json.string (Json.field "how" x); Face = picturesOf m (Json.string (Json.field "gem" x)); Code = Json.string (Json.field "cond" x) }) |> List.distinctBy (fun p -> p.Skill)
                 Dps = killed @ [ { Label = "DPS"; Value = short (dps "mean") }; { Label = "one in ten below"; Value = short (dps "p10") }; { Label = "median"; Value = short (dps "p50") }; { Label = "one in ten above"; Value = short (dps "p90") } ]
                 Shares =
@@ -2130,7 +2134,7 @@ let private analyse (m : Model) (about : string) : Node<Msg> =
         Dom.Class "analyse"
         button { Dom.Class "act"; Dom.OnClick (fun _ -> Analyse); label }
         span { Dom.Class "depth"; about }
-        span { Dom.Class "depth"; "The three numbers: the pack, and the damage on a boss that lasts 5 seconds and on one that lasts 30." }
+        span { Dom.Class "depth"; "The three numbers: the map (how soon it is cleared), and the damage on a boss that lasts 5 seconds and on one that lasts 30." }
         span { Dom.Class "legend"; span { Dom.Class "w3"; "much" }; span { Dom.Class "w2"; "some" }; span { Dom.Class "w1"; "little" }; span { Dom.Class "w0"; "none" }; span { Dom.Class "wneg"; "costs damage" } }
     }
 
@@ -2370,11 +2374,36 @@ let private inventory (m : Model) : Node<Msg> =
             }
     }
 
+/// What a scenario is and why it is measured so, for a tooltip and for the line under the tabs.
+let private scenarioSaid (key : string) : string =
+    match key with
+    | "map" ->
+        "A map of ten rooms, each with a pack of 20 monsters (melee and ranged, some magic, a rare in every third) and a boss in the last. "
+        + "The character walks through at its movement speed and is done when everything is dead; the number is how long that takes. "
+        + "Why so: a single pack or boss dies to a strong character's first hit whatever it wears, so its time says nothing. "
+        + "A whole map also counts what really sets clear speed: movement speed, how far the skills reach, and whether they can be used on the move."
+    | "burst" ->
+        "A boss with as much life as it takes to last 5 seconds: the damage a second over the opening of a fight. "
+        + "With the game's own life a boss is dead in one hit, and how soon then says nothing."
+    | "endless" ->
+        "A boss with as much life as it takes to last 30 seconds: the damage a second that is kept up, with mana, cooldowns and what builds up over a fight."
+    | _ -> ""
+
 let private scenario (m : Model) (key : string) (name : string) : Node<Msg> =
     button {
         Dom.Class (if m.Scenario = key then "tab active" else "tab")
+        Dom.Attr ("title", scenarioSaid key)
         Dom.OnClick (fun _ -> Scenario key)
         name
+    }
+
+/// Under the scenarios: what the one looked at is (a phone shows no tooltips), and for the
+/// map how the character plays it.
+let private aboutScenario (m : Model) : Node<Msg> =
+    details {
+        Dom.Class "about-scenario"
+        summary { (if m.Scenario = "map" && m.MapWay <> "" then "The character " + m.MapWay + ". What is this?" else "What is this?") }
+        div { Dom.Class "depth"; scenarioSaid m.Scenario }
     }
 
 /// A square of side 1 around the origin, its texture coordinates from the top left. (Two
@@ -2673,7 +2702,7 @@ let view (m : Model) : Node<Msg> =
     // character's passives belong to is the one)
     // (never the head of a list that may be empty: the text is worked out again before the
     // element that holds it is taken away)
-    let headline = match m.Dps with | d :: _ when d.Label = "DPS" -> d.Value + " DPS" | d :: _ -> "dead in " + d.Value | [] -> ""
+    let headline = match m.Dps with | d :: _ when d.Label = "DPS" -> d.Value + " DPS" | d :: _ -> "cleared in " + d.Value | [] -> ""
     let undo = "Undo (" + string m.GemEdits.Length + ")"
     let hasMinions = m.Groups |> List.exists (fun g -> g.Gems |> List.exists (fun x -> x.Minions > 0))
     let tune = if m.Tuning <> "" then "Trying minion counts ..." else "Best minion counts"
@@ -2784,7 +2813,7 @@ let view (m : Model) : Node<Msg> =
                 div {
                     Dom.Class "survival"
                     nav {
-                        scenario m "pack" "Pack"
+                        scenario m "map" "Map"
                         scenario m "burst" "Boss, 5 s"
                         scenario m "endless" "Boss, 30 s"
                     }
@@ -2908,10 +2937,11 @@ let view (m : Model) : Node<Msg> =
                 div {
                     Dom.Class "column wide"
                     nav {
-                        scenario m "pack" "Pack"
+                        scenario m "map" "Map"
                         scenario m "burst" "Boss, 5 s"
                         scenario m "endless" "Boss, 30 s"
                     }
+                    aboutScenario m
                     section {
                         Dom.Class "panel going"
                         h3 { "Going into the fight" }

@@ -79,7 +79,7 @@
         const rs = f.results;
         const clears = rs.map((r) => r.clear && r.clear.mean).filter((x) => x != null);
         return {
-          gem: f.gem, engine: rs[0].engine || "", play: rs[0].play || [], scenario: rs[0].scenario, runs: rs.length, more: (rs.length < f.total || !f.shown) && !f.failed,
+          gem: f.gem, engine: rs[0].engine || "", way: rs[0].way || "", play: rs[0].play || [], scenario: rs[0].scenario, runs: rs.length, more: (rs.length < f.total || !f.shown) && !f.failed,
           replay: f.replay,
           killRate: mean(rs.map((r) => r.killRate)),
           clear: clears.length === rs.length ? stats(clears) : null,
@@ -161,13 +161,13 @@
       const bases = new Map();
       // (depth 0: at once and rough; depth 1: asked after it, more and longer fights)
       const scenes = (depth) => depth
-        ? [["pack", 8, 0, 32, 0], ["burst", 30, 0, 32, 5], ["endless", 60, 0, 16, 30]]
-        : [["pack", 6, 0, 8, 0], ["burst", 30, 0, 8, 5], ["endless", 60, 0, 6, 30]];
+        ? [["map", 300, 0, 4, 0], ["burst", 30, 0, 32, 5], ["endless", 60, 0, 16, 30]]
+        : [["map", 300, 0, 2, 0], ["burst", 30, 0, 8, 5], ["endless", 60, 0, 6, 30]];
       // (a scene: its name, how long at most, the enemies' life if it is given, how many
       // fights, and how long a fight lasts at least.) A boss dies for real, with so much life
       // that a fight lasts at least so many seconds (the simulator finds how much, "scale" in
       // its answer); the fights that are compared have the same boss: that of the fight as it
-      // is. A pack has the life the game gives it, and who dies is replaced. "burst" and
+      // is. "map" is the map of ten rooms (`Report.prepare`), measured by how soon it is cleared. "burst" and
       // "endless" are the pinnacle boss with the life that makes it last 5 and 30 seconds: a
       // boss with the game's own life dies to a strong character's first use whatever it wears,
       // and how soon then says nothing (a weak character's fight lasts so long as it is).
@@ -179,7 +179,8 @@
         try {
           const r = JSON.parse(text);
           if (r.error) return null;
-          if (scene[0] === "boss" || scene[0] === "pinnacle") return 1 / (r.killRate === 1 && r.clear ? r.clear.mean : scene[1]);
+          // (the map: how soon it is cleared; not cleared, or dead on the way: as if it took the whole time)
+          if (scene[0] === "map" || scene[0] === "boss" || scene[0] === "pinnacle") return 1 / (r.killRate === 1 && r.clear ? r.clear.mean : scene[1]);
           return r.dpsEvened != null && r.killRate === 0 ? r.dpsEvened : r.dps.mean;
         } catch { return null; }
       };
@@ -995,6 +996,9 @@
     }
     #app header .login { flex: 0 0 auto; background: none; border: 0; color: var(--dim); font: inherit; font-size: 13px; cursor: pointer; padding: 0; text-decoration: underline dotted; overflow: visible; }
     #app header .login:hover { color: var(--ink); }
+    #app .about-scenario { margin: 6px 0 10px; font-size: 13px; color: var(--dim); }
+    #app .about-scenario summary { cursor: pointer; }
+    #app .about-scenario .depth { margin-top: 6px; line-height: 1.35; }
     #app .shared { position: fixed; left: 0; right: 0; bottom: 0; z-index: 60; display: flex; gap: 8px; align-items: center; padding: 10px 16px; background: #14110f; border-top: 1px solid var(--edge); font-size: 14px; }
     #app .shared input { flex: 1 1 auto; min-width: 0; background: #0c0a09; color: var(--ink); border: 1px solid var(--edge); font: inherit; font-size: 16px; padding: 6px 8px; }
     #app .shared .said { flex: 1 1 auto; color: var(--dim); }
