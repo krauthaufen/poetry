@@ -143,6 +143,10 @@ type Msg =
     | Import
     | Imported of Fetched
     /// Share the build as it is set up: a short address anyone can open.
+    /// A new build: its class and ascendancy ("Class|Ascendancy"), its level, and go.
+    | NewClass of string
+    | NewLevel of string
+    | NewBuild
     | Share
     | Shared of Fetched
     | Unshare
@@ -305,6 +309,8 @@ type Model =
       ImportSaid : string
       /// The request that shares the build, its address once there, or why not.
       Sharing : string
+      NewOf : string
+      NewAt : string
       ShareLink : string
       ShareSaid : string
       /// The passive tree: its passives and connections, who neighbours whom, the ribbons of
@@ -417,7 +423,7 @@ type Model =
 let init : Model =
     { Build = ""; Scenario = "pack"; Status = "locating"; Title = ""; Class = ""; Ascendancy = ""; Tab = "character"
       Pools = []; Guards = []; Survival = []; Defences = []; Resistances = []; Minions = []
-      NotUnderstood = 0; Fighting = false; Gem = ""; Dps = []; Shares = []; Groups = []; Items = []; Bag = []; Swapped = Map.empty; Wearing = []; Equip = ""; Aim = ""; Pasting = false; Draft = ""; Dropped = Set.empty; GemEdits = []; Picker = ""; States = []; Standing = []; Editing = ""; Offers = []; Wanted = ""; Offered = []; Probe = ""; ProbeRound = 0; Probing = false; Tuning = ""; TuneSaid = ""; Probed = ""; Worth = []; Play = []; Rotation = []; Pressable = []; EnemyLevel = ""; EnemyEle = ""; EnemyChaos = ""; CustomDraft = ""; Custom = ""; Calcs = []; CanLogin = false; Asked = false; Player = ""; Characters = []; Running = []; Lasting = []; Going = ""; Kept = ""; Restored = false; Notes = ""; NotesWere = ""; NodeWorth = Map.empty; Among = ""; CalcShown = []; Pinned = ""; Deltas = []; DeltaOf = ""; Ask = ""; AskMore = ""; Anointed = Set.empty; Types = []; Counts = []; Start = Map.empty; Switches = Set.empty; Link = ""; Importing = ""; ImportSaid = ""; Sharing = ""; ShareLink = ""; ShareSaid = ""
+      NotUnderstood = 0; Fighting = false; Gem = ""; Dps = []; Shares = []; Groups = []; Items = []; Bag = []; Swapped = Map.empty; Wearing = []; Equip = ""; Aim = ""; Pasting = false; Draft = ""; Dropped = Set.empty; GemEdits = []; Picker = ""; States = []; Standing = []; Editing = ""; Offers = []; Wanted = ""; Offered = []; Probe = ""; ProbeRound = 0; Probing = false; Tuning = ""; TuneSaid = ""; Probed = ""; Worth = []; Play = []; Rotation = []; Pressable = []; EnemyLevel = ""; EnemyEle = ""; EnemyChaos = ""; CustomDraft = ""; Custom = ""; Calcs = []; CanLogin = false; Asked = false; Player = ""; Characters = []; Running = []; Lasting = []; Going = ""; Kept = ""; Restored = false; Notes = ""; NotesWere = ""; NodeWorth = Map.empty; Among = ""; CalcShown = []; Pinned = ""; Deltas = []; DeltaOf = ""; Ask = ""; AskMore = ""; Anointed = Set.empty; Types = []; Counts = []; Start = Map.empty; Switches = Set.empty; Link = ""; Importing = ""; ImportSaid = ""; Sharing = ""; NewOf = "Warrior|Titan"; NewAt = "90"; ShareLink = ""; ShareSaid = ""
       Passives = [||]; Ascendancies = []; Shown = []; AscendancyWeb = Data.pack (Data.ofList ([] : V3f list)); Path = Data.pack (Data.ofList ([] : V3f list))
       Loaded = false; Capacity = 0
       WebUv = Data.pack (Data.ofList ([] : V2f list)); AscendancyWebUv = Data.pack (Data.ofList ([] : V2f list)); PathUv = Data.pack (Data.ofList ([] : V2f list)); Art = ""; Links = [||]; Neighbours = Map.empty; Web = Data.pack (Data.ofList ([] : V3f list)); Allocated = Set.empty; Edited = false
@@ -1427,6 +1433,17 @@ let private kept (m : Model) : string =
               "\"choices\":" + (if m.Edited then list (m.Choices |> Map.toList |> List.map (fun (i, c) -> list [ string i; quote c ])) else "[]")
               "\"notes\":" + quote m.Notes ] + "}"
 
+/// The classes and their ascendancies (the tree's "classes"), for a new build.
+let private classes =
+    [ "Warrior", [ "Titan"; "Warbringer"; "Smith of Kitava" ]
+      "Mercenary", [ "Tactician"; "Witchhunter"; "Gemling Legionnaire" ]
+      "Ranger", [ "Deadeye"; "Pathfinder" ]
+      "Huntress", [ "Amazon"; "Spirit Walker"; "Ritualist" ]
+      "Monk", [ "Martial Artist"; "Invoker"; "Acolyte of Chayula" ]
+      "Sorceress", [ "Stormweaver"; "Chronomancer"; "Disciple of Varashta" ]
+      "Witch", [ "Infernalist"; "Blood Mage"; "Lich"; "Abyssal Lich" ]
+      "Druid", [ "Oracle"; "Shaman" ] ]
+
 let private storeKey (m : Model) : string = m.Build.Replace("%", "%25").Replace("&", "%26").Replace("#", "%23").Replace("+", "%2B")
 let private saveUrl (m : Model) : string = "__store?op=put&key=" + storeKey m + "&value=" + esc m.Kept
 let private restoreUrl (m : Model) : string = "__store?op=get&key=" + storeKey m
@@ -1550,6 +1567,9 @@ let rec private step (msg : Msg) (m : Model) : Model =
          | Ok j when Json.string (Json.field "error" j) <> "" -> { m with Importing = ""; ImportSaid = Json.string (Json.field "error" j) }
          | Ok _ -> m
          | _ -> { m with Importing = ""; ImportSaid = "that did not work" })
+    | NewClass c -> { m with NewOf = c }
+    | NewLevel l -> { m with NewAt = l }
+    | NewBuild -> if m.Importing <> "" then m else { m with Importing = "__poe?op=new&of=" + esc m.NewOf + "&level=" + esc m.NewAt; ImportSaid = "" }
     | Share -> if m.Build = "" || m.Sharing <> "" then m else { m with Sharing = "__poe?op=share&name=" + storeKey m; ShareLink = ""; ShareSaid = "sharing ..." }
     | Shared r ->
         (match Native.parseJson r.Text with
@@ -1809,7 +1829,7 @@ let update (msg : Msg) (m : Model) : Model =
     // (what is kept between visits: after anything but the pointer, a frame, an answer)
     let n =
         match msg with
-        | PointerDown _ | PointerMove _ | PointerUp _ | Zoom _ | Sized _ | Tick _ | Fought _ | Warmed _ | Compared _ | Analysed _ | Tuned _ | Sources _ | Saved _ | Link _ | Import | Imported _ | Share | Shared _ | Unshare | TreeData _ | Sheet _ | Picked _ -> n
+        | PointerDown _ | PointerMove _ | PointerUp _ | Zoom _ | Sized _ | Tick _ | Fought _ | Warmed _ | Compared _ | Analysed _ | Tuned _ | Sources _ | Saved _ | Link _ | Import | Imported _ | Share | Shared _ | Unshare | NewClass _ | NewLevel _ | NewBuild | TreeData _ | Sheet _ | Picked _ -> n
         | _ when not n.Restored -> n
         | _ -> (let k = kept n in if k = n.Kept then n else { n with Kept = k })
     // (what the passive looked at would take or give back, drawn on the tree)
@@ -2451,7 +2471,15 @@ let private points (m : Model) : string =
     let zones = areas m m.Allocated
     let leapt = m.Passives |> Array.filter (fun p -> m.Allocated.Contains p.Id && not (spent.Contains p.Id) && free zones p) |> Array.length
     let granted = m.Allocated.Count - spent.Count - leapt
-    sprintf "%d of %d points, %d ascendancy%s" (spent.Count - asc - starts + leapt) (m.Level - 1 + 24) asc (if granted > 0 then sprintf ", %d granted" granted else "")
+    // (the class's start on the tree, which a build file lists, is no point)
+    let origin = m.Passives |> Array.filter (fun p -> p.Kind = "start" && spent.Contains p.Id) |> Array.length
+    let used = spent.Count - asc - starts - origin + leapt
+    let has = m.Level - 1 + 24
+    // the level that has so many: one point a level after the first, with all 24 of the quests
+    let needs = max 1 (used - 24 + 1)
+    let left = if used < has then sprintf " (%d free)" (has - used) elif used > has then sprintf " (%d too many)" (used - has) else ""
+    let level = if used = 0 then "" elif needs > 100 then ", more than level 100 has" else sprintf ", needs level %d" needs
+    sprintf "%d of %d points%s%s, %d ascendancy%s" used has left level asc (if granted > 0 then sprintf ", %d granted" granted else "")
 
 /// The tooltip of the pinned passive (with what can be done to it) or the one under the mouse.
 let private tooltip (m : Model) : Node<Msg> =
@@ -2744,6 +2772,22 @@ let view (m : Model) : Node<Msg> =
                         if m.ImportSaid <> "" then span { Dom.Class "said"; m.ImportSaid }
                     }
                     if m.Importing <> "" then span { Dom.Fetch (m.Importing, Imported) }
+                }
+                div {
+                    Dom.Class "import fresh"
+                    div {
+                        Dom.Class "actions"
+                        span { "or start a new build:" }
+                        select {
+                            Dom.Class "pick"
+                            Dom.OnChange NewClass
+                            for (value, shown) in classes |> List.collect (fun (klass, ascendancies) -> ascendancies |> List.map (fun a -> klass + "|" + a, a + " (" + klass + ")")) do
+                                option { Dom.Attr ("value", value); shown }
+                        }
+                        span { "level" }
+                        input { Dom.Class "level"; Dom.Attr ("type", "number"); Dom.Attr ("min", "1"); Dom.Attr ("max", "100"); Dom.Attr ("value", "90"); Dom.OnInput NewLevel }
+                        button { Dom.Class "act"; Dom.OnClick (fun _ -> NewBuild); "Start" }
+                    }
                 }
                 for (league, count, heroes) in m.Running do
                     details {
