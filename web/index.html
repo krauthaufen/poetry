@@ -24,6 +24,18 @@
       const count = Math.max(1, Math.min(small ? 2 : 4, (navigator.hardwareConcurrency || 2) - 1));
       const workers = [];
       const jobs = [];          // { request, done, fight } waiting for a worker
+      // Leaving for another page of this site (another character, a login): what this one holds
+      // is given up before the next is loaded. A phone's browser keeps the old page alive while
+      // the new one loads (and after, to come back to at once): with the workers' game data and
+      // the pictures of both, it closed the new one. A page brought back so is loaded anew.
+      const depart = () => {
+        for (const w of workers) { try { w.worker.terminate(); } catch {} }
+        workers.length = 0; jobs.length = 0;
+        const app = document.getElementById("app");
+        if (app) { for (const c of app.querySelectorAll("canvas")) { c.width = 0; c.height = 0; } app.replaceChildren(); }
+      };
+      window.addEventListener("pagehide", depart);
+      window.addEventListener("pageshow", (e) => { if (e.persisted) location.reload(); });
       const feed = (w) => {
         if (w.busy) return;
         // a question about the character goes to the first worker only (it keeps the sheet)
@@ -395,7 +407,7 @@
               .map((c) => ({ ...c, league: c.league || "No league", lasting: lasting(c.league) }));
           };
           if (op === "paste") {
-            try { location.search = "?build=" + (await outside.pasted(q.get("text"))); return { ok: true }; }
+            try { const to = await outside.pasted(q.get("text")); depart(); location.search = "?build=" + to; return { ok: true }; }
             catch (err) { return { error: String(err && err.message || err) }; }
           }
           if (op === "new") {
@@ -407,20 +419,20 @@
               if (!start || !/^[A-Za-z ]+$/.test(ascendancy || "")) throw new Error("choose a class");
               const level = Math.max(1, Math.min(100, Math.round(Number(q.get("level")) || 90)));
               const xml = '<PathOfBuilding2><Build level="' + level + '" className="' + klass + '" ascendClassName="' + ascendancy + '" mainSocketGroup="1" poetry="new" made="' + Date.now().toString(36) + '"/><Items activeItemSet="1"><ItemSet id="1"/></Items><Tree activeSpec="1"><Spec nodes="' + start + '"/></Tree><Skills activeSkillSet="1"><SkillSet id="1"/></Skills><Config/></PathOfBuilding2>';
-              location.search = "?build=" + (await outside.pasted(xml)); return { ok: true };
+              const to = await outside.pasted(xml); depart(); location.search = "?build=" + to; return { ok: true };
             } catch (err) { return { error: String(err && err.message || err) }; }
           }
           if (op === "share") {
             try { return { url: await outside.share(q.get("name") || "") }; }
             catch (err) { return { error: String(err && err.message || err) }; }
           }
-          if (op === "home") { location.href = location.pathname; return { ok: true }; }
-          if (op === "open" && outside.mine(q.get("name") || "")) { location.search = "?build=" + q.get("name"); return { ok: true }; }
+          if (op === "home") { depart(), location.href = location.pathname; return { ok: true }; }
+          if (op === "open" && outside.mine(q.get("name") || "")) { depart(), location.search = "?build=" + q.get("name"); return { ok: true }; }
           if (!hosted) return { can: false, name: "", characters: ordered(saved([])) };
           if (op === "login") { await login(); return { ok: true }; }
-          if (op === "logout") { put("token", null); sessionStorage.clear(); location.href = location.pathname; return { ok: true }; }
-          if (op === "home") { location.href = location.pathname; return { ok: true }; }
-          if (op === "open") { location.search = "?build=" + encodeURIComponent("poe-api/character/poe2/" + q.get("name")).replace(/%2F/g, "/"); return { ok: true }; }
+          if (op === "logout") { put("token", null); sessionStorage.clear(); depart(), location.href = location.pathname; return { ok: true }; }
+          if (op === "home") { depart(), location.href = location.pathname; return { ok: true }; }
+          if (op === "open") { depart(), location.search = "?build=" + encodeURIComponent("poe-api/character/poe2/" + q.get("name")).replace(/%2F/g, "/"); return { ok: true }; }
           const failed = get("failed"); put("failed", null);
           const t = await token();
           if (!t) return { can: true, name: "", characters: ordered(saved([])), error: failed || "" };
