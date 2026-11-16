@@ -309,6 +309,9 @@ type Model =
       ImportSaid : string
       /// The request that shares the build, its address once there, or why not.
       Sharing : string
+      /// The line of the tree's bar: the points spent of those there are. Said anew by `update`
+      /// when what it reads has changed (the view does not see the tree's passives arrive).
+      PointsSaid : string
       /// What a rotation's conditions can count besides what the fight begins with: the infusions the skills consume.
       Countable : (string * int) list
       /// When the fight's picture was last drawn anew (the frame's time; it is drawn 15 times a second).
@@ -433,7 +436,7 @@ type Model =
 let init : Model =
     { Build = ""; Scenario = "pack"; Status = "locating"; Title = ""; Class = ""; Ascendancy = ""; Tab = "character"
       Pools = []; Guards = []; Survival = []; Defences = []; Resistances = []; Minions = []
-      NotUnderstood = 0; Fighting = false; Gem = ""; Dps = []; Shares = []; Groups = []; Items = []; Bag = []; Swapped = Map.empty; Wearing = []; Equip = ""; Aim = ""; Pasting = false; Draft = ""; Dropped = Set.empty; GemEdits = []; Picker = ""; States = []; Standing = []; Editing = ""; Offers = []; Wanted = ""; Offered = []; Probe = ""; ProbeRound = 0; Probing = false; Tuning = ""; TuneSaid = ""; Probed = ""; Worth = []; Play = []; Rotation = []; Pressable = []; EnemyLevel = ""; EnemyEle = ""; EnemyChaos = ""; CustomDraft = ""; Custom = ""; Calcs = []; CanLogin = false; Asked = false; Player = ""; Characters = []; Running = []; Lasting = []; Going = ""; Kept = ""; Restored = false; Notes = ""; NotesWere = ""; NodeWorth = Map.empty; Among = ""; CalcShown = []; Pinned = ""; Deltas = []; DeltaOf = ""; Ask = ""; AskMore = ""; Anointed = Set.empty; Types = []; Counts = []; Start = Map.empty; Switches = Set.empty; Link = ""; Importing = ""; ImportSaid = ""; Sharing = ""; Countable = []; Moves = Map.empty; Kills = Map.empty; Drawn = -1.0; NewOf = "Warrior|Titan"; SetPoints = 0; NewAt = "90"; ShareLink = ""; ShareSaid = ""
+      NotUnderstood = 0; Fighting = false; Gem = ""; Dps = []; Shares = []; Groups = []; Items = []; Bag = []; Swapped = Map.empty; Wearing = []; Equip = ""; Aim = ""; Pasting = false; Draft = ""; Dropped = Set.empty; GemEdits = []; Picker = ""; States = []; Standing = []; Editing = ""; Offers = []; Wanted = ""; Offered = []; Probe = ""; ProbeRound = 0; Probing = false; Tuning = ""; TuneSaid = ""; Probed = ""; Worth = []; Play = []; Rotation = []; Pressable = []; EnemyLevel = ""; EnemyEle = ""; EnemyChaos = ""; CustomDraft = ""; Custom = ""; Calcs = []; CanLogin = false; Asked = false; Player = ""; Characters = []; Running = []; Lasting = []; Going = ""; Kept = ""; Restored = false; Notes = ""; NotesWere = ""; NodeWorth = Map.empty; Among = ""; CalcShown = []; Pinned = ""; Deltas = []; DeltaOf = ""; Ask = ""; AskMore = ""; Anointed = Set.empty; Types = []; Counts = []; Start = Map.empty; Switches = Set.empty; Link = ""; Importing = ""; ImportSaid = ""; Sharing = ""; PointsSaid = ""; Countable = []; Moves = Map.empty; Kills = Map.empty; Drawn = -1.0; NewOf = "Warrior|Titan"; SetPoints = 0; NewAt = "90"; ShareLink = ""; ShareSaid = ""
       Passives = [||]; Ascendancies = []; Shown = []; AscendancyWeb = Data.pack (Data.ofList ([] : V3f list)); Path = Data.pack (Data.ofList ([] : V3f list))
       Loaded = false; Capacity = 0
       WebUv = Data.pack (Data.ofList ([] : V2f list)); AscendancyWebUv = Data.pack (Data.ofList ([] : V2f list)); PathUv = Data.pack (Data.ofList ([] : V2f list)); Art = ""; Links = [||]; Neighbours = Map.empty; Web = Data.pack (Data.ofList ([] : V3f list)); Allocated = Set.empty; Edited = false
@@ -692,6 +695,9 @@ let private tracks (happened : Happening list) (foes : Foe list) : Map<string, (
     // (the first time it dies)
     let kills = happened |> List.filter (fun h -> h.Kind = "k") |> List.rev |> List.map (fun h -> h.Who, h.T) |> Map.ofList
     moves, kills
+
+/// (a map made where no model is in scope: see `standing`)
+let private jewelled (xs : (int * Jewel) list) : Map<int, Jewel> = Map.ofList xs
 
 /// Where the minions stand, by name. Built here and not in `stage`: a map keeps its comparer,
 /// a closure, and a closure keeps the scope it was made in. Made in `stage` that scope holds
@@ -1686,7 +1692,15 @@ let rec private step (msg : Msg) (m : Model) : Model =
     | Tab t -> { m with Tab = t }
     | TreeData r ->
         match r.Status, Native.parseJson r.Text with
-        | 200, Ok j -> settle (readTree j m)
+        | 200, Ok j ->
+            // (the character may be there before the tree is: its jewels get their pictures now)
+            let m = readTree j m
+            let pictured =
+                m.Jewels |> Map.toList |> List.map (fun (node, x) ->
+                    match Map.tryFind x.Called m.JewelSprites |> Option.orElse (Map.tryFind x.Base m.JewelSprites) with
+                    | Some (sheet, rect) when x.Sprite = "" -> node, { x with Sprite = sheet; SpriteRect = rect }
+                    | _ -> node, x)
+            settle { m with Jewels = jewelled pictured }
         | s, _ -> { m with Status = "the passive tree could not be read (status " + string s + ")" }
     // the passive under the click: the nearest one whose frame covers the place (the
     // character's own ascendancy is drawn in the middle, over the tree's passives there)
@@ -1864,6 +1878,41 @@ let rec private step (msg : Msg) (m : Model) : Model =
 
 /// One message: the model after it, and with it the question about the pinned passive when
 /// something it depends on is another now.
+/// Passive points spent of those a character of this level has (one a level after the
+/// first, 25 from quests), the ascendancy's apart; what a jewel or an item allocates
+/// without a way to it costs none.
+let private points (m : Model) : string =
+    let spent = hanging m m.Allocated
+    let asc = m.Passives |> Array.filter (fun p -> p.Ascendancy <> "" && p.Kind <> "ascstart" && spent.Contains p.Id) |> Array.length
+    let starts = m.Passives |> Array.filter (fun p -> p.Kind = "ascstart" && spent.Contains p.Id) |> Array.length
+    // (a passive allocated without a way to it in a jewel's radius costs its point all the same)
+    let zones = areas m m.Allocated
+    let leapt = m.Passives |> Array.filter (fun p -> m.Allocated.Contains p.Id && not (spent.Contains p.Id) && free zones p) |> Array.length
+    let granted = m.Allocated.Count - spent.Count - leapt
+    // (the class's start on the tree, which a build file lists, is no point)
+    let origin = m.Passives |> Array.filter (fun p -> p.Kind = "start" && spent.Contains p.Id) |> Array.length
+    // (a passive of a weapon set costs a point as any other does: the larger set counts, PoB Build.lua)
+    // (a notable an item allocates is free also where it touches the tree)
+    let gifted = m.Anointed |> Set.filter (fun i -> spent.Contains i) |> Set.count
+    let used = spent.Count - asc - starts - origin - gifted + leapt + m.SetPoints
+    // "Grants 4 Passive Skill Point" on an ascendancy's passives (Pathfinder six in all, Oracle two)
+    let more =
+        m.Passives |> Array.sumBy (fun p ->
+            if not (spent.Contains p.Id) then 0
+            else
+                p.Stats |> List.sumBy (fun (l : string) ->
+                    if l.StartsWith "Grants " && l.Contains "Passive Skill Point" then (match System.Int32.TryParse (l.Split(' ').[1]) with | true, n -> n | _ -> 0) else 0))
+    // one a level after the first, 24 from the quests and one from the Martyr (the user, 2026-11-16)
+    let quests = 25 + more
+    let has = m.Level - 1 + quests
+    // the level that has so many, with all of the quests done
+    let needs = max 1 (used - quests + 1)
+    // (of the level 100 characters on poe.ninja two in three have exactly these and one in three
+    // one more, none two: one point more is from somewhere not known here, and not called too many)
+    let left = if used < has then sprintf " (%d free)" (has - used) elif used > has + 1 then sprintf " (%d too many)" (used - has) else ""
+    let level = if used = 0 then "" elif needs > 101 then ", more than level 100 has" else sprintf ", needs level %d" (min 100 needs)
+    sprintf "%d of %d points%s%s, %d ascendancy%s%s" used has left level asc (if m.SetPoints > 0 then sprintf ", %d of them by weapon set" m.SetPoints else "") (if granted + gifted > 0 then sprintf ", %d granted" (granted + gifted) else "")
+
 let update (msg : Msg) (m : Model) : Model =
     let n = step msg m
     let n = if n.Swapped = m.Swapped && n.Items.Length = m.Items.Length then n else { n with Wearing = Map.toList n.Swapped; Equip = esc (equipText n.Items n.Swapped) }
@@ -1882,6 +1931,11 @@ let update (msg : Msg) (m : Model) : Model =
         | PointerDown _ | PointerMove _ | PointerUp _ | Zoom _ | Sized _ | Tick _ | Fought _ | Warmed _ | Compared _ | Analysed _ | Tuned _ | Sources _ | Saved _ | Link _ | Import | Imported _ | Share | Shared _ | Unshare | NewClass _ | NewLevel _ | NewBuild | TreeData _ | Sheet _ | Picked _ -> n
         | _ when not n.Restored -> n
         | _ -> (let k = kept n in if k = n.Kept then n else { n with Kept = k })
+    let n =
+        if n.Passives.Length = 0 then n
+        elif n.PointsSaid <> "" && n.Allocated = m.Allocated && n.Passives.Length = m.Passives.Length && n.Level = m.Level && n.SetPoints = m.SetPoints
+             && n.Anointed = m.Anointed && n.Ascendancy = m.Ascendancy && n.Jewels.Count = m.Jewels.Count then n
+        else { n with PointsSaid = points n }
     // (what the passive looked at would take or give back, drawn on the tree)
     if n.Selected = m.Selected && n.Hovered = m.Hovered && n.Allocated = m.Allocated && n.Passives.Length = m.Passives.Length && n.Ascendancy = m.Ascendancy then n
     else plan n
@@ -2510,41 +2564,6 @@ let private tab (m : Model) (key : string) (name : string) : Node<Msg> =
         name
     }
 
-/// Passive points spent of those a character of this level has (one a level after the
-/// first, 25 from quests), the ascendancy's apart; what a jewel or an item allocates
-/// without a way to it costs none.
-let private points (m : Model) : string =
-    let spent = hanging m m.Allocated
-    let asc = m.Passives |> Array.filter (fun p -> p.Ascendancy <> "" && p.Kind <> "ascstart" && spent.Contains p.Id) |> Array.length
-    let starts = m.Passives |> Array.filter (fun p -> p.Kind = "ascstart" && spent.Contains p.Id) |> Array.length
-    // (a passive allocated without a way to it in a jewel's radius costs its point all the same)
-    let zones = areas m m.Allocated
-    let leapt = m.Passives |> Array.filter (fun p -> m.Allocated.Contains p.Id && not (spent.Contains p.Id) && free zones p) |> Array.length
-    let granted = m.Allocated.Count - spent.Count - leapt
-    // (the class's start on the tree, which a build file lists, is no point)
-    let origin = m.Passives |> Array.filter (fun p -> p.Kind = "start" && spent.Contains p.Id) |> Array.length
-    // (a passive of a weapon set costs a point as any other does: the larger set counts, PoB Build.lua)
-    // (a notable an item allocates is free also where it touches the tree)
-    let gifted = m.Anointed |> Set.filter (fun i -> spent.Contains i) |> Set.count
-    let used = spent.Count - asc - starts - origin - gifted + leapt + m.SetPoints
-    // "Grants 4 Passive Skill Point" on an ascendancy's passives (Pathfinder six in all, Oracle two)
-    let more =
-        m.Passives |> Array.sumBy (fun p ->
-            if not (spent.Contains p.Id) then 0
-            else
-                p.Stats |> List.sumBy (fun (l : string) ->
-                    if l.StartsWith "Grants " && l.Contains "Passive Skill Point" then (match System.Int32.TryParse (l.Split(' ').[1]) with | true, n -> n | _ -> 0) else 0))
-    // one a level after the first, 24 from the quests and one from the Martyr (the user, 2026-11-16)
-    let quests = 25 + more
-    let has = m.Level - 1 + quests
-    // the level that has so many, with all of the quests done
-    let needs = max 1 (used - quests + 1)
-    // (of the level 100 characters on poe.ninja two in three have exactly these and one in three
-    // one more, none two: one point more is from somewhere not known here, and not called too many)
-    let left = if used < has then sprintf " (%d free)" (has - used) elif used > has + 1 then sprintf " (%d too many)" (used - has) else ""
-    let level = if used = 0 then "" elif needs > 101 then ", more than level 100 has" else sprintf ", needs level %d" (min 100 needs)
-    sprintf "%d of %d points%s%s, %d ascendancy%s%s" used has left level asc (if m.SetPoints > 0 then sprintf ", %d of them by weapon set" m.SetPoints else "") (if granted + gifted > 0 then sprintf ", %d granted" (granted + gifted) else "")
-
 /// The tooltip of the pinned passive (with what can be done to it) or the one under the mouse.
 let private tooltip (m : Model) : Node<Msg> =
     let pinned = m.Selected.IsSome
@@ -2694,7 +2713,7 @@ let view (m : Model) : Node<Msg> =
             if m.Tab = "tree" then
                 div {
                     Dom.Class "treebar"
-                    div { Dom.Class "points"; Dom.Attr ("data-check", "points"); points m }
+                    div { Dom.Class "points"; Dom.Attr ("data-check", "points"); m.PointsSaid }
                     input { Dom.Class "seek"; Dom.Attr ("type", "search"); Dom.Attr ("placeholder", "search the tree"); Dom.OnInput Seek }
                     div { Dom.Class "found"; Dom.Attr ("data-check", "found"); found }
                     button { Dom.Class "act"; Dom.Attr ("title", "what every notable and keystone allocated is worth: each is given back alone and the fight fought without it"); Dom.OnClick (fun _ -> Analyse); analysing }
