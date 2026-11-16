@@ -2653,6 +2653,8 @@ module Flat =
           mutable AttackN: int
           /// On a march: it has woken (the player came near enough).
           mutable Woken: bool
+          /// On a march: the number of the pack it came with.
+          mutable Pack: int
           /// The enemy as it is now (it walks).
           mutable Def: EnemyDef
           mutable Life: float
@@ -3702,11 +3704,14 @@ module Flat =
                             match s.Main.Fight.March with
                             | Some m when not e.Woken ->
                                 let mutable ahead = false
-                                if not (d - e.Def.Size <= m.Aggro) && s.Packs > m.Packs then
+                                if s.Packs > m.Packs then
                                     for k in 0 .. s.Live.Length - 1 do
                                         let x = at s.Foes (at s.Live k)
                                         if x.Life > 0.0 && x.Def.Position.X > 0.0 then ahead <- true
-                                if d - e.Def.Size <= m.Aggro || (s.Packs > m.Packs && not ahead) then
+                                let near =
+                                    if not m.Rooms then d - e.Def.Size <= m.Aggro
+                                    else s.Front - float (s.Packs - 1 - e.Pack) * m.Spacing <= m.Spacing / 2.0
+                                if near || (s.Packs > m.Packs && not ahead) then
                                     e.Woken <- true
                                     false
                                 else true
@@ -3737,14 +3742,37 @@ module Flat =
                     if e.Life > 0.0 then
                         if m.Hold && Vec.length e.Def.Position - e.Def.Size <= m.Engage then met <- true
                         if e.Def.Position.X > 0.0 then ahead <- true
-                let way = if met || not ahead then 0.0 else m.Speed * (held * s.WalkKept + (dt - held))
+                let way = if met then 0.0 else m.Speed * (held * s.WalkKept + (dt - held))
                 if not (way <= 0.0) then
-                    s.Walked <- s.Walked + way
-                    s.Front <- s.Front - way
-                    for k in 0 .. s.Live.Length - 1 do
-                        let e = at s.Foes (at s.Live k)
-                        if e.Life > 0.0 then e.Def <- { e.Def with Position = { e.Def.Position with X = e.Def.Position.X - way } }
-                    s.AliveStale <- true
+                    if ahead then
+                        s.Walked <- s.Walked + way
+                        s.Front <- s.Front - way
+                        for k in 0 .. s.Live.Length - 1 do
+                            let e = at s.Foes (at s.Live k)
+                            if e.Life > 0.0 then e.Def <- { e.Def with Position = { e.Def.Position with X = e.Def.Position.X - way } }
+                        s.AliveStale <- true
+                    else
+                        // nothing ahead any more: to the nearest of what is left (`Sim.advance`)
+                        let mutable near = -1
+                        let mutable least = infinity
+                        for k in 0 .. s.Live.Length - 1 do
+                            let e = at s.Foes (at s.Live k)
+                            if e.Life > 0.0 then
+                                let gap = Vec.length e.Def.Position - e.Def.Size
+                                if near < 0 || gap < least then
+                                    near <- e.Index
+                                    least <- gap
+                        if near >= 0 then
+                            let target = at s.Foes near
+                            let d = Vec.length target.Def.Position
+                            let step = min way (d - target.Def.Size - m.Engage)
+                            if not (step <= 0.0 || d <= 1e-9) then
+                                let by = Vec.scale (step / d) target.Def.Position
+                                s.Walked <- s.Walked + step
+                                for k in 0 .. s.Live.Length - 1 do
+                                    let e = at s.Foes (at s.Live k)
+                                    if e.Life > 0.0 then e.Def <- { e.Def with Position = Vec.sub e.Def.Position by }
+                                s.AliveStale <- true
             | _ -> ()
             s.Time <- t
 
@@ -7802,6 +7830,7 @@ module Flat =
               AttackKey = Sim.streamHash ("E|" + def.Name)
               AttackN = 0
               Woken = false
+              Pack = 0
               Def = def
               Life = def.Life
               Has = Array.create ns false
@@ -8165,7 +8194,9 @@ module Flat =
                     let index = s.FoeIds.[name]
                     let old = at s.Foes index
                     let def = { d with Name = name; Position = Vec.add (Vec.make middle 0.0) d.Position }
-                    put s.Foes index (makeFoe s.Entropies ns p.Roots.[name] index old.Root def)
+                    let fresh = makeFoe s.Entropies ns p.Roots.[name] index old.Root def
+                    fresh.Pack <- s.Packs
+                    put s.Foes index fresh
                     s.AliveCount <- s.AliveCount + 1
                     s.RoomAt <- -2
                     if p.Attacked then

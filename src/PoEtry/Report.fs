@@ -463,13 +463,17 @@ module Report =
         let size = max 1 (int (n "pack" 20.0))
         // (ten packs, 3.75 m from one to the next: a quarter of a map of 150 m and 40 packs, which
         // takes a quarter of the time to play and tells the same of a character)
+        // ("rooms": each pack in a room of its own, 6 m long, and awake when the player comes in;
+        // 0: packs 3.75 m apart that wake by how near the player is)
+        let rooms = n "rooms" 1.0 > 0.0
         let packs = max 1 (int (n "packs" 10.0))
-        let spacing = max 5.0 (n "spacing" 37.5)
+        let spacing = max 5.0 (n "spacing" (if rooms then 60.0 else 37.5))
         // (a map of so many packs, played so: `engage`, `hold` of `Sim.March`)
         let marchOf (count: int) (engage: float) (hold: bool) : March =
             { Speed = fst (Defence.movement c.Sheet)
               Spacing = spacing
               Packs = count
+              Rooms = rooms
               Aggro = 60.0
               Engage = engage
               Hold = hold

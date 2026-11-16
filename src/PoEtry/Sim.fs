@@ -546,6 +546,9 @@ type March =
       /// The player stands while an enemy is that near (it finishes what it meets); else it
       /// walks on also then, as far as the skill it uses lets it, and may leave enemies behind.
       Hold: bool
+      /// The map is rooms, a spacing long each with its pack in the middle: a pack wakes as a
+      /// whole when the player comes into its room (and not by how near the player is).
+      Rooms: bool
       /// How many packs the map has; after the last comes what `Pack` gives for this number
       /// (the map's boss), and the map is cleared when all of them are dead.
       Packs: int
@@ -1335,7 +1338,13 @@ module Sim =
                     let asleep, w =
                         match env.Fight.March with
                         | Some m when not (w.Woken.Contains e.Def.Name) ->
-                            if d - e.Def.Size <= m.Aggro || w.Packs > m.Packs && not (w.Enemies |> Map.exists (fun _ x -> x.Life > 0.0 && x.Def.Position.X > 0.0))
+                            // (the room of the pack it came with: the player is in it once the pack's middle is half a spacing ahead or less)
+                            let near =
+                                if not m.Rooms then d - e.Def.Size <= m.Aggro
+                                else
+                                    let pack = int (e.Def.Name.Substring(e.Def.Name.LastIndexOf '#' + 1).TrimEnd('+'))
+                                    w.Front - float (w.Packs - 1 - pack) * m.Spacing <= m.Spacing / 2.0
+                            if near || w.Packs > m.Packs && not (w.Enemies |> Map.exists (fun _ x -> x.Life > 0.0 && x.Def.Position.X > 0.0))
                             then false, { w with Woken = w.Woken.Add e.Def.Name }
                             else true, w
                         | _ -> false, w
@@ -1353,15 +1362,29 @@ module Sim =
                 | Some m when w.Player |> Option.forall (fun p -> p.Died.IsNone) ->
                     let held = max 0.0 (min t w.WalkHeldUntil - w.Time)
                     let met = m.Hold && (alive w |> List.exists (fun e -> Vec.length e.Def.Position - e.Def.Size <= m.Engage))
-                    // (with nothing ahead any more it stands: what it left behind comes to it)
                     let ahead = w.Packs <= m.Packs || (w.Enemies |> Map.exists (fun _ e -> e.Life > 0.0 && e.Def.Position.X > 0.0))
-                    let way = if met || not ahead then 0.0 else m.Speed * (held * w.WalkKept + (dt - held))
+                    let way = if met then 0.0 else m.Speed * (held * w.WalkKept + (dt - held))
                     if way <= 0.0 then w
-                    else
+                    elif ahead then
                         { w with
                             Walked = w.Walked + way
                             Front = w.Front - way
                             Enemies = w.Enemies |> Map.map (fun _ e -> if e.Life > 0.0 then { e with Def = { e.Def with Position = { e.Def.Position with X = e.Def.Position.X - way } } } else e) }
+                    else
+                        // nothing ahead any more: it walks to the nearest of what is left (one that
+                        // shoots from where it stands does not come), until that is near enough
+                        match alive w with
+                        | [] -> w
+                        | left ->
+                            let near = left |> List.minBy (fun e -> Vec.length e.Def.Position - e.Def.Size)
+                            let d = Vec.length near.Def.Position
+                            let step = min way (d - near.Def.Size - m.Engage)
+                            if step <= 0.0 || d <= 1e-9 then w
+                            else
+                                let by = Vec.scale (step / d) near.Def.Position
+                                { w with
+                                    Walked = w.Walked + step
+                                    Enemies = w.Enemies |> Map.map (fun _ e -> if e.Life > 0.0 then { e with Def = { e.Def with Position = Vec.sub e.Def.Position by } } else e) }
                 | _ -> w
             { w with Time = t }
 

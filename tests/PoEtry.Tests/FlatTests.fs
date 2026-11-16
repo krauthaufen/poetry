@@ -1402,12 +1402,17 @@ let run (test: string -> (unit -> unit) -> unit) =
         let player (mods: Mod list) =
             { Actor.make "Player" [ Mod.inc CritChance 50.0 ] [ { spell "Nova" Fire 150.0 300.0 with Delivery = AreaAroundSelf 30.0; BaseTime = 0.5; Mods = mods } ] with
                 Vitals = Some { PlayerStats.basic 9000.0 500.0 with Evasion = 900.0; LifeRegen = 200.0; ManaRegen = 60.0 } }
-        let march hold = { Speed = 40.0; Spacing = 35.0; Aggro = 60.0; Engage = 30.0; Hold = hold; Packs = 6; Pack = pack }
+        let march hold = { Speed = 40.0; Spacing = 35.0; Aggro = 60.0; Engage = 30.0; Hold = hold; Rooms = false; Packs = 6; Pack = pack }
         let fight hold mods = { Fight.single (pack 0).Head (player mods) 120.0 with Enemies = []; Targeting = Nearest; March = Some (march hold) }
         let moving = [ Mod.flag (Named "UsedWhileMoving"); Mod.base' (Named "MoveWhileUsing") -70.0; Mod.base' (Named "MoveEasing") 160.0; Mod.base' (Named "MoveHeld") 50.0 ]
         for hold in [ true; false ] do
             for mods in [ []; moving ] do
                 same (fight hold mods) [ 1u; 2u; 3u ]
+        // the same map as rooms: a pack wakes when the player comes into its room
+        let rooms hold mods = { fight hold mods with March = Some { march hold with Rooms = true; Spacing = 60.0 } }
+        for hold in [ true; false ] do
+            same (rooms hold moving) [ 1u; 2u ]
+        if (Sim.run (rooms true []) 1u).Kills.Length <> 31 then failwith "expected the rooms cleared"
         // the map is cleared: every monster of the six packs and the boss, none before it came
         let o = Sim.run (fight true []) 1u
         if o.Ttk.IsNone || o.Kills.Length <> 31 then failwithf "expected the map cleared with 31 kills: %A, %d kills" o.Ttk o.Kills.Length
