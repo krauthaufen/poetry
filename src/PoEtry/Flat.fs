@@ -653,6 +653,7 @@ module Flat =
     let private qForkAngle = site MSkill Inc (named "ForkAngle")
     let private qForkedDamage = siteMult MSkill (named "ForkedDamage")
     let private qAftershock = site MSkill Base (named "AftershockChance")
+    let private qExplodeTwice = site MSkill Base (named "ExplodeTwice")
     let private qSplashChance = site MSkill Base (named "SplashChance")
     let private qLaunchesBolt = site MSkill Flag (named "LaunchesBolt")
     let private qNovaBoltSpeed = site MSkill Base (named "NovaOnBoltSpeed")
@@ -911,6 +912,7 @@ module Flat =
           CMiss: int
           CTrigger: int
           CAftershock: int
+          CTwice: int
           /// A nova cast on a bolt in flight: where the count goes.
           COnBolt: int
           CCannotAfford: int
@@ -2014,6 +2016,7 @@ module Flat =
                       CMiss = counts.Id("miss:" + s.Name)
                       CTrigger = counts.Id("trigger:" + s.Name)
                       CAftershock = counts.Id("aftershock:" + s.Name)
+                      CTwice = counts.Id("twice:" + s.Name)
                       COnBolt = counts.Id("on bolt:" + s.Name)
                       CCannotAfford = counts.Id("cannot afford:" + s.Name)
                       CKept = (match s.Consumes with Some c -> counts.Id("kept:" + c) | None -> -1)
@@ -7006,6 +7009,15 @@ module Flat =
                                 let mutable rest = forked
                                 while not rest.IsEmpty do
                                     hitEnemy s rng impact forkMult s.FoeIds.[rest.Head]
+                                    rest <- rest.Tail
+                            // a grenade that activates a second time (Payload, `Sim`)
+                            let twice = sumQ ev qExplodeTwice
+                            if twice > 0.0 then
+                                let mutable rest = hit
+                                while not rest.IsEmpty do
+                                    if rng.Chance twice then
+                                        bump s info.CTwice
+                                        hitEnemy s rng impact mult s.FoeIds.[rest.Head]
                                     rest <- rest.Tail
                 strike ()
                 // Aftershock: a slam has a chance to hit its area once more

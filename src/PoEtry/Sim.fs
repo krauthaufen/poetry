@@ -4004,7 +4004,13 @@ module Sim =
                                 let hit, forked = Geometry.targetsParted rng env.Fight.Walls env.Fight.Reach delivery areaMult primary living
                                 hit, forked, w
                         let w = hit |> List.fold (fun w target -> hitEnemy env rng actor sk mult target w) w
-                        forked |> List.fold (fun w target -> hitEnemy env rng actor sk forkMult target w) w
+                        let w = forked |> List.fold (fun w target -> hitEnemy env rng actor sk forkMult target w) w
+                        // a grenade that activates a second time (Payload) hits once more: rolled
+                        // for each of its hits (a grenade's second blast hits all it hit together:
+                        // the same on average)
+                        let twice = Mods.sumBase ctx [ Named "ExplodeTwice" ] mods
+                        if twice <= 0.0 then w
+                        else hit |> List.fold (fun w target -> if rng.Chance twice then hitEnemy env rng actor sk mult target { w with Counts = bump ("twice:" + sk.Name) w.Counts } else w) w
                 let w = strike w
                 // Aftershock: a slam has a chance to hit its area once more
                 if sk.Tags.Contains Slam && rng.Chance(Mods.sumBase ctx [ Named "AftershockChance" ] mods) then

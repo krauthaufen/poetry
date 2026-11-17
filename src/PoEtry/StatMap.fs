@@ -1597,6 +1597,9 @@ module StatMap =
         // area lies on the enemy it is aimed at, and its Aftershock on the same enemy (RULES.md,
         // "Aftershock"): the geometry has no place for the half metre between the two.
         | "cascade_aftershock_additional_offset_distance" -> Some Structural
+        // "Grenades fired by Supported Skills have N% chance to activate a second time" (Payload;
+        // the character's own "Grenade Skills have N% chance ...")
+        | "grenade_skill_%_chance_to_explode_twice" -> one (Mod.base' (Named "ExplodeTwice") v |> Mod.whenever (SkillIs(Tag "Grenade")))
         | "your_slam_aftershock_chance_%" | "slam_aftershock_chance_%" -> one (Mod.base' (Named "AftershockChance") v |> Mod.whenever (SkillIs Slam))
         | "hit_damage_immobilisation_multiplier_+%" ->
             Some(Mods([ Freeze; HeavyStun; Electrocute; Pin ] |> List.map (fun a -> Mod.inc (Buildup a) v)))
