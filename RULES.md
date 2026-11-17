@@ -673,7 +673,7 @@ The game's standard buffs and debuffs, with the numbers of its keyword text. Sta
 | Virtuous Barrier motes (observed) | user's character: Strength 9, Dexterity 8, Intelligence 12, as the formula gives (in-game advanced info) | user | confirmed |
 | Virtuous Barrier motes | a random colour not at maximum every `base_active_skill_buff_stack_gain_frequency_ms`; maximum per colour = the description's base (`skill_specific_stat_description_mode`, 3) + active skills requiring that attribute, single-attribute skills counting twice; `gem_barrier_<colour>_grants_<stat>` is per mote | skill text and data; supports not counted as skills | data + guess |
 | Gem levels by attribute | `<attribute>_skill_gem_level_+` applies to gems with that attribute requirement | gem data | data |
-| Observed per-skill behaviour | `Behaviours.observed`: facts seen in game that the data lacks. Falling Thunder: projectiles appear ~0.5 m (5 units) out from the impact, radially | user | user |
+| Observed per-skill behaviour | `Behaviours.observed`: facts seen in game that the data lacks. Falling Thunder: projectiles appear ~0.5 m (5 units) out from the impact, radially; its slam is a cone from the player ("Cone length is 4 metres"), 45° wide in all like Charged Staff's shockwave (the data has no angle: a guess; user: the slam is tiny) | user; skill text | user; guess (angle) |
 
 ## Meta gems and triggers
 

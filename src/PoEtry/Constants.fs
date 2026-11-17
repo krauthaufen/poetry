@@ -237,6 +237,8 @@ module Constants =
     /// still finds whoever is this near to there (units; a guess at what a spell landing on the
     /// corpse would reach), and nobody otherwise.
     let triggerStray = 20.0
+    /// Falling Thunder's slam: degrees its cone is wide in all (a guess; the data has only its length).
+    let fallingThunderCone = 45.0
 
     /// How far from the player a triggered skill finds its target on a map (units; a guess:
     /// the game does not say, and what causes a trigger can be a screen away).

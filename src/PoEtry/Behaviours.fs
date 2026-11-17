@@ -9,7 +9,11 @@ module Behaviours =
         let projectiles f (s: Skill) =
             { s with Delivery = (match s.Delivery with Projectiles p -> Projectiles(f p) | d -> d) }
         [ // user: Falling Thunder's projectiles appear about half a metre out from the impact
-          "Falling Thunder", projectiles (fun p -> { p with StartOffset = 5.0 }) ]
+          // (its slam: the data has "Cone length is 4 metres" and no angle; user: the slam is
+          // tiny. As wide as its sibling's, Charged Staff's shockwave: a guess)
+          "Falling Thunder", (fun s ->
+              let s = projectiles (fun p -> { p with StartOffset = 5.0 }) s
+              { s with Delivery = (match s.Delivery with AreaAtTarget r -> Cone(r, Constants.fallingThunderCone, 0.0) | d -> d) }) ]
 
     let applyObserved (skill: Skill) =
         match observed |> List.tryFind (fun (n, _) -> n = skill.Name) with
