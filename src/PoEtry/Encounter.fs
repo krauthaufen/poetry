@@ -782,6 +782,17 @@ module Geometry =
                     last.[n] <- t
                     used.[i] <- used.[i] + 1
             List.ofSeq hits
+        | Projectiles ({ BlastOnly = true; Explosion = Some blast } as p) ->
+            // a grenade sticks to no one: it lies where it lands and bursts there. Each lands
+            // as far out as the enemy it was thrown at, in its own direction of the volley
+            let r = radius blast areaMult
+            let far = Vec.length primary.Position
+            let turn = if p.Spread >= 360.0 && p.Count > 1 then 2.0 * System.Math.PI * rng.Float() else 0.0
+            [ for a in angles p (Vec.angle primary.Position + turn) do
+                let at = Vec.scale far (Vec.ofAngle a)
+                mark (Flight [ Vec.zero; at ])
+                mark (Ring(at, r, 0.0))
+                yield! alive |> List.filter (within at r) |> List.map (fun e -> e.Name) ]
         | Projectiles p ->
             let explode (at: Vec) =
                 match p.Explosion with
@@ -855,9 +866,8 @@ module Geometry =
                     let all = struck @ chained
                     let into = if isFork then forkedNames else names
                     let from = into.Count
-                    if not p.BlastOnly then
-                        for e in all do
-                            into.Add e.Name
+                    for e in all do
+                        into.Add e.Name
                     for e in all do
                         for n in explode e.Position do
                             into.Add n

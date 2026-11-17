@@ -16,8 +16,8 @@ type ProjectileShape =
       CanShotgun: bool
       /// Radius of an explosion where a projectile hits, if any.
       Explosion: float option
-      /// What it hits is only its explosion's (a grenade: it lands and bursts, all within
-      /// the explosion are hit once; it does not hit the one it lands on besides).
+      /// What it hits is only its explosion's (a grenade: it lies where it lands and bursts
+      /// there, all within the explosion are hit once; it collides with no one).
       BlastOnly: bool
       /// Extra projectiles per stack of a charge: ("PowerCharge", 3).
       PerCharge: (string * int) option
