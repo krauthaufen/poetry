@@ -2679,8 +2679,9 @@ module Behaviours =
     /// ranged Attacks for a short duration, then vanish." The Mirage as an actor: it uses the
     /// socketed attacks with the owner's weapon and mods and the gem's supports, one after
     /// the other for as long as it stands ("Mirages deal 30% less Damage"), each with a
-    /// cooldown of the Mirage's own. It stands while the buff "<gem> buff" is on the player:
-    /// made by the roll (`Setup.pressed`, the gem pressed).
+    /// cooldown of the Mirage's own. Each roll (`Setup.pressed`, the gem pressed) makes one
+    /// that stands for its time, as a temporary minion of the gem's pool: two at most, the
+    /// one whose time is up soonest made anew when both stand.
     let mirageArcher = "Mirage Archer"
     let mirages (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) : Actor list =
         let charMods = ModDb.ofList sheet.Mods
@@ -2700,7 +2701,8 @@ module Behaviours =
                             { sk with Name = mirageArcher + ": " + sk.Name; Cost = 0.0; Mods = sk.Mods @ [ less ]; Parts = sk.Parts |> List.map asMirage }
                         Some(asMirage (applyObserved s))
                     | Error _ -> None)
-            if skills.IsEmpty then [] else [ { Actor.make (mirageArcher + " (mirage)") sheet.Mods skills with ActiveWhile = Some(mirageArcher + " buff") } ])
+            if skills.IsEmpty then []
+            else [ for i in 1 .. Constants.mirageArcherMost -> { Actor.make (sprintf "%s %d" mirageArcher i) sheet.Mods skills with Pool = Some mirageArcher } ])
 
     /// "if you've summoned a Totem Recently": placing a totem (using a totem gem) makes it so
     /// for 4 s, where something asks.

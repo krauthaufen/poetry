@@ -72,6 +72,9 @@ module Constants =
     /// support_lingering_mirage_damage_+%_final -30), and the skill that makes the Mirage.
     let mirageArcherLess = 30.0
     let mirageArcherSpawn = "MirageArcherSpawnPlayer"
+    /// How many Mirages stand at once at most (user: "i keep two mirages as long as possible";
+    /// the data names no limit, the roll's cooldown allows no third).
+    let mirageArcherMost = 2
     /// Elemental resistances are lowered by 10% per act of the campaign: -60% in the endgame
     /// (PoB CalcSetup resistancePenalty "Endgame (-60%)"; shown in game on the character sheet).
     let endgameResistPenalty = -60.0

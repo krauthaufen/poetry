@@ -446,7 +446,7 @@ module Setup =
                         Some
                             { Skill = { Skill.make gemName [ Tag "DodgeRoll" ] with BaseTime = Constants.dodgeRollSeconds; Hits = []; Cooldown = s.Cooldown; Mods = s.Mods }
                               Infused = None; GrantsVerisium = 0
-                              Rules = [ { Hook = OnUse; Filter = Called gemName; Chance = 100.0; Reaction = GrantBuff(gemName + " buff", duration, 1, []) } ]
+                              Rules = [ { Hook = OnUse; Filter = Called gemName; Chance = 100.0; Reaction = Summon(gemName, 1, duration) } ]
                               Grants = []; Curse = None; Pattern = None; Extra = []; Periodics = [] }
                     | Error _ -> None
                 | _ -> None)
@@ -616,8 +616,8 @@ module Setup =
                     if summons.IsSome && most > 0 then
                         let needsCorpses = summons.Value
                         Some(When((fun v -> count ("Out:" + x.Name) v < most && (not needsCorpses || count "Corpses" v > 0)), x.Name))
-                    // (the Mirage is made again whenever it is gone and can be)
-                    elif x.Name = Behaviours.mirageArcher then Some(KeepBuff x.Name)
+                    // (a Mirage is made whenever one can be: two stand for as long as possible)
+                    elif x.Name = Behaviours.mirageArcher then Some(OnCooldown x.Name)
                     elif warps then Some(OnCooldown x.Name)
                     elif barrage || tipped then (if mainRepeats then Some(OnCooldown x.Name) else None)
                     elif skip then None
@@ -686,7 +686,7 @@ module Setup =
         // (the roll that makes the Mirage comes before all: a main skill that is always ready
         // would leave no gap for it)
         let plain =
-            let mirage = function KeepBuff g -> g = Behaviours.mirageArcher | _ -> false
+            let mirage = function OnCooldown g -> g = Behaviours.mirageArcher | _ -> false
             (plain |> List.filter mirage) @ (plain |> List.filter (mirage >> not))
 
         // a main skill that consumes a Whirlwind (Twister): the whirlwind is built to the
