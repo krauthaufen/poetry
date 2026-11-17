@@ -233,6 +233,15 @@ module Constants =
     /// "Skills take 5% longer to perform for each time they Repeat" (keyword text, Repeating Skills).
     let longerPerRepeat = 0.05
 
+    /// A triggered skill whose cause died of the triggering hit lands where the cause was: it
+    /// still finds whoever is this near to there (units; a guess at what a spell landing on the
+    /// corpse would reach), and nobody otherwise.
+    let triggerStray = 20.0
+
+    /// How far from the player a triggered skill finds its target on a map (units; a guess:
+    /// the game does not say, and what causes a trigger can be a screen away).
+    let triggerReach = 80.0
+
     /// Flicker Strike: "Teleports and Strikes N additional times per Power Charge, with 285% more
     /// Attack Speed" (the number is in the description's text, not a stat).
     let flickerMoreSpeed = 285.0

@@ -2776,8 +2776,33 @@ module Sim =
     and private trigger env rng (actor: Actor) name (w: World) =
         let skill = skillOf actor name
         let st = Map.find actor.Name w.Actors
-        if ready st w.Time skill then
-            { w with Counts = bump ("trigger:" + name) w.Counts; Aim = w.Cause }
+        // On a map the player's triggered skill does not go any distance: at the cause while that
+        // is within reach; where a dead cause was, if someone is near enough to there; else at
+        // whom the player would aim at, within reach (a skill around the player itself: whoever
+        // that is). Nobody: the trigger is wasted.
+        let aim =
+            match env.Fight.March with
+            | Some _ when actor.Name = env.Fight.Player.Name ->
+                let reach (e: EnemyDef) = Vec.length e.Position - e.Size <= Constants.triggerReach
+                let self = match skill.Delivery with AreaAroundSelf _ -> true | _ -> false
+                let usual () =
+                    match Geometry.aim env.Fight.Targeting (alive w |> List.map (fun e -> e.Def)) with
+                    | Some d when self || reach d -> Some d.Name
+                    | _ -> None
+                match (if w.Cause = "" then None else Map.tryFind w.Cause w.Enemies) with
+                | Some e when e.Life > 0.0 -> if reach e.Def then Some e.Def.Name else usual ()
+                | Some e ->
+                    match alive w with
+                    | [] -> None
+                    | living ->
+                        let near = living |> List.minBy (fun x -> Vec.dist x.Def.Position e.Def.Position)
+                        if Vec.dist near.Def.Position e.Def.Position <= Constants.triggerStray && reach near.Def then Some near.Def.Name
+                        elif self then usual ()
+                        else None
+                | None -> usual ()
+            | _ -> Some w.Cause
+        if aim.IsSome && ready st w.Time skill then
+            { w with Counts = bump ("trigger:" + name) w.Counts; Aim = aim.Value }
             |> updateActor actor.Name (fun st -> { st with Buffs = Map.add "TriggeredRecently" { Name = "TriggeredRecently"; Mods = []; Stacks = 1; Expires = w.Time + 4.0 } st.Buffs })
             |> schedule (w.Time + 4.0) Expire
             |> startUse env rng actor skill 0.0
@@ -3751,9 +3776,22 @@ module Sim =
         let w = syncDarkness env actor w
         let living = alive w |> List.map (fun e -> e.Def)
         // Aim where the use was aimed; if that enemy died meanwhile, at the next one.
+        // (On a map the player's skill lands where it was aimed: on someone near enough to where
+        // the dead one was, or on the next one that is within the reach the map is played with;
+        // a skill around the player itself needs no one in particular.)
         let primary =
             living |> List.tryFind (fun e -> e.Name = aimedAt)
-            |> Option.orElse (Geometry.aim env.Fight.Targeting living)
+            |> Option.orElse (
+                match env.Fight.March with
+                | Some m when name = env.Fight.Player.Name && not (match skill.Delivery with AreaAroundSelf _ -> true | _ -> false) ->
+                    let near =
+                        match Map.tryFind aimedAt w.Enemies, living with
+                        | Some dead, _ :: _ ->
+                            let near = living |> List.minBy (fun x -> Vec.dist x.Position dead.Def.Position)
+                            if Vec.dist near.Position dead.Def.Position <= Constants.triggerStray then Some near else None
+                        | _ -> None
+                    near |> Option.orElse (Geometry.aim env.Fight.Targeting (living |> List.filter (fun e -> Vec.length e.Position - e.Size <= m.Engage)))
+                | _ -> Geometry.aim env.Fight.Targeting living)
         // On a march a strike that teleports (Flicker Strike) takes the player to whom it
         // strikes: reckoned around the player, everything comes that much nearer
         let w =

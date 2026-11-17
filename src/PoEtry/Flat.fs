@@ -5232,12 +5232,36 @@ module Flat =
 
     and private trigger (s: State) (rng: Rng) (sid: int) =
         if sid < 0 then failwith "a trigger of a skill its actor does not have"
-        if ready s sid then
+        // whom it is aimed at; on a map not any distance away (`Sim.trigger`; -2: nobody)
+        let aim =
+            if s.P.IsPlayer && s.Main.Fight.March.IsSome then
+                refreshAlive s
+                let reach (i: int) = (let e = (at s.Foes i).Def in Vec.length e.Position - e.Size <= Constants.triggerReach)
+                let self = match (at s.P.Skills sid).Skill.Delivery with AreaAroundSelf _ -> true | _ -> false
+                let usual () = if s.Aimed >= 0 && (self || reach s.Aimed) then s.Aimed else -2
+                if s.Cause < 0 then usual ()
+                elif (at s.Foes s.Cause).Life > 0.0 then (if reach s.Cause then s.Cause else usual ())
+                else
+                    let spot = (at s.Foes s.Cause).Def.Position
+                    let mutable best = -1
+                    let mutable least = infinity
+                    for k in 0 .. s.Live.Length - 1 do
+                        let e = at s.Foes (at s.Live k)
+                        if e.Life > 0.0 then
+                            let d = Vec.dist e.Def.Position spot
+                            if best < 0 || d < least then
+                                best <- e.Index
+                                least <- d
+                    if best >= 0 && least <= Constants.triggerStray && reach best then best
+                    elif best >= 0 && self then usual ()
+                    else -2
+            else s.Cause
+        if aim > -2 && ready s sid then
             bump s (at s.P.Skills sid).CTrigger
             setBuff s s.P.BTriggered 1 (s.Time + 4.0) []
             expireAt s (s.Time + 4.0)
             // (aimed at the cause of the trigger while it starts)
-            s.Aim <- s.Cause
+            s.Aim <- aim
             startUse s rng sid 0.0
             s.Aim <- -1
 
@@ -6714,7 +6738,28 @@ module Flat =
         if p.BUnreservedDarkness >= 0 then syncDarkness s
         living s |> ignore
         // Aim where the use was aimed; if that enemy died meanwhile, at the next one.
-        let primary = if (at s.Foes aimedAt).Life > 0.0 then aimedAt else s.Aimed
+        let primary =
+            if (at s.Foes aimedAt).Life > 0.0 then aimedAt
+            else
+                // (on a map the player's skill lands where it was aimed, `Sim.onStrike`)
+                match s.Main.Fight.March with
+                | Some m when p.IsPlayer && not (match (at p.Skills sid).Skill.Delivery with AreaAroundSelf _ -> true | _ -> false) ->
+                    let spot = (at s.Foes aimedAt).Def.Position
+                    let mutable best = -1
+                    let mutable least = infinity
+                    for k in 0 .. s.Live.Length - 1 do
+                        let e = at s.Foes (at s.Live k)
+                        if e.Life > 0.0 then
+                            let d = Vec.dist e.Def.Position spot
+                            if best < 0 || d < least then
+                                best <- e.Index
+                                least <- d
+                    if best >= 0 && least <= Constants.triggerStray then best
+                    else
+                        match Geometry.aim s.P.Fight.Targeting (s.Living |> List.filter (fun e -> Vec.length e.Position - e.Size <= m.Engage)) with
+                        | Some d -> s.FoeIds.[d.Name]
+                        | None -> -1
+                | _ -> s.Aimed
         // a teleporting strike on a march takes the player to whom it strikes (`Sim.onStrike`)
         if primary >= 0 && p.IsPlayer && s.Main.Fight.March.IsSome && (at p.Skills sid).Flickers > 0.0 then
             let e = (at s.Foes primary).Def
