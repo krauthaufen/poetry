@@ -498,7 +498,7 @@ module Report =
         let marching (m: March) (f: Fight) = { f with March = Some m; Enemies = []; Replace = false; Targeting = Nearest }
         // How the map is played is found by playing: a short map of the same packs is played
         // in six ways (walking on, using the skills from 1, 2.5, 4.5 or 7 m; standing until what
-        // is near is dead, from 2.5 or 4.5 m), and the way that clears it soonest is the character's way.
+        // is near is dead, from 2.5 or 4.5 m), three times each, and the way that clears it soonest is the character's way.
         // (Not cleared, or dead: the more it killed the better.) "engage" and "hold" say the
         // way themselves.
         let march, way =
@@ -513,10 +513,12 @@ module Report =
                     let trial (engage: float, hold: bool) =
                         let f = marching (marchOf (min packs 3) engage hold) { Setup.fight c o player enemies with MaxTime = 60.0 }
                         let run = match Flat.compile f with | Ok program -> Flat.runner program | Error _ -> Sim.run f
-                        let o = run 7001u
-                        match o.Ttk with
-                        | Some t when o.Died.IsNone -> t
-                        | _ -> 1e6 - float o.Kills.Length
+                        // (three runs: one that dies or does not finish counts more than any time)
+                        [ 7001u; 7002u; 7003u ] |> List.sumBy (fun seed ->
+                            let o = run seed
+                            match o.Ttk with
+                            | Some t when o.Died.IsNone -> t
+                            | _ -> 1e6 - float o.Kills.Length)
                     let engage, hold = [ 10.0, false; 25.0, false; 45.0, false; 70.0, false; 25.0, true; 45.0, true ] |> List.minBy trial
                     Some (marchOf packs engage hold), said engage hold
         // ("engine": "reference" asks for the reference engine whatever the fight)
