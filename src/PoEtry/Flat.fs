@@ -6743,6 +6743,8 @@ module Flat =
             else
                 // (on a map the player's skill lands where it was aimed, `Sim.onStrike`)
                 match s.Main.Fight.March with
+                // (what springs from the impact springs from there though its enemy is dead)
+                | Some _ when p.IsPlayer && (match (at p.Skills sid).Skill.Delivery with Projectiles pr -> pr.FromImpact | _ -> false) -> aimedAt
                 | Some m when p.IsPlayer && not (match (at p.Skills sid).Skill.Delivery with AreaAroundSelf _ -> true | _ -> false) ->
                     let spot = (at s.Foes aimedAt).Def.Position
                     let mutable best = -1

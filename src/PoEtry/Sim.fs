@@ -3779,10 +3779,17 @@ module Sim =
         // (On a map the player's skill lands where it was aimed: on someone near enough to where
         // the dead one was, or on the next one that is within the reach the map is played with;
         // a skill around the player itself needs no one in particular.)
+        // (what springs from the impact of the same use, Falling Thunder's projectiles, springs
+        // from there though the slam has killed whom it was aimed at)
+        let fromCorpse =
+            env.Fight.March.IsSome && name = env.Fight.Player.Name
+            && (match skill.Delivery with Projectiles p -> p.FromImpact | _ -> false)
+            && not (living |> List.exists (fun e -> e.Name = aimedAt))
         let primary =
             living |> List.tryFind (fun e -> e.Name = aimedAt)
             |> Option.orElse (
                 match env.Fight.March with
+                | Some _ when fromCorpse -> Map.tryFind aimedAt w.Enemies |> Option.map (fun dead -> dead.Def)
                 | Some m when name = env.Fight.Player.Name && not (match skill.Delivery with AreaAroundSelf _ -> true | _ -> false) ->
                     let near =
                         match Map.tryFind aimedAt w.Enemies, living with
@@ -3808,7 +3815,7 @@ module Sim =
                         Enemies = w.Enemies |> Map.map (fun _ e -> if e.Life > 0.0 then { e with Def = { e.Def with Position = Vec.sub e.Def.Position by } } else e) }
             | _ -> w
         let living = alive w |> List.map (fun e -> e.Def)
-        let primary = primary |> Option.bind (fun e -> living |> List.tryFind (fun x -> x.Name = e.Name))
+        let primary = if fromCorpse then primary else primary |> Option.bind (fun e -> living |> List.tryFind (fun x -> x.Name = e.Name))
         match primary with
         | None -> w
         | Some primary ->
