@@ -818,6 +818,7 @@ module Gems =
             let r = statOf "active_skill_base_area_of_effect_radius"
             let extra = if staged then perStage [ "radius_+_per_stage" ] * stages else 0.0
             if extra > 0.0 then Some((r |> Option.defaultValue 0.0) + extra) else r
+        let grenade = data.Types.Contains "Grenade" && data.Types.Contains "DetonatesAfterTime"
         let perCharge =
             ownStats
             |> List.tryPick (fun (id, v) -> if id.EndsWith "_number_of_projectiles_per_power_charge" then Some("PowerCharge", int v) else None)
@@ -903,7 +904,9 @@ module Gems =
                             match statOf "active_skill_base_area_of_effect_radius", statOf "active_skill_base_secondary_area_of_effect_radius" with
                             | Some a, Some b when (count >= 2 && data.Types.Contains "Rain" && b < a) || rains -> Some(max a b, min a b)
                             | _ -> None
-                        Explosion = if data.Types.Contains "Area" && not (List.contains "is_area_damage" set.Stats) then radius else None }
+                        Explosion = if data.Types.Contains "Area" && (grenade || not (List.contains "is_area_damage" set.Stats)) then radius else None
+                        // a grenade bursts where it lands: its hit is the blast ("Explosion radius is")
+                        BlastOnly = grenade && data.Types.Contains "Area" && radius.IsSome }
             else
                 // a part whose only radius is the skill's secondary one ("Explosion radius is",
                 // "Shockwave radius is" in its own description): that is its area

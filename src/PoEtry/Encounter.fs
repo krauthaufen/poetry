@@ -855,8 +855,9 @@ module Geometry =
                     let all = struck @ chained
                     let into = if isFork then forkedNames else names
                     let from = into.Count
-                    for e in all do
-                        into.Add e.Name
+                    if not p.BlastOnly then
+                        for e in all do
+                            into.Add e.Name
                     for e in all do
                         for n in explode e.Position do
                             into.Add n

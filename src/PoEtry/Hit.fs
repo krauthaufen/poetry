@@ -16,6 +16,9 @@ type ProjectileShape =
       CanShotgun: bool
       /// Radius of an explosion where a projectile hits, if any.
       Explosion: float option
+      /// What it hits is only its explosion's (a grenade: it lands and bursts, all within
+      /// the explosion are hit once; it does not hit the one it lands on besides).
+      BlastOnly: bool
       /// Extra projectiles per stack of a charge: ("PowerCharge", 3).
       PerCharge: (string * int) option
       /// Projectiles start where the skill lands (on the aimed enemy), not at the player.
@@ -93,6 +96,7 @@ module ProjectileShape =
           Range = 100.0
           CanShotgun = true
           Explosion = None
+          BlastOnly = false
           PerCharge = None
           FromImpact = false
           Passing = 0.0
