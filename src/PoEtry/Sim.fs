@@ -844,6 +844,9 @@ module Sim =
           Walked: float
           WalkHeldUntil: float
           WalkKept: float
+          /// How long the player's last use took: it starts the next one so much before those
+          /// that come at it are near enough.
+          Lead: float
           Front: float
           Packs: int
           /// Those that have woken (by name).
@@ -3003,7 +3006,7 @@ module Sim =
                 let w, extra = reload w
                 let w =
                     if env.Fight.March.IsNone || name <> env.Fight.Player.Name then w
-                    else { w with WalkHeldUntil = w.Time + t + extra; WalkKept = (if extra > 0.0 then 0.0 else Channel.walked skill t) }
+                    else { w with WalkHeldUntil = w.Time + t + extra; WalkKept = (if extra > 0.0 then 0.0 else Channel.walked skill t); Lead = t }
                 schedule (w.Time + t + extra) (Ready name) w
             // drink the mana flask when mana is getting low and it isn't already running
             let w =
@@ -3100,9 +3103,18 @@ module Sim =
         match w.Player with
         | Some p when name = env.Fight.Player.Name && p.LockedUntil > w.Time -> schedule p.LockedUntil (Ready name) w
         // on a march the player walks on until an enemy is near enough to use its skills on
+        // (one that is awake and comes at it: near enough by the time a use takes, as far as
+        // it comes, so that the skill lands when it is there and not after)
         | Some _ when name = env.Fight.Player.Name
                       && (match env.Fight.March with
-                          | Some m -> not (alive w |> List.exists (fun e -> Vec.length e.Def.Position - e.Def.Size <= m.Engage))
+                          | Some m ->
+                              not (alive w |> List.exists (fun e ->
+                                      let d = Vec.length e.Def.Position - e.Def.Size
+                                      let coming =
+                                          match e.Def.Attack with
+                                          | Some atk when w.Woken.Contains e.Def.Name -> min (max 0.0 (d - atk.Range)) (e.Def.Speed * w.Lead)
+                                          | _ -> 0.0
+                                      d - coming <= m.Engage))
                           | None -> false) ->
             schedule (w.Time + Constants.serverTick) (Ready name) w
         // a totem that isn't placed waits
@@ -5120,6 +5132,7 @@ module Sim =
               Walked = 0.0
               WalkHeldUntil = 0.0
               WalkKept = 1.0
+              Lead = 0.0
               Front = (match fight.March with Some m -> m.Engage | None -> 0.0)
               Packs = 0
               Woken = Set.empty

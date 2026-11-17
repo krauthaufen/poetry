@@ -2990,6 +2990,7 @@ module Flat =
           mutable ShownWalked: float
           mutable WalkHeldUntil: float
           mutable WalkKept: float
+          mutable Lead: float
           mutable Front: float
           mutable Packs: int
           mutable FreezeBuildup: float
@@ -5452,6 +5453,7 @@ module Flat =
             startUse s rng sid t
             if p.IsPlayer && s.Main.Fight.March.IsSome then
                 s.WalkHeldUntil <- s.Time + t + 0.0
+                s.Lead <- t
                 s.WalkKept <- Channel.walked info.Skill t
             schedule s (s.Time + t + 0.0) EReady 0 0 0.0 0.0
         else
@@ -5482,6 +5484,7 @@ module Flat =
             release s
             if p.IsPlayer && s.Main.Fight.March.IsSome then
                 s.WalkHeldUntil <- s.Time + t + extra
+                s.Lead <- t
                 s.WalkKept <- (if extra > 0.0 then 0.0 else Channel.walked info.Skill t)
             schedule s (s.Time + t + extra) EReady 0 0 0.0 0.0
 
@@ -5664,7 +5667,14 @@ module Flat =
                      let mutable near = false
                      for k in 0 .. s.Live.Length - 1 do
                          let e = at s.Foes (at s.Live k)
-                         if e.Life > 0.0 && Vec.length e.Def.Position - e.Def.Size <= m.Engage then near <- true
+                         if e.Life > 0.0 then
+                             // (one that comes at the player: near enough by the time a use takes, `Sim.onReady`)
+                             let d = Vec.length e.Def.Position - e.Def.Size
+                             let coming =
+                                 match e.Def.Attack with
+                                 | Some atk when e.Woken -> min (max 0.0 (d - atk.Range)) (e.Def.Speed * s.Lead)
+                                 | _ -> 0.0
+                             if d - coming <= m.Engage then near <- true
                      not near
                  | None -> false) then
             schedule s (s.Time + Constants.serverTick) EReady 0 0 0.0 0.0
@@ -8195,6 +8205,7 @@ module Flat =
               ShownWalked = 0.0
               WalkHeldUntil = 0.0
               WalkKept = 1.0
+              Lead = 0.0
               Front = (match p.Fight.March with Some m -> m.Engage | None -> 0.0)
               Packs = 0
               FreezeBuildup = 0.0
