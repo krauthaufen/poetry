@@ -68,6 +68,10 @@ module Constants =
     /// DodgeRollPlayer: dodge_roll_base_travel_distance 46, cast time 750 ms, not modifiable).
     let dodgeRollDistance = 46.0
     let dodgeRollSeconds = 0.75
+    /// Mirage Archer: "Mirages deal 30% less Damage" (game files, SupportMirageArcherPlayer:
+    /// support_lingering_mirage_damage_+%_final -30), and the skill that makes the Mirage.
+    let mirageArcherLess = 30.0
+    let mirageArcherSpawn = "MirageArcherSpawnPlayer"
     /// Elemental resistances are lowered by 10% per act of the campaign: -60% in the endgame
     /// (PoB CalcSetup resistancePenalty "Endgame (-60%)"; shown in game on the character sheet).
     let endgameResistPenalty = -60.0

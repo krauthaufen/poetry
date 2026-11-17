@@ -380,6 +380,7 @@ module Setup =
         let minionActors =
             let ms, mNotes = Behaviours.minions db sheet build
             let ts, tNotes = Behaviours.totems db sheet build
+            let ts = ts @ Behaviours.mirages db sheet build
             let spirits, _ = Behaviours.ancestralSpirits db sheet build vitals.Str vitals.Dex ts
             ms @ ts @ spirits, mNotes @ tNotes
         { Db = db
@@ -430,6 +431,25 @@ module Setup =
             Some
                 { Skill = { Skill.make dodgeRoll [ Tag "DodgeRoll" ] with BaseTime = Constants.dodgeRollSeconds; Hits = [] }
                   Infused = None; GrantsVerisium = 0; Rules = []; Grants = []; Curse = None; Pattern = None; Extra = []; Periodics = [] }
+        // Mirage Archer pressed: the dodge roll that makes the Mirage (it stands for the
+        // Mirage's time, and the next can be made when the cooldown of making one is over)
+        elif gemName = Behaviours.mirageArcher then
+            let charMods = ModDb.ofList c.Sheet.Mods
+            c.Build.Groups |> List.tryPick (fun g ->
+                match g.Gems |> List.tryFind (fun x -> x.Name = gemName && not x.IsSupport && x.Enabled) with
+                | Some gem when g.Enabled ->
+                    let supports = g.Gems |> List.filter (fun x -> x.IsSupport && x.Enabled) |> List.map (fun x -> x.Name, x.Level)
+                    match Gems.skill c.Db charMods (Gems.chooseWeapon c.Db gemName c.Sheet.Weapons) { Gem = Constants.mirageArcherSpawn; Level = gem.Level; Quality = gem.Quality; StatSet = 1; Supports = supports } with
+                    | Ok (s, _) ->
+                        let ctx = { Ctx.empty with SkillTags = s.Tags; SkillName = gemName }
+                        let duration = s.Duration * Mods.mult ctx [ SkillDuration ] (ModDb.ofList (c.Sheet.Mods @ s.Mods))
+                        Some
+                            { Skill = { Skill.make gemName [ Tag "DodgeRoll" ] with BaseTime = Constants.dodgeRollSeconds; Hits = []; Cooldown = s.Cooldown; Mods = s.Mods }
+                              Infused = None; GrantsVerisium = 0
+                              Rules = [ { Hook = OnUse; Filter = Called gemName; Chance = 100.0; Reaction = GrantBuff(gemName + " buff", duration, 1, []) } ]
+                              Grants = []; Curse = None; Pattern = None; Extra = []; Periodics = [] }
+                    | Error _ -> None
+                | _ -> None)
         else pressedGem c o gemName
 
     and private pressedGem (c: Loaded) (o: Options) (gemName: string) : Pressed option =
@@ -548,7 +568,7 @@ module Setup =
     /// (remnants, exposure, infusions) are used on cooldown, the main skill is spammed.
     /// Marks, warcries, travel skills and anything else stay unpressed.
     let rec auto (c: Loaded) (o: Options) (mainGem: string) : Play list =
-        let isTotem (name: string) = Gems.data c.Db name |> Option.exists (fun d -> d.Types.Contains "SummonsTotem")
+        let isTotem (name: string) = name = Behaviours.mirageArcher || Gems.data c.Db name |> Option.exists (fun d -> d.Types.Contains "SummonsTotem")
         let inOwnGroup =
             c.Build.Groups
             |> List.filter (fun g -> g.Enabled && not (g.Gems |> List.exists (fun x -> x.Enabled && not x.IsSupport && Gems.isMeta c.Db x.Name)))
@@ -557,7 +577,7 @@ module Setup =
             c.Build.Groups
             |> List.filter (fun g -> g.Enabled)
             |> List.collect (fun g -> g.Gems |> List.filter (fun x -> x.Enabled && not x.IsSupport))
-            |> List.filter (fun x -> x.Name <> mainGem && (not (Gems.isMeta c.Db x.Name) || isTotem x.Name) && not (Gems.isPersistentBuff c.Db x.Name))
+            |> List.filter (fun x -> x.Name <> mainGem && (not (Gems.isMeta c.Db x.Name) || isTotem x.Name) && (x.Name = Behaviours.mirageArcher || not (Gems.isPersistentBuff c.Db x.Name)))
             // a gem socketed in a trigger or aura gem is used by that gem, not pressed
             // (a totem that uses socketed skills is itself placed by pressing it)
             |> List.filter (fun x -> List.contains x.Name inOwnGroup || isTotem x.Name)
@@ -596,6 +616,8 @@ module Setup =
                     if summons.IsSome && most > 0 then
                         let needsCorpses = summons.Value
                         Some(When((fun v -> count ("Out:" + x.Name) v < most && (not needsCorpses || count "Corpses" v > 0)), x.Name))
+                    // (the Mirage is made again whenever it is gone and can be)
+                    elif x.Name = Behaviours.mirageArcher then Some(KeepBuff x.Name)
                     elif warps then Some(OnCooldown x.Name)
                     elif barrage || tipped then (if mainRepeats then Some(OnCooldown x.Name) else None)
                     elif skip then None
@@ -661,6 +683,11 @@ module Setup =
                 | None -> OnCooldown mainGem :: others @ (filler |> Option.map (fun x -> Spam x.Name) |> Option.toList)
             | Some p when p.Skill.Cooldown.IsSome && (match main with Spam _ -> true | _ -> false) -> OnCooldown mainGem :: others @ [ main ]
             | _ -> others @ [ main ]
+        // (the roll that makes the Mirage comes before all: a main skill that is always ready
+        // would leave no gap for it)
+        let plain =
+            let mirage = function KeepBuff g -> g = Behaviours.mirageArcher | _ -> false
+            (plain |> List.filter mirage) @ (plain |> List.filter (mirage >> not))
 
         // a main skill that consumes a Whirlwind (Twister): the whirlwind is built to the
         // number of stages that does best in a short fight (none, if that is best)
@@ -1061,7 +1088,7 @@ module Setup =
         |> fun own ->
             own
             @ (c.Build.Groups |> List.filter (fun g -> g.Enabled)
-               |> List.collect (fun g -> g.Gems |> List.filter (fun x -> x.Enabled && not x.IsSupport && Gems.isMeta c.Db x.Name && (Gems.data c.Db x.Name |> Option.exists (fun d -> d.Types.Contains "SummonsTotem"))))
+               |> List.collect (fun g -> g.Gems |> List.filter (fun x -> x.Enabled && not x.IsSupport && Gems.isMeta c.Db x.Name && (x.Name = Behaviours.mirageArcher || Gems.data c.Db x.Name |> Option.exists (fun d -> d.Types.Contains "SummonsTotem"))))
                |> List.map (fun x -> x.Name))
         |> List.distinct
 

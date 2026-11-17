@@ -2675,6 +2675,33 @@ module Behaviours =
         |> List.unzip
         |> fun (actors, notes) -> List.concat actors, List.concat notes
 
+    /// Mirage Archer: "While active, dodge rolling will create a Mirage that uses socketed
+    /// ranged Attacks for a short duration, then vanish." The Mirage as an actor: it uses the
+    /// socketed attacks with the owner's weapon and mods and the gem's supports, one after
+    /// the other for as long as it stands ("Mirages deal 30% less Damage"), each with a
+    /// cooldown of the Mirage's own. It stands while the buff "<gem> buff" is on the player:
+    /// made by the roll (`Setup.pressed`, the gem pressed).
+    let mirageArcher = "Mirage Archer"
+    let mirages (db: GameDb) (sheet: CharacterSheet) (build: PobBuild) : Actor list =
+        let charMods = ModDb.ofList sheet.Mods
+        build.Groups
+        |> List.filter (fun g -> g.Enabled && g.Gems |> List.exists (fun x -> x.Enabled && not x.IsSupport && x.Name = mirageArcher))
+        |> List.collect (fun g ->
+            let enabled = g.Gems |> List.filter (fun x -> x.Enabled)
+            let supports = enabled |> List.filter (fun x -> x.IsSupport) |> List.map (fun x -> x.Name, x.Level)
+            let skills =
+                enabled
+                |> List.filter (fun x -> not x.IsSupport && x.Name <> mirageArcher)
+                |> List.choose (fun x ->
+                    match Gems.skill db charMods (Gems.chooseWeapon db x.Name sheet.Weapons) { Gem = x.Name; Level = x.Level; Quality = x.Quality; StatSet = 1; Supports = supports } with
+                    | Ok (s, _) ->
+                        let less = Mod.more (Damage AllDamage) (-Constants.mirageArcherLess) |> Mod.from mirageArcher
+                        let rec asMirage (sk: Skill) =
+                            { sk with Name = mirageArcher + ": " + sk.Name; Cost = 0.0; Mods = sk.Mods @ [ less ]; Parts = sk.Parts |> List.map asMirage }
+                        Some(asMirage (applyObserved s))
+                    | Error _ -> None)
+            if skills.IsEmpty then [] else [ { Actor.make (mirageArcher + " (mirage)") sheet.Mods skills with ActiveWhile = Some(mirageArcher + " buff") } ])
+
     /// "if you've summoned a Totem Recently": placing a totem (using a totem gem) makes it so
     /// for 4 s, where something asks.
     let totemRecently (sheet: CharacterSheet) (skills: Skill list) : Rule list =
