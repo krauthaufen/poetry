@@ -1441,6 +1441,39 @@ let run (test: string -> (unit -> unit) -> unit) =
         | Some a, Some b when b < a -> ()
         | a, b -> failwithf "expected the moving one sooner: %A, %A" a b)
 
+    test "flat: Flicker Strike: more strikes per Power Charge, the player going with them on a march" (fun () ->
+        let flicker =
+            { Skill.make "Flicker" [ Attack; Tag "Type:Melee" ] with
+                BaseDamage = Map.ofList [ Physical, { Min = 300.0; Max = 500.0 } ]; BaseCrit = 9.0; BaseTime = 1.0; Consumes = Some "PowerCharge"
+                Mods = [ Mod.base' (Named "FlickersPerPowerCharge") 2.0; Mod.base' (Named "ChargeSkipConsume") 95.0 ] }
+        let player =
+            { Actor.make "Player" [ Mod.inc CritChance 50.0 ] [ flicker ] with
+                Vitals = Some { PlayerStats.basic 9000.0 500.0 with Evasion = 900.0; LifeRegen = 200.0; ManaRegen = 60.0 }
+                Rules = [ { Hook = OnHit; Filter = AnySkill; Chance = 40.0; Reaction = GainResource("PowerCharge", 1) } ] }
+        // one enemy that lasts: every use is the strike and two more per charge, in a use that much longer
+        let boss = { EnemyDef.make Rarity.defaults 75 Unique "Boss" (Vec.make 10.0 0.0) with Life = 1e7 }
+        let alone = Fight.single boss player 60.0
+        same alone [ 1u; 2u; 3u ]
+        let o = Sim.run alone 1u
+        let count key = Map.tryFind key o.Counts |> Option.defaultValue 0
+        let uses, hits = count "uses:Flicker", count "hits:Flicker"
+        if uses < 10 || hits <= uses * 2 then failwithf "expected more strikes than uses: %d uses, %d hits (%A)" uses hits (o.Counts |> Map.toList |> List.map fst)
+        // "has a maximum chance of 75%": kept three times in four, whatever more the character has
+        let kept, gone = count "kept:PowerCharge", count "consumed:PowerCharge"
+        if gone = 0 || float kept / float (kept + gone) > 0.9 then failwithf "kept %d times, consumed %d times" kept gone
+        // a map: both engines the same, and the player gets through it sooner than on foot alone
+        let pack (k: int) =
+            if k >= 4 then [ { EnemyDef.make Rarity.defaults 75 Unique "Boss" (Vec.make 0.0 0.0) with Life = 6000.0; Speed = 25.0 } ]
+            else [ for i in 0 .. 4 -> { EnemyDef.make Rarity.defaults 75 Normal (sprintf "m%d" i) (Vec.make (float (i % 3) * 5.0 - 5.0) (float i * 4.0 - 8.0)) with Life = 500.0 + 100.0 * float i; Speed = 25.0 } ]
+        let march rooms = { Speed = 40.0; Spacing = (if rooms then 60.0 else 35.0); Aggro = 60.0; Engage = 45.0; Hold = false; Rooms = rooms; Packs = 4; Pack = pack }
+        let map rooms (who: Actor) = { Fight.single (pack 0).Head who 120.0 with Enemies = []; Targeting = Nearest; March = Some (march rooms) }
+        for rooms in [ false; true ] do
+            same (map rooms player) [ 1u; 2u; 3u ]
+        let plain = { player with Skills = [ { flicker with Mods = [] } ] }
+        match (Sim.run (map true player) 1u).Ttk, (Sim.run (map true plain) 1u).Ttk with
+        | Some a, Some b when a < b -> ()
+        | a, b -> failwithf "expected the teleporting one sooner: %A, %A" a b)
+
     test "flat: a pack whose dead are replaced; minions beside the player in it" (fun () ->
         let weak i = { EnemyDef.make Rarity.defaults 75 (if i % 3 = 0 then Magic else Normal) (sprintf "pack %d" i) (Vec.make (12.0 + 4.0 * float i) (float (i % 4) * 6.0 - 9.0)) with Life = 400.0 + 150.0 * float i; Speed = 25.0 }
         let pack = [ for i in 1 .. 11 -> weak i ]

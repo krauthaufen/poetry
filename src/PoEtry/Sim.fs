@@ -1926,6 +1926,11 @@ module Sim =
                 |> Option.forall (fun d -> x.Expires - now <= d / 2.0)))
         |> List.map fst
 
+    /// Flicker Strike's additional strikes: so many per Power Charge there is as it is used.
+    let private flickers (skill: Skill) (st: ActorState) =
+        let per = skill.Mods |> List.sumBy (fun m -> if m.Stat = Named "FlickersPerPowerCharge" && m.Kind = Base then m.Value else 0.0)
+        if per <= 0.0 then 0.0 else per * float (match Map.tryFind "PowerCharge" st.Buffs with Some e -> e.Stacks | None -> 0)
+
     /// Barrage: the readied repeats waiting for the next Repeatable bow or spear attack.
     let private barraged (skill: Skill) (st: ActorState) =
         if skill.Tags.Contains(Tag "Type:Barrageable") && skill.Tags.Contains Attack then
@@ -2525,6 +2530,22 @@ module Sim =
                             | _ -> st) w
                     pattern, { w with Counts = bump ("barraged:" + skill.Name) w.Counts }
                 | _ -> pattern, w
+            // Flicker Strike: the strike, then so many more per Power Charge, each in the time
+            // its more attack speed leaves of the first one's (the use is as much longer)
+            let pattern =
+                let n = int (flickers skill st)
+                if n <= 0 || useTime <= 0.0 then pattern
+                else
+                    let quick = 1.0 / (1.0 + Constants.flickerMoreSpeed / 100.0)
+                    let whole = 1.0 + float n * quick
+                    [ for i in 0 .. n do
+                        let before = if i = 0 then 0.0 else 1.0 + float (i - 1) * quick
+                        let own = if i = 0 then 1.0 else quick
+                        for (timing, mult) in pattern ->
+                            (match timing with
+                             | DuringUse f -> DuringUse((before + f * own) / whole)
+                             | After t -> After(t + useTime * before / whole)),
+                            mult ]
             let w = { w with Counts = bump ("uses:" + skill.Name) w.Counts }
             // the Glory or Combo the skill needed is spent
             let w =
@@ -2775,7 +2796,7 @@ module Sim =
         // "Skills take 5% longer to perform for each time they Repeat"
         let repeats = match barraged skill st with Some b when w.Time < b.Expires -> float b.Stacks | _ -> 0.0
         // "+1 second to Total Cast Time": added after speed
-        own.BaseTime / speed * (1.0 + Constants.longerPerRepeat * repeats) + Mods.sumBase ctx [ Named "FixedUseTime" ] db
+        own.BaseTime / speed * (1.0 + Constants.longerPerRepeat * repeats + flickers skill st / (1.0 + Constants.flickerMoreSpeed / 100.0)) + Mods.sumBase ctx [ Named "FixedUseTime" ] db
 
     /// Life spent on a skill can leave the life below half as a hit can: the life flask is
     /// drunk then, as when a hit leaves it there (`takeDamage`).
@@ -3733,6 +3754,23 @@ module Sim =
         let primary =
             living |> List.tryFind (fun e -> e.Name = aimedAt)
             |> Option.orElse (Geometry.aim env.Fight.Targeting living)
+        // On a march a strike that teleports (Flicker Strike) takes the player to whom it
+        // strikes: reckoned around the player, everything comes that much nearer
+        let w =
+            match env.Fight.March, primary with
+            | Some _, Some e when name = "Player" && skill.Mods |> List.exists (fun m -> m.Stat = Named "FlickersPerPowerCharge") ->
+                let d = Vec.length e.Position
+                let step = d - e.Size
+                if step <= 0.0 then w
+                else
+                    let by = Vec.scale (step / d) e.Position
+                    { w with
+                        Walked = w.Walked + step
+                        Front = w.Front - by.X
+                        Enemies = w.Enemies |> Map.map (fun _ e -> if e.Life > 0.0 then { e with Def = { e.Def with Position = Vec.sub e.Def.Position by } } else e) }
+            | _ -> w
+        let living = alive w |> List.map (fun e -> e.Def)
+        let primary = primary |> Option.bind (fun e -> living |> List.tryFind (fun x -> x.Name = e.Name))
         match primary with
         | None -> w
         | Some primary ->
@@ -4736,6 +4774,7 @@ module Sim =
                 let st = Map.find name w.Actors
                 // character + skill (gem quality, supports): the skill's own db
                 let skip = Mods.sumBase Ctx.empty [ Named "ChargeSkipConsume" ] (skillDb env actor (skillOf actor skillName) st)
+                let skip = if (skillOf actor skillName).Mods |> List.exists (fun m -> m.Stat = Named "FlickersPerPowerCharge") then min Constants.flickerKeepCap skip else skip
                 // a channel that takes a charge for so long of it: each use takes one with the
                 // chance its own time is of that (the same charges per second, at random moments)
                 let every = Mods.sumBase Ctx.empty [ Named "ConsumeChargeEveryMs" ] (skillDb env actor (skillOf actor skillName) st) / 1000.0

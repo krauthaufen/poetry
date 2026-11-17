@@ -993,6 +993,8 @@ module Flat =
           /// Barrage: the repeats a use readies (and per Frenzy Charge), what the buff carries.
           BarrageRepeats: float
           BarragePerFrenzy: float
+          /// Flicker Strike: additional strikes per Power Charge.
+          Flickers: float
           BarrageMods: Mod list
           CBarraged: int
           /// A seed planted in the enemy that the damage the enemy takes sets off: the damage
@@ -2089,6 +2091,7 @@ module Flat =
                       SealMods = (match sealMods.TryGetValue s.Name with | true, mods -> mods | _ -> [])
                       CSeals = counts.Id("seals:" + s.Name)
                       BarrageRepeats = ownBase s "BarrageRepeats"
+                      Flickers = ownBase s "FlickersPerPowerCharge"
                       BarragePerFrenzy = ownBase s "BarrageRepeatsPerFrenzy"
                       BarrageMods = (match barrageMods.TryGetValue s.Name with | true, mods -> mods | _ -> [])
                       CBarraged = counts.Id("barraged:" + s.Name)
@@ -5030,6 +5033,22 @@ module Flat =
                     | _ -> ()
                  | _ -> ())
                 bump s info.CBarraged
+            // Flicker Strike: the strike, then so many more per Power Charge (`Sim.startUse`)
+            let flickers = if info.Flickers <= 0.0 || not (useTime > 0.0) then 0 else int (info.Flickers * float (stacksOf s (at p.BCharges 0)))
+            if flickers > 0 then
+                let quick = 1.0 / (1.0 + Constants.flickerMoreSpeed / 100.0)
+                let whole = 1.0 + float flickers * quick
+                let n = patAt.Length
+                let share, time, mult = patShare, patAt, patMult
+                patShare <- Array.init ((flickers + 1) * n) (fun j -> at share (j % n))
+                patAt <-
+                    Array.init ((flickers + 1) * n) (fun j ->
+                        let i = j / n
+                        let before = if i = 0 then 0.0 else 1.0 + float (i - 1) * quick
+                        let own = if i = 0 then 1.0 else quick
+                        if (at share (j % n)) then (before + (at time (j % n)) * own) / whole
+                        else (at time (j % n)) + useTime * before / whole)
+                patMult <- Array.init ((flickers + 1) * n) (fun j -> at mult (j % n))
             bump s info.CUses
             // the Glory or Combo the skill needed is spent
             for k in 0 .. info.Requires.Length - 1 do
@@ -5260,7 +5279,8 @@ module Flat =
         // "Skills take 5% longer to perform for each time they Repeat"
         let barrage = s.P.BBarrage
         let repeats = if info.SpendsRepeats && (at s.A.BHas barrage) && (at s.A.BStacks barrage) > 0 && s.Time < (at s.A.BExpires barrage) then float (at s.A.BStacks barrage) else 0.0
-        let time = info'.Skill.BaseTime / speed * (1.0 + Constants.longerPerRepeat * repeats) + sumQ ev qFixedUse
+        let flickers = if info.Flickers <= 0.0 then 0.0 else info.Flickers * float (stacksOf s (at s.P.BCharges 0))
+        let time = info'.Skill.BaseTime / speed * (1.0 + Constants.longerPerRepeat * repeats + flickers / (1.0 + Constants.flickerMoreSpeed / 100.0)) + sumQ ev qFixedUse
         release s
         time
 
@@ -6692,9 +6712,23 @@ module Flat =
     let private onStrike (s: State) (rng: Rng) (sid: int) (mult: float) (aimedAt: int) (elapsed: float) (passing: bool) (direct: bool) =
         let p = s.P
         if p.BUnreservedDarkness >= 0 then syncDarkness s
-        let alive = living s
+        living s |> ignore
         // Aim where the use was aimed; if that enemy died meanwhile, at the next one.
         let primary = if (at s.Foes aimedAt).Life > 0.0 then aimedAt else s.Aimed
+        // a teleporting strike on a march takes the player to whom it strikes (`Sim.onStrike`)
+        if primary >= 0 && p.IsPlayer && s.Main.Fight.March.IsSome && (at p.Skills sid).Flickers > 0.0 then
+            let e = (at s.Foes primary).Def
+            let d = Vec.length e.Position
+            let step = d - e.Size
+            if not (step <= 0.0) then
+                let by = Vec.scale (step / d) e.Position
+                s.Walked <- s.Walked + step
+                s.Front <- s.Front - by.X
+                for k in 0 .. s.Live.Length - 1 do
+                    let e = at s.Foes (at s.Live k)
+                    if e.Life > 0.0 then e.Def <- { e.Def with Position = Vec.sub e.Def.Position by }
+                s.AliveStale <- true
+        let alive = living s
         if primary >= 0 then
             let plain = (at p.Skills sid)
             let primaryDef = (at s.Foes primary).Def
@@ -7057,6 +7091,7 @@ module Flat =
         let info = (at p.Skills sid)
         let ev = acquireEmpty s sid
         let skip = sumQ ev qSkipConsume
+        let skip = if info.Flickers > 0.0 then min Constants.flickerKeepCap skip else skip
         let every = sumQ ev qConsumeEvery / 1000.0
         let count = int (sumQ ev qConsumeCount)
         release s

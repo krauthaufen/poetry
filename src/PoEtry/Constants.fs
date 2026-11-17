@@ -233,6 +233,14 @@ module Constants =
     /// "Skills take 5% longer to perform for each time they Repeat" (keyword text, Repeating Skills).
     let longerPerRepeat = 0.05
 
+    /// Flicker Strike: "Teleports and Strikes N additional times per Power Charge, with 285% more
+    /// Attack Speed" (the number is in the description's text, not a stat).
+    let flickerMoreSpeed = 285.0
+
+    /// "The chance to not remove Charges on use for Flicker Strike now has a maximum chance of 75%"
+    /// (0.5.0b Hotfix 12; neither in the tooltip nor in the data).
+    let flickerKeepCap = 75.0
+
     /// Seconds between the pulses of a Frost Bomb (its exposure grows with each): not in the
     /// data; 0.25 s lets one bomb reach its cap just as it detonates. A guess.
     let orbPulseInterval = 0.25
