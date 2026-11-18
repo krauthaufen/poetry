@@ -476,7 +476,7 @@ module Report =
         let rooms = n "rooms" 1.0 > 0.0
         let packs = max 1 (int (n "packs" 10.0))
         let spacing = max 5.0 (n "spacing" (if rooms then 60.0 else 37.5))
-        // (a map of so many packs, played so: `engage`, `hold` of `Sim.March`)
+        // (a map of so many packs, played so: `engage`, `hold` of `March`)
         let marchOf (count: int) (engage: float) (hold: bool) : March =
             { Speed = fst (Defence.movement c.Sheet)
               Spacing = spacing

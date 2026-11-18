@@ -65,7 +65,7 @@ module Flat =
     [<Fable.Core.Emit("$0[$1] = $2")>]
     let inline private put (xs: 'a[]) (i: int) (v: 'a) : unit = xs.[i] <- v
 
-    // ---- the kinds of event (see `Sim.Event`) ----
+    // ---- the kinds of event (see `Engine.Event`) ----
 
     [<Literal>]
     let private EReady = 0
@@ -106,7 +106,7 @@ module Flat =
     [<Literal>]
     let private ELand = 18
 
-    /// A killed enemy explodes (`Sim.Event.Explosion`): a = the enemy, b = the damage type, x = percent of its life, y = radius.
+    /// A killed enemy explodes (`Engine.Event.Explosion`): a = the enemy, b = the damage type, x = percent of its life, y = radius.
     let private EExplode = 40
 
     let private kindName kind =
@@ -815,7 +815,7 @@ module Flat =
           Label: int
           Ignited: int }
 
-    /// A skill that can only be used once enough Glory or Combo has been built (`Sim.hitEnemy`).
+    /// A skill that can only be used once enough Glory or Combo has been built (`Engine.hitEnemy`).
     type private BuilderInfo =
         { /// By skill: whether a hit of it is the skill's own (which builds nothing).
           Own: bool[]
@@ -856,7 +856,7 @@ module Flat =
 
     type private SkillInfo =
         { Skill: Skill
-          /// The character's mods and the skill's (`Sim.Env.SkillDbs`).
+          /// The character's mods and the skill's (`Engine.Env.SkillDbs`).
           Db: ModDb
           /// The skill and its parts.
           Parts: int[]
@@ -867,7 +867,7 @@ module Flat =
           /// The buff the skill consumes (-1: none).
           Consumes: int
           /// The charge whose stacks the skill counts more of ("N additional consumed"), and
-          /// how many more (see `Sim.skillStacks`).
+          /// how many more (see `Engine.skillStacks`).
           StackCharge: string
           StackBuff: int
           StackExtra: int
@@ -928,7 +928,7 @@ module Flat =
           Passing: bool
           /// Its damage over time: type, per second, label, where the damage goes.
           Dots: (DamageType * float * string * int)[]
-          // what a part needs to happen (see `Sim.startUse`)
+          // what a part needs to happen (see `Engine.startUse`)
           OncePerUse: bool
           OnlyTriggered: bool
           NotEnraged: bool
@@ -1129,9 +1129,9 @@ module Flat =
               Reviving: int[]
               AnyPool: bool
               Walks: bool
-              /// See `Sim.Env.SlowMagnitude`.
+              /// See `Engine.Env.SlowMagnitude`.
               SlowMagnitude: float
-              /// See `Sim.Env.AsksESRecharge`.
+              /// See `Engine.Env.AsksESRecharge`.
               AsksESRecharge: bool
               /// Whether monsters attack at all (the player or a minion can be hurt).
               Attacked: bool
@@ -1161,11 +1161,11 @@ module Flat =
               CSigil: int
               BPowerCharge: int
               CBarred: int
-              /// Whether anything of the actor's makes a skill cost life (`Sim.splitCost`).
+              /// Whether anything of the actor's makes a skill cost life (`Engine.splitCost`).
               LifeCosts: bool
               /// Whether anything of the actor's makes life leech go by more than physical damage.
               LeechTypes: bool
-              /// The buff whose stacks are the Darkness not reserved (-1: nothing asks, `Sim.syncDarkness`).
+              /// The buff whose stacks are the Darkness not reserved (-1: nothing asks, `Engine.syncDarkness`).
               BUnreservedDarkness: int
               /// Whether any meta gem gains energy from hits.
               MetaHits: bool
@@ -1518,7 +1518,7 @@ module Flat =
                             match Mod.eval Ctx.empty m with
                             | Some v -> yield m.Stat, m.Kind, v, (m.Source = "Shock")
                             | None -> () |]
-                  // (as `Sim.runWith` makes them: of two of one name the later stays)
+                  // (as `Engine.runWith` makes them: of two of one name the later stays)
                   Auras =
                     fight.EnemyAuras
                     |> List.map (fun (name, stacks, mods) ->
@@ -1960,14 +1960,14 @@ module Flat =
                 all
                 |> List.mapi (fun index s ->
                     let flag (name: string) = s.Mods |> List.exists (fun m -> m.Stat = Named name)
-                    // (what the skill does with corpses, if a rule of the actor says so: `Sim.corpseRule`)
+                    // (what the skill does with corpses, if a rule of the actor says so: `Engine.corpseRule`)
                     let onCorpse = s.Tags.Contains(Tag "Type:TargetsDestructibleCorpses")
                     let corpseRule =
                         actor.Rules |> List.tryPick (fun r ->
                             match r.Reaction with
                             | WithCorpse _ | SummonPerCorpse _ when r.Hook = OnUse && matches r.Filter s -> Some r.Reaction
                             | _ -> None)
-                    // (the rest of a flag of the skill's that starts so: `Sim.partNamed`)
+                    // (the rest of a flag of the skill's that starts so: `Engine.partNamed`)
                     let named' (prefix: string) = s.Mods |> List.tryPick (fun m -> match m.Stat with Named n when n.StartsWith prefix -> Some(n.Substring prefix.Length) | _ -> None)
                     let states (prefix: string) = match named' prefix with Some st -> st.Split '|' |> List.ofArray | None -> []
                     let onlyVs = states "OnlyVs:"
@@ -1977,7 +1977,7 @@ module Flat =
                     let rangeQueries = rangeSites |> Array.map (fun i -> at answers i)
                     let own = actor.Mods @ askedOf s
                     let pattern = Map.tryFind s.Name actor.HitPattern |> Option.defaultValue (s.Hits |> List.map (fun (f, m) -> DuringUse f, m)) |> Array.ofList
-                    // (as `Sim.skillStacks`: a part counts like the skill it belongs to)
+                    // (as `Engine.skillStacks`: a part counts like the skill it belongs to)
                     let stackCharge =
                         s.Consumes
                         |> Option.orElse (actor.Skills |> List.tryPick (fun o -> if o.Parts |> List.exists (fun p -> p.Name = s.Name) then o.Consumes else None))
@@ -2625,7 +2625,7 @@ module Flat =
                         i <- least
                     else go <- false
 
-    /// What decides whether attacks on a defender land (`World.Entropy`, see `Sim.lands`).
+    /// What decides whether attacks on a defender land (`World.Entropy`, see `Engine.lands`).
     type private Entropy =
         { mutable Value: float
           mutable At: float
@@ -2681,13 +2681,13 @@ module Flat =
           Has: bool[]
           Stacks: int[]
           Expires: float[]
-          /// See `Sim.EnemyState.Immune`.
+          /// See `Engine.EnemyState.Immune`.
           ImmuneUntil: float[]
           DMods: Mod list[]
           /// Nothing of its debuffs and damage over time runs out before this.
           mutable Soonest: float
           mutable Dots: FDot list
-          /// The damage over time that counts (`Sim.activeDots`), and the list it was worked out from.
+          /// The damage over time that counts (`Engine.activeDots`), and the list it was worked out from.
           mutable Active: FDot list
           mutable ActiveOf: FDot list
           /// What the damage over time that counts deals per second, with where it goes, for
@@ -2710,7 +2710,7 @@ module Flat =
           /// What they add up to (kept as they come and go: the same as their sum but for rounding).
           mutable FlamSum: float
           Entropy: Entropy
-          /// Its statuses (`Sim.status`) with their numbers, good until a debuff or the damage
+          /// Its statuses (`Engine.status`) with their numbers, good until a debuff or the damage
           /// over time changes, or its life crosses one of the marks that are statuses.
           mutable Status: Map<string, int>
           /// The statuses by number: whether it has each, and its stacks. Made anew when they
@@ -2758,7 +2758,7 @@ module Flat =
           mutable HitIsolated: bool
           mutable HitClose: bool
           mutable HitStatusMade: bool
-          /// The enemy as a defender (`Sim.defender`), good until a debuff's mods or stacks change.
+          /// The enemy as a defender (`Engine.defender`), good until a debuff's mods or stacks change.
           mutable Defender: Defender
           mutable DefenderStale: bool
           /// By damage type: what it takes of damage over time (NaN: not worked out for this defender).
@@ -2775,7 +2775,7 @@ module Flat =
           mutable SeedStacks: int[]
           mutable SeedIds: int[] }
 
-    /// The player or a minion during a run (`Sim.ActorState`): its buffs, what is kept of
+    /// The player or a minion during a run (`Engine.ActorState`): its buffs, what is kept of
     /// its skills' answers, its cooldowns and rolls, and a minion's body.
     type private Agent =
         { // its buffs, by buff
@@ -2797,7 +2797,7 @@ module Flat =
           MapHas: bool[]
           MapStacks: int[]
           /// Counts the changes to what the buffs' mods are: a skill's mods with the buffs
-          /// (`Sim.skillDb`) are good while this is what it was when they were made.
+          /// (`Engine.skillDb`) are good while this is what it was when they were made.
           mutable ModsVersion: int
           /// Counts the changes to which buffs there are and their stacks; and those to the
           /// buffs the defences depend on (`Program.Vital`).
@@ -2874,12 +2874,12 @@ module Flat =
           /// strikes still waiting in the queue) is lost, where the reference takes them out
           /// of the queue.
           mutable Epoch: int
-          /// Whether its bones have been used since it was killed (`Sim.World.Boned`).
+          /// Whether its bones have been used since it was killed (`Engine.World.Boned`).
           mutable Boned: bool
           /// Its evasion entropy.
           Dodge: Entropy }
 
-    /// A ground surface or storm as it is in a fight (`Sim.GroundState`).
+    /// A ground surface or storm as it is in a fight (`Engine.GroundState`).
     type private FGround =
         { Spec: Ground
           By: int
@@ -2940,7 +2940,7 @@ module Flat =
           /// Ice Crystals beside an enemy: owner, explosion part, enemy, the enemy's life when
           /// they appeared, life of one crystal, how many, gone at. Newest first.
           mutable Crystals: (int * int * int * float * float * int * float) list
-          /// What skills have left on the ground, oldest first (`Sim.World.Grounds`).
+          /// What skills have left on the ground, oldest first (`Engine.World.Grounds`).
           mutable Grounds: FGround list
           /// Crystals on their way (what a `EPlant` event names by its place here): how many,
           /// the life of one, the most at once, the seconds they last.
@@ -2998,7 +2998,7 @@ module Flat =
           mutable Taken: float
           mutable MinLife: float
           mutable LockedUntil: float
-          /// A march (`Sim.March`): how far the player has walked; until when the skill it uses
+          /// A march (`March`): how far the player has walked; until when the skill it uses
           /// holds it and what part of its walking it keeps till then; where the furthest
           /// pack's middle is and how many packs there have been.
           mutable Walked: float
@@ -3013,7 +3013,7 @@ module Flat =
           mutable Front: float
           mutable Packs: int
           mutable FreezeBuildup: float
-          /// See `Sim.PlayerState.Stuns`.
+          /// See `Engine.PlayerState.Stuns`.
           mutable Stuns: float list
           /// What a hit that takes a state off an enemy still reads of the enemy as it was:
           /// its shock, and how far its armour was broken.
@@ -3042,7 +3042,7 @@ module Flat =
           Gained: float[]
           GainedSeen: bool[] }
 
-    // ---- the pools a recovery stream goes into (`Sim.PlayerState.Recoups`, by name there) ----
+    // ---- the pools a recovery stream goes into (`Engine.PlayerState.Recoups`, by name there) ----
 
     [<Literal>]
     let private PLeechMana = 0
@@ -3162,7 +3162,7 @@ module Flat =
             put s.A.BStacks id (0)
             put s.A.BMods id ([])
 
-    /// A buff's stacks, whether its time is up or not (`Sim.stacksOf`).
+    /// A buff's stacks, whether its time is up or not (`Engine.stacksOf`).
     let inline private stacksOf (s: State) (id: int) = if (at s.A.BHas id) then (at s.A.BStacks id) else 0
 
     /// Whether a buff has stacks and time left.
@@ -3197,7 +3197,7 @@ module Flat =
                 seed.SeedIds <- ids.ToArray()
         s.A.BuffMap
 
-    /// Buff stacks as a skill sees them (`Sim.skillStacks`).
+    /// Buff stacks as a skill sees them (`Engine.skillStacks`).
     let private skillStacks (s: State) (sid: int) : Map<string, int> =
         let stacks = buffMap s
         let info = (at s.P.Skills sid)
@@ -3207,7 +3207,7 @@ module Flat =
             | _ -> stacks
         else stacks
 
-    /// The player's mods while using a skill (`Sim.skillDb`): made the way the reference
+    /// The player's mods while using a skill (`Engine.skillDb`): made the way the reference
     /// makes them, so that every sum over them adds in the same order.
     let private skillDb (s: State) (sid: int) : ModDb =
         if (at s.A.DbVersion sid) = s.A.ModsVersion then (at s.A.Dbs sid)
@@ -3254,7 +3254,7 @@ module Flat =
             put e.Stacks id (0)
             put e.DMods id ([])
 
-    /// A debuff comes or stacks, for so long (`Sim.addDebuff`).
+    /// A debuff comes or stacks, for so long (`Engine.addDebuff`).
     let private addDebuff (s: State) (e: Foe) (id: int) (duration: float) (maxStacks: int) (mods: Mod list) =
         if not ((at e.ImmuneUntil id) > s.Time) then
          let stacks = if (at e.Has id) && (at e.Expires id) > s.Time then min maxStacks ((at e.Stacks id) + 1) else 1
@@ -3262,7 +3262,7 @@ module Flat =
          expireAt s (s.Time + duration)
 
     /// The damage over time that counts: the strongest of each label, as many as may stack
-    /// (`Sim.activeDots`, in its order).
+    /// (`Engine.activeDots`, in its order).
     let private activeDots (e: Foe) : FDot list =
         if obj.ReferenceEquals(e.ActiveOf, e.Dots) then e.Active
         elif e.Dots.IsEmpty then
@@ -3340,7 +3340,7 @@ module Flat =
             e.RatePending <- 0.0
             e.RateAny <- false
 
-    /// An enemy's statuses (`Sim.statusOf`), by number.
+    /// An enemy's statuses (`Engine.statusOf`), by number.
     let private refreshStatus (s: State) (e: Foe) =
         let def = e.Def
         let cullable = e.Life <= e.Info.CullLife
@@ -3477,7 +3477,7 @@ module Flat =
             e.StatusMapStale <- false
         e.Status
 
-    /// An enemy as a defender: its own mods and its debuffs' (`Sim.defender`).
+    /// An enemy as a defender: its own mods and its debuffs' (`Engine.defender`).
     let private defender (s: State) (e: Foe) : Defender =
         if e.DefenderStale then
             let debuffMods =
@@ -3616,7 +3616,7 @@ module Flat =
     let private kill (s: State) (e: Foe) (at: float) =
         e.Life <- 0.0
         s.Kills.Add((e.Def.Name, e.Def.Rarity, at))
-        // (one killed while frozen shatters and leaves no corpse: `Sim.corpsesAfter`)
+        // (one killed while frozen shatters and leaves no corpse: `Engine.corpsesAfter`)
         (let frozen = Array.get s.P.AilmentStatus 5
          if (Array.get e.Has frozen) && (Array.get e.Expires frozen) > at then s.CorpsesUsed <- s.CorpsesUsed + 1)
         s.AliveCount <- s.AliveCount - 1
@@ -3639,7 +3639,7 @@ module Flat =
         refreshAlive s
         s.Living
 
-    /// The enemy aimed at (`Sim.aimed`): a triggered skill "usually targets the cause of the trigger".
+    /// The enemy aimed at (`Engine.aimed`): a triggered skill "usually targets the cause of the trigger".
     let private aimed (s: State) : int =
         refreshAlive s
         if s.Aim < 0 then s.Aimed
@@ -3667,7 +3667,7 @@ module Flat =
 
     // ---- time passing ----
 
-    /// The clock goes to t: damage over time, and how long each status lasted (`Sim.advance`).
+    /// The clock goes to t: damage over time, and how long each status lasted (`Engine.advance`).
     let private advance (s: State) (t: float) =
         let dt = t - s.Time
         if dt > 0.0 then
@@ -3777,7 +3777,7 @@ module Flat =
                             e.Def <- { e.Def with Position = Vec.scale ((d - step) / d) e.Def.Position }
                             s.AliveStale <- true
                     | _ -> ()
-            // a march: the player walks on (`Sim.advance`)
+            // a march: the player walks on (`Engine.advance`)
             match s.Main.Fight.March with
             | Some m when System.Double.IsNaN s.Died ->
                 let held = max 0.0 (min t s.WalkHeldUntil - s.Time)
@@ -3798,7 +3798,7 @@ module Flat =
                             if e.Life > 0.0 then e.Def <- { e.Def with Position = { e.Def.Position with X = e.Def.Position.X - way } }
                         s.AliveStale <- true
                     else
-                        // nothing ahead any more: to the nearest of what is left (`Sim.advance`)
+                        // nothing ahead any more: to the nearest of what is left (`Engine.advance`)
                         let mutable near = -1
                         let mutable least = infinity
                         for k in 0 .. s.Live.Length - 1 do
@@ -3827,7 +3827,7 @@ module Flat =
         else s.Grounds |> List.filter (fun g -> g.Until > s.Time) |> List.countBy (fun g -> g.Spec.Skill) |> Map.ofList
 
     /// Auras on enemies in the player's Presence come and go with where the enemies are
-    /// (`Sim.syncPresence`).
+    /// (`Engine.syncPresence`).
     let private syncPresence (s: State) =
         let auras = s.Main.PresenceAuras
         let entries = s.Main.PresenceEntry
@@ -3857,12 +3857,12 @@ module Flat =
     /// Mitigated damage onto the player, by type: energy shield first (chaos damage removes
     /// twice as much of it), a share of the rest from mana, life down to 1, then Runic Ward;
     /// death when nothing is left. Starts recoup, and drinks the life flask when life drops
-    /// below half (`Sim.takeDamage`).
+    /// below half (`Engine.takeDamage`).
     let private takeDamage (s: State) (fromHit: bool) (pools: PlayerStats) (damage: Map<DamageType, float>) =
         if alive s then
             let dmg = damage |> Map.toList |> List.sumBy snd
             if dmg > 0.0 then
-                // Darkness (`Sim.takeDamage`)
+                // Darkness (`Engine.takeDamage`)
                 let damage =
                     if pools.Darkness <= 0.0 then damage
                     else
@@ -3889,7 +3889,7 @@ module Flat =
                 let rest = rest - toLife
                 let toWard = min s.Ward rest
                 let rest = rest - toWard
-                // life loss from a hit put off (`Sim.takeDamage`)
+                // life loss from a hit put off (`Engine.takeDamage`)
                 let deferred = fromHit && pools.DeferPrevent > 0.0
                 let life = s.Life - toLife * (if deferred then 1.0 - pools.DeferPrevent / 100.0 else 1.0) - rest
                 let later = if deferred then toLife * pools.DeferLose / 100.0 else 0.0
@@ -3920,7 +3920,7 @@ module Flat =
                     bump s s.P.CFlaskLife
                 | _ -> ()
 
-    /// The life flask is drunk when life spent on a skill has left the life below half (`Sim.drinkLifeFlask`).
+    /// The life flask is drunk when life spent on a skill has left the life below half (`Engine.drinkLifeFlask`).
     let private drinkLifeFlask (s: State) (pools: PlayerStats) =
         match pools.LifeFlask with
         | Some f when alive s && pools.Life > 1.0 && s.Life < 0.5 * pools.Life && s.Time >= s.LifeFlaskUntil && s.LifeFlaskCharges >= f.ChargesPerUse ->
@@ -4004,7 +4004,7 @@ module Flat =
                 v
         | None -> pools
 
-    /// The player's recovery and the damage over time on it during dt, ending now (`Sim.recover`).
+    /// The player's recovery and the damage over time on it during dt, ending now (`Engine.recover`).
     let private recover (s: State) (dt: float) =
         match s.P.Vitals with
         | Some _ when dt > 0.0 && s.P.Charms |> Array.exists (fun c -> c.Charm.ChargesPerSecond > 0.0) ->
@@ -4020,7 +4020,7 @@ module Flat =
         | _ -> ()
         match s.P.Vitals with
         | Some v when dt > 0.0 && alive s ->
-            // (the pools are the sheet's; how fast they recover is of the moment, `Sim.recover`)
+            // (the pools are the sheet's; how fast they recover is of the moment, `Engine.recover`)
             let r = if v.RatesVary then (enter s 0; vitalsNow s v) else v
             let t0 = s.Time - dt
             recouped s t0
@@ -4075,7 +4075,7 @@ module Flat =
             addGained s slot (m - s.Mana)
             s.Mana <- m
 
-    /// What has run out of the enemies' debuffs and damage over time goes (`Sim.prune`).
+    /// What has run out of the enemies' debuffs and damage over time goes (`Engine.prune`).
     let private pruneFoes (s: State) =
         for live in 0 .. s.Live.Length - 1 do
             let e = at s.Foes (at s.Live live)
@@ -4091,7 +4091,7 @@ module Flat =
                     if d.Until < soonest then soonest <- d.Until
                 e.Soonest <- soonest
 
-    /// What has run out of the buffs of the actor that acts now goes (`Sim.prune`).
+    /// What has run out of the buffs of the actor that acts now goes (`Engine.prune`).
     let private prune (s: State) =
         let p = s.P
         if not (s.A.BSoonest > s.Time) then
@@ -4106,7 +4106,7 @@ module Flat =
 
     // ---- effects ----
 
-    /// A buff comes or stacks, for so long (`Sim.stackEffect` on the actor's buffs).
+    /// A buff comes or stacks, for so long (`Engine.stackEffect` on the actor's buffs).
     let private grantBuff (s: State) (id: int) (duration: float) (maxStacks: int) (mods: Mod list) =
         let stacks = if (at s.A.BHas id) && (at s.A.BExpires id) > s.Time then min maxStacks ((at s.A.BStacks id) + 1) else 1
         setBuff s id stacks (s.Time + duration) mods
@@ -4120,7 +4120,7 @@ module Flat =
         setBuff s id 1 (s.Time + seconds) []
         expireAt s (s.Time + seconds)
 
-    /// A resource's stacks are set (`Sim.setStacksWith`).
+    /// A resource's stacks are set (`Engine.setStacksWith`).
     let private setStacks (s: State) (refresh: bool) (id: int) (n: int) =
         let d = (at s.P.ResourceSeconds id)
         let lasts = not (System.Double.IsNaN d)
@@ -4134,7 +4134,7 @@ module Flat =
             setBuff s id n expires []
         if lasts && refresh && n > 0 then expireAt s (s.Time + d)
 
-    /// The player gains rage, up to the maximum; the loss timer starts again (`Sim.gainRage`).
+    /// The player gains rage, up to the maximum; the loss timer starts again (`Engine.gainRage`).
     let private gainRage (s: State) (amount: float) =
         let p = s.P
         if not (amount <= 0.0 || p.MaxRage <= 0) then
@@ -4142,7 +4142,7 @@ module Flat =
             s.A.RageAt <- s.Time
 
     /// Something that uses charms happened to the player. A charm for it that is running, or
-    /// has the charges to be used now, answers; whether the occurrence is prevented (`Sim.charm`).
+    /// has the charges to be used now, answers; whether the occurrence is prevented (`Engine.charm`).
     let private charm (s: State) (rng: Rng) (key: string) : bool =
         let p = s.Main
         match p.Vitals with
@@ -4174,7 +4174,7 @@ module Flat =
             prevented
         | _ -> false
 
-    /// Exposure on an enemy: the strongest applies (`Sim.expose`).
+    /// Exposure on an enemy: the strongest applies (`Engine.expose`).
     let private expose (s: State) (target: int) (dt: DamageType) (amount: float) (duration: float) =
         let e = (at s.Foes target)
         if e.Life > 0.0 then
@@ -4204,7 +4204,7 @@ module Flat =
         elif not beaten then
             e.Dots <- d :: (if beats then e.Dots |> List.filter (fun x -> x.Label <> d.Label || not (x.Dps < d.Dps && x.Until <= d.Until)) else e.Dots)
 
-    /// What lies on the ground and the storms (`Sim.syncGround`, in its order).
+    /// What lies on the ground and the storms (`Engine.syncGround`, in its order).
     let private syncGround (s: State) =
         if not s.Grounds.IsEmpty then
             let now = s.Time
@@ -4338,7 +4338,7 @@ module Flat =
                         bump s p.CGroundIgnite
                         expireAt s d.Until
 
-    /// What a hit inflicts comes onto the enemy (`Sim.inflict`).
+    /// What a hit inflicts comes onto the enemy (`Engine.inflict`).
     let private inflict (s: State) (e: Foe) (i: Inflict) =
         let p = s.P
         match i with
@@ -4374,7 +4374,7 @@ module Flat =
 
     // ---- using skills ----
 
-    /// Does an attack with this chance to hit land (`Sim.lands`)?
+    /// Does an attack with this chance to hit land (`Engine.lands`)?
     let private landsOn (s: State) (rng: Rng) (entropy: Entropy) (hitChance: float) : bool =
         if hitChance >= 100.0 then true
         else
@@ -4415,7 +4415,7 @@ module Flat =
             | Some conds, stacky -> yield slot, { V = m.Value; Conds = conds; Stacky = stacky; Slot = -1 }
             | None, _ -> () |]
 
-    /// The mods of the buffs, per stat and kind, newest first (as they lie in `Sim.skillDb`).
+    /// The mods of the buffs, per stat and kind, newest first (as they lie in `Engine.skillDb`).
     let private dyn (s: State) : Item[][] =
         if s.A.DynVersion <> s.A.ModsVersion then
             let p = s.P
@@ -4581,7 +4581,7 @@ module Flat =
     // ---- minions ----
 
     /// A minion goes out of the fight (killed, or its time is up): what it had begun is
-    /// lost (`Sim.leave`; see `Agent.Epoch`).
+    /// lost (`Engine.leave`; see `Agent.Epoch`).
     let private leave (s: State) (who: int) =
         let a = at s.Agents who
         s.RoomAt <- -2
@@ -4594,7 +4594,7 @@ module Flat =
         a.Barrier <- 0.0
 
     /// Temporary minions of a pool appear: those that are out first; when all are in the
-    /// fight, the ones whose time would be up soonest are summoned anew (`Sim.summonWith`).
+    /// fight, the ones whose time would be up soonest are summoned anew (`Engine.summonWith`).
     let private summon (s: State) (members: int[]) (count: int) (duration: float) (first: Mod list) (summoned: int) =
         if members.Length > 0 && count > 0 then
             let was = s.Cur
@@ -4639,13 +4639,13 @@ module Flat =
             enter s was
 
     /// Chained attacks: which use of the chain comes next (-1: the skill is no chain). Using
-    /// another skill in between starts the chain again (`Sim.seqStep`).
+    /// another skill in between starts the chain again (`Engine.seqStep`).
     let private seqStep (s: State) (sid: int) (info: SkillInfo) : int =
         if info.SeqLength <= 0 then -1
         elif s.A.LastUsed <> sid then 0
         else int (Map.tryFind info.SeqKey s.A.Energy |> Option.defaultValue 0.0) % info.SeqLength
 
-    /// Whether a part belongs to this place of the chain (`Sim.inStep`).
+    /// Whether a part belongs to this place of the chain (`Engine.inStep`).
     let private inStep (step: int) (part: SkillInfo) : bool =
         step < 0 || not part.InChain || Array.contains step part.SeqSteps
 
@@ -4882,8 +4882,8 @@ module Flat =
                 expireAt s expires
                 bump s count
 
-    /// A meta gem gains energy, and triggers its spells if that allows (`Sim.gainEnergy`,
-    /// `Sim.releaseMeta`): "Cast on" at maximum, Invocations whenever enough is banked and the
+    /// A meta gem gains energy, and triggers its spells if that allows (`Engine.gainEnergy`,
+    /// `Engine.releaseMeta`): "Cast on" at maximum, Invocations whenever enough is banked and the
     /// invocation is off cooldown (as many times as it covers).
     and private gainEnergy (s: State) (rng: Rng) (index: int) (gained: float) =
         let index = (at s.P.Metas index).First
@@ -4930,7 +4930,7 @@ module Flat =
                     let skill = at info.Triggers place
                     trigger s rng skill
 
-    /// A use of a skill starts now, aimed at the current target (`Sim.startUse`).
+    /// A use of a skill starts now, aimed at the current target (`Engine.startUse`).
     and private startUse (s: State) (rng: Rng) (sid: int) (useTime: float) =
         let target = aimed s
         if target >= 0 then
@@ -4960,7 +4960,7 @@ module Flat =
             let areaMult = if info.AsksArea then multQ ev qArea else 1.0
             let rageSpend = sumQ ev qRageforgedSpend
             // Rageforged: the use spends its Rage before its hits, when there is that much, and
-            // its hits deal more (`Sim.startUse`)
+            // its hits deal more (`Engine.startUse`)
             let mutable rageforged = 1.0
             if rageSpend > 0.0 && (at s.A.BHas p.BRage) && float (at s.A.BStacks p.BRage) >= rageSpend then
                 let more = sumQ ev qRageforgedMore
@@ -5082,7 +5082,7 @@ module Flat =
                     | _ -> ()
                  | _ -> ())
                 bump s info.CBarraged
-            // Flicker Strike: the strike, then so many more per Power Charge (`Sim.startUse`)
+            // Flicker Strike: the strike, then so many more per Power Charge (`Engine.startUse`)
             let flickers = if info.Flickers <= 0.0 || not (useTime > 0.0) then 0 else int (info.Flickers * float (stacksOf s (at p.BCharges 0)))
             if flickers > 0 then
                 let quick = 1.0 / (1.0 + Constants.flickerMoreSpeed / 100.0)
@@ -5283,7 +5283,7 @@ module Flat =
 
     and private trigger (s: State) (rng: Rng) (sid: int) =
         if sid < 0 then failwith "a trigger of a skill its actor does not have"
-        // whom it is aimed at; on a map not any distance away (`Sim.trigger`; -2: nobody)
+        // whom it is aimed at; on a map not any distance away (`Engine.trigger`; -2: nobody)
         let aim =
             if s.P.IsPlayer && s.Main.Fight.March.IsSome then
                 refreshAlive s
@@ -5316,7 +5316,7 @@ module Flat =
             startUse s rng sid 0.0
             s.Aim <- -1
 
-    /// How long a use of the skill takes now (`Sim.useTime`).
+    /// How long a use of the skill takes now (`Engine.useTime`).
     let private useTime (s: State) (sid: int) : float =
         let info = (at s.P.Skills sid)
         let t = aimed s
@@ -5360,7 +5360,7 @@ module Flat =
         time
 
     /// Mana spent while a Sigil of Power stands: a Stage for every share of maximum mana, at
-    /// most one a second, up to its maximum (`Sim.sigilSpend`).
+    /// most one a second, up to its maximum (`Engine.sigilSpend`).
     let private sigilSpend (s: State) (spent: float) (maxMana: float) =
         let p = s.P
         // the first of the buffs, in the order of their names, that is a sigil
@@ -5389,12 +5389,12 @@ module Flat =
             s.A.HeldStale <- false
         s.A.Energy
 
-    /// Is the skill's window shut (the next use opens one)? (`Sim.windowShut`)
+    /// Is the skill's window shut (the next use opens one)? (`Engine.windowShut`)
     let private windowShut (s: State) (info: SkillInfo) =
         info.WindowSecs > 0.0 && s.Time >= (Map.tryFind info.WindowKey s.A.Energy |> Option.defaultValue -1.0)
 
     /// Has the enemy a curse that Hexblast can detonate: one that lasts, and (where the
-    /// actor's own rule makes it) is at least half over? (`Sim.ripeCurses`)
+    /// actor's own rule makes it) is at least half over? (`Engine.ripeCurses`)
     let private anyRipe (s: State) (e: Foe) =
         let ripe = s.P.CurseRipe
         let mutable any = false
@@ -5402,7 +5402,7 @@ module Flat =
             if not (System.Double.IsNaN(at ripe id)) && (at e.Has id) && (at e.Expires id) > s.Time && (at e.Expires id) - s.Time <= (at ripe id) then any <- true
         any
 
-    /// What the player sees when choosing a skill (`Sim.view`).
+    /// What the player sees when choosing a skill (`Engine.view`).
     let private view (s: State) : View =
         let t = aimed s
         // what is seen of the minions: how many of each pool of temporary ones are out
@@ -5466,14 +5466,14 @@ module Flat =
                 (if s.A.LastUsed = sid then 0.0 else ownCost) + skill.CostPerSecond * seconds
         (ownCost + extraCost) * costMult / efficiency
 
-    /// The mana a use needs to begin, and how far below nothing paying may leave it (`Sim.manaNeeded`).
+    /// The mana a use needs to begin, and how far below nothing paying may leave it (`Engine.manaNeeded`).
     let private manaNeeded (pools: PlayerStats) (skill: Skill) (seconds: float) (cost: float) : struct (float * float) =
         if skill.CostPerSecond <= 0.0 then struct (cost, 0.0)
         else
             let flows = max 0.0 (pools.ManaRegen * seconds)
             struct (min pools.Mana (max 0.0 (cost - flows)), flows)
 
-    /// What of a use's cost is left for mana, and what is paid with life (`Sim.splitCost`).
+    /// What of a use's cost is left for mana, and what is paid with life (`Engine.splitCost`).
     let private splitCost (s: State) (sid: int) (pools: PlayerStats) (cost: float) : struct (float * float) =
         if not s.P.LifeCosts then struct (cost, 0.0)
         else
@@ -5539,7 +5539,7 @@ module Flat =
             schedule s (s.Time + t + extra) EReady 0 0 0.0 0.0
 
     /// The player is free to act: the first step of the rotation that can be used and paid
-    /// for is used (`Sim.onReadyUnlocked`).
+    /// for is used (`Engine.onReadyUnlocked`).
     let private act (s: State) (rng: Rng) =
         let p = s.P
         let v = view s
@@ -5618,7 +5618,7 @@ module Flat =
             match (if main then p.Vitals else None) with
             | None -> useNow s rng sid t
             | Some pools ->
-                // what of the cost is paid with life (`Sim.onReadyUnlocked`)
+                // what of the cost is paid with life (`Engine.onReadyUnlocked`)
                 let struct (cost, lifeCost) = if pools.CostsLife || pools.CostsInfernalFlame then struct (cost, 0.0) else splitCost s sid pools cost
                 if lifeCost > 0.0 && s.Life - lifeCost < 1.0 then
                     let wait = max Constants.serverTick 0.25
@@ -5682,7 +5682,7 @@ module Flat =
             schedule s (if next < infinity then next else s.Time + Constants.serverTick) EReady 0 0 0.0 0.0
 
     /// Has this melee minion no room at the enemy aimed at? The melee minions in the fight
-    /// take their places in order (`Sim.crowdedOut`). Who has room is worked out when the
+    /// take their places in order (`Engine.crowdedOut`). Who has room is worked out when the
     /// enemy aimed at is another, or a minion has come or gone, not at every turn.
     let private crowdedOut (s: State) : bool =
         match s.P.Body with
@@ -5703,7 +5703,7 @@ module Flat =
                 at s.NoRoom s.Cur
         | _ -> false
 
-    /// An actor's turn comes (`Sim.onReady`): a stunned or frozen player waits, a totem
+    /// An actor's turn comes (`Engine.onReady`): a stunned or frozen player waits, a totem
     /// that is not placed waits, a melee minion that finds no room at the enemy waits.
     let private onReady (s: State) (rng: Rng) =
         let p = s.P
@@ -5718,7 +5718,7 @@ module Flat =
                      for k in 0 .. s.Live.Length - 1 do
                          let e = at s.Foes (at s.Live k)
                          if e.Life > 0.0 then
-                             // (one that comes at the player: near enough by the time a use takes, `Sim.onReady`)
+                             // (one that comes at the player: near enough by the time a use takes, `Engine.onReady`)
                              let d = Vec.length e.Def.Position - e.Def.Size
                              let coming =
                                  match e.Def.Attack with
@@ -6182,10 +6182,10 @@ module Flat =
             if (at has i) then m <- Map.add (at p.StatusNames i) (at stacks i) m
         m
 
-    /// One hit on one enemy (`Sim.hitEnemy`, in its order).
+    /// One hit on one enemy (`Engine.hitEnemy`, in its order).
     let private resonanceClocks = DamageType.elemental |> List.map (fun t -> "ResonanceClock:" + DamageType.name t) |> Array.ofList
 
-    /// Trinity's drain, reckoned when a hit of the player's is worked out (`Sim.syncResonance`).
+    /// Trinity's drain, reckoned when a hit of the player's is worked out (`Engine.syncResonance`).
     let private syncResonance (s: State) =
         let p = s.P
         let mutable any = false
@@ -6489,7 +6489,7 @@ module Flat =
                         addDebuff s e p.SFullyBroken seconds 1 (scopes |> List.map (fun sc -> Mod.inc (DamageTaken sc) taken |> Mod.from "Fully Broken Armour"))
                         // (a break of armour that was not fully broken already)
                         if brokenBefore < baseArmour && p.OnFullBreak.Length > 0 then react s rng p.OnFullBreak "" sid target)
-                // a light stun (`Sim.hitEnemy`)
+                // a light stun (`Engine.hitEnemy`)
                 (let chance = min 100.0 ((dealt + (at de 0) * Constants.playerPhysicalStunMore / 100.0) * (if info.IsMelee then 1.0 + Constants.playerMeleeStunMore / 100.0 else 1.0) / max 1.0 def0.Life * 100.0)
                  if not dead && chance >= Constants.lightStunMinimum && rng.Chance chance then
                     e.StunnedUntil <- s.Time + Constants.monsterLightStunDuration
@@ -6734,7 +6734,7 @@ module Flat =
                         let most = match p.Vitals with Some v -> v.Mana | None -> 0.0
                         schedule s (s.Time + r.Delay) EMana 0 0 ((r.ManaPerRemnant + r.PercentOfMaxMana / 100.0 * most) * count) 0.0
                  | _ -> ())
-                // Life Remnants (`Sim.hitOne`)
+                // Life Remnants (`Engine.lifeRemnants`)
                 (match p.LifeRemnants, p.Vitals with
                  | Some r, Some v when s.Main.Vitals.IsSome ->
                     let fromKill = dead && rng.Chance r.OnKillChance
@@ -6818,8 +6818,8 @@ module Flat =
                 e.DefVersion <- e.DefVersion + 1
             release s
 
-    /// A strike lands: who is hit, and each hit (`Sim.onStrike`).
-    /// The Darkness that is not reserved now, as the stacks of a buff (`Sim.syncDarkness`).
+    /// A strike lands: who is hit, and each hit (`Engine.onStrike`).
+    /// The Darkness that is not reserved now, as the stacks of a buff (`Engine.syncDarkness`).
     let private syncDarkness (s: State) =
         let id = s.P.BUnreservedDarkness
         match s.P.Vitals with
@@ -6839,7 +6839,7 @@ module Flat =
         let primary =
             if (at s.Foes aimedAt).Life > 0.0 then aimedAt
             else
-                // (on a map the player's skill lands where it was aimed, `Sim.onStrike`)
+                // (on a map the player's skill lands where it was aimed, `Engine.onStrike`)
                 match s.Main.Fight.March with
                 // (what springs from the impact springs from there though its enemy is dead)
                 | Some _ when p.IsPlayer && (match (at p.Skills sid).Skill.Delivery with Projectiles pr -> pr.FromImpact | _ -> false) -> aimedAt
@@ -6860,7 +6860,7 @@ module Flat =
                         | Some d -> s.FoeIds.[d.Name]
                         | None -> -1
                 | _ -> s.Aimed
-        // a teleporting strike on a march takes the player to whom it strikes (`Sim.onStrike`)
+        // a teleporting strike on a march takes the player to whom it strikes (`Engine.onStrike`)
         if primary >= 0 && p.IsPlayer && s.Main.Fight.March.IsSome && (at p.Skills sid).Flickers > 0.0 then
             let e = (at s.Foes primary).Def
             let d = Vec.length e.Position
@@ -7029,7 +7029,7 @@ module Flat =
                     while not rest.IsEmpty do
                         hitEnemy s rng impact mult s.FoeIds.[rest.Head]
                         rest <- rest.Tail
-                // a bolt that leaves now, and a nova cast on it (`Sim.onStrike`)
+                // a bolt that leaves now, and a nova cast on it (`Engine.onStrike`)
                 if not direct && not passing && flagQ ev qLaunchesBolt then
                     s.A.Energy <- s.A.Energy |> Map.add "BoltAt" s.Time |> Map.add "BoltAngle" (Vec.angle primaryDef.Position)
                 let novaAt =
@@ -7116,7 +7116,7 @@ module Flat =
             release s
 
     /// A minion is killed: it leaves the fight; a reviving one comes back with the others
-    /// once none has died for its revive time (`Sim.killMinion`).
+    /// once none has died for its revive time (`Engine.killMinion`).
     let private killMinion (s: State) (rng: Rng) (who: int) =
         let body = (at s.Progs who).Body.Value
         leave s who
@@ -7138,7 +7138,7 @@ module Flat =
             schedule s due ERevive 0 0 due 0.0)
         enter s was
 
-    /// Killed minions come back, if no other has died since this was set (`Sim.reviveMinions`).
+    /// Killed minions come back, if no other has died since this was set (`Engine.reviveMinions`).
     let private reviveMinions (s: State) (due: float) =
         match s.Revival with
         | Some (t, _) when abs (t - due) < 1e-9 ->
@@ -7162,7 +7162,7 @@ module Flat =
 
     /// Mitigated damage onto a minion: energy shield first (chaos removes twice as much),
     /// then life. Before that it has recovered since it was last hit: its life regeneration,
-    /// and its energy shield recharge once the delay has passed (`Sim.hurtMinion`).
+    /// and its energy shield recharge once the delay has passed (`Engine.hurtMinion`).
     let private hurtMinion (s: State) (rng: Rng) (who: int) (damage: Map<DamageType, float>) =
         let p = at s.Progs who
         let body = p.Body.Value
@@ -7197,7 +7197,7 @@ module Flat =
         elif life <= 0.0 then killMinion s rng who
 
     /// A monster's hit at a minion: evasion, armour against physical damage, resistances
-    /// (`Sim.attackMinion`).
+    /// (`Engine.attackMinion`).
     let private attackMinion (s: State) (rng: Rng) (index: int) (who: int) =
         let p = s.Main
         let e = at s.Foes index
@@ -7232,14 +7232,14 @@ module Flat =
                 bump s p.CMinionHit
                 hurtMinion s rng who taken
 
-    /// Life for each Endurance Charge consumed (`Sim.enduranceLife`); the player is entered.
+    /// Life for each Endurance Charge consumed (`Engine.enduranceLife`); the player is entered.
     let private enduranceLife (s: State) (n: int) =
         match s.P.Vitals with
         | Some v when s.Main.Vitals.IsSome && n > 0 && v.LifePerEnduranceConsumed > 0.0 && v.Life > 1.0 ->
             s.Life <- min (max s.Life v.Life) (s.Life + v.LifePerEnduranceConsumed * float n)
         | _ -> ()
 
-    /// After a use's hits: the skill consumes its charges, unless they are kept (`Sim.step`).
+    /// After a use's hits: the skill consumes its charges, unless they are kept (`Engine.step`).
     let private onConsume (s: State) (rng: Rng) (charge: int) (sid: int) =
         let p = s.P
         let info = (at p.Skills sid)
@@ -7253,7 +7253,7 @@ module Flat =
         if (at s.A.BHas charge) && not spared then
             // "still count as consuming": the consumed-recently status starts either way
             markStatus s (at p.ConsumedRecently charge)
-            // mana for consuming power charges: once for the use, kept or not (`Sim.step`, ConsumeCharges)
+            // mana for consuming power charges: once for the use, kept or not (`Engine.step`, ConsumeCharges)
             (match p.Vitals with
              | Some v when charge = (at p.BCharges 0) -> gainMana s v 6 (v.Mana * p.ConsumePowerMana / 100.0)
              | _ -> ())
@@ -7280,7 +7280,7 @@ module Flat =
                 else removeBuff s charge
                 bump s info.CConsumed
 
-    /// Stacks of a resource arrive (`Sim.step`, GainStacks).
+    /// Stacks of a resource arrive (`Engine.step`, GainStacks).
     let private onGainStacks (s: State) (rng: Rng) (r: int) (n: int) =
         let p = s.P
         if r = p.BPowerCharge && (match Map.tryFind "PowerChargeLock" s.A.Energy with Some t -> s.Time <= t | None -> false) then bump s p.CBarred
@@ -7300,7 +7300,7 @@ module Flat =
             if (at p.IsCharge r) then markStatus s (at p.GainedRecently r)
             bump s (at p.CGained r)
 
-    /// A cycle picks its next variant (`Sim.step`, CycleTick).
+    /// A cycle picks its next variant (`Engine.step`, CycleTick).
     let private onCycle (s: State) (rng: Rng) (index: int) =
         let c = (at s.P.Cycles index)
         if c.Variants.Length = 0 then failwith "a cycle without variants"
@@ -7309,7 +7309,7 @@ module Flat =
         bump s (at c.Picked pick)
         schedule s (s.Time + c.Period) ECycle index 0 0.0 0.0
 
-    /// What happens on its own every few seconds (`Sim.onPeriodic`).
+    /// What happens on its own every few seconds (`Engine.onPeriodic`).
     let private onPeriodic (s: State) (rng: Rng) (index: int) =
         let p = s.P
         let pd = (at p.Periodics index)
@@ -7383,7 +7383,7 @@ module Flat =
                         bump s (at p.CLostOf r)
 
     /// A monster's hit at the player: evasion, deflection, armour, resistances, then energy
-    /// shield and life (`Sim.attackPlayer`, in its order).
+    /// shield and life (`Engine.attackPlayer`, in its order).
     let private attackPlayer (s: State) (rng: Rng) (index: int) =
         let p = s.P
         let e = (at s.Foes index)
@@ -7457,13 +7457,13 @@ module Flat =
                                     | None -> d
                             d * (Map.tryFind t v.TakenMult |> Option.defaultValue 1.0) * (1.0 + shocked / 100.0)
                               * (if blocked then v.BlockedDamageTaken / 100.0 else 1.0))
-                    // Scarred Faith: what mitigation kept of the hit's physical damage (`Sim.attackPlayer`)
+                    // Scarred Faith: what mitigation kept of the hit's physical damage (`Engine.attackPlayer`)
                     let preventedRecoup =
                         if v.RecoupPreventedPerPower <= 0.0 then 0.0
                         else
                             let prevented = max 0.0 ((Map.tryFind Physical unmitigated |> Option.defaultValue 0.0) - (Map.tryFind Physical taken |> Option.defaultValue 0.0))
                             prevented * v.RecoupPreventedPerPower / 100.0 * MonsterPower.ofRarity e.Def.Rarity * v.ESRecoveryRate
-                    // "X% of Physical Damage prevented Recouped as Life" (`Sim.attackPlayer`)
+                    // "X% of Physical Damage prevented Recouped as Life" (`Engine.attackPlayer`)
                     let preventedLife =
                         if v.RecoupPreventedLife <= 0.0 then 0.0
                         else
@@ -7553,7 +7553,7 @@ module Flat =
                             unlessCharm "Stunned" (fun () ->
                                 lock (Constants.playerLightStunDuration / v.StunRecovery) p.CPlayerStunned ()
                                 s.Stuns <- s.Time :: stuns
-                                // "if you've been Stunned Recently"; life regenerated over a second (`Sim.attackPlayer`)
+                                // "if you've been Stunned Recently"; life regenerated over a second (`Engine.attackPlayer`)
                                 markStatus s p.BStunnedRecently
                                 if v.RegenOnStun > 0.0 then
                                     s.Recoups <- (s.Time + Constants.stunRegenSeconds, v.RegenOnStun / 100.0 * pools.Life / Constants.stunRegenSeconds, PLife) :: s.Recoups)
@@ -7584,7 +7584,7 @@ module Flat =
 
     /// A monster's attack goes at the player or at one of the minions in its reach, each as
     /// likely as the other. A melee minion fights at the monster; the others stand where the
-    /// player does (`Sim.enemyAttack`).
+    /// player does (`Engine.enemyAttack`).
     let private enemyAttack (s: State) (rng: Rng) (index: int) =
         let p = s.P
         let e = at s.Foes index
@@ -7618,7 +7618,7 @@ module Flat =
         if on then (if not (at s.A.BHas id) then setBuff s id 1 infinity [])
         elif (at s.A.BHas id) then removeBuff s id
 
-    /// The player's life and mana state, as buffs conditions can read (`Sim.step`).
+    /// The player's life and mana state, as buffs conditions can read (`Engine.step`).
     let private playerStates (s: State) (v: PlayerStats) =
         let p = s.P
         // "Your Life cannot change while you have Energy Shield": no recovery above where it started
@@ -7657,7 +7657,7 @@ module Flat =
             setState s (10 + 3 * k) (maxN > 0 && n >= maxN)
             setState s (11 + 3 * k) (n = 0)
             setState s (12 + 3 * k) (n = 0)
-        // the player's own ailments (`Sim.step`)
+        // the player's own ailments (`Engine.step`)
         let ignited = s.Burning |> List.exists (fun (until, _, t) -> t = Fire && until > s.Time)
         setState s 19 ignited
         setState s 20 ignited
@@ -7665,7 +7665,7 @@ module Flat =
         setState s 23 (v.EnergyShield > 0.0 && s.Shield >= v.EnergyShield)
         setState s 22 (p.AsksESRecharge && v.EnergyShield > 0.0 && s.Time - s.LastHit >= v.ESRechargeDelay && s.Time - s.LastHit < v.ESRechargeDelay + Constants.esRechargeStartedRecently)
 
-    /// What is planted in or beside the enemies (`Sim.step`): seeds set off by the damage
+    /// What is planted in or beside the enemies (`Engine.step`): seeds set off by the damage
     /// their enemy has taken (or its death: the blast then strikes the enemy aimed at), gone
     /// when their time is up; pustules that burst when their time is up or they hold all the
     /// Poison they can use; Ice Crystals destroyed once the enemy beside them has lost as much
@@ -7730,7 +7730,7 @@ module Flat =
             s.Agonies <- List.rev kept
         killed
 
-    /// What has run out of every actor's buffs goes (`Sim.prune`).
+    /// What has run out of every actor's buffs goes (`Engine.prune`).
     let private pruneAll (s: State) =
         pruneFoes s
         prune s
@@ -7741,7 +7741,7 @@ module Flat =
                     prune s
             enter s 0
 
-    /// What a kill by damage over time gives besides the rules for kills (`Sim.dotKillGains`);
+    /// What a kill by damage over time gives besides the rules for kills (`Engine.dotKillGains`);
     /// the player is the agent entered.
     let private dotKillGains (s: State) (rng: Rng) (e: Foe) (mine: bool) =
         let p = s.P
@@ -7791,7 +7791,7 @@ module Flat =
             gainRage s p.RageOnKill
             mark s p.BKilled 4.0
 
-    /// A killed enemy explodes (`Sim.step`, `Explosion`): those it kills are kills over time of the actor's.
+    /// A killed enemy explodes (`Engine.step`, `Explosion`): those it kills are kills over time of the actor's.
     let private explode (s: State) (rng: Rng) (target: int) (t: int) (percent: float) (radius: float) =
         let p = s.P
         let mine = s.Cur = 0
@@ -7821,7 +7821,7 @@ module Flat =
                     statusMap p e.SHas e.SStacks |> Map.iter (fun k _ -> reactDot s rng p.OnKillOf k e.Index)
             dotKillGains s rng e mine
 
-    /// The earliest event happens (`Sim.step`).
+    /// The earliest event happens (`Engine.step`).
     let private step (s: State) =
         let q = s.Queue
         q.Pop()
@@ -7888,7 +7888,7 @@ module Flat =
             let killsBefore = s.Kills.Count
             advance s t
             // the player's kills by damage over time set off the player's rules for kills and
-            // give what a kill gives (`Sim.step`, `Sim.dotKillGains`)
+            // give what a kill gives (`Engine.step`, `Engine.dotKillGains`)
             if s.Kills.Count > killsBefore then
                 for k in killsBefore .. s.Kills.Count - 1 do
                     let (name, _, when') = s.Kills.[k]
@@ -7903,13 +7903,13 @@ module Flat =
             syncPresence s
             syncGround s
             recover s dt
-            // (on a march the field is empty between a pack and the next: the player's turn comes again, `Sim.stepEvent`)
+            // (on a march the field is empty between a pack and the next: the player's turn comes again, `Engine.stepEvent`)
             if s.AliveCount = 0 && alive s && kind = EReady && who = 0 && (match s.Main.Fight.March with Some m -> s.Packs <= m.Packs | None -> false) then
                 schedule s (s.Time + Constants.serverTick) EReady 0 0 0.0 0.0
             if s.AliveCount > 0 && alive s then
                 pruneAll s
                 if not (s.Seeds.IsEmpty && s.Pustules.IsEmpty && s.Crystals.IsEmpty && s.Agonies.IsEmpty) then
-                    // kills by recorded damage coming due are kills over time (`Sim.killedOverTime`)
+                    // kills by recorded damage coming due are kills over time (`Engine.killedOverTime`)
                     for (target, mine) in planted s do
                         enter s 0
                         let e = at s.Foes target
@@ -7951,7 +7951,7 @@ module Flat =
                 // rage: regenerated all the time, lost once none has been gained for a while
                 (let have = stacksOf s p.BRage
                  if not (dt <= 0.0 || p.MaxRage <= 0 || (p.RageRegen <= 0.0 && have = 0)) then
-                    // Rage is lost from when the delay is over: of dt, the part after it (`Sim.step`)
+                    // Rage is lost from when the delay is over: of dt, the part after it (`Engine.step`)
                     let losingFor = max 0.0 (s.Time - max (s.Time - dt) (s.A.RageAt + p.RageDelay))
                     // Berserk: life lost for every Rage held while Rage is not being lost (not below 1)
                     let berserkFor = if p.RageLoss <= p.RageRegen then dt else dt - losingFor
@@ -8028,7 +8028,7 @@ module Flat =
                             else removeBuff s a
                          | _ -> ())
                         enter s 0
-            // and the ground again: what the event left or lit is there at once (`Sim.step`)
+            // and the ground again: what the event left or lit is there at once (`Engine.step`)
             if not s.Grounds.IsEmpty then
                 enter s 0
                 syncGround s
@@ -8053,7 +8053,7 @@ module Flat =
 
     let private newKept (p: Program) : Kept = { Queue = Queue(); Evs = ResizeArray(); Vitals = p.VitalsKnown; Answers = ResizeArray(); Comps = ResizeArray(); Seeds = ResizeArray() }
 
-    /// An enemy as it comes into the fight (`fresh` in `Sim.runWith`): `root` is the enemy
+    /// An enemy as it comes into the fight (`fresh` in `Engine.runWith`): `root` is the enemy
     /// the fight names that it is, or that it replaces.
     let private makeFoe (shared: Dictionary<string, Entropy>) (ns: int) (info: EnemyInfo) (index: int) (root: int) (def: EnemyDef) : Foe =
         let e =
@@ -8372,7 +8372,7 @@ module Flat =
 
     /// Those that died in the last step are replaced: one of the same kind comes from where
     /// the first of them began, further out and somewhat to the side, and walks in
-    /// (`Sim.runWith`). `from`: the first of the kills that are new.
+    /// (`Engine.runWith`). `from`: the first of the kills that are new.
     let private replace (s: State) (from: int) =
         let p = s.Main
         let ns = p.StatusNames.Length
@@ -8418,7 +8418,7 @@ module Flat =
             |> Array.map (fun e -> e.Index)
         s.AliveStale <- true
 
-    /// A march's packs as they come (`Sim.runWith`, `supply`): one after the other as far
+    /// A march's packs as they come (`Engine.runWith`, `supply`): one after the other as far
     /// ahead as twice the monsters' aggro, and after the last of them the map's boss. Each
     /// enemy takes the place the program has for it.
     let private supply (s: State) =

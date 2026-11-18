@@ -815,7 +815,7 @@ module Setup =
         // Ice Nova cast on a Frostbolt: when the play style uses Frostbolt, its bolt is
         // followed (it flies at the speed of the game's Projectiles table, x the skill's
         // projectile speed, for the skill's duration), and a nova of a gem that "casts on" one
-        // can be cast on it (`Sim.onStrike`)
+        // can be cast on it (`Engine.onStrike`)
         let onBolts (skills: Skill list) =
             match used |> List.tryFind (fun (g, _) -> g = "Frostbolt") with
             | None -> skills

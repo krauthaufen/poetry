@@ -568,7 +568,7 @@ module StatMap =
         | "gain_accuracy_rating_equal_to_intelligence" -> one (Mod.flag (Named "AccuracyFromIntelligence"))
         | "support_inspiration_cost_+%_final" -> one (Mod.more ManaCost v)
         | "minions_deal_%_of_physical_damage_as_additional_chaos_damage" -> one (Mod.base' (ForMinions(GainAs(Physical, Chaos))) v)
-        // more attack damage by distance to the target (see Sim.hitEnemy)
+        // more attack damage by distance to the target (see Engine.hitEnemy)
         | "support_close_combat_attack_damage_+%_final_from_distance" -> one (Mod.base' (Named "CloseCombatMore") v |> Mod.whenever (SkillIs Attack))
         | "support_far_combat_attack_damage_+%_final_from_distance" -> one (Mod.base' (Named "FarCombatMore") v |> Mod.whenever (SkillIs Attack))
         // seconds added to the use time, not shortened by speed
@@ -579,7 +579,7 @@ module StatMap =
         | "base_minimum_channel_time_ms" | "base_melee_dash_range" | "main_hand_weapon_range_+"
         | "remnant_pickup_range_+%" | "immune_to_maim" | "immune_to_hinder" | "enemy_extra_damage_rolls_chance_%"
         | "action_can_be_used_in_upward_aiming_stance" | "projectiles_crossbow_barrage" -> Some Structural
-        // armour break (see Sim.hitEnemy)
+        // armour break (see Engine.hitEnemy)
         | "armour_break_physical_damage_%_dealt_as_armour_break" -> one (Mod.base' (Named "ArmourBreakOfPhysical") v)
         | "armour_break_equal_to_%_physical_damage_dealt_spells" -> one (Mod.base' (Named "ArmourBreakOfPhysical") v |> Mod.whenever (SkillIs Spell))
         | "armour_break_fire_damage_%_dealt_as_armour_break" -> one (Mod.base' (Named "ArmourBreakOfFire") v)
@@ -682,7 +682,7 @@ module StatMap =
         | id when id.StartsWith "triggered_by_" || id.StartsWith "monster_"
                   || ((id.StartsWith "spell_minimum_base_" || id.StartsWith "spell_maximum_base_") && id.EndsWith "_damage")
                   || (id.StartsWith "base_" && id.EndsWith "_damage_to_deal_per_minute") -> Some Structural
-        // Knockback (Sim.hitEnemy): which hits knock back, how far (a skill's own distance; more
+        // Knockback (Engine.hitEnemy): which hits knock back, how far (a skill's own distance; more
         // or less by how close the enemy is), and what scales it. How fast the monster is pushed
         // is nothing here: it is where it lands at once.
         | "global_knockback" | "knockback" -> one (Mod.base' (Named "KnockbackChance") 100.0)
@@ -745,7 +745,7 @@ module StatMap =
         | "culling_strike_threshold_+%" -> one (Mod.inc (Named "CullingThreshold") v)
         | "culling_strike_threshold_+%_vs_rare_or_unique_monsters" -> one (Mod.inc (Named "CullingThreshold") v |> Mod.whenever (EnemyHas "RareOrUnique"))
         | "culling_strike_threshold_+%_vs_immobilised_enemies" -> one (Mod.inc (Named "CullingThreshold") v |> Mod.whenever (EnemyHas "Immobilised"))
-        // what the attacker does to the enemy's resistance and damage taken (see Hit / Sim.hitEnemy)
+        // what the attacker does to the enemy's resistance and damage taken (see Hit / Engine.hitEnemy)
         | "freeze_applies_cold_resistance_+" -> one (Mod.base' (Named "EnemyResist:Cold") v |> Mod.whenever (EnemyHas "Frozen"))
         | "enemies_damage_taken_+%_while_cursed" -> one (Mod.inc (Named "EnemyDamageTaken") v |> Mod.whenever (EnemyHas "Cursed"))
         | "marked_enemy_damage_taken_+%" -> one (Mod.inc (Named "EnemyDamageTaken") v |> Mod.whenever (EnemyHas "Marked"))
@@ -785,7 +785,7 @@ module StatMap =
             one (Mod.inc (Damage AllDamage) v |> Mod.whenever (SkillIs Spell) |> Mod.whenever (WhileBuff "FullEnergyShield"))
         // Darkness (see Defence, takeDamage)
         | "darkness_per_level" -> one (Mod.base' (Named "DarknessPerLevel") v)
-        // "Gain X% of Damage as Extra Chaos Damage per 20 Unreserved Darkness" (Sim.syncDarkness)
+        // "Gain X% of Damage as Extra Chaos Damage per 20 Unreserved Darkness" (Engine.syncDarkness)
         | "gain_%_damage_as_chaos_from_unreserved_darkness" ->
             Some(Mods [ for t in DamageType.all -> Mod.base' (GainAs(t, Chaos)) v |> Mod.whenever (PerStack("UnreservedDarkness", 20.0)) ])
         | "maximum_darkness_+%" -> one (Mod.inc (Named "Darkness") v)
@@ -851,7 +851,7 @@ module StatMap =
         | "maximum_energy_shield_+%" -> one (Mod.inc MaxEnergyShield v)
         | "base_evasion_rating" -> one (Mod.base' Evasion v)
         | "evasion_rating_+%" -> one (Mod.inc Evasion v)
-        // a state of the fight's (Sim.step: the recharge delay since the last hit is over, by
+        // a state of the fight's (Engine.step: the recharge delay since the last hit is over, by
         // no more than 2 s)
         | "evasion_rating_+%_if_energy_shield_recharge_started_in_past_2_seconds" -> one (Mod.inc Evasion v |> Mod.whenever (WhileBuff "ESRechargeStartedRecently"))
         | "base_physical_damage_reduction_rating" -> one (Mod.base' Armour v)
@@ -1001,7 +1001,7 @@ module StatMap =
         // a slow on the player slows (the Chill of a monster's cold hit is the one slow there is)
         | "base_slow_potency_+%" -> one (Mod.inc (Named "SlowPotencyOnSelf") v)
         // "Debuffs you inflict have X% increased Slow Magnitude": the Maim and Hinder the
-        // character's hits leave slow the monsters that much more (Sim.Env.SlowMagnitude)
+        // character's hits leave slow the monsters that much more (Engine.Env.SlowMagnitude)
         | "base_debuff_slow_magnitude_+%" -> one (Mod.inc (Named "SlowMagnitude") v)
         // "Life Recovery from Flasks also applies to Energy Shield" (PlayerStats.LifeFlaskAlsoES)
         | "life_recovery_from_flasks_also_recovers_energy_shield" -> one (Mod.flag (Named "LifeFlaskAlsoES"))
@@ -1190,7 +1190,7 @@ module StatMap =
         | "grenade_skill_cooldown_count_+" -> one (Mod.base' (Named "ExtraCooldownUses") v |> Mod.whenever (SkillIs(Tag "Grenade")))
         | "grenade_fuse_duration_+%" -> one (Mod.inc (Named "GrenadeFuse") v)
         // Rageforged: "Supported Skills spend X Rage if possible to deal Y% more Damage", "Z% chance
-        // to gain the benefits of this Support without spending additional Rage" (Sim.startUse)
+        // to gain the benefits of this Support without spending additional Rage" (Engine.startUse)
         | "support_rageforged_consumes_X_rage_to_enrage_skill_use" -> one (Mod.base' (Named "RageforgedSpend") v)
         | "support_rageforged_enraged_damage_+%_final" -> one (Mod.base' (Named "RageforgedMore") v)
         | "rage_skip_consume_chance_%" -> one (Mod.base' (Named "RageSkipChance") v)
@@ -1449,7 +1449,7 @@ module StatMap =
             Some(Mods [ Mod.more (Damage AllDamage) v |> Mod.whenever (EnemyHas "Frozen"); Mod.flag (Named "Takes:Frozen") ])
         | "support_gem_consume_enemy_fully_broken_armour_to_gain_damage_+%_final" ->
             Some(Mods [ Mod.more (Damage AllDamage) v |> Mod.whenever (EnemyHas "FullyBrokenArmour"); Mod.flag (Named "Takes:FullyBrokenArmour") ])
-        // life costs (Sim.splitCost, Behaviours.lifeCost): "X% of Mana Costs Converted to Life
+        // life costs (Engine.splitCost, Behaviours.lifeCost): "X% of Mana Costs Converted to Life
         // Costs" (of a support's skill, of spells), "Skills gain a Base Life Cost equal to Base
         // Mana Cost", "Non-Channelling Spells cost an additional X% of your maximum Life",
         // "increased Life Cost Efficiency"

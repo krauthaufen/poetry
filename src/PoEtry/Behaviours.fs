@@ -826,7 +826,7 @@ module Behaviours =
     /// which cost Life Gain X% of Damage as Extra Physical Damage", "increased Spell Damage
     /// with Spells that cost Life"), on the skill and its parts; and "Supported Skills Gain X%
     /// of Damage as extra Physical Damage per 20 Life cost, up to 40%", by what a use costs in
-    /// life (as `Sim.splitCost` works it out; "an additional X% of your maximum Life" is not
+    /// life (as `Engine.splitCost` works it out; "an additional X% of your maximum Life" is not
     /// counted in, the character's life is not known where the skill is built).
     let lifeCost (charMods: ModDb) (skill: Skill) : Skill =
         let ctx = { Ctx.empty with SkillTags = skill.Tags; SkillName = skill.Name }
@@ -947,7 +947,7 @@ module Behaviours =
     /// Sigil of Power: a sigil for its duration whose buff grants more spell damage per Stage;
     /// "Gains a Stage when you Spend a total of X% of your Maximum Mana while in Area",
     /// "Minimum 1 second between gaining Stages". The player is taken to stand in it; it starts
-    /// with one Stage (guess). The engine counts the mana spent (Sim.sigilSpend).
+    /// with one Stage (guess). The engine counts the mana spent (Engine.sigilSpend).
     let sigilOfPower (db: GameDb) (charMods: ModDb) (setup: GemSetup) (skill: Skill) : Rule list =
         let raw = Gems.rawStats db charMods { setup with Supports = [] }
         let sum id = raw |> List.filter (fun (k, _) -> k = id) |> List.sumBy snd
@@ -968,7 +968,7 @@ module Behaviours =
     /// Demon Form: "You gain Demonflame every second you remain in demon form, causing your
     /// Life to be lost at an ever-increasing rate. Maximum 10 Demonflame. Revert to human form
     /// if you reach 1 Life". Cast speed while in the form, more spell damage per Demonflame.
-    /// The engine counts the Demonflame and takes the life (Sim.step); the buff carries the
+    /// The engine counts the Demonflame and takes the life (Engine.step); the buff carries the
     /// numbers. Returns the skill (not pressed again while in the form), the rule and the mods.
     let demonForm (db: GameDb) (charMods: ModDb) (setup: GemSetup) (skill: Skill) : (Skill * Rule list * Mod list) option =
         let raw = Gems.rawStats db charMods { setup with Supports = [] }
@@ -1774,7 +1774,7 @@ module Behaviours =
     /// Tornado that overlaps an Elemental Ground Surface absorbs that surface's Debuff, applying
     /// it to enemies inside the Tornado and causing the Tornado to deal extra damage of that
     /// element." The storm stands where it was cast for the skill's duration, with its radius;
-    /// "Limit N Tornadoes". What it does once it overlaps Ignited Ground: `Sim.syncGround`.
+    /// "Limit N Tornadoes". What it does once it overlaps Ignited Ground: `Engine.syncGround`.
     /// "Deals X damage per second of each absorbed Elemental Damage type": scaled as the
     /// skill's own damage over time is, by what the character has when the fight is prepared.
     /// With Advancing Storm ("originate from the player and move towards the target location")
