@@ -6,6 +6,117 @@ open PoEtry
 // (again, after PoEtry: where both have a record with a field of one name, the engine's is meant)
 open PoEtry.Engine
 
+/// Damage over time on one enemy for the time that passes (`dt`; `n` enemies share the
+/// count of how long each status was up): its life, the books, and its death if it comes.
+let sufferOverTime (dt: float) (n: float) (w: World) (e: EnemyState) : World =
+    // (nothing over time on it: only its statuses' time is counted, and it stays the
+    // very value it was, so what is remembered about it stays good)
+    if e.Dots.IsEmpty then
+      { w with Uptime = status e |> Map.fold (fun m k _ -> addf k (dt / n) m) w.Uptime }
+    else
+      let def = defender e
+      let bleedK = if e.Def.Moving then Constants.bleedMovingMultiplier else 1.0
+      let active = activeDots e
+      let parts =
+          active
+          |> List.map (fun d ->
+              let k = if d.Ailment = Some Bleed then bleedK else 1.0
+              d.Label, d.Dps * k * Ailments.dotTakenMult def d.Type)
+      let types =
+          active
+          |> List.map (fun d ->
+              let k = if d.Ailment = Some Bleed then bleedK else 1.0
+              DamageType.name d.Type, d.Dps * k * Ailments.dotTakenMult def d.Type)
+      let dps = parts |> List.sumBy snd
+      let span = if dps > 0.0 && e.Life <= dps * dt then e.Life / dps else dt
+      let life = e.Life - dps * span
+      let dead = life <= 1e-9
+      { w with
+          Enemies = Map.add e.Def.Name { e with Life = (if dead then 0.0 else life) } w.Enemies
+          DamageBy = parts |> List.fold (fun m (k, v) -> addf k (v * span) m) w.DamageBy
+          DamageByType = types |> List.fold (fun m (k, v) -> addf k (v * span) m) w.DamageByType
+          Uptime = status e |> Map.fold (fun m k _ -> addf k (span / n) m) w.Uptime
+          CorpsesUsed = corpsesAfter dead e.Def.Name (w.Time + span) w
+          Kills = if dead then (e.Def.Name, e.Def.Rarity, w.Time + span) :: w.Kills else w.Kills }
+
+/// On a march a monster the player is not near enough to sleeps, and wakes for good once
+/// the player is, or when there is nothing ahead of the player any more. Whether it
+/// sleeps still (`d`: how far it is from the player).
+let wakes (env: Env) (e: EnemyState) (d: float) (w: World) : bool * World =
+    match env.Fight.March with
+    | Some m when not (w.Woken.Contains e.Def.Name) ->
+        // (the room of the pack it came with: the player is in it once the pack's middle is half a spacing ahead or less)
+        let near =
+            if not m.Rooms then d - e.Def.Size <= m.Aggro
+            else
+                let pack = int (e.Def.Name.Substring(e.Def.Name.LastIndexOf '#' + 1).TrimEnd('+'))
+                w.Front - float (w.Packs - 1 - pack) * m.Spacing <= m.Spacing / 2.0
+        if near || w.Packs > m.Packs && not (w.Enemies |> Map.exists (fun _ x -> x.Life > 0.0 && x.Def.Position.X > 0.0))
+        then false, { w with Woken = w.Woken.Add e.Def.Name }
+        else true, w
+    | _ -> false, w
+
+/// A monster walks towards the player until it is in attack range (stopped, asleep or
+/// there already: it stands), slowed by what is on it.
+let walk (env: Env) (dt: float) (w: World) (e: EnemyState) : World =
+    match e.Def.Attack with
+    | Some atk when e.Life > 0.0 && w.Player.IsSome ->
+        let st = status e
+        let stopped = e.StunnedUntil > w.Time || [ "Frozen"; "HeavilyStunned"; "Electrocuted"; "Pinned" ] |> List.exists st.ContainsKey
+        // (a slow weakens with rarity, and never brings a monster below a quarter of its speed)
+        let potency = Rarity.slowPotency e.Def.Rarity
+        let slow =
+            (if st.ContainsKey "Maimed" then max 0.0 (1.0 - Constants.maimSlow * env.SlowMagnitude * potency / 100.0) else 1.0)
+            * (if st.ContainsKey "Hindered" then max 0.0 (1.0 - Constants.hinderSlow * env.SlowMagnitude * potency / 100.0) else 1.0)
+            * (1.0 - (e.Debuffs |> Map.tryFind "Chilled" |> Option.map (fun x -> x.Mods |> List.sumBy (fun m -> m.Value)) |> Option.defaultValue 0.0) / 100.0)
+        // what its debuffs make of its movement speed (Jagged Ground, "Hindered, with 15% reduced Movement Speed")
+        let slow = if e.Debuffs.IsEmpty then slow else slow * Rarity.slowed e.Def.Rarity (max 0.0 (Mods.more Ctx.empty [ Named "MovementSpeed" ] (defender e).Mods))
+        let slow = max Constants.slowFloor slow
+        let d = Vec.length e.Def.Position
+        let gap = d - e.Def.Size - atk.Range
+        let asleep, w = wakes env e d w
+        // (one that walks is moving: its Bleeding deals twice the damage)
+        if stopped || asleep || gap <= 0.0 then
+            if e.Def.Moving then { w with Enemies = w.Enemies |> Map.change e.Def.Name (Option.map (fun e -> { e with Def = { e.Def with Moving = false } })) } else w
+        else
+            let step = min gap (e.Def.Speed * slow * dt)
+            let pos = Vec.scale ((d - step) / d) e.Def.Position
+            { w with Enemies = w.Enemies |> Map.change e.Def.Name (Option.map (fun e -> { e with Def = { e.Def with Position = pos; Moving = true } })) }
+    | _ -> w
+
+/// A march: the player walks on until `t`, less so while a skill it uses holds it. Reckoned
+/// around the player, that is every enemy (and the packs to come) coming nearer.
+let playerWalksOn (env: Env) (t: float) (w: World) : World =
+    let dt = t - w.Time
+    match env.Fight.March with
+    | Some m when w.Player |> Option.forall (fun p -> p.Died.IsNone) ->
+        let held = max 0.0 (min t w.WalkHeldUntil - w.Time)
+        let met = m.Hold && (alive w |> List.exists (fun e -> Vec.length e.Def.Position - e.Def.Size <= m.Engage))
+        let ahead = w.Packs <= m.Packs || (w.Enemies |> Map.exists (fun _ e -> e.Life > 0.0 && e.Def.Position.X > 0.0))
+        let way = if met then 0.0 else m.Speed * (held * w.WalkKept + (dt - held))
+        if way <= 0.0 then w
+        elif ahead then
+            { w with
+                Walked = w.Walked + way
+                Front = w.Front - way
+                Enemies = w.Enemies |> Map.map (fun _ e -> if e.Life > 0.0 then { e with Def = { e.Def with Position = { e.Def.Position with X = e.Def.Position.X - way } } } else e) }
+        else
+            // nothing ahead any more: it walks to the nearest of what is left (one that
+            // shoots from where it stands does not come), until that is near enough
+            match alive w with
+            | [] -> w
+            | left ->
+                let near = left |> List.minBy (fun e -> Vec.length e.Def.Position - e.Def.Size)
+                let d = Vec.length near.Def.Position
+                let step = min way (d - near.Def.Size - m.Engage)
+                if step <= 0.0 || d <= 1e-9 then w
+                else
+                    let by = Vec.scale (step / d) near.Def.Position
+                    { w with
+                        Walked = w.Walked + step
+                        Enemies = w.Enemies |> Map.map (fun _ e -> if e.Life > 0.0 then { e with Def = { e.Def with Position = Vec.sub e.Def.Position by } } else e) }
+    | _ -> w
+
 let advance env t (w: World) =
     let dt = t - w.Time
     if dt <= 0.0 then
@@ -13,109 +124,10 @@ let advance env t (w: World) =
     else
         let living = alive w
         let n = float living.Length
-        let step (w: World) (e: EnemyState) =
-          // (nothing over time on it: only its statuses' time is counted, and it stays the
-          // very value it was, so what is remembered about it stays good)
-          if e.Dots.IsEmpty then
-            { w with Uptime = status e |> Map.fold (fun m k _ -> addf k (dt / n) m) w.Uptime }
-          else
-            let def = defender e
-            let bleedK = if e.Def.Moving then Constants.bleedMovingMultiplier else 1.0
-            let active = activeDots e
-            let parts =
-                active
-                |> List.map (fun d ->
-                    let k = if d.Ailment = Some Bleed then bleedK else 1.0
-                    d.Label, d.Dps * k * Ailments.dotTakenMult def d.Type)
-            let types =
-                active
-                |> List.map (fun d ->
-                    let k = if d.Ailment = Some Bleed then bleedK else 1.0
-                    DamageType.name d.Type, d.Dps * k * Ailments.dotTakenMult def d.Type)
-            let dps = parts |> List.sumBy snd
-            let span = if dps > 0.0 && e.Life <= dps * dt then e.Life / dps else dt
-            let life = e.Life - dps * span
-            let dead = life <= 1e-9
-            { w with
-                Enemies = Map.add e.Def.Name { e with Life = (if dead then 0.0 else life) } w.Enemies
-                DamageBy = parts |> List.fold (fun m (k, v) -> addf k (v * span) m) w.DamageBy
-                DamageByType = types |> List.fold (fun m (k, v) -> addf k (v * span) m) w.DamageByType
-                Uptime = status e |> Map.fold (fun m k _ -> addf k (span / n) m) w.Uptime
-                CorpsesUsed = corpsesAfter dead e.Def.Name (w.Time + span) w
-                Kills = if dead then (e.Def.Name, e.Def.Rarity, w.Time + span) :: w.Kills else w.Kills }
-        let w = living |> List.fold step w
+        let w = living |> List.fold (sufferOverTime dt n) w
         // monsters walk towards the player until they're in attack range
-        let move (w: World) (e: EnemyState) =
-            match e.Def.Attack with
-            | Some atk when e.Life > 0.0 && w.Player.IsSome ->
-                let st = status e
-                let stopped = e.StunnedUntil > w.Time || [ "Frozen"; "HeavilyStunned"; "Electrocuted"; "Pinned" ] |> List.exists st.ContainsKey
-                // (a slow weakens with rarity, and never brings a monster below a quarter of its speed)
-                let potency = Rarity.slowPotency e.Def.Rarity
-                let slow =
-                    (if st.ContainsKey "Maimed" then max 0.0 (1.0 - Constants.maimSlow * env.SlowMagnitude * potency / 100.0) else 1.0)
-                    * (if st.ContainsKey "Hindered" then max 0.0 (1.0 - Constants.hinderSlow * env.SlowMagnitude * potency / 100.0) else 1.0)
-                    * (1.0 - (e.Debuffs |> Map.tryFind "Chilled" |> Option.map (fun x -> x.Mods |> List.sumBy (fun m -> m.Value)) |> Option.defaultValue 0.0) / 100.0)
-                // what its debuffs make of its movement speed (Jagged Ground, "Hindered, with 15% reduced Movement Speed")
-                let slow = if e.Debuffs.IsEmpty then slow else slow * Rarity.slowed e.Def.Rarity (max 0.0 (Mods.more Ctx.empty [ Named "MovementSpeed" ] (defender e).Mods))
-                let slow = max Constants.slowFloor slow
-                let d = Vec.length e.Def.Position
-                let gap = d - e.Def.Size - atk.Range
-                // (on a march a monster the player is not near enough to sleeps)
-                // (and wakes for good once the player is, or when there is nothing ahead of the player any more)
-                let asleep, w =
-                    match env.Fight.March with
-                    | Some m when not (w.Woken.Contains e.Def.Name) ->
-                        // (the room of the pack it came with: the player is in it once the pack's middle is half a spacing ahead or less)
-                        let near =
-                            if not m.Rooms then d - e.Def.Size <= m.Aggro
-                            else
-                                let pack = int (e.Def.Name.Substring(e.Def.Name.LastIndexOf '#' + 1).TrimEnd('+'))
-                                w.Front - float (w.Packs - 1 - pack) * m.Spacing <= m.Spacing / 2.0
-                        if near || w.Packs > m.Packs && not (w.Enemies |> Map.exists (fun _ x -> x.Life > 0.0 && x.Def.Position.X > 0.0))
-                        then false, { w with Woken = w.Woken.Add e.Def.Name }
-                        else true, w
-                    | _ -> false, w
-                // (one that walks is moving: its Bleeding deals twice the damage)
-                if stopped || asleep || gap <= 0.0 then
-                    if e.Def.Moving then { w with Enemies = w.Enemies |> Map.change e.Def.Name (Option.map (fun e -> { e with Def = { e.Def with Moving = false } })) } else w
-                else
-                    let step = min gap (e.Def.Speed * slow * dt)
-                    let pos = Vec.scale ((d - step) / d) e.Def.Position
-                    { w with Enemies = w.Enemies |> Map.change e.Def.Name (Option.map (fun e -> { e with Def = { e.Def with Position = pos; Moving = true } })) }
-            | _ -> w
-        let w = alive w |> List.fold move w
-        // a march: the player walks on, less so while a skill it uses holds it; reckoned
-        // around the player, that is every enemy (and the packs to come) coming nearer
-        let w =
-            match env.Fight.March with
-            | Some m when w.Player |> Option.forall (fun p -> p.Died.IsNone) ->
-                let held = max 0.0 (min t w.WalkHeldUntil - w.Time)
-                let met = m.Hold && (alive w |> List.exists (fun e -> Vec.length e.Def.Position - e.Def.Size <= m.Engage))
-                let ahead = w.Packs <= m.Packs || (w.Enemies |> Map.exists (fun _ e -> e.Life > 0.0 && e.Def.Position.X > 0.0))
-                let way = if met then 0.0 else m.Speed * (held * w.WalkKept + (dt - held))
-                if way <= 0.0 then w
-                elif ahead then
-                    { w with
-                        Walked = w.Walked + way
-                        Front = w.Front - way
-                        Enemies = w.Enemies |> Map.map (fun _ e -> if e.Life > 0.0 then { e with Def = { e.Def with Position = { e.Def.Position with X = e.Def.Position.X - way } } } else e) }
-                else
-                    // nothing ahead any more: it walks to the nearest of what is left (one that
-                    // shoots from where it stands does not come), until that is near enough
-                    match alive w with
-                    | [] -> w
-                    | left ->
-                        let near = left |> List.minBy (fun e -> Vec.length e.Def.Position - e.Def.Size)
-                        let d = Vec.length near.Def.Position
-                        let step = min way (d - near.Def.Size - m.Engage)
-                        if step <= 0.0 || d <= 1e-9 then w
-                        else
-                            let by = Vec.scale (step / d) near.Def.Position
-                            { w with
-                                Walked = w.Walked + step
-                                Enemies = w.Enemies |> Map.map (fun _ e -> if e.Life > 0.0 then { e with Def = { e.Def with Position = Vec.sub e.Def.Position by } } else e) }
-            | _ -> w
+        let w = alive w |> List.fold (walk env dt) w
+        let w = playerWalksOn env t w
         { w with Time = t }
 
 /// Auras on enemies in the player's Presence: an enemy has them from when its body reaches
