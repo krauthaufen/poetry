@@ -120,7 +120,8 @@
       "columns": [
         "DisplayLevel",
         "LeechResistance",
-        "RareUniqueLeechResistance"
+        "RareUniqueLeechResistance",
+        "MoreDamageAgainstNonUnique"
       ]
     }
   ]

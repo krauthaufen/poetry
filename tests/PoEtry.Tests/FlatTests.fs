@@ -832,6 +832,16 @@ let run (test: string -> (unit -> unit) -> unit) =
         let enemy = { EnemyDef.make Rarity.defaults 80 Rare "Brute" (Vec.make 12.0 0.0) with Life = 1e12; Moving = true }
         same (Fight.single enemy player 25.0) seeds)
 
+    test "flat: a monster that walks is moving, and its Bleeding deals twice the damage" (fun () ->
+        let player = { Actor.make "Player" [ Mod.base' (AilmentChance Bleed) 100.0 ] [ spell "Shard" Physical 100.0 100.0 ] with Rotation = [ Actor.always "Shard" ]; Vitals = Some(PlayerStats.basic 1e9 0.0) }
+        let walker = { EnemyDef.make Rarity.defaults 80 Rare "Walker" (Vec.make 300.0 0.0) with Life = 1e12; Speed = 1.0 }
+        let bleed f =
+            let r = Sim.run f 1u
+            r.DamageBy |> Map.toList |> List.filter (fun (k, _) -> k.Contains "Bleed") |> List.sumBy snd
+        let walking, standing = bleed (Fight.single walker player 20.0), bleed (Fight.single { walker with Attack = None } player 20.0)
+        if standing <= 0.0 || abs (walking / standing - 2.0) > 0.05 then failwithf "bleeding dealt %g to the walker, %g to the one that stands" walking standing
+        same (Fight.single walker player 20.0) seeds)
+
     test "flat: mana, costs, a flask and leech; a skill that waits for mana" (fun () ->
         let vitals = { PlayerStats.basic 1000.0 120.0 with ManaRegen = 8.0; EnergyShield = 200.0; EnergyShieldRecharge = 40.0; LifeRegen = 5.0; StartLife = 0.6 }
         let flask = { Amount = 90.0; Duration = 3.0; ChargesPerUse = 20.0; MaxCharges = 60.0; ChargesPerSecond = 1.0; ChargeGainMult = 1.0; Instant = 0.3 }

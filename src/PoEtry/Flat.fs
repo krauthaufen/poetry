@@ -3731,7 +3731,13 @@ module Flat =
                                 else true
                             | _ -> false
                         // (one that has arrived walks no further: its statuses are not asked)
-                        if not asleep && not (gap <= 0.0) && not (stopped s e true) then
+                        let walks = not asleep && not (gap <= 0.0) && not (stopped s e true)
+                        // (one that walks is moving: what its Bleeding deals is worked out anew)
+                        if walks <> e.Def.Moving then
+                            e.Def <- { e.Def with Moving = walks }
+                            e.RatesVersion <- -1
+                            e.StatusStale <- true
+                        if walks then
                             let ailments = s.P.AilmentStatus
                             let potency = Rarity.slowPotency e.Def.Rarity
                             let slow =

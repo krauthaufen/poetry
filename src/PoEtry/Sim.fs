@@ -1360,11 +1360,13 @@ module Sim =
                             then false, { w with Woken = w.Woken.Add e.Def.Name }
                             else true, w
                         | _ -> false, w
-                    if stopped || asleep || gap <= 0.0 then w
+                    // (one that walks is moving: its Bleeding deals twice the damage)
+                    if stopped || asleep || gap <= 0.0 then
+                        if e.Def.Moving then { w with Enemies = w.Enemies |> Map.change e.Def.Name (Option.map (fun e -> { e with Def = { e.Def with Moving = false } })) } else w
                     else
                         let step = min gap (e.Def.Speed * slow * dt)
                         let pos = Vec.scale ((d - step) / d) e.Def.Position
-                        updateEnemyDef e.Def.Name pos w
+                        { w with Enemies = w.Enemies |> Map.change e.Def.Name (Option.map (fun e -> { e with Def = { e.Def with Position = pos; Moving = true } })) }
                 | _ -> w
             let w = alive w |> List.fold move w
             // a march: the player walks on, less so while a skill it uses holds it; reckoned

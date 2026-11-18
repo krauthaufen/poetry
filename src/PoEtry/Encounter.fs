@@ -130,6 +130,12 @@ module Rarity =
         let t = RarityData.leechResistance
         1.0 - t.[max 0 (min (t.Length - 1) (level - 1))] / 100.0
 
+    /// % more damage a minion of that level deals with hits and ailments against monsters that
+    /// are not unique (DefaultMonsterStats MoreDamageAgainstNonUnique: 3% at level 8, 50% from 25).
+    let minionMoreAgainstNonUnique level =
+        let t = RarityData.minionMoreAgainstNonUnique
+        t.[max 0 (min (t.Length - 1) (level - 1))]
+
     /// Default profiles, from the game's rarity monster mods: life, poise, curse and
     /// exposure effect, size. Rarity carries no resistances; those come from the
     /// monster and the area (scenario settings). Unique resists default to PoB's

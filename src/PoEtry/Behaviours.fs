@@ -2308,6 +2308,11 @@ module Behaviours =
                     let level = levelOf gem.Name gem.Level
                     let weapon, fixup = minionWeapon m level byName.IsSome
                     let minionMods = if fixup = 1.0 then minionMods else Mod.more (Damage AllDamage) ((fixup - 1.0) * 100.0) :: minionMods
+                    // minions deal more damage against what is not unique, by their level
+                    let minionMods =
+                        match Rarity.minionMoreAgainstNonUnique level with
+                        | 0.0 -> minionMods
+                        | more -> (Mod.more (Damage AllDamage) more |> Mod.whenever (Not(EnemyHas "Unique")) |> Mod.from "against non-unique") :: minionMods
                     // "Companions gain added Attack damage equal to x% of your main hand Weapon's damage"
                     let minionMods =
                         match Mods.sumBase Ctx.empty [ Named "CompanionWeaponDamage" ] charMods, sheet.Weapons with
