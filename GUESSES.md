@@ -18,234 +18,243 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
    whose description or behaviour changed.
 5. Go through the lists below; the wiki's version history of a skill says what changed.
 
-## Rules (164)
+## Rules (171)
 
 ### Hit damage
 
-| Rule | Source, and what is guessed | Confidence |
-|---|---|---|
-| Double damage | — | guess |
+| Rule | What is assumed | Source, and what is guessed | Confidence |
+|---|---|---|---|
+| Double damage | A hit with a chance to deal Double Damage simply deals twice its damage. No source says more, so nothing else is assumed. | — | guess |
 
 ### Mitigation
 
-| Rule | Source, and what is guessed | Confidence |
-|---|---|---|
-| Duration | game keyword text ("Fully Broken for 12 seconds"); the partial case is our reading | data / guess |
+| Rule | What is assumed | Source, and what is guessed | Confidence |
+|---|---|---|---|
+| Armour Break: Duration | Fully broken armour comes back after 12 seconds; the game says that. For armour that is only partly broken it says nothing, and the simulator lets it come back after the same 12 seconds. | game keyword text ("Fully Broken for 12 seconds"); the partial case is our reading | data / guess |
 
 ### Ailments
 
-| Rule | Source, and what is guessed | Confidence |
-|---|---|---|
-| Ailment durations | stat descriptions; Electrocute among the elemental ailments: recollection of the game's keyword | data; electrocute: guess |
+| Rule | What is assumed | Source, and what is guessed | Confidence |
+|---|---|---|---|
+| Ailment durations | Electrocute is counted among the elemental ailments, so "increased Duration of Elemental Ailments" lengthens it too. That is from memory of the game's keyword, not from the data. | stat descriptions; Electrocute among the elemental ailments: recollection of the game's keyword | data; electrocute: guess |
 
 ### Timing and the event engine
 
-| Rule | Source, and what is guessed | Confidence |
-|---|---|---|
-| Cooldown uses | stat descriptions; that "+1" is added before the doubling is a guess | data; order guess |
-| Triggered skills | use immediately, cost no time, respect their cooldown | guess per trigger |
-| Ice Nova on a Frostbolt | skill description, game table, gem data. What counts as "near" (nearer the target than the player) is a guess | data / guess |
+| Rule | What is assumed | Source, and what is guessed | Confidence |
+|---|---|---|---|
+| Cooldown uses | A skill with stored uses can get "+1 Cooldown Use" and a support that doubles them. The simulator adds first and doubles after (1 + 1, then twice: 4). The other order would give 3. | stat descriptions; that "+1" is added before the doubling is a guess | data; order guess |
+| Triggered skills | A triggered skill is used the moment its trigger fires and takes no time of the character's, but it still has to wait out its own cooldown. Assumed for every kind of trigger alike. | use immediately, cost no time, respect their cooldown | guess per trigger |
+| Ice Nova on a Frostbolt | Ice Nova cast "near" a flying Frostbolt bursts from the bolt. How near is near is not stated: the simulator takes it to work whenever the bolt is closer to the enemy than the player is. | skill description, game table, gem data. What counts as "near" (nearer the target than the player) is a guess | data / guess |
 
 ### Gems and items
 
-| Rule | Source, and what is guessed | Confidence |
-|---|---|---|
-| +N gem levels | — | guess (cap) |
-| Weapon local crit | — | guess |
+| Rule | What is assumed | Source, and what is guessed | Confidence |
+|---|---|---|---|
+| +N gem levels | "+N to Level of Skills" raises a gem above its own level, but not beyond the highest level the game's data has for that gem. Whether the game stops there too is not confirmed. | — | guess (cap) |
+| Weapon local crit | A weapon's critical hit chance is its base value plus what the weapon's own lines add, then times the weapon's own "increased". The order of the two is assumed. | — | guess |
 
 ### Encounters and geometry
 
-| Rule | Source, and what is guessed | Confidence |
-|---|---|---|
-| Rare monster modifiers | Mods.dat (Monster mods of domain 3 with SpawnWeight, Families), generated into RareModsData.fs by `tools/gamefiles/gen_rare_mods.py`; "Rare Monsters have up to 4 by default" (poe2db Monster Modifiers); how many of the four: guess | data; count: guess; on the monster: missing |
-| Enemies that explode when killed | stat descriptions | data; the radius (2 m), and that nothing of the character's scales the damage: guess |
-| Projectiles | — | guess (geometry), data (counts) |
-| Default spread | — | guess |
-| Fork | poe2db keyword text (Fork, Chain); the angle: the first game's wiki ("two new projectile travel ... at a 120º angle", via poedb); the remaining range and straight flight are guesses | data / guess |
-| Shocked Ground | keyword text (poe2db), stat description; game table BuffDefinitions (`shocked_ground`: no stats) | data / guess |
-| Slow magnitude | stat description; what counts as a slow: guess | guess |
-| Spark | game tables (GrantedEffectStatSets, Projectiles), gem text; user: cone widening with the number, gone on hit. The 15 degrees and the zigzag step are guesses | data / guess |
-| Full circle from the player | geometry | guess |
-| Damage per target | — | guess |
-| Resistances "treated as negated" | game text | guess (interaction with penetration/exposure order) |
-| States of a while ago | stat descriptions; the shared time of a count and that a repeated Ignite of one enemy counts are ours | data; guess |
-| Life per Endurance Charge consumed | stat description; "none when kept" is our reading of "consumed" | data; guess |
-| Chance to not remove charges | game text | guess (cap: Flicker Strike's equivalent is hard-capped at 75%) |
-| Projectiles of `ProjectilesNotFromUser` skills (Falling Thunder) | skill text, skill type | guess (geometry) |
-| Slam impact point | setting (default 15) | guess |
-| Walls and terrain chain | game text ("chain" = targeted) | guess (no-target fallback, chain range 3 m) |
+| Rule | What is assumed | Source, and what is guessed | Confidence |
+|---|---|---|---|
+| Light stuns on monsters | A hit can briefly stun a monster; the chance grows with the damage against its life. The game has a further constant for this chance (58) whose meaning is unknown, and it is left out. | keyword text Stun; Monster.ot `stun_base_duration_override_ms` = 500; GameConstants LightStunMinimumChance | data / guess |
+| Rare monster modifiers | A rare monster carries up to four modifiers. The simulator rolls one to four with equal odds; how the game picks the number is not known. The modifiers only matter for what the kill gives. | Mods.dat (Monster mods of domain 3 with SpawnWeight, Families), generated into RareModsData.fs by `tools/gamefiles/gen_rare_mods.py`; "Rare Monsters have up to 4 by default" (poe2db Monster Modifiers); how many of the four: guess | data; count: guess; on the monster: missing |
+| Enemies that explode when killed | "Enemies you Kill Explode": the explosion is taken to reach 2 metres, and its damage (a share of the corpse's life) is not raised by any of the character's damage bonuses. Neither is in the data. | stat descriptions | data; the radius (2 m), and that nothing of the character's scales the damage: guess |
+| Projectiles | Several projectiles are spread evenly in a fan towards the target, and each hits the first enemy in its path. How the game really arranges them differs by skill and is not in the data. | — | guess (geometry), data (counts) |
+| Default spread | The fan of several projectiles is 30 degrees wide in all unless the skill's data names an angle. | — | guess |
+| Fork | A projectile that forks splits in two, each 60 degrees off the old line (a number from the first game). They are taken to fly straight and only as far as the old one had left. | poe2db keyword text (Fork, Chain); the angle: the first game's wiki ("two new projectile travel ... at a 120º angle", via poedb); the remaining range and straight flight are guesses | data / guess |
+| Shocked Ground | A Shock can leave Shocked Ground under the enemy. The ground's Shock is taken to have the basic strength (20% more damage taken); the data gives it none. Only the shocked enemy is treated as standing in it. | keyword text (poe2db), stat description; game table BuffDefinitions (`shocked_ground`: no stats) | data / guess |
+| Slow magnitude | "Increased Slow Magnitude" of debuffs is applied to Maim and Hinder only. Chill and a curse's own slow are left as they are. Which debuffs the game counts as a slow here is assumed. | stat description; what counts as a slow: guess | guess |
+| Spark | Sparks spread wider the more there are and zigzag as they fly. The widening (15 degrees per spark) and the length of one zigzag step are not in the data. | game tables (GrantedEffectStatSets, Projectiles), gem text; user: cone widening with the number, gone on hit. The 15 degrees and the zigzag step are guesses | data / guess |
+| Full circle from the player | A skill that fires projectiles in a full circle is not aimed, so its first projectile points in a random direction and the rest follow evenly around. | geometry | guess |
+| Damage per target | When one use hits several enemies, each enemy gets its own damage roll. The game might roll once for the whole use instead. | — | guess |
+| Resistances "treated as negated" | With a chance to treat resistance "as negated", a positive resistance counts as its negative for that hit. Whether penetration and exposure are applied before or after the flip is assumed. | game text | guess (interaction with penetration/exposure order) |
+| States of a while ago | Bonuses "for each X recently" count stacks that all share one timer, restarted by each new one (the game lets each run out alone). Igniting the same enemy again counts again. | stat descriptions; the shared time of a count and that a repeated Ignite of one enemy counts are ours | data; guess |
+| Life per Endurance Charge consumed | "Recover Life for each Endurance Charge consumed": if a chance lets the character keep its charges, the simulator gives no life for them. That reads "consumed" strictly. | stat description; "none when kept" is our reading of "consumed" | data; guess |
+| Chance to not remove charges | Chances not to lose charges on use are simply added up, and at 100% charges are never lost. Flicker Strike is known to be capped at 75% in the game; other skills may have a hidden cap too. | game text | guess (cap: Flicker Strike's equivalent is hard-capped at 75%) |
+| Projectiles of `ProjectilesNotFromUser` skills (Falling Thunder) | Some skills fire projectiles from where they strike, not from the character (Falling Thunder). They are taken to start at the impact, fly outwards away from the player, and hit an enemy they start inside at once. | skill text, skill type | guess (geometry) |
+| Slam impact point | A slam lands a set distance in front of the character (1.5 metres unless changed), or on the enemy's centre if that is closer. | setting (default 15) | guess |
+| Walls and terrain chain | A projectile that can chain off terrain flies from the wall to the nearest enemy it has not hit, within 3 metres. With nobody in range it bounces like off a mirror. Range and fallback are assumed. | game text ("chain" = targeted) | guess (no-target fallback, chain range 3 m) |
 
 ### The player: pools, costs, incoming damage
 
-| Rule | Source, and what is guessed | Confidence |
-|---|---|---|
-| Jade | poe2db Keywords | data; never lost: guess |
-| Resistances | — | guess (no campaign penalty) |
-| Skill cost | skill data; PoB SupportManaMultiplier | data (efficiency formula: guess) |
-| Mana on kill | game text | guess (DoT kills) |
-| Monster hits | PoB enemy presets; rarity mod from Mods.dat | pob heuristic + guess |
-| Monster movement | maim −30% from BuffTemplates; hinder 30%: wiki Hinder; speed and range: guesses | guess |
-| Stun recovery | stat description; the stun's own length is a guess (see "Light stun on the player") | guess |
-| Flask effect duration | stat description; same amount, longer time as in PoE1's flask rules | guess |
-| Mana flask | item / data; base charges per kill and drink policy: guesses | data + guess |
-| Body armour scoped | game text | guess (order) |
-| Runic Ward | game item text | guess |
-| Total | game item text; poe.ninja's Spirit for the six corpus characters that differed (a sceptre in the other set, Spirit lines of items under "Cannot gain Spirit from Equipment", Spirit per 2 levels) | data; the other set's Spirit: guess |
-| Over budget | - | guess |
-| Minion counts | the player chooses this in game; the API doesn't say | guess |
-| Armour vs elemental | stat text; order a guess | guess |
-| Damage taken | stat text | guess (order) |
-| Life flask | player behaviour | guess |
-| Energy shield recharge started in the past 2 seconds | stat description; ES recharge rule above | data; below maximum: guess |
-| Low Energy Shield, low and full life | game constants | data; no shield: guess |
-| Defend with X% of Armour | stat descriptions | data; stacking: guess |
-| Ailments on the player | GameConstants "...Player" | data; using unmitigated damage is a guess |
-| Ignited by one's own critical hits | stat description; the stat's id ("if crit recently") for the 4 s; that it is mitigated like an Ignite is a guess | data / guess |
-| Buffs and debuffs that expire faster | stat descriptions; which effects count as buffs (the stat's id: "only buff category") is a guess | guess |
-| Slowing potency on the player | stat description; that it is a multiplier of its own is a guess | guess |
-| Light stun on the player | game constants; formula a guess; the regeneration: stat description | guess |
-| Scarred Faith | keystone text; what "prevented" covers and the start are guesses | data / guess |
-| Prevented damage recouped as life | stat description; what "prevented" covers is the reading used for Scarred Faith | data / guess |
-| Conduit | keystone text; that it is lost without allies is our reading of "instead" | data / guess |
-| Which monster | game data (PoB Minions / Spectres export); which variant a name means is not in the API | data; the variant by name is a guess |
-| Skills | game data | data; that the player commands whenever the cooldown allows is a guess |
-| Puppet Master | poe2db (Puppet Master: per stack values, 8 s, 5 stacks); BuffDefinitions `puppet_master` (which stats) | data; one clock for the stacks: guess |
-| Archon of Undeath | game data (BuffDefinitions, BuffTemplates) | data; one roll per gem and command: guess |
-| Minion modifiers on the player | stat descriptions; which lines count as companion damage (only those naming companions, not all minion damage) is a guess | data; guess |
-| Minions inflict Withered | stat text | data; 4 s is a guess |
-| The same minion gem twice | PoB lists both; that the tree's and the gem's are one is a guess | guess |
-| Count | 1 per gem, or the gem's pack size; how many a build reserves spirit for is unknown from the API | | guess, usually too low |
-| Who a monster attacks | monster tags are data; who is attacked is not known | guess |
-| Room for melee minions | sizes and ranges: game data (the wolves' collision size was lowered to the other minions' in 0.4.0c). The rings, measuring the range from the minion's centre, and the order are a guess. Getting stuck on the way (terrain, other monsters) is not modelled | data; guess |
-| Temporary minions | game data; renewing the oldest is a guess | data; guess |
-| Playing summoning skills | beside the main skill, a skill that raises temporary minions is used while fewer than its limit are out (Unearth: and there is a corpse or dead minion) | | guess |
-| Taking hits for the owner | stat text. Which of several takes it, and that it takes the damage as the player mitigated it, are guesses | data; guess |
-| Minion Instability | support text. The radius is not in its stats: 2 m | data; radius guess |
-| Kelari's Malediction | game data; "Summons 2 Beetles per Corpse consumed" from the wiki. That the player commands them at once is a guess | data; guess |
-| Totems | gem data; stat description | data; the simplifications are guesses |
-| Trinity | gem data | guess |
-| Aftershock | stat text | guess (same damage and area) |
-| Jagged Ground | poe2db keyword text, GameConstants `JaggedGroundMagnitude`, support gem data and descriptions. That an enemy stays in the patch is a guess | data / guess |
-| Curses that hinder | stat description; scaling with the enemy's curse effect is a guess | data / guess |
-| Limits of what stands | gem data, skill type `Limit`; when it is cast again: a way to play within the limit | data; play: guess |
-| Shapeshift skills | using one means "while Shapeshifted" conditions hold for the whole fight | | guess |
-| Onslaught on kill | stat descriptions; 4 s as the stat that names it | data; 4 s guess |
-| Thorns | poe2db keyword Thorns; that modifiers to all damage apply and the base critical chance of 0 are ours | data; guess |
-| Life and energy shield lost on use | stat description; that a triggered use loses nothing is ours | data; guess |
-| Arctic Armour | gem description and stats; that the burst counts the stage it takes, and that spell damage added by the character's lines adds to it once: ours | data; guess |
-| Ancestral Bond and more totems | stat descriptions; that the doubling comes after what adds to the limit, that minions counted by Spirit are not deducted first and that a character with the keystone has at least one totem: ours. "No Charge requirement for placing Totems" changes nothing here | data; guess |
-| Spirit shared by totems and minions | the even shares: as for several minion gems | guess |
-| Life regeneration granted to allies | stat description; "Base" as before increases: ours | data; guess |
-| Companion in your Presence | stat description; always beside the character: ours | guess |
-| Power counted by warcries | stat description; that the cap grows too: ours | data; guess |
-| Knockback | gem data (`global_knockback`, `base_knockback_distance`, `generic_knockback_*`), stat descriptions. The unit of the distance, the metre where none is named, and that bosses are immune (a guide says so; the wiki could not be read) are guesses | guess |
-| Resisting by the lowest resistance | stat description; that penetration applies after is a guess | data / guess |
-| A random element | stat description; the average in place of the choice | guess |
-| Additional Remnants | stat descriptions; adding the two up is a guess | guess |
-| Using them up | game rule | guess |
-| Marked and Blinded monsters' critical hits | stat descriptions; that the N seconds are the time it is Blinded | data; the time: guess |
-| Herald of Plague | gem description, `herald_of_agony_poison_spread_on_kill_radius_base_magnitude_to_grant` (its description: a radius in tenths of a metre) | data / guess |
-| Kills by damage over time | game: "on kill" effects are not limited to hits unless they say so; the owner rule is a simplification | guess |
-| Chains | game rule (recollection) | guess |
-| Herald of Ash | gem description + data | data; the ignite takes no further modifiers (guess); in the damage shares it is the herald's, not "Ignite" |
-| Item modifier magnitudes | item text as the API gives it | guess |
-| A cost by the second and the pool | the game ends a channel when its cost can no longer be paid; that the player then releases with the stages reached, and that every channel is held as long as the mana allows, is a play-style assumption | data; the stages held: guess |
-| Counting different skills used | stat descriptions; that the use being made counts itself | data; counting itself: guess |
-| Tempest Bell | `bell_hit_limit`, `bell_shockwave_cooldown_ms`; description | data / guess |
-| Lightning Warp | description ("Can also be used on Ball Lightning Projectiles", "Creates a Lightning Infusion on successful use") | guess |
-| Rain of Arrows | `active_skill_base_area_of_effect_radius`, `active_skill_base_secondary_area_of_effect_radius`; uniform landing is a guess | data / guess |
-| Volcano | `volcano_fires_projectiles_every_x_ms`, `volcano_initial_explosion_number_of_additional_projectiles_per_additional_stage`, the stat sets' radii; uniform landing is a guess | data / guess |
-| Combat Frenzy | gem data and description; the fixed beat is a simplification | data / guess |
-| Sigil of Power | `circle_of_power_*` gem stats and descriptions ("Gains a Stage when you Spend a total of {0}% of your Maximum Mana while in Area", "Minimum 1 second between gaining Stages") | data / guess |
-| Temper Weapon | `temper_weapon_empowers_per_strike`, `imbue_weapon_max_exerts`, `TemperWeaponCombustionPlayer` | data / guess |
-| Freezing Mark, Voltaic Mark | `*_damage_buff_damage_%_to_gain_as_cold`, `base_secondary_skill_effect_duration`, description | data / guess |
-| Spearfield | `spear_wall_cm_per_spear`, `hazard_damage_+%_final_for_first_500_ms_when_not_killed_by_self`; wiki Spearfield ("Spears emerge within a (4-6.9) metre length cone"); the cone's angle and spears spread evenly at random are guesses | data / guess |
-| Parts that go for other enemies | descriptions ("at nearby enemies", "at multiple other enemies", "in a cone behind it") | guess |
-| More parts of one use | stat sets of the gems; descriptions | data / guess |
-| An explosion per ailment consumed | descriptions | data / guess |
-| Forms that spend something | `bear_slam_spend_X_rage_for_stronger_slam`, stat sets, descriptions | data / guess |
-| Crushing Fear | description | guess |
-| Frost Bomb's exposure | "Initially applies {0}% Elemental Exposure and {1}% Exposure per pulse, up to a maximum of {2}%" (`active_skill_all_elemental_exposure_compounding_magnitude`, `_cap`) | data / guess |
-| The Stars Answer | game data, wiki. Active for the whole fight (it has no duration in the data, the cast is taken to be before the fight) is a guess; more stars per enemy in its radius after the first are not counted | data; guess |
-| Triskelion Cascade | game data. The pattern's measures are not in the data: impacts spaced like Spell Cascade's (1.5 radii), the arms turned at random. The share of the spell's cast time added to the cooldown is not counted | data; pattern guess |
-| Oil Ground | gem data, stat descriptions; one patch a use, patches that fall together being one, and a spray that covers exactly who is in the patch are ours | data / guess |
-| Covered in Oil | keyword texts (poe2db: Covered in Oil, Oil Ground), game table BuffDefinitions (`covered_in_oil`, `ground_oil`), gem data. Fire only, and only while in the patch: guesses | data / guess |
-| What lit Oil burns with | gem data (`skill_main_hand_total_attack_fire_damage_permyriad_to_add_as_unscalable_damage_to_oil_ground_ignite`). That the ground carries the Ignite that lit it: the user's account of the build (the ground burns with Flameblast's Ignite) and build guides ("this will spread the ignite from our Flameblast", "it will remember your ignite damage", "wait for all the ignited ground to die out and redo", and that any other source of Ignite spoils it; mobalytics, 0.5.5). Ground before enemies, and how the addition enters: ours | guess |
-| Ignited Ground | keyword text (poe2db; 6 s before 0.4), wiki Ignite (igniting aura effects, version history 0.4.0) | data; outright and without a gap: guess; other sources: missing |
-| Tornado | gem data, stat descriptions, wiki Tornado; build guides (the Tornado "will pick up the burning ground effect"). That it keeps the first Ignite it took, that the ground stays, and the extra damage of a storm scaled once: guesses | data / guess |
-| Ice Crystals (Grim Pillars) | gem stats (`wall_maximum_length`, `frost_wall_maximum_life`); wiki Ice Crystal ("larger enemies can walk through them and destroy them", 80% less within 0.5 s); user (no explosion on expiry); placement, one crystal per 0.8 m, and enemy life lost standing for damage to the crystal, are guesses | guess |
-| What a fight starts with | user: buffs that last may be up when the fight starts, what comes from the last kill is not, bosses have introductions far longer than 4 s | guess |
-| Darkness | stat descriptions (base_darkness, darkness_per_level, base_darkness_refresh_rate_ms) | data; that all types are reserved by one share, and that recoup counts only what got past: guess |
-| Life flasks that are never drunk | keystone text | data; that an instant share is spread like the rest: guess |
-| Life Remnants | gem data; the pickup time and the even recovery | data; pickup: guess; overflow: missing |
-| Weapon for a skill | - | guess |
-| Default attacks | play-style assumption | guess |
-| Charged variants | skill description; which part it replaces is read off Explosive Spear only | guess |
-| Glory | `active_skill_requires_X_glory`, `active_skill_generates_mp_%_glory_per_*`; monster power values are community numbers | data / guess |
-| Combo | `active_skill_requires_X_combo`-style gem stats | data / guess |
-| Skills that must be built up | in the automatic play style a skill needing Glory or Combo is used whenever it is ready; if it is the main skill, the weapon's default attack fills the time between | | guess |
-| Banners | the banner's additional effect in the gem data (`*BannerPlayer`) | data / guess |
-| Perfect Timing | `perfectly_timed` stat sets, `channel_end_duration_as_%_of_attack_time`; that the release comes on top of the attack time is a reading of the stat name | data / guess |
-| Chained attacks | `statset_index_for_<nth>_animation_combo_index`, `supplementary_stat_container_attack_speed_+%_final`; chain lengths and strike counts from the descriptions | data / guess |
-| Several strikes in one use | descriptions | guess |
-| Requiem (The Last Lament) | `rapidshot_requiem_active_duration_ms`, `_base_buff_count_requirement`, `_number_of_stacks_per_minute`, `crossbow_ammo_has_no_ammo`, the shot's two radii; wiki Requiem ("fixed duration of 12 seconds that cannot be scaled"); charged at the start and no anguish while it runs are guesses | data / guess |
-| Hailstorm Rounds | `crossbow_ammo_skill_has_passive_reloading`, `base_number_of_crossbow_bolts`, the shot's two radii, description; full at the start and uniform landing are guesses | data / guess |
-| Twister | `twister_base_movement_speed`, `twister_hit_interval_ms`, `minimum_per_projectile_spread_angle_degrees`, description ("Twisters fired at the same time can Hit the same target no more than once every 0.66 seconds"); how far it strays is a guess | data / guess |
-| Whirlwind | gem data and description; poe2db and the community wiki ("can gain stages by being used again on top of an existing Whirlwind"); forum thread 3758963 for the duration; the start is our assumption | data / guess |
-| Wind skills boosted by elemental ground | stat descriptions; which one counts without the multiple line is a guess | data / guess |
-| Ball Lightning | `ball_lightning_base_hit_frequency_ms`; game table Projectiles (BallLightningPlayer 400), read as 40 units per second | data / guess |
-| Living Bomb | `living_bomb_damage_threshold_%_of_ailment_threshold`, `living_bomb_base_number_of_bombs_allowed`; that it fizzles when its time is up is a reading of the description | data / guess |
-| Per block chance, per lowest attribute | stat descriptions; PoB for the lucky question | guess |
-| While moving | user | guess |
-| Which weapon set is in hand | - | guess |
-| Fear Incarnate | poe2db Keywords; one time for all stacks: guess | data / guess |
-| Totems | - | guess |
-| Flames of Chayula | skill data; 8 s and the colours from poe2db patch notes; cap of ten from PoB; pick-up is a guess | guess |
-| Low life | user: low life must be justified by the build | guess |
-| Hollow Palm Technique | keystone text; damage by level: poe2db "Unarmed Flat Damage"; attack time and base crit: PoE1's unarmed numbers (its damage rolls, 2 to 5-8 by class, are PoE2's) | data; attack time and base crit, and that modifiers for quarterstaves apply: guess |
-| Skills an item triggers | item text, skill types | data; "with this weapon" is taken as any attack (guess) |
-| Entangle | gem stats and description; that a vine deals its hit when it attaches, that the three are counted for each enemy and not for each fissure, and that the vine's second is no skill duration: ours | data; guess |
-| Damage that starts from a Unique enemy | stat descriptions; the enemy hit for the one it starts from: ours | data; guess |
-| Secondary radius as a width or an impact | the stat sets' description texts; Entangle's fissure as wide as its vines reach to either side and Shield Wall's width: ours | data; guess |
-| Ice Bite | stat description, support description ("infuses your damage with Cold damage"). The stat's id says "added cold attack damage": that it is for attacks only is not what the text says, so it is for all damage | data; all damage is a guess |
+| Rule | What is assumed | Source, and what is guessed | Confidence |
+|---|---|---|---|
+| Jade | Jade (1% physical damage reduction per stack, one stack a second, up to 10) is never lost once gained. The game's texts name no way to lose it. | poe2db Keywords | data; never lost: guess |
+| Resistances | Resistances are added up and capped. No penalty is taken off, as the campaign's resistance penalty is assumed not to exist in this game's endgame. | — | guess (no campaign penalty) |
+| Skill cost | "Cost Efficiency" is taken to divide a skill's cost: 25% efficiency makes it cost 1 / 1.25 of what it did. The exact formula is not confirmed. | skill data; PoB SupportManaMultiplier | data (efficiency formula: guess) |
+| Mana on kill | "Mana on kill" is given for kills by a hit. The row is undecided about kills by damage over time; a later rule (kills by damage over time) gives them the same. | game text | guess (DoT kills) |
+| Monster hits | How hard and how often monsters hit is a rough borrowed model: one hit every 1.5 seconds, 40% physical and 20% each element, sized by monster level. Real monsters each have their own attacks. | PoB enemy presets; rarity mod from Mods.dat; DefaultMonsterStats MoreElementalDamage, MoreChaosDamage (stats `non_player_minion_elemental_damage_+%_final_from_monster_level`, `..._chaos_...`, read as: of monsters that are no player's minions) | pob heuristic + guess; data (the more by level) |
+| Monster movement | Monsters walk straight at the player at 3.5 metres a second and stop 0.8 metres away. Both numbers are assumed; real monsters differ in speed and reach. | maim −30% from BuffTemplates; hinder 30%: wiki Hinder; speed and range: guesses | guess |
+| Flask effect duration | "Increased Flask Effect Duration" stretches a flask's recovery over more time without adding to the amount, as in the first game. | stat description; same amount, longer time as in PoE1's flask rules | guess |
+| Mana flask | The mana flask is drunk, at no cost in time, when mana is below twice the next skill's cost. A normal monster's kill gives it one charge. Both are assumed player behaviour and game values. | item / data; base charges per kill and drink policy: guesses | data + guess |
+| Body armour scoped | "+1 Energy Shield per X Evasion on Body Armour" is worked out from the body armour's evasion after that item's own increases. The order is assumed. | game text | guess (order) |
+| The character sheet: Runic Ward | Runic Ward from items is taken as the item shows it, times its increases. Nothing was available to check the total against. | game item text | guess |
+| Spirit: Total | Spirit from a sceptre counts only while its weapon set is in hand. If the persistent gems would not fit otherwise, the simulator assumes the other set is the one in hand. | game item text; poe.ninja's Spirit for the six corpus characters that differed (a sceptre in the other set, Spirit lines of items under "Cannot gain Spirit from Equipment", Spirit per 2 levels) | data; the other set's Spirit: guess |
+| Spirit: Over budget | The game's API does not say which persistent gems are switched on. All of them are simulated as active, and going over the Spirit budget is only reported. | - | guess |
+| Spirit: Minion counts | The API does not say how many minions a character runs. Unless you set it, each minion gem gets its free minions plus an even share of whatever Spirit is left. | the player chooses this in game; the API doesn't say | guess |
+| Incoming damage in detail: Armour vs elemental | "X% of Armour applies to Elemental Damage": the armour formula is used with that share of the armour, after resistance has been taken off. The order is assumed. | stat text; order a guess | guess |
+| Incoming damage in detail: Damage taken | "Increased damage taken" multiplies after armour and resistance; a flat reduction of physical damage comes off before armour. The order is assumed. | stat text | guess (order) |
+| Incoming damage in detail: Life flask | The life flask is drunk as soon as life falls below half. That is a stand-in for what a player does. | player behaviour | guess |
+| Incoming damage in detail: Leech resistance | Monsters resist leech more the higher their level (84% at level 70). The simulator multiplies what is leeched by what is left; that it works as a plain multiplier is assumed. | game table DefaultMonsterStats LeechResistance (permyriad; RareUniqueLeechResistance is equal); keyword text Life Leech: "Monsters have Leech Resistance that increases with monster level"; that it is a plain multiplier is our reading | data / guess |
+| Incoming damage in detail: Energy shield recharge started in the past 2 seconds | "Energy Shield Recharge started recently" is taken to begin whenever the recharge delay runs out, without checking that the shield was actually below full then. | stat description; ES recharge rule above | data; below maximum: guess |
+| Incoming damage in detail: Low Energy Shield, low and full life | "Low Energy Shield" means at most 35% of it. A character with no energy shield at all is treated as never being on Low Energy Shield. | game constants | data; no shield: guess |
+| Incoming damage in detail: Defend with X% of Armour | Several "Defend with X% of Armour" lines of one kind are added up; lines of different kinds (against projectiles, against critical hits) multiply. How they combine is assumed. | stat descriptions | data; stacking: guess |
+| Incoming damage in detail: Ailments on the player | Whether a monster's hit ignites, shocks, chills or freezes the player is worked out from the hit's damage before the player's defences. The game might use the damage after them. | GameConstants "...Player" | data; using unmitigated damage is a guess |
+| Incoming damage in detail: Ignited by one's own critical hits | The Infernalist's Ignite on herself from her own critical hits is reduced by fire resistance and the like, as any Ignite would be. The text does not say whether it is. | stat description; the stat's id ("if crit recently") for the 4 s; that it is mitigated like an Ignite is a guess | data / guess |
+| Incoming damage in detail: Buffs and debuffs that expire faster | "Buffs on you expire faster" shortens the timed buffs gained in a fight, not charges or permanent effects. Which effects the game counts as buffs here is assumed. | stat descriptions; which effects count as buffs (the stat's id: "only buff category") is a guess | guess |
+| Incoming damage in detail: Slowing potency on the player | "Slowing Potency of Debuffs on You" multiplies together with "Effect of Chill on you" rather than adding to it. | stat description; that it is a multiplier of its own is a guess | guess |
+| Incoming damage in detail: Light stun on the player | The chance for a hit to stun the player is the hit's damage against the player's life, with a bonus for physical and melee hits. The game's constants are known; how they combine is assumed. | game constants; wiki Stun: "Light Stun lasts 0.53 seconds", "Players have 50% more Light Stun Threshold per time they were Light Stunned in the past 4 seconds" (taken as one multiplier of 1 + 0.5 a stun), Character.ot `light_stun_threshold_+%_final_per_number_of_times_stunned_in_past_duration_from_ot` = 50 over 4000 ms; formula a guess; the regeneration: stat description | guess |
+| Keystones: Scarred Faith | Scarred Faith returns "prevented" physical damage as energy shield. Prevented is taken to mean everything the defences kept off a hit. The fight starts with full energy shield. | keystone text; what "prevented" covers and the start are guesses | data / guess |
+| Keystones: Prevented damage recouped as life | "Physical Damage prevented Recouped as Life": prevented is taken to mean everything the character's defences kept off a hit, as for Scarred Faith. | stat description; what "prevented" covers is the reading used for Scarred Faith | data / guess |
+| Keystones: Conduit | Conduit gives the character's charges to allies "instead". With no ally nearby the charge is taken to be lost, not kept. | keystone text; that it is lost without allies is our reading of "instead" | data / guess |
+| Minions: Which monster | A spectre or companion is known only by its monster's name. Where several monsters share the name, the one with the most skills is taken. | game data (PoB Minions / Spectres export); which variant a name means is not in the API | data; the variant by name is a guess |
+| Minions: Skills | Minions with a Command skill are taken to be commanded every time its cooldown is over, as if the player never missed it. | game data | data; that the player commands whenever the cooldown allows is a guess |
+| Minions: Puppet Master | Puppet Master stacks on a minion all run out together, 8 seconds after the last was gained. In the game each stack has its own timer. | poe2db (Puppet Master: per stack values, 8 s, 5 stacks); BuffDefinitions `puppet_master` (which stats) | data; one clock for the stacks: guess |
+| Minions: Archon of Undeath | Archon of Undeath can be gained when a Command skill is used. The simulator rolls the chance once per command for a whole group of minions, not once per minion. | game data (BuffDefinitions, BuffTemplates) | data; one roll per gem and command: guess |
+| Minions: Minion modifiers on the player | "Increases to Companion Damage also apply to you" passes on only lines that name companions, not lines for all minions. | stat descriptions; which lines count as companion damage (only those naming companions, not all minion damage) is a guess | data; guess |
+| Minions: Minions inflict Withered | "Minions have a chance to inflict Withered" names no duration. A stack is taken to last 4 seconds, like the player's own Withered on hit. | stat text | data; 4 s is a guess |
+| Minions: The same minion gem twice | A minion skill granted by the passive tree and the same gem in a socket are treated as one skill with one set of minions, not two. | PoB lists both; that the tree's and the gem's are one is a guess | guess |
+| Minions: Count | Where nothing better is known, a minion gem has one minion (or its pack). This is usually fewer than the character really has. | 1 per gem, or the gem's pack size; how many a build reserves spirit for is unknown from the API | | guess, usually too low |
+| Minions: Who a monster attacks | A monster's attack goes at the player or at one of the minions within its reach, each equally likely. Whom monsters really prefer is not known. | monster tags are data; who is attacked is not known | guess |
+| Minions: Room for melee minions | Melee minions need room around an enemy. They are placed in rings around it by their body size, and one that finds no room waits. Sizes are data; the ring arrangement is assumed. | sizes and ranges: game data (the wolves' collision size was lowered to the other minions' in 0.4.0c). The rings, measuring the range from the minion's centre, and the order are a guess. Getting stuck on the way (terrain, other monsters) is not modelled | data; guess |
+| Minions: Temporary minions | When all temporary minions are out, summoning again replaces the one closest to running out. Two kinds of duration bonus on them are added together, not multiplied. | game data; renewing the oldest is a guess | data; guess |
+| Minions: Playing summoning skills | A skill that raises temporary minions is pressed, beside the main skill, whenever fewer than its limit are out. | beside the main skill, a skill that raises temporary minions is used while fewer than its limit are out (Unearth: and there is a corpse or dead minion) | | guess |
+| Minions: Taking hits for the owner | "Damage is taken from your Companion's life before you": the first living companion takes its share, and takes it as already reduced by the player's defences. Both are assumed. | stat text. Which of several takes it, and that it takes the damage as the player mitigated it, are guesses | data; guess |
+| Minions: Minion Instability | Minion Instability makes a minion explode at low life. The explosion is taken to reach 2 metres; the data has no radius. | support text. The radius is not in its stats: 2 m | data; radius guess |
+| Minions: Kelari's Malediction | The beetles that Kelari's Malediction raises from corpses are taken to be sent to explode at once. | game data; "Summons 2 Beetles per Corpse consumed" from the wiki. That the player commands them at once is a guess | data; guess |
+| Totems, curses, buffs, damage over time: Totems | All of a gem's totems stand after one use of it, and totems cannot be killed. Placing each one and losing them to damage are left out. | gem data; stat description | data; the simplifications are guesses |
+| Totems, curses, buffs, damage over time: Aftershock | An Aftershock hits the same area again for the same damage. That it may land a little beside the first hit is ignored. | stat text | guess (same damage and area) |
+| Totems, curses, buffs, damage over time: Jagged Ground | Jagged Ground slows enemies in it. An enemy hit where the ground appears is taken to stay in it for its whole time. | poe2db keyword text, GameConstants `JaggedGroundMagnitude`, support gem data and descriptions. That an enemy stays in the patch is a guess | data / guess |
+| Totems, curses, buffs, damage over time: Curses that hinder | A curse that also hinders (15% slower) slows less on enemies that curses are weaker on, such as bosses. That it scales this way is assumed. | stat description; scaling with the enemy's curse effect is a guess | data / guess |
+| Totems, curses, buffs, damage over time: Limits of what stands | A skill with a limit on what stands at once (storms, orbs) is recast evenly, so that the full number always stands. This is a way of playing, not a game rule. | gem data, skill type `Limit`; when it is cast again: a way to play within the limit | data; play: guess |
+| Totems, curses, buffs, damage over time: Shapeshift skills | A character that uses a shapeshift skill is treated as shapeshifted for the whole fight. | using one means "while Shapeshifted" conditions hold for the whole fight | | guess |
+| Named effects: Onslaught on kill | "Chance to gain Onslaught on kill" lasts 4 seconds where the line names no time, as the versions that do name one. | stat descriptions; 4 s as the stat that names it | data; 4 s guess |
+| Named effects: Thorns | Thorns damage is raised by bonuses to all damage but not by those for attacks or spells, and it cannot crit unless something adds a chance. | poe2db keyword Thorns; that modifiers to all damage apply and the base critical chance of 0 are ours | data; guess |
+| Named effects: Life and energy shield lost on use | "Lose Life when you use a Chaos Skill" is paid for skills the character uses itself, not for triggered ones. | stat description; that a triggered use loses nothing is ours | data; guess |
+| Named effects: Arctic Armour | Arctic Armour's burst deals damage for every stage held, including the one it then uses up. | gem description and stats; that the burst counts the stage it takes, and that spell damage added by the character's lines adds to it once: ours | data; guess |
+| Named effects: Ancestral Bond and more totems | Ancestral Bond doubles the totem limit after other bonuses to it are added, and always allows at least one totem. The order is assumed. | stat descriptions; that the doubling comes after what adds to the limit, that minions counted by Spirit are not deducted first and that a character with the keystone has at least one totem: ours. "No Charge requirement for placing Totems" changes nothing here | data; guess |
+| Named effects: Spirit shared by totems and minions | With Ancestral Bond totems cost Spirit. What is left is shared evenly between totem gems and minion gems. | the even shares: as for several minion gems | guess |
+| Named effects: Life regeneration granted to allies | "Your Base Life Regeneration is granted to Allies": base is taken as the regeneration before any increases. | stat description; "Base" as before increases: ours | data; guess |
+| Named effects: Companion in your Presence | "While your Companion is in your Presence" holds for the whole fight if the character has a companion, wherever it is and even while it is dead. | stat description; always beside the character: ours | guess |
+| Named effects: Power counted by warcries | "Increased Power counted by Warcries" also raises the most a warcry can count, not only what each monster counts for. | stat description; that the cap grows too: ours | data; guess |
+| What the attacker does to the enemy: Knockback | Knockback pushes a monster straight away at once. The distance is read from a skill number taken to be hundredths of a metre, 1 metre where none is given, and bosses are not moved. | gem data (`global_knockback`, `base_knockback_distance`, `generic_knockback_*`), stat descriptions. The unit of the distance, the metre where none is named, and that bosses are immune (a guide says so; the wiki could not be read) are guesses | guess |
+| What the attacker does to the enemy: Resisting by the lowest resistance | When enemies resist by their lowest elemental resistance, the hit's own penetration is applied to that lowest value afterwards. | stat description; that penetration applies after is a guess | data / guess |
+| What the attacker does to the enemy: A random element | "Extra Damage of a random Element" is given as a third each of fire, cold and lightning: the average, in place of one chosen at random each time. | stat description; the average in place of the choice | guess |
+| What the attacker does to the enemy: Additional Remnants | Different chances for an additional Remnant are added together. | stat descriptions; adding the two up is a guess | guess |
+| Warcries: Using them up | Attacks empowered by a warcry: each attack the player makes uses one up. Triggered attacks and the cry itself do not. | game rule | guess |
+| Warcries: Marked and Blinded monsters' critical hits | "Enemies have no Critical Damage Bonus for N seconds after you Blind them": those seconds are taken to be the time the enemy stays Blinded. | stat descriptions; that the N seconds are the time it is Blinded | data; the time: guess |
+| Heralds: Herald of Plague | Herald of Plague can Hinder the enemies its Poison spreads to. The Hinder is taken to last as long as that Poison. | gem description, `herald_of_agony_poison_spread_on_kill_radius_base_magnitude_to_grant` (its description: a radius in tenths of a metre) | data / guess |
+| Heralds: Kills by damage over time | An enemy that dies of damage over time counts as the player's kill and gives everything a kill gives that is not tied to a hit. The game may be stricter for some "on kill" effects. | game: "on kill" effects are not limited to hits unless they say so; the owner rule is a simplification | guess |
+| Heralds: Chains | A herald's own hits never set off heralds. This is from memory of the game, with no source to hand. | game rule (recollection) | guess |
+| Heralds: Herald of Ash | The Ignite that Herald of Ash spreads is a share of the overkill damage and is not raised by anything else the character has. | gem description + data | data; the ignite takes no further modifiers (guess); in the damage shares it is the herald's, not "Ignite" |
+| Heralds: Item modifier magnitudes | "Increased magnitudes of modifiers" on an item add nothing extra: the item's lines are taken to show the raised values already. | item text as the API gives it | guess |
+| Heralds: A cost by the second and the pool | A channelled skill is held as long as mana allows and released with the stages reached by then. That is how the simulator plays it; a player might stop earlier. | the game ends a channel when its cost can no longer be paid; that the player then releases with the stages reached, and that every channel is held as long as the mana allows, is a play-style assumption | data; the stages held: guess |
+| Heralds: Counting different skills used | "For each different Spell cast recently": the cast being made counts itself. | stat descriptions; that the use being made counts itself | data; counting itself: guess |
+| Heralds: Tempest Bell | Tempest Bell is taken to stand where the attacks land and to last for 10 hits. Its 6 second time limit is left out. | `bell_hit_limit`, `bell_shockwave_cooldown_ms`; description | data / guess |
+| Heralds: Lightning Warp | Lightning Warp is only used on an enemy that can be culled or into one's own Ball Lightning, and the ball is taken to be close enough to the enemy for its explosion to hit. | description ("Can also be used on Ball Lightning Projectiles", "Creates a Lightning Infusion on successful use") | guess |
+| Heralds: Rain of Arrows | Rain of Arrows: every arrow lands at a random point of the skill's area, each point equally likely. A boss in the middle is then hit by about a fifth of them. | `active_skill_base_area_of_effect_radius`, `active_skill_base_secondary_area_of_effect_radius`; uniform landing is a guess | data / guess |
+| Heralds: Volcano | Volcano's projectiles land at random within 3 metres, each point equally likely, so a boss is hit by about a quarter of them. | `volcano_fires_projectiles_every_x_ms`, `volcano_initial_explosion_number_of_additional_projectiles_per_additional_stage`, the stat sets' radii; uniform landing is a guess | data / guess |
+| Heralds: Combat Frenzy | Combat Frenzy can give a charge only "once every few seconds". The simulator makes it available again on a fixed beat, not that long after it was last used. | gem data and description; the fixed beat is a simplification | data / guess |
+| Heralds: Sigil of Power | Sigil of Power starts with one stage, and the character is taken to stand in it the whole time. | `circle_of_power_*` gem stats and descriptions ("Gains a Stage when you Spend a total of {0}% of your Maximum Mana while in Area", "Minimum 1 second between gaining Stages") | data / guess |
+| Heralds: Temper Weapon | Temper Weapon: an empowered attack sets off the fire burst with every hit, and counts as used up after its last hit lands. | `temper_weapon_empowers_per_strike`, `imbue_weapon_max_exerts`, `TemperWeaponCombustionPlayer` | data / guess |
+| Heralds: Freezing Mark, Voltaic Mark | Freezing Mark and Voltaic Mark stay on the enemy after giving their buff, so the buff is renewed for as long as the enemy stays frozen or electrocuted. | `*_damage_buff_damage_%_to_gain_as_cold`, `base_secondary_skill_effect_duration`, description | data / guess |
+| Heralds: Spearfield | Spearfield's spears appear at random spots in a cone in front of the character, taken to be 90 degrees wide. Only spears the enemy already stands on go off. | `spear_wall_cm_per_spear`, `hazard_damage_+%_final_for_first_500_ms_when_not_killed_by_self`; wiki Spearfield ("Spears emerge within a (4-6.9) metre length cone"); the cone's angle and spears spread evenly at random are guesses | data / guess |
+| Heralds: Parts that go for other enemies | Extra parts aimed "at other enemies" (Lightning Arrow's beams, Molten Blast's shrapnel) cannot hit the enemy that was struck, so they do nothing against a lone boss. | descriptions ("at nearby enemies", "at multiple other enemies", "in a cone behind it") | guess |
+| Heralds: More parts of one use | Skills with an extra part (a second slam, a star, a serpent) get exactly one of it per use, even where the game can make several. | stat sets of the gems; descriptions | data / guess |
+| Heralds: An explosion per ailment consumed | Skills that explode an ailment (Elemental Sundering, Snap) do nothing unless the enemy has that ailment, and always take it off. | descriptions | data / guess |
+| Heralds: Forms that spend something | Furious Slam spends Rage for its stronger form whenever it has enough, and Rend uses a Power Charge for its charged form whenever it has one. | `bear_slam_spend_X_rage_for_stronger_slam`, stat sets, descriptions | data / guess |
+| Heralds: Crushing Fear | Crushing Fear's shockwave happens only when the skill kills, where the enemy stood. Against a lone boss it never does anything. | description | guess |
+| Heralds: Frost Bomb's exposure | Frost Bomb's exposure grows with every pulse. A pulse every quarter second is assumed; in the game the pulses start slower and speed up, so early exposure is a little too high here. | "Initially applies {0}% Elemental Exposure and {1}% Exposure per pulse, up to a maximum of {2}%" (`active_skill_all_elemental_exposure_compounding_magnitude`, `_cap`) | data / guess |
+| Heralds: The Stars Answer | The Stars Answer needs 10,000 mana to cast. A character that has it is treated as having cast it before the fight, with it active throughout. | game data, wiki. Active for the whole fight (it has no duration in the data, the cast is taken to be before the fight) is a guess; more stars per enemy in its radius after the first are not counted | data; guess |
+| Heralds: Triskelion Cascade | Triskelion Cascade repeats a spell at six more spots on three arms. The spacing is copied from Spell Cascade and the arms point at random; the data has no measures. | game data. The pattern's measures are not in the data: impacts spaced like Spell Cascade's (1.5 radii), the arms turned at random. The share of the spell's cast time added to the cooldown is not counted | data; pattern guess |
+| Heralds: Oil Ground | One use of Oil Grenade leaves one patch of oil however many grenades it throws, and oil poured exactly onto an existing patch only renews it. | gem data, stat descriptions; one patch a use, patches that fall together being one, and a spray that covers exactly who is in the patch are ours | data / guess |
+| Heralds: Covered in Oil | An enemy counts as covered in oil only while it stands in the patch, and the oil's exposure lowers fire resistance only. | keyword texts (poe2db: Covered in Oil, Oil Ground), game table BuffDefinitions (`covered_in_oil`, `ground_oil`), gem data. Fire only, and only while in the patch: guesses | data / guess |
+| Heralds: What lit Oil burns with | Oil that is set alight burns with the strength of the Ignite that lit it, plus a fixed addition from the grenade. This follows players' accounts; the game's data says nothing. | gem data (`skill_main_hand_total_attack_fire_damage_permyriad_to_add_as_unscalable_damage_to_oil_ground_ignite`). That the ground carries the Ignite that lit it: the user's account of the build (the ground burns with Flameblast's Ignite) and build guides ("this will spread the ignite from our Flameblast", "it will remember your ignite damage", "wait for all the ignited ground to die out and redo", and that any other source of Ignite spoils it; mobalytics, 0.5.5). Ground before enemies, and how the addition enters: ours | guess |
+| Heralds: Ignited Ground | Burning ground ignites whoever stands on it at once and again the moment the Ignite ends. The game builds it up first and leaves a short gap. | keyword text (poe2db; 6 s before 0.4), wiki Ignite (igniting aura effects, version history 0.4.0) | data; outright and without a gap: guess; other sources: missing |
+| Heralds: Tornado | A Tornado that touches burning ground takes on that Ignite and keeps the first one it took. The burning ground itself is not used up. | gem data, stat descriptions, wiki Tornado; build guides (the Tornado "will pick up the burning ground effect"). That it keeps the first Ignite it took, that the ground stays, and the extra damage of a storm scaled once: guesses | data / guess |
+| Heralds: Ice Crystals (Grim Pillars) | Ice Crystals stand at random spots and break once the enemy beside them has lost as much life as one crystal has. Where they stand and what breaks them are both assumed. | gem stats (`wall_maximum_length`, `frost_wall_maximum_life`); wiki Ice Crystal ("larger enemies can walk through them and destroy them", 80% less within 0.5 s); user (no explosion on expiry); placement, one crystal per 0.8 m, and enemy life lost standing for damage to the crystal, are guesses | guess |
+| Heralds: What a fight starts with | A fight starts with full charges if the build can make them without kills, and with nothing that needs a recent kill. A boss's introduction is assumed to outlast such effects. | user: buffs that last may be up when the fight starts, what comes from the last kill is not, bosses have introductions far longer than 4 s | guess |
+| Heralds: Darkness | Darkness absorbs damage before life. Every damage type is absorbed by the same share, and recoup counts only the damage that got past it. | stat descriptions (base_darkness, darkness_per_level, base_darkness_refresh_rate_ms) | data; that all types are reserved by one share, and that recoup counts only what got past: guess |
+| Heralds: Life flasks that are never drunk | With life flasks that apply constantly, a flask's instant part is spread over time like the rest of its recovery. | keystone text | data; that an instant share is spread like the rest: guess |
+| Heralds: Life Remnants | A Life Remnant's life arrives evenly over the time it takes to walk over and pick it up, which is a setting, not a known number. | gem data; the pickup time and the even recovery | data; pickup: guess; overflow: missing |
+| Heralds: Weapon for a skill | If weapons in both sets could be used for a skill, the stronger one is. The API does not say which set a gem is bound to. | - | guess |
+| Heralds: Default attacks | A weapon's plain default attack is not woven into the rotation beside the main skill. | play-style assumption | guess |
+| Heralds: Charged variants | A skill's "Frenzy-Charged" part happens only when a charge is consumed and replaces the normal explosion. This was worked out on Explosive Spear alone. | skill description; which part it replaces is read off Explosive Spear only | guess |
+| Heralds: Glory | Glory builds faster against stronger monsters: a normal one counts 1, magic 2, rare 5, a boss 20. These are community numbers, not from the data. | `active_skill_requires_X_glory`, `active_skill_generates_mp_%_glory_per_*`; monster power values are community numbers | data / guess |
+| Heralds: Combo | Combo is never lost between hits, as the rotation is assumed never to pause long enough for it to run out. | `active_skill_requires_X_combo`-style gem stats | data / guess |
+| Heralds: Skills that must be built up | A skill that needs Glory or Combo is used as soon as it is ready; if it is the main skill, the plain attack fills the time in between. | in the automatic play style a skill needing Glory or Combo is used whenever it is ready; if it is the main skill, the weapon's default attack fills the time between | | guess |
+| Heralds: Banners | A banner is placed the moment its Glory is full, and the character is taken to stay inside its aura. | the banner's additional effect in the gem data (`*BannerPlayer`) | data / guess |
+| Heralds: Perfect Timing | Skills with a Perfect Timing window are always released perfectly. The release is taken to add its time on top of the channel. | `perfectly_timed` stat sets, `channel_end_duration_as_%_of_attack_time`; that the release comes on top of the attack time is a reading of the stat name | data / guess |
+| Heralds: Chained attacks | Attacks that are a chain of strikes (Ice Strike, Tempest Flurry) go through their strikes in order, and any other skill in between starts the chain over. | `statset_index_for_<nth>_animation_combo_index`, `supplementary_stat_container_attack_speed_+%_final`; chain lengths and strike counts from the descriptions | data / guess |
+| Heralds: Several strikes in one use | Rapid Assault's stabs are spread evenly over the use, and both cuts of Cross Slash always hit the target. Against small monsters the second is generous. | descriptions | guess |
+| Heralds: Requiem (The Last Lament) | Requiem starts the fight charged, and its charge only begins to build again once its 12 seconds of firing are over. | `rapidshot_requiem_active_duration_ms`, `_base_buff_count_requirement`, `_number_of_stacks_per_minute`, `crossbow_ammo_has_no_ammo`, the shot's two radii; wiki Requiem ("fixed duration of 12 seconds that cannot be scaled"); charged at the start and no anguish while it runs are guesses | data / guess |
+| Heralds: Hailstorm Rounds | Hailstorm Rounds starts the fight with all its bolts, and each bolt lands at a random spot within 4 metres of the target. | `crossbow_ammo_skill_has_passive_reloading`, `base_number_of_crossbow_bolts`, the shot's two radii, description; full at the start and uniform landing are guesses | data / guess |
+| Heralds: Twister | A twister wanders up to 1 metre to either side of its line as it travels. How far it really strays is not in the data. | `twister_base_movement_speed`, `twister_hit_interval_ms`, `minimum_per_projectile_spread_angle_degrees`, description ("Twisters fired at the same time can Hit the same target no more than once every 0.66 seconds"); how far it strays is a guess | data / guess |
+| Heralds: Whirlwind | Whirling Slash's whirlwind is taken to be at full strength when the fight starts, as if built up beforehand. It matters most for fights that last only seconds. | gem data and description; poe2db and the community wiki ("can gain stages by being used again on top of an existing Whirlwind"); forum thread 3758963 for the duration; the start is our assumption | data / guess |
+| Heralds: Wind skills boosted by elemental ground | If several lines say wind skills count as boosted by chilled, ignited or shocked ground, only the first applies, unless a line says several may. | stat descriptions; which one counts without the multiple line is a guess | data / guess |
+| Heralds: Ball Lightning | Ball Lightning travels 10 metres and zaps what is near it on the way. The 10 metres is assumed. | `ball_lightning_base_hit_frequency_ms`; game table Projectiles (BallLightningPlayer 400), read as 40 units per second | data / guess |
+| Heralds: Living Bomb | A Living Bomb seed that is not set off within its duration disappears without exploding. | `living_bomb_damage_threshold_%_of_ailment_threshold`, `living_bomb_base_number_of_bombs_allowed`; that it fizzles when its time is up is a reading of the description | data / guess |
+| Heralds: Flicker Strike | Flicker Strike's extra strikes each take a fixed fraction of the first one's time, and the Power Charges are consumed all together or not at all. | gem stat, description text; 0.5.0b Hotfix 12 for the cap | data / guess (all-or-none consumption, timing of the extra strikes) |
+| Heralds: Reach on a map | On a map a triggered skill reaches up to 8 metres, and a skill whose target died goes for someone within 2 metres of that spot. Both distances are assumed. | — | guess (both distances; before, a dead cause sent the skill to whoever was nearest to it, room after room) |
+| Heralds: Timing on a map | On a map the player starts a skill a little before an approaching enemy is in reach, so that it lands as the enemy arrives. | user ("the player sees enemies incoming and doesn't time the cast") | guess (how a player times it) |
+| Heralds: Grenades activating twice | A grenade's chance to "activate a second time" is rolled for each enemy its blast hits, not once for the whole blast. On average it is the same. | support text | guess (per hit) |
+| Heralds: A grenade's blast | A grenade is taken to come to rest at its target and to burst where the target is when the fuse ends. Bounces are not followed. | skill text ("unleashes a ... blast when its fuse expires", "Explosion radius is"); user ("it lies on the floor and detonates", "huge detonation radius") | data; guess (aimed where the enemy is at the burst) |
+| Heralds: Mirage Archer | A Mirage Archer has the owner's buffs, starts with its skills off cooldown, and what it has shot still arrives after it vanishes. | gem text; game files (MirageArcherSpawnPlayer, SupportMirageArcherPlayer); user (uses back to back, re-rolled at once, "i keep two mirages as long as possible") | data; user (two); guess (the Mirage has the owner's buffs, fresh cooldowns, projectiles outlive it) |
+| Heralds: Per block chance, per lowest attribute | "Damage per 1% Chance to Block" counts the block chance before "Block is Lucky" raises it. The game might count the higher value its sheet shows. | stat descriptions; PoB for the lucky question | guess |
+| Heralds: While moving | "While moving" bonuses always hold if the build has any and all its skills can be used on the move: a character that gains from moving moves. | user | guess |
+| Heralds: Which weapon set is in hand | The API does not say which weapon set is in hand. The stronger set is taken for the character sheet and the defences. | - | guess |
+| Heralds: Fear Incarnate | Fear Incarnate stacks all share one timer that each new stack restarts. | poe2db Keywords; one time for all stacks: guess | data / guess |
+| Heralds: Totems | A totem uses its skill with the character's own modifiers and numbers ("per 100 maximum Mana" and the like). | - | guess |
+| Heralds: Flames of Chayula | Flames of Chayula are taken to be picked up the moment they appear. One in three is the purple kind that adds chaos damage, a number from patch notes. | skill data; 8 s and the colours from poe2db patch notes; cap of ten from PoB; pick-up is a guess | guess |
+| Heralds: Low life | The fight starts at low life (35%) only if the build gains from low life and has a way to stay there. Otherwise it starts at full life. | user: low life must be justified by the build | guess |
+| Heralds: Hollow Palm Technique | Bare-handed attacks (Hollow Palm) are made 1.2 times a second with no base critical hit chance, numbers from the first game, and count as quarterstaff attacks for bonuses. | keystone text; damage by level: poe2db "Unarmed Flat Damage"; attack time and base crit: PoE1's unarmed numbers (its damage rolls, 2 to 5-8 by class, are PoE2's) | data; attack time and base crit, and that modifiers for quarterstaves apply: guess |
+| Heralds: Skills an item triggers | "Hits with this Weapon have a chance to trigger X" is rolled for every attack hit the player makes, without checking that this weapon dealt it. | item text, skill types | data; "with this weapon" is taken as any attack (guess) |
+| Heralds: Entangle | Entangle's vines deal their hit when they attach, and the limit of three vines is per enemy however many fissures stand. | gem stats and description; that a vine deals its hit when it attaches, that the three are counted for each enemy and not for each fissure, and that the vine's second is no skill duration: ours | data; guess |
+| Heralds: Damage that starts from a Unique enemy | Bonuses for explosions "originating from a Unique enemy" apply whenever the enemy that is hit is unique. | stat descriptions; the enemy hit for the one it starts from: ours | data; guess |
+| Heralds: Secondary radius as a width or an impact | Some skills hit a strip, not a circle (Entangle's fissure, Shield Wall). Where the data gives a length but no width, a width is assumed. | the stat sets' description texts; Entangle's fissure as wide as its vines reach to either side and Shield Wall's width: ours | data; guess |
+| Skills granted by supports: Ice Bite | Ice Bite's extra cold damage is given to all the character's damage, as its text says, though its internal name suggests attacks only. | stat description, support description ("infuses your damage with Cold damage"). The stat's id says "added cold attack damage": that it is for attacks only is not what the text says, so it is for all damage | data; all damage is a guess |
 
 ### Resources over time
 
-| Rule | Source, and what is guessed | Confidence |
-|---|---|---|
-| Rageforged | gem descriptions and stats (support_rageforged_consumes_X_rage_to_enrage_skill_use, support_rageforged_enraged_damage_+%_final, rage_skip_consume_chance_%). That the spending comes before the hits is the support's text ("spend ... to deal"); that only the use's own hits gain is our reading | data; guess |
-| "Consumes one of each Charge every X s" | skill text | data + guess (skip chance applies) |
-| Virtuous Barrier motes | skill text and data; supports not counted as skills | data + guess |
+| Rule | What is assumed | Source, and what is guessed | Confidence |
+|---|---|---|---|
+| Rageforged | Rageforged spends its Rage before the hits, and only the use's own hits are stronger, not explosions it sets off later. | gem descriptions and stats (support_rageforged_consumes_X_rage_to_enrage_skill_use, support_rageforged_enraged_damage_+%_final, rage_skip_consume_chance_%). That the spending comes before the hits is the support's text ("spend ... to deal"); that only the use's own hits gain is our reading | data; guess |
+| "Consumes one of each Charge every X s" | A skill that takes one of each charge every few seconds lets the character's chance to keep charges apply to that too. | skill text | data + guess (skip chance applies) |
+| Virtuous Barrier motes | Virtuous Barrier counts active skills for its mote limits. Support gems are not counted as skills. | skill text and data; supports not counted as skills | data + guess |
+| Observed per-skill behaviour | Falling Thunder's slam is a narrow cone in front of the character, taken to be 45 degrees wide. The data has no angle. | user; skill text | user; guess (angle) |
 
 ### Meta gems and triggers
 
-| Rule | Source, and what is guessed | Confidence |
-|---|---|---|
-| Infusion remnants | gem data; pickup delay a guess | data + guess |
-| Fuses | gem data, descriptions | data; where it explodes is a guess |
-| Verisium in the rotation | player behaviour | guess |
-| Charged Staff's shockwave | `ChargedStaffShockwavePlayer` (baseMultiplier, `active_skill_base_area_of_effect_radius` 50, `charged_staff_cone_angle` 45, `charged_staff_bonus_width` 15, conversion 80); gem text ("adding Lightning damage and a Lightning shockwave to your Quarterstaff Attacks"); user: its hits deal a little physical damage and leech with the group's support. One per use, and that it comes with the attack's first hit (user: it came too early when set off as the swing began), 45 degrees being the whole angle, and what the bonus width widens are guesses | data / guess |
-| Block | data / game text | data + guess (cap) |
-| Energy from melee hits / kills | gem stats; the scaling is taken to be the same as for crits | guess |
+| Rule | What is assumed | Source, and what is guessed | Confidence |
+|---|---|---|---|
+| Infusion remnants | An infusion remnant is picked up a set time after it drops. That time is a setting standing in for how fast a player walks over it. | gem data; pickup delay a guess | data + guess |
+| Fuses | A grenade explodes where it was aimed. Its bounces are not followed. | gem data, descriptions | data; where it explodes is a guess |
+| Verisium in the rotation | The skill that makes Verisium infusions is cast when ready, but only while the character has fewer than it can hold. | player behaviour | guess |
+| Charged Staff's shockwave | Charged Staff adds one shockwave to each quarterstaff attack, at the moment of the attack's first hit, in a narrow cone 45 degrees wide in all. | `ChargedStaffShockwavePlayer` (baseMultiplier, `active_skill_base_area_of_effect_radius` 50, `charged_staff_cone_angle` 45, `charged_staff_bonus_width` 15, conversion 80); gem text ("adding Lightning damage and a Lightning shockwave to your Quarterstaff Attacks"); user: its hits deal a little physical damage and leech with the group's support. One per use, and that it comes with the attack's first hit (user: it came too early when set off as the swing began), 45 degrees being the whole angle, and what the bonus width widens are guesses | data / guess |
+| Block | Block chance is capped at 50% plus whatever raises the maximum. | data / game text | data + guess (cap) |
+| Energy from melee hits / kills | Meta gems that gain energy from melee hits or kills gain it by the monster's power, the same way the ones that count critical hits do. | gem stats; the scaling is taken to be the same as for crits | guess |
 
 ### Runic Ward, remnants, Infernal Flame
 
-| Rule | Source, and what is guessed | Confidence |
-|---|---|---|
-| Ward remnants | data; overflow: user | data + user + guess |
+| Rule | What is assumed | Source, and what is guessed | Confidence |
+|---|---|---|---|
+| Ward remnants | A ward remnant is collected one second after it appears. | data; overflow: user | data + user + guess |
 
-## Constants (11)
+## Constants (13)
 
-| Constant | Value | What it stands for |
-|---|---|---|
-| `unarmedAttacksPerSecond` | `1.2` | Unarmed attacks per second and base critical hit chance: PoE1's numbers (its unarmed damage rolls, 2 to 5-8 by class, are PoE2's too). A guess. |
-| `explodeOnKillRadius` | `20.0` | How far the explosion of a killed enemy reaches ("Enemies you Kill Explode"): the data has no radius for it; 2 m is our guess. |
-| `crowdedWait` | `0.25` | A melee minion without room at the enemy looks again after this long. A guess. |
-| `playerLightStunDuration` | `0.35` | Seconds a light stun interrupts the player. GUESS (no player constant in the data). |
-| `orbPulseInterval` | `0.25` | Seconds between the pulses of a Frost Bomb (its exposure grows with each): not in the data; 0.25 s lets one bomb reach its cap just as it detonates. A guess. |
-| `iceCrystalWidth` | `8.0` | Width (units) of one Ice Crystal of a wall: a wall has one per so much of its length (Frost Wall, 5.6 m: seven). Not in the data. A guess. |
-| `twisterWander` | `10.0` | How far (units) a twister strays to either side of its line ("moves forward erratically"): not in the data. A guess: twice its own radius. |
-| `spearfieldCone` | `90.0` | Spearfield: "Spears emerge within a 6.9 metre length cone" in front of the player. The length is the skill's radius; the angle is in neither the data nor the wiki. A guess. |
-| `erraticFanStep` | `15.0` | Degrees between neighbouring erratic projectiles (Spark's spray widens with every spark; the angle is not in the data). A guess. |
-| `forkAngle` | `60.0` | Fork: the two projectiles of a fork fly "away from each other at a 120º angle" (the community wiki for the first game, quoted by poedb's Fork Support page): 60 degrees off the line each. Not in the data of this game. A guess. |
-| `knockbackUnitsPerDistance` | `10.0` | Knockback: a skill's "base_knockback_distance" is read as hundredths of a metre (Rapid Shot 30, Explosive Shot 400, Shield Charge 900): so many of them to a game unit. A guess: the numbers fit nothing else. And how far a hit pushes where the skill names no distance (Ice Nova, a passive's "Knocks Back Enemies"): a metre. A guess. |
+| Constant | Value | What is assumed | In the code's words |
+|---|---|---|---|
+| `unarmedAttacksPerSecond` | `1.2` | How fast bare hands attack and how often they crit: taken from the first game. | Unarmed attacks per second and base critical hit chance: PoE1's numbers (its unarmed damage rolls, 2 to 5-8 by class, are PoE2's too). A guess. |
+| `explodeOnKillRadius` | `20.0` | How far the explosion of a killed enemy reaches: 2 metres. | How far the explosion of a killed enemy reaches ("Enemies you Kill Explode"): the data has no radius for it; 2 m is our guess. |
+| `crowdedWait` | `0.25` | How long a melee minion with no room at the enemy waits before it looks for room again. | A melee minion without room at the enemy looks again after this long. A guess. |
+| `triggerStray` | `20.0` | A triggered skill whose cause has just died still hits whoever is within 2 metres of where it stood. | A triggered skill whose cause died of the triggering hit lands where the cause was: it still finds whoever is this near to there (units; a guess at what a spell landing on the corpse would reach), and nobody otherwise. |
+| `fallingThunderCone` | `45.0` | How wide the cone of Falling Thunder's slam is: 45 degrees in all. | Falling Thunder's slam: degrees its cone is wide in all (a guess; the data has only its length). |
+| `triggerReach` | `80.0` | On a map, how far from the player a triggered skill can find its target: 8 metres. | How far from the player a triggered skill finds its target on a map (units; a guess: the game does not say, and what causes a trigger can be a screen away). |
+| `orbPulseInterval` | `0.25` | The time between two pulses of a Frost Bomb. Chosen so that one bomb reaches its full exposure just as it explodes. | Seconds between the pulses of a Frost Bomb (its exposure grows with each): not in the data; 0.25 s lets one bomb reach its cap just as it detonates. A guess. |
+| `iceCrystalWidth` | `8.0` | How wide one Ice Crystal of a wall is, and so how many crystals a wall has (seven for Frost Wall). | Width (units) of one Ice Crystal of a wall: a wall has one per so much of its length (Frost Wall, 5.6 m: seven). Not in the data. A guess. |
+| `twisterWander` | `10.0` | How far a twister strays to either side of its line: twice its own radius. | How far (units) a twister strays to either side of its line ("moves forward erratically"): not in the data. A guess: twice its own radius. |
+| `spearfieldCone` | `90.0` | How wide the cone is in which Spearfield's spears appear: 90 degrees. | Spearfield: "Spears emerge within a 6.9 metre length cone" in front of the player. The length is the skill's radius; the angle is in neither the data nor the wiki. A guess. |
+| `erraticFanStep` | `15.0` | How much wider Spark's spray gets with every spark: 15 degrees. | Degrees between neighbouring erratic projectiles (Spark's spray widens with every spark; the angle is not in the data). A guess. |
+| `forkAngle` | `60.0` | The angle at which forked projectiles fly apart, from the first game's wiki. | Fork: the two projectiles of a fork fly "away from each other at a 120º angle" (the community wiki for the first game, quoted by poedb's Fork Support page): 60 degrees off the line each. Not in the data of this game. A guess. |
+| `knockbackUnitsPerDistance` | `10.0` | How to read a skill's knockback number as a distance (hundredths of a metre), and 1 metre where a skill names none. | Knockback: a skill's "base_knockback_distance" is read as hundredths of a metre (Rapid Shot 30, Explosive Shot 400, Shield Charge 900): so many of them to a game unit. A guess: the numbers fit nothing else. And how far a hit pushes where the skill names no distance (Ice Nova, a passive's "Knocks Back Enemies"): a metre. A guess. |

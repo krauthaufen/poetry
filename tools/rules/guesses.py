@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """Lists everything the simulator assumes without a source: the rows of RULES.md whose
 confidence says "guess" and the constants in Constants.fs documented as a guess.
-    python3 tools/rules/guesses.py        writes GUESSES.md
+    python3 tools/rules/guesses.py        writes GUESSES.md and the site's pages
+                                          (web/public/guesses.html, web/public/rules.html)
+
+What each guess means in plain words is in tools/rules/guesses-plain.txt (by hand); a guess
+without a line there is named when this runs.
 """
-import os, re
+import html, os, re
 
 root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
 rules = open(os.path.join(root, "RULES.md"), encoding="utf-8").read().split("\n")
@@ -29,21 +33,37 @@ out = ["# Open guesses", "",
        "5. Go through the lists below; the wiki's version history of a skill says what changed.",
        ""]
 
-section, rows = "", {}
+plain = {}
+for line in open(os.path.join(root, "tools", "rules", "guesses-plain.txt"), encoding="utf-8").read().split("\n"):
+    if line and not line.startswith("#") and "\t" in line:
+        key, text = line.split("\t", 1)
+        plain[key.strip()] = text.strip()
+missing = []
+
+# every row of the ledger: (section, subsection, cells), and the guesses among them
+section, sub, rows, ledger = "", "", {}, []
 for line in rules:
     if line.startswith("## "):
-        section = line[3:].strip()
+        section, sub = line[3:].strip(), ""
+    elif line.startswith("### "):
+        sub = line[4:].strip()
     elif line.startswith("|"):
         cells = [c.strip() for c in line.strip().strip("|").split(" | ")]
-        if len(cells) >= 3 and "guess" in cells[-1].lower() and cells[0] not in ("Rule", "Mechanic"):
-            rows.setdefault(section, []).append(cells)
+        if len(cells) >= 3 and cells[0] not in ("Rule", "Mechanic") and not set(cells[0]) <= set("-: "):
+            ledger.append((section, sub, cells))
+            if "guess" in cells[-1].lower():
+                key = (sub or section) + " / " + cells[0]
+                if key not in plain:
+                    missing.append(key)
+                rows.setdefault(section, []).append(cells + [sub, plain.get(key, "")])
 
 total = sum(len(v) for v in rows.values())
 out += [f"## Rules ({total})", ""]
 for sec, items in rows.items():
-    out += [f"### {sec}", "", "| Rule | Source, and what is guessed | Confidence |", "|---|---|---|"]
+    out += [f"### {sec}", "", "| Rule | What is assumed | Source, and what is guessed | Confidence |", "|---|---|---|---|"]
     for c in items:
-        out.append(f"| {c[0]} | {c[-2]} | {c[-1]} |")
+        name = (c[-2] + ": " if c[-2] else "") + c[0]
+        out.append(f"| {name} | {c[-1]} | {c[-4]} | {c[-3]} |")
     out.append("")
 
 found, doc = [], []
@@ -58,9 +78,84 @@ for line in consts:
             found.append((m.group(1), m.group(2), text))
         if s:
             doc = []
-out += [f"## Constants ({len(found)})", "", "| Constant | Value | What it stands for |", "|---|---|---|"]
+out += [f"## Constants ({len(found)})", "", "| Constant | Value | What is assumed | In the code's words |", "|---|---|---|---|"]
 for name, value, text in found:
-    out.append(f"| `{name}` | `{value.replace('|', '/')}` | {text.replace('|', '/')} |")
+    if "Constants / " + name not in plain:
+        missing.append("Constants / " + name)
+    out.append(f"| `{name}` | `{value.replace('|', '/')}` | {plain.get('Constants / ' + name, '')} | {text.replace('|', '/')} |")
 out.append("")
 open(os.path.join(root, "GUESSES.md"), "w", encoding="utf-8").write("\n".join(out))
 print(f"{total} rules, {len(found)} constants")
+for key in missing:
+    print("no plain words for:", key)
+
+# ---- the site's pages ----
+
+def rich(text):
+    """A cell of the ledger as html: `code` and **bold** kept."""
+    t = html.escape(text, quote=False)
+    t = re.sub(r"`([^`]+)`", r"<code>\1</code>", t)
+    return re.sub(r"\*\*([^*]+)\*\*", r"<b>\1</b>", t)
+
+def slug(text):
+    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+
+def kind(confidence):
+    """The weakest thing a confidence names, for its colour."""
+    c = confidence.lower()
+    for word in ("missing", "guess", "pob", "user", "data"):
+        if word in c:
+            return word
+    return "other"
+
+page = open(os.path.join(root, "tools", "rules", "page.html"), encoding="utf-8").read()
+
+def write(name, title, lead, nav, body):
+    text = page.replace("{{title}}", title).replace("{{lead}}", lead).replace("{{nav}}", nav).replace("{{body}}", body)
+    open(os.path.join(root, "web", "public", name), "w", encoding="utf-8").write(text)
+
+# the guesses: one card each, the plain words first, the ledger's own row behind a click
+body, nav = [], []
+for sec, items in rows.items():
+    nav.append(f'<a href="#{slug(sec)}">{html.escape(sec)} <i>{len(items)}</i></a>')
+    body.append(f'<h2 id="{slug(sec)}">{html.escape(sec)} <i>{len(items)}</i></h2>')
+    for c in items:
+        name = (c[-2] + ": " if c[-2] and c[-2] != c[0] else "") + c[0]
+        said = html.escape(c[-1]) if c[-1] else rich(c[-4])
+        body.append(f'<article class="row" data-find="{html.escape((name + " " + c[-1]).lower())}"><h3>{rich(name)}</h3><p>{said}</p>'
+                    f'<details><summary>the rule as the ledger has it</summary><p>{rich(" | ".join(c[1:-4]))}</p>'
+                    f'<p class="src"><b>Source:</b> {rich(c[-4])}</p><p class="src"><b>Confidence:</b> {rich(c[-3])}</p></details></article>')
+nav.append(f'<a href="#constants">Constants <i>{len(found)}</i></a>')
+body.append(f'<h2 id="constants">Constants <i>{len(found)}</i></h2>')
+for name, value, text in found:
+    said = plain.get("Constants / " + name, "")
+    body.append(f'<article class="row" data-find="{html.escape((name + " " + said).lower())}"><h3><code>{name}</code> = {html.escape(value)}</h3><p>{html.escape(said)}</p>'
+                f'<details><summary>in the code\'s words</summary><p>{rich(text)}</p></details></article>')
+write("guesses.html", "Open guesses",
+      f"What the simulator assumes without a source: {total} rules and {len(found)} constants. Each is waiting for a recording, "
+      'a number from the game\'s data or a word from the developers. If you can settle one, <a href="about.html#help">say so</a>.',
+      "".join(nav), "\n".join(body))
+
+# the whole ledger
+body, nav, last = [], [], ("", "")
+counts = {}
+for sec, sub, cells in ledger:
+    counts[sec] = counts.get(sec, 0) + 1
+for sec, sub, cells in ledger:
+    if sec != last[0]:
+        nav.append(f'<a href="#{slug(sec)}">{html.escape(sec)} <i>{counts[sec]}</i></a>')
+        body.append(f'<h2 id="{slug(sec)}">{html.escape(sec)} <i>{counts[sec]}</i></h2>')
+    if sub and (sec, sub) != last:
+        body.append(f'<h4>{html.escape(sub)}</h4>')
+    last = (sec, sub)
+    conf = cells[-1]
+    middle = cells[1:-1]
+    rule, source = (" | ".join(middle[:-1]), middle[-1]) if len(middle) >= 2 else (" | ".join(middle), "")
+    key = (sub or sec) + " / " + cells[0]
+    said = f'<p class="plain">{html.escape(plain[key])}</p>' if key in plain and "guess" in conf.lower() else ""
+    body.append(f'<article class="row {kind(conf)}" data-find="{html.escape((cells[0] + " " + rule).lower())}"><h3>{rich(cells[0])} <span class="chip">{rich(conf)}</span></h3>'
+                f'{said}<p>{rich(rule)}</p>' + (f'<p class="src"><b>Source:</b> {rich(source)}</p>' if source and source not in ("-", "—") else "") + '</article>')
+write("rules.html", "Rules ledger",
+      f"Every mechanic the simulator applies ({len(ledger)} rules), where it comes from and how sure it is. "
+      'The ones marked as a guess are explained in plain words on the <a href="guesses.html">open guesses</a> page.',
+      "".join(nav), "\n".join(body))
