@@ -97,7 +97,8 @@ Not modelled yet, and reported when a build uses it: buffs from minions, minions
 The code is under the [MIT licence](LICENSE).
 
 - Several formulas were taken over from [Path of Building for PoE2](https://github.com/PathOfBuildingCommunity/PathOfBuilding-PoE2) (MIT, © Path of Building Community); `RULES.md` marks each of them. No Path of Building code is included.
-- The game data under `data/game/`, the art and sprites under `web/public/` and all game text belong to Grinding Gear Games and are not covered by the licence above. The Fontin typeface is by exljbris.
+- **Game assets: © Grinding Gear Games.** Path of Exile 2's game data (`data/game/`), art, icons and sprites (`web/public/art`, `web/public/sprites`, the passive tree) and all game text are the property of Grinding Gear Games. They are **not** under the MIT licence and remain subject to Grinding Gear Games' terms.
+- The Fontin typeface is by exljbris, under its own licence.
 - PoEtry is a fan project and is not affiliated with or endorsed by Grinding Gear Games.
 
 Contributing: see [CONTRIBUTING.md](CONTRIBUTING.md) and <https://poetry.awx.at/about.html>.

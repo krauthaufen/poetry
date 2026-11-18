@@ -19,3 +19,14 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+--------------------------------------------------------------------------------
+
+This licence covers the source code of PoEtry only.
+
+Path of Exile 2, its game data (data/game/), art, icons and sprites
+(web/public/art, web/public/sprites, the passive tree) and all game text are
+the property of Grinding Gear Games. They are included for the simulator to
+work, are NOT licensed under the MIT licence, and remain subject to Grinding
+Gear Games' own terms. The Fontin typeface (web/public/fonts) is by exljbris
+and under its own licence.
