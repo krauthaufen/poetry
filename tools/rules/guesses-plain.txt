@@ -37,7 +37,7 @@ Encounters and geometry / Slam impact point	A slam lands a set distance in front
 Encounters and geometry / Walls and terrain chain	A projectile that can chain off terrain flies from the wall to the nearest enemy it has not hit, within 3 metres. With nobody in range it bounces like off a mirror. Range and fallback are assumed.
 # The player: pools, costs, incoming damage
 The player: pools, costs, incoming damage / Jade	Jade (1% physical damage reduction per stack, one stack a second, up to 10) is never lost once gained. The game's texts name no way to lose it.
-The player: pools, costs, incoming damage / Resistances	Resistances are added up and capped. No penalty is taken off, as the campaign's resistance penalty is assumed not to exist in this game's endgame.
+The player: pools, costs, incoming damage / Resistances	The campaign takes 60% off fire, cold and lightning resistance by its end. Every character is given the full penalty, also one still in the campaign, where it is smaller.
 The player: pools, costs, incoming damage / Skill cost	"Cost Efficiency" is taken to divide a skill's cost: 25% efficiency makes it cost 1 / 1.25 of what it did. The exact formula is not confirmed.
 The player: pools, costs, incoming damage / Mana on kill	"Mana on kill" is given for kills by a hit. The row is undecided about kills by damage over time; a later rule (kills by damage over time) gives them the same.
 The player: pools, costs, incoming damage / Monster hits	How hard and how often monsters hit is a rough borrowed model: one hit every 1.5 seconds, 40% physical and 20% each element, sized by monster level. Real monsters each have their own attacks.
