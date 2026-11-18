@@ -121,6 +121,8 @@
         "DisplayLevel",
         "LeechResistance",
         "RareUniqueLeechResistance",
+        "MoreElementalDamage",
+        "MoreChaosDamage",
         "MoreDamageAgainstNonUnique"
       ]
     }

@@ -546,6 +546,16 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         near 1.2 (Rarity.slowed Unique 1.2)
         near 0.25 Constants.slowFloor)
 
+    test "monsters: more elemental and chaos damage by level" (fun () ->
+        near 1.0 (Rarity.monsterDamageByType 83 Physical)
+        near 4.0 (Rarity.monsterDamageByType 83 Fire)
+        near 2.0 (Rarity.monsterDamageByType 83 Chaos)
+        near 1.17 (Rarity.monsterDamageByType 40 Cold)
+        near 1.0 (Rarity.monsterDamageByType 40 Chaos)
+        // the default hit: 40% physical, 20% of each element, the elements four times as much at 83
+        let a = EnemyDef.defaultAttack 83 Normal
+        near (a.Damage.[Physical] / 0.4 * 0.2 * 4.0) a.Damage.[Fire])
+
     test "stun recovery: a light stun on the player is over sooner" (fun () ->
         near 1.2 (load { blank with ExtraLines = [ "20% increased Stun Recovery" ] } Options.defaults).Vitals.StunRecovery
         near 1.0 (load blank Options.defaults).Vitals.StunRecovery

@@ -132,6 +132,16 @@ module Rarity =
 
     /// % more damage a minion of that level deals with hits and ailments against monsters that
     /// are not unique (DefaultMonsterStats MoreDamageAgainstNonUnique: 3% at level 8, 50% from 25).
+    /// What a monster's damage of a type is multiplied by for its level: 300% more elemental
+    /// and 100% more chaos damage from level 80 (DefaultMonsterStats MoreElementalDamage /
+    /// MoreChaosDamage; 17% / none from level 18 to 65, rising from 66).
+    let monsterDamageByType level (t: DamageType) =
+        let pick (table: float[]) = table.[max 0 (min (table.Length - 1) (level - 1))]
+        match t with
+        | Fire | Cold | Lightning -> 1.0 + pick RarityData.moreElementalDamage / 100.0
+        | Chaos -> 1.0 + pick RarityData.moreChaosDamage / 100.0
+        | Physical -> 1.0
+
     let minionMoreAgainstNonUnique level =
         let t = RarityData.minionMoreAgainstNonUnique
         t.[max 0 (min (t.Length - 1) (level - 1))]
@@ -187,7 +197,7 @@ module EnemyDef =
         let classMult = if rarity = Unique then 4.0 / 4.4 else 1.0 / 4.4
         let hit = Constants.monsterDamage level * 1.5 * classMult * rarityMult
         { Interval = 1.5
-          Damage = DamageProfile.mixed |> List.map (fun (t, k) -> t, hit * k) |> Map.ofList
+          Damage = DamageProfile.mixed |> List.map (fun (t, k) -> t, hit * k * Rarity.monsterDamageByType level t) |> Map.ofList
           Accuracy = Constants.monsterAccuracy level
           Range = 8.0
           // Monster base critical hit chance 5% (PoB enemy default)

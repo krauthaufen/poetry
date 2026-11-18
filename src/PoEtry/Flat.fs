@@ -6174,7 +6174,34 @@ module Flat =
         m
 
     /// One hit on one enemy (`Sim.hitEnemy`, in its order).
+    let private resonanceClocks = DamageType.elemental |> List.map (fun t -> "ResonanceClock:" + DamageType.name t) |> Array.ofList
+
+    /// Trinity's drain, reckoned when a hit of the player's is worked out (`Sim.syncResonance`).
+    let private syncResonance (s: State) =
+        let p = s.P
+        let mutable any = false
+        for t in 0 .. 2 do
+            match Map.tryFind (at resonanceClocks t) s.A.Energy with
+            | Some c when s.Time > c && int ((s.Time - c) * Constants.trinityDecayPerSecond) > 0 -> any <- true
+            | _ -> ()
+        if any then
+            let mutable sum = 0
+            for t in 0 .. 2 do
+                let b = at p.BResonance t
+                let clock = at resonanceClocks t
+                let drained =
+                    match Map.tryFind clock s.A.Energy with
+                    | Some c when s.Time > c -> int ((s.Time - c) * Constants.trinityDecayPerSecond)
+                    | _ -> 0
+                let n = max 0 (stacksOf s b - drained)
+                if drained > 0 then
+                    s.A.Energy <- Map.add clock (Map.find clock s.A.Energy + float drained / Constants.trinityDecayPerSecond) s.A.Energy
+                    if n > 0 then setBuff s b n infinity [] else removeBuff s b
+                sum <- sum + n
+            if sum > 0 then setBuff s p.BResonanceSum sum infinity [] else removeBuff s p.BResonanceSum
+
     let private hitEnemy (s: State) (rng: Rng) (sid: int) (mult: float) (target: int) =
+        if s.P.IsPlayer && (at s.A.BHas s.P.BResonanceSum) then syncResonance s
         let e = (at s.Foes target)
         if e.Life > 0.0 then
             let p = s.P
@@ -6723,12 +6750,9 @@ module Flat =
                         let mutable sum = 0
                         for t in 1 .. 3 do
                             let b = at p.BResonance (t - 1)
-                            // (the drain of an element not gained for 8 s: `Sim.hitEnemy`)
-                            let clock = "ResonanceClock:" + DamageType.name (List.item (t - 1) DamageType.elemental)
-                            let late = match Map.tryFind clock s.A.Energy with Some c -> s.Time > c | None -> false
-                            let had = if late then max 0 (stacksOf s b - int ((s.Time - Map.find clock s.A.Energy) * Constants.trinityDecayPerSecond)) else stacksOf s b
-                            if t = top then s.A.Energy <- Map.add clock (s.Time + Constants.trinityDecayDelay) s.A.Energy
-                            elif late then s.A.Energy <- Map.add clock s.Time s.A.Energy
+                            // (the element gained does not drain for 8 s: `syncResonance`)
+                            let had = stacksOf s b
+                            if t = top then s.A.Energy <- Map.add (at resonanceClocks (t - 1)) (s.Time + Constants.trinityDecayDelay) s.A.Energy
                             let n = if t = top then min 100 (had + int gain) else max 0 (had - int loss)
                             if n > 0 then setBuff s b n infinity [] else removeBuff s b
                             sum <- sum + n

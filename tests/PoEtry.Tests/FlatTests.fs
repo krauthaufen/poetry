@@ -1468,7 +1468,8 @@ let run (test: string -> (unit -> unit) -> unit) =
                 Mods = [ Mod.base' (Named "FlickersPerPowerCharge") 2.0; Mod.base' (Named "ChargeSkipConsume") 95.0 ] }
         let player =
             { Actor.make "Player" [ Mod.inc CritChance 50.0 ] [ flicker ] with
-                Vitals = Some { PlayerStats.basic 9000.0 500.0 with Evasion = 900.0; LifeRegen = 200.0; ManaRegen = 60.0 }
+                // (capped resistances: monsters of this level deal 200% more elemental damage)
+                Vitals = Some { PlayerStats.basic 9000.0 500.0 with Evasion = 900.0; LifeRegen = 200.0; ManaRegen = 60.0; Resist = Map.ofList [ Fire, 75.0; Cold, 75.0; Lightning, 75.0; Chaos, 0.0 ] }
                 Rules = [ { Hook = OnHit; Filter = AnySkill; Chance = 40.0; Reaction = GainResource("PowerCharge", 1) } ] }
         // one enemy that lasts: every use is the strike and two more per charge, in a use that much longer
         let boss = { EnemyDef.make Rarity.defaults 75 Unique "Boss" (Vec.make 10.0 0.0) with Life = 1e7 }
@@ -1493,6 +1494,47 @@ let run (test: string -> (unit -> unit) -> unit) =
         match (Sim.run (map true player) 1u).Ttk, (Sim.run (map true plain) 1u).Ttk with
         | Some a, Some b when a < b -> ()
         | a, b -> failwithf "expected the teleporting one sooner: %A, %A" a b)
+
+    test "flat: Trinity: Resonance not gained for 8 s drains away" (fun () ->
+        // every hit deals 10% more per 10 Resonance and gains 50 of it
+        let caster cooldown =
+            { Actor.make "Player"
+                  [ noIgnite; Mod.base' (Named "TrinityGain") 50.0; Mod.more (Damage AllDamage) 10.0 |> Mod.whenever (PerStack("Resonance", 10.0)) ]
+                  [ { spell "Flame" Fire 100.0 100.0 with BaseCrit = 0.0; Cooldown = Some cooldown; BaseTime = 0.2 } ] with
+                Rotation = [ Actor.always "Flame" ] }
+        let each cooldown seconds =
+            let fight = Fight.single (boss 1e12) (caster cooldown) seconds
+            same fight [ 1u; 2u ]
+            let o = Sim.run fight 1u
+            o.DamageBy.["Flame (hit)"] / float o.Counts.["hits:Flame"], o.Counts.["hits:Flame"]
+        let first, one = each 20.0 10.0
+        let slow, three = each 20.0 59.0
+        let fast, _ = each 5.0 59.0
+        if one <> 1 || three <> 3 then failwithf "expected one and three hits: %d, %d" one three
+        // 20 s apart: 12 s of draining 10 a second take all 50 again, every hit is like the first
+        if abs (slow - first) > 1e-6 * first then failwithf "20 s apart every hit like the first: %f, %f" slow first
+        // 5 s apart it is kept and grows
+        if fast < first * 1.3 then failwithf "5 s apart the Resonance stays: %f, %f" fast first)
+
+    test "flat: shatter: a monster killed while frozen leaves no corpse" (fun () ->
+        let raise = { Skill.make "Raise" [ Spell; Tag "Type:TargetsDestructibleCorpses" ] with Hits = []; BaseTime = 0.5 }
+        let frost buildup = { spell "Frost" Cold 5.0 6.0 with Delivery = AreaAroundSelf 80.0; BaseTime = 0.3; BaseCrit = 0.0; Mods = [ Mod.inc (Buildup Freeze) buildup ] }
+        let nova = { spell "Nova" Fire 20000.0 30000.0 with Delivery = AreaAroundSelf 80.0; BaseTime = 0.3 }
+        let zombies = [ for i in 1 .. 6 -> { Actor.make (sprintf "Zombie %d" i) [] [ spell "Chew" Physical 1.0 2.0 ] with Pool = Some "Zombies" } ]
+        let raiser buildup =
+            { Actor.make "Player" [ noIgnite ] [ frost buildup; nova; raise ] with
+                Rotation = [ { Use = "Frost"; When = fun v -> v.LastUsed = "" }; { Use = "Nova"; When = fun v -> v.LastUsed = "Frost" }; Actor.always "Raise" ]
+                Rules = [ { Hook = OnUse; Filter = Called "Raise"; Chance = 100.0; Reaction = WithCorpse(Summon("Zombies", 1, 30.0), SpendStack("PowerCharge", Summon("Zombies", 1, 30.0))) } ] }
+        let weak i = { EnemyDef.atLevel 70 600.0 with Name = sprintf "weak %d" i; Rarity = Normal; Position = Vec.make (10.0 + float i) (float i); Mods = []; Attack = None }
+        let summoned buildup =
+            let fight = { Fight.single (boss 1e12) (raiser buildup) 6.0 with Enemies = boss 1e12 :: [ for i in 1 .. 4 -> weak i ]; Minions = zombies }
+            same fight [ 1u; 2u; 3u ]
+            let o = Sim.run fight 1u
+            if o.Kills.Length <> 4 then failwithf "expected the four weak ones killed: %A" o.Kills
+            Map.tryFind "summoned:Zombies" o.Counts |> Option.defaultValue 0
+        // not frozen: four corpses, four zombies; frozen when killed: none
+        let plain, frozen = summoned 0.0, summoned 1e7
+        if plain <> 4 || frozen <> 0 then failwithf "expected 4 zombies from corpses and none from shattered ones: %d, %d" plain frozen)
 
     test "flat: a pack whose dead are replaced; minions beside the player in it" (fun () ->
         let weak i = { EnemyDef.make Rarity.defaults 75 (if i % 3 = 0 then Magic else Normal) (sprintf "pack %d" i) (Vec.make (12.0 + 4.0 * float i) (float (i % 4) * 6.0 - 9.0)) with Life = 400.0 + 150.0 * float i; Speed = 25.0 }

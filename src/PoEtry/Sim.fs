@@ -3215,7 +3215,35 @@ module Sim =
             |> updateActor name (fun st -> { st with RageAt = w.Time })
 
     /// One hit on one enemy.
+    /// Trinity: "Resonance of an element not gained for 8 seconds drains away", 10 a second
+    /// (the gem's data). Reckoned whenever a hit of the player's is worked out (it drains at no
+    /// event); the clock of an element says from when on its drain is not reckoned yet.
+    let private syncResonance (env: Env) (actor: Actor) (w: World) =
+        if actor.Name <> env.Fight.Player.Name then w
+        else
+            let st = Map.find actor.Name w.Actors
+            if not (st.Buffs.ContainsKey "Resonance") then w
+            else
+                let clock t = "ResonanceClock:" + DamageType.name t
+                let drained t =
+                    match Map.tryFind (clock t) st.Energy with
+                    | Some c when w.Time > c -> int ((w.Time - c) * Constants.trinityDecayPerSecond)
+                    | _ -> 0
+                if DamageType.elemental |> List.forall (fun t -> drained t = 0) then w
+                else
+                    updateActor actor.Name (fun st ->
+                        let key t = "Resonance:" + DamageType.name t
+                        let put k n (b: Map<string, Effect>) = if n > 0 then Map.add k { Name = k; Mods = []; Stacks = n; Expires = infinity } b else Map.remove k b
+                        let values = DamageType.elemental |> List.map (fun t -> t, max 0 ((Map.tryFind (key t) st.Buffs |> Option.map (fun e -> e.Stacks) |> Option.defaultValue 0) - drained t))
+                        let energy =
+                            DamageType.elemental |> List.fold (fun (m: Map<string, float>) t ->
+                                let d = drained t
+                                if d > 0 then Map.add (clock t) (Map.find (clock t) m + float d / Constants.trinityDecayPerSecond) m else m) st.Energy
+                        let buffs = values |> List.fold (fun b (t, n) -> put (key t) n b) st.Buffs
+                        { st with Energy = energy; Buffs = put "Resonance" (values |> List.sumBy snd) buffs }) w
+
     let private hitEnemy env (rng: Rng) (actor: Actor) (skill: Skill) mult (target: string) (w: World) =
+        let w = syncResonance env actor w
         let e = w.Enemies.[target]
         if e.Life <= 0.0 then
             w
@@ -3758,18 +3786,9 @@ module Sim =
                         let loss = Mods.sumBase ctx [ Named "TrinityLoss" ] mods
                         updateActor actor.Name (fun st ->
                             let key t = "Resonance:" + DamageType.name t
-                            // (an element not gained for 8 s has drained since, 10 a second: reckoned at the next hit)
-                            let clock t = "ResonanceClock:" + DamageType.name t
-                            let late t = match Map.tryFind (clock t) st.Energy with Some c -> w.Time > c | None -> false
-                            let get t =
-                                let n = Map.tryFind (key t) st.Buffs |> Option.map (fun e -> e.Stacks) |> Option.defaultValue 0
-                                if late t then max 0 (n - int ((w.Time - Map.find (clock t) st.Energy) * Constants.trinityDecayPerSecond)) else n
-                            let energy =
-                                DamageType.elemental |> List.fold (fun (m: Map<string, float>) t ->
-                                    if t = top then Map.add (clock t) (w.Time + Constants.trinityDecayDelay) m
-                                    elif late t then Map.add (clock t) w.Time m
-                                    else m) st.Energy
-                            let st = { st with Energy = energy }
+                            // (the element gained does not drain for 8 s: `syncResonance`)
+                            let get t = Map.tryFind (key t) st.Buffs |> Option.map (fun e -> e.Stacks) |> Option.defaultValue 0
+                            let st = { st with Energy = Map.add ("ResonanceClock:" + DamageType.name top) (w.Time + Constants.trinityDecayDelay) st.Energy }
                             let values = DamageType.elemental |> List.map (fun t -> t, (if t = top then min 100 (get t + int gain) else max 0 (get t - int loss)))
                             let put k n (b: Map<string, Effect>) = if n > 0 then Map.add k { Name = k; Mods = []; Stacks = n; Expires = infinity } b else Map.remove k b
                             let buffs = values |> List.fold (fun b (t, n) -> put (key t) n b) st.Buffs
