@@ -54,7 +54,7 @@ Setup.fight character options player (Encounter.boss 83 Rarity.defaults 30.0)
 | Stat ids → modifiers | `StatMap.fs` | read word by word; an unknown word makes the stat *unmapped*, never guessed |
 | Gems → skills | `Gems.fs`, `Behaviours.fs` | gem level data, supports, weapon; what a skill does besides hitting (energy, remnants, buffs, curses, totems, ammunition, stages) from its stats |
 | Character | `Api.fs`, `Pob.fs`, `Character.fs`, `Defence.fs` | items, passives, weapon sets, jewels → modifiers; pools and defences |
-| The fight | `Sim.fs`, `Hit.fs`, `Ailments.fs`, `Encounter.fs` | the discrete-event engine, one hit, what a hit inflicts, monsters and geometry |
+| The fight | `Sim/` (see [ENGINE.md](ENGINE.md)), `Hit.fs`, `Ailments.fs`, `Encounter.fs` | the discrete-event engine, one hit, what a hit inflicts, monsters and geometry |
 | Setup | `Setup.fs` | options, play styles, building the player and the fight |
 | Results | `Summary.fs` | Monte Carlo percentiles, damage share, uptimes, counts |
 
