@@ -74,17 +74,27 @@ dotnet run --project tests/PoEtry.Tests -c Release
 2. Add or change the row in `RULES.md` with the source and the confidence. A guess also gets a line in `tools/rules/guesses-plain.txt`; `python3 tools/rules/guesses.py` rebuilds the site's pages.
 3. The tests in `FlatTests.fs` compare the fast engine with this one and will now fail wherever your mechanic shows. That is expected. Leave `Flat.fs` alone and say so in the pull request; it is brought into line before the change goes live.
 
-## What is still hard to read
+## What to know before a larger change
 
-Honest list, largest first. These are long chains in which each step rebinds the world and a handful of locals, and cutting them would need functions with a dozen parameters. They have section comments instead.
+No function in the engine is longer than about 80 lines now. Each of the long ones of before is a short function that names its steps and calls them in order:
 
-| Function | Lines | Why it is long |
+| To change | Start at | Its steps |
 |---|---|---|
-| `Run.runWith` | 250 | builds the starting world (charges, buffs, timers, the first events), then reads the outcome off the last one |
-| `Monsters.attackPlayer` | 250 | one monster hit on the player: block, evasion, mitigation per type, ailments, what the player gains from being hit |
-| `Reactions.startUse` (first half) | 240 | builds a use's hit pattern: seals, Barrage, Flicker, stages |
-| `Hitting.hitEnemy` (head) | 215 | the roll and the damage, a chain of early exits |
-| `Striking.onStrike` | 150 | three ways a strike reaches enemies (area, projectiles, direct) |
-| `Using.onReadyUnlocked` | 140 | choosing, reloading, paying |
+| How a fight is set up, or what is read off it at the end | `Run.runWith` | `blankWorld`, `firstEvents`, `supply`, `loop`, `outcomeOf` |
+| A monster's hit on the player | `Monsters.attackPlayer` | `attackUnderDebuffs`, `chanceToHitPlayer`, `rollIncoming`, then `hitLandsOnPlayer`: `mitigated`, `companionTakesShare`, `playerAnswersHit`, `ailmentsOnPlayer`, `gainsOnBlock`, `blockSetsOff` |
+| What the beginning of a use does | `Reactions.startUse` | `rollUseCrit`, `spendRageforged`, `startCooldown`, `losePoolsOnUse`, the hit pattern (`sealRepeats`, `barrageRepeats`, `flickerStrikes`), then what the use sets going |
+| One hit on an enemy | `Hitting.hitEnemy` | `statusForHit`, `chanceToHit`, `partHappens`, `rollDamage`, `landDamage`, then the chain of consequences |
+| Whom a strike reaches | `Striking.onStrike` | `strikeTriskelion`, `strikeCascade`, or `strikePlain` with `strikeOnce` and `strikeReaches` |
+| Choosing and paying for a skill | `Using.onReadyUnlocked` | `nextStep`, `useCost`, `drinkManaFlask`, `payAndGo`, `goAhead`, `reloadAfter` |
+| Ground surfaces | `Effects.syncGround` | `lightOil`, `stormsAbsorb`, `standsOnGround` |
+| Time passing | `Clock.advance` | `sufferOverTime`, `walk`, `playerWalksOn` |
 
-Many things are still keyed by string (buff names, count names, statuses). A misspelt name does not fail to compile; it silently never matches. Search for an existing name before inventing one.
+Steps that share many values take one record that holds them (`LandedHit`, `HitAttempt`, `IncomingHit`, `BeginningUse`, `StartedUse`, `Strike`, `ReadyUse`, `Reacting`). A step reads what it needs from the record and returns the next world. Where a step must not see what an earlier step changed, the record's comment says so (`BeginningUse.State`, `Strike.Seen`): keep it that way, the fast engine does the same.
+
+**Names.** Buffs, statuses and counters are keyed by strings, and many of those strings are data: a buff's name comes from a gem, a rule's condition from a stat. The ones the engine itself both writes and reads have one definition in `State.fs`:
+
+- `Statuses` for what an enemy suffers from (`Statuses.Frozen`),
+- `RecoupPool` for where a recovery stream goes,
+- `Keys` for an actor's bookkeeping (`Keys.sealBreak skill.Name`).
+
+Use those and a misspelt name does not compile. A new name that only one function uses can stay a literal; one that is written in one place and read in another belongs in `State.fs`. Names of counters (`bump "..."`) are read by the page and the tests: search for an existing one before inventing a new one.
