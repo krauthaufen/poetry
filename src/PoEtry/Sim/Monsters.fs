@@ -81,6 +81,317 @@ let hurtMinion env (rng: Rng) (minion: Actor) (damage: Map<DamageType, float>) (
         |> killMinion env rng minion
     | _ -> if life <= 0.0 then killMinion env rng minion w else w
 
+/// A monster's hit that has got past the player's evasion, as the stages below see it
+/// (in the order `attackPlayer` goes through them).
+type IncomingHit =
+    { Env: Env
+      Rng: Rng
+      /// The monster that hits, and its attack as its debuffs leave it.
+      Monster: string
+      Enemy: EnemyState
+      Attack: EnemyAttack
+      /// What the monster suffers from.
+      Status: Map<string, int>
+      /// The player's pools, and the defences under the buffs of the moment.
+      Pools: PlayerStats
+      V: PlayerStats
+      Blocked: bool
+      Deflected: bool
+      Crit: bool
+      /// The hit by damage type before the player's mitigation (after "taken as" and a critical hit's bonus).
+      Unmitigated: Map<DamageType, float> }
+
+/// The monster's attack as the curses and debuffs on it leave it (damage dealt, chaos gained
+/// as extra), and how long until its next one (slowed by chill and by its action speed).
+let attackUnderDebuffs (e: EnemyState) (atk: EnemyAttack) : EnemyAttack * float =
+    let chill = e.Debuffs |> Map.tryFind "Chilled" |> Option.map (fun x -> x.Mods |> List.sumBy (fun m -> m.Value)) |> Option.defaultValue 0.0
+    // curses on the monster: action speed (Temporal Chains), damage dealt (Enfeeble)
+    let debuffs = (defender e).Mods
+    let actionSpeed = max 0.1 (Mods.more Ctx.empty [ Named "ActionSpeed" ] debuffs)
+    let dealt = max 0.0 (Mods.more Ctx.empty [ Named "DamageDealt" ] debuffs)
+    let atk = { atk with Damage = atk.Damage |> Map.map (fun _ d -> d * dealt) |> Vitals.withExtraChaos (Mods.sumBase Ctx.empty [ Named "GainAsChaos" ] debuffs) }
+    let next = (if (1.0 - chill / 100.0) * actionSpeed < Constants.slowFloor then atk.Interval / Constants.slowFloor else atk.Interval / max 0.1 (1.0 - chill / 100.0) / actionSpeed)
+    atk, next
+
+/// The monster's accuracy (less while Blinded or Marked) and its chance to hit the player.
+let chanceToHitPlayer (v: PlayerStats) (st: Map<string, int>) (atk: EnemyAttack) : float * float =
+    let accuracy = atk.Accuracy * (if st.ContainsKey "Blinded" then 1.0 - Constants.blindAccuracyLess / 100.0 else 1.0) * (if st.ContainsKey "Marked" then v.MarkedEnemyAccuracyMult else 1.0)
+    let hitChance =
+        let h = Vitals.monsterHitChance v.Evasion accuracy
+        // Glancing Blows: the evade roll is unlucky (both of two rolls must evade)
+        if v.UnluckyEvade then 100.0 - (100.0 - h) * (100.0 - h) / 100.0 else h
+    accuracy, hitChance
+
+/// "Recover X% of Missing Life before being Hit by an Enemy"
+let recoverBeforeHit (v: PlayerStats) (w: World) : World =
+    match w.Player with
+    | Some p when v.MissingLifeBeforeHit > 0.0 && p.Life < v.Life -> { w with Player = Some { p with Life = p.Life + (v.Life - p.Life) * v.MissingLifeBeforeHit / 100.0 } }
+    | _ -> w
+
+/// The rolls of a hit that was not evaded: is it blocked, deflected, critical; and what it
+/// carries by damage type before mitigation.
+let rollIncoming env (rng: Rng) name (e: EnemyState) (st: Map<string, int>) (atk: EnemyAttack) (pools: PlayerStats) (v: PlayerStats) accuracy hitChance : IncomingHit =
+    let blockRoll () = rng.Chance v.Block
+    let blocked = blockRoll () || (v.LuckyBlock && blockRoll ())
+    let deflectChance =
+        let d = Vitals.deflectChance v.Deflection accuracy
+        if v.LuckyDeflect then 100.0 - (100.0 - d) * (100.0 - d) / 100.0 else d
+    let deflected = not blocked && rng.Chance deflectChance
+    // "<from> damage taken as <to>" moves part of each type before mitigation
+    let incoming =
+        v.TakenAs
+        |> List.fold
+            (fun (m: Map<DamageType, float>) (from, into, pct) ->
+                let moved = (Map.tryFind from atk.Damage |> Option.defaultValue 0.0) * pct / 100.0
+                m |> Map.add from ((Map.tryFind from m |> Option.defaultValue 0.0) - moved)
+                  |> Map.add into ((Map.tryFind into m |> Option.defaultValue 0.0) + moved))
+            atk.Damage
+    // a critical hit is tested against evasion once more: evaded, it is an ordinary hit
+    let crit = rng.Chance(atk.CritChance * v.EnemyCritChanceMult * (if st.ContainsKey "Blinded" then v.BlindedEnemyCritMult else 1.0) * (if st.ContainsKey "Marked" then v.MarkedEnemyCritMult else 1.0)) && not (hitChance < 100.0 && rng.Chance(100.0 - hitChance))
+    let critMult = if crit then 1.0 + Constants.monsterBaseCritBonus / 100.0 * (1.0 - v.LessCritDamageTaken / 100.0) * (if st.ContainsKey "Blinded" then v.BlindedEnemyCritBonusMult else 1.0) else 1.0
+    { Env = env; Rng = rng; Monster = name; Enemy = e; Attack = atk; Status = st; Pools = pools; V = v
+      Blocked = blocked; Deflected = deflected; Crit = crit
+      Unmitigated = incoming |> Map.map (fun _ d -> d * critMult) }
+
+/// What the player's defences leave of the hit, by damage type: deflection, armour (against
+/// physical damage, and against the types it also applies to), resistances, damage taken,
+/// Shock on the player, and a block's share.
+let mitigated (h: IncomingHit) (w: World) : Map<DamageType, float> =
+    let v, atk = h.V, h.Attack
+    // "Defend with X% of Armour against Projectile Attacks / Critical Hits"
+    let armourShare = (if atk.Melee then 1.0 else v.ArmourVsProjectiles) * (if h.Crit then v.ArmourVsCrits else 1.0) * v.ArmourDefend
+    let playerSt = Map.find h.Env.Fight.Player.Name w.Actors
+    let shocked =
+        Map.tryFind "Shocked" playerSt.Buffs |> Option.filter (fun x -> x.Expires > w.Time)
+        |> Option.map (fun x -> x.Mods |> List.sumBy (fun m -> m.Value)) |> Option.defaultValue 0.0
+    h.Unmitigated
+    |> Map.map (fun t d ->
+        let d = if h.Deflected then d * (1.0 - v.DeflectEffect / 100.0) else d
+        let d =
+            match t with
+            | Physical ->
+                let d = if atk.Melee then max 0.0 (d - v.FlatPhysicalTaken) else d
+                Vitals.physicalLeft v (v.Armour * armourShare) (match w.Player with Some p -> p.EnergyShield | None -> 0.0) d
+            | t ->
+                let d = d * (1.0 - (Map.tryFind t v.Resist |> Option.defaultValue 0.0) / 100.0)
+                // "X% of Armour also applies to <type> damage"
+                match Map.tryFind t v.ArmourAppliesTo with
+                | Some pct -> d * (1.0 - Vitals.armourReduction (v.Armour * armourShare * pct / 100.0) d / 100.0)
+                | None -> d
+        d * (Map.tryFind t v.TakenMult |> Option.defaultValue 1.0) * (1.0 + shocked / 100.0)
+          * (if h.Blocked then v.BlockedDamageTaken / 100.0 else 1.0))
+
+/// The physical damage of the hit that mitigation kept off.
+let preventedPhysical (h: IncomingHit) (taken: Map<DamageType, float>) =
+    max 0.0 ((Map.tryFind Physical h.Unmitigated |> Option.defaultValue 0.0) - (Map.tryFind Physical taken |> Option.defaultValue 0.0))
+
+/// Scarred Faith: "5% of Physical Damage prevented Recouped as Energy Shield per enemy
+/// Power": what mitigation kept of the hit's physical damage.
+let preventedAsShield (h: IncomingHit) taken =
+    if h.V.RecoupPreventedPerPower <= 0.0 then 0.0
+    else
+        let prevented = preventedPhysical h taken
+        prevented * h.V.RecoupPreventedPerPower / 100.0 * MonsterPower.ofRarity h.Enemy.Def.Rarity * h.V.ESRecoveryRate
+
+/// "X% of Physical Damage prevented Recouped as Life"
+let preventedAsLife (h: IncomingHit) taken =
+    if h.V.RecoupPreventedLife <= 0.0 then 0.0
+    else
+        let prevented = preventedPhysical h taken
+        prevented * h.V.RecoupPreventedLife / 100.0 * h.V.LifeRecoveryRate
+
+/// "x% of Damage from Hits is taken from your Companion's Life before you": the first
+/// minion that does so and is alive takes its share, as much as it has. What is left for
+/// the player, and the world with the minion hurt.
+let companionTakesShare (h: IncomingHit) (taken: Map<DamageType, float>) (w: World) : Map<DamageType, float> * World =
+    let guard =
+        h.Env.Fight.Minions |> List.tryFind (fun m ->
+            (m.Body |> Option.exists (fun b -> b.TakesForOwner > 0.0)) && not (Map.find m.Name w.Actors).Gone)
+    match guard with
+    | Some m ->
+        let share = m.Body.Value.TakesForOwner / 100.0
+        let its = Map.find m.Name w.Actors
+        let total = taken |> Map.toList |> List.sumBy snd
+        let k = if total <= 0.0 then 0.0 else min share ((its.Life + its.Shield) / total)
+        taken |> Map.map (fun _ d -> d * (1.0 - k)),
+        hurtMinion h.Env h.Rng m (taken |> Map.map (fun _ d -> d * k)) { w with Counts = bump "minion:took for owner" w.Counts }
+    | None -> taken, w
+
+/// A recovery stream for the player begins (recoup of what was prevented, regeneration when stunned).
+let startRecoup (amount: float) (seconds: float) (pool: string) (w: World) : World =
+    { w with Player = w.Player |> Option.map (fun p -> { p with Recoups = { Until = w.Time + seconds; Rate = amount / seconds; Pool = pool } :: p.Recoups }) }
+
+/// What being hit sets off on the player's side: Rage when hit, the rules for being hit,
+/// charms against the hit's damage types, and "been Hit Recently".
+let playerAnswersHit (h: IncomingHit) (taken: Map<DamageType, float>) (w: World) : World =
+    let env, rng, name = h.Env, h.Rng, h.Monster
+    let w = gainRage env env.Rage.WhenHit w
+    let w = (match env.Fight.Player.Skills |> List.tryHead with Some any -> react env rng env.Fight.Player WhenHit any (Some name) w | None -> w)
+    let w = (match env.Fight.Player.Skills |> List.tryHead with Some any when h.Attack.Melee -> react env rng env.Fight.Player WhenHitMelee any (Some name) w | _ -> w)
+    // "Rage loss is paused for 4 seconds upon gaining Rage, or after taking damage"
+    let w = updateActor env.Fight.Player.Name (fun st -> { st with RageAt = w.Time }) w
+    // charms used when a hit of their damage type is taken (they help from the next hit on)
+    let w = taken |> Map.fold (fun w t d -> if d > 0.0 then fst (charm env rng ("Hit:" + DamageType.name t) w) else w) w
+    let w = if h.Crit then { w with Counts = bump "enemy:crit" w.Counts } else w
+    updateActor env.Fight.Player.Name (fun st ->
+        { st with Buffs = Map.add "BeenHitRecently" { Name = "BeenHitRecently"; Mods = []; Stacks = 1; Expires = w.Time + 4.0 } st.Buffs }) w
+    |> schedule (w.Time + 4.0) Expire
+
+/// The hit's damage of one type before mitigation (what its ailments are worked out from).
+let incomingOf (h: IncomingHit) t = Map.tryFind t h.Unmitigated |> Option.defaultValue 0.0
+/// Whether the player's chance to avoid the ailment comes up.
+let avoidsAilment (h: IncomingHit) a = h.Rng.Chance(Map.tryFind a h.V.Avoid |> Option.defaultValue 0.0)
+/// "Effect of <ailment> on you", and how long it lasts on the player, as multipliers.
+let ailmentEffectOnPlayer (h: IncomingHit) a = Map.tryFind a h.V.SelfEffect |> Option.defaultValue 1.0
+let ailmentLastsOnPlayer (h: IncomingHit) a = Map.tryFind a h.V.SelfDuration |> Option.defaultValue 1.0
+/// The damage an ailment's chance on the player is measured against.
+let playerAilmentThreshold (h: IncomingHit) = max 1.0 h.V.AilmentThreshold
+
+/// A timed debuff on the player (Shocked, Chilled).
+let debuffPlayer (h: IncomingHit) name mods duration (w: World) =
+    updateActor h.Env.Fight.Player.Name (fun st -> { st with Buffs = Map.add name { Name = name; Mods = mods; Stacks = 1; Expires = w.Time + duration } st.Buffs }) w
+    |> schedule (w.Time + duration) Expire
+    |> fun w -> { w with Counts = bump ("player:" + name) w.Counts }
+
+/// The player cannot act for so long (Frozen, Stunned).
+let lockPlayer seconds what (w: World) =
+    { w with
+        Player = w.Player |> Option.map (fun p -> { p with LockedUntil = max p.LockedUntil (w.Time + seconds) })
+        Counts = bump ("player:" + what) w.Counts }
+
+/// A charm for this may stop it (and is used up doing so).
+let unlessCharm (h: IncomingHit) key (apply: World -> World) (w: World) =
+    let w, prevented = charm h.Env h.Rng key w
+    if prevented then { w with Counts = bump ("charm prevented:" + key) w.Counts } else apply w
+
+/// The hit's fire damage may Ignite the player: the strongest Ignite only burns.
+let igniteOnPlayer (h: IncomingHit) (w: World) : World =
+    let v = h.V
+    let fire = incomingOf h Fire
+    if fire > 0.0 && h.Rng.Chance(min 100.0 (fire / playerAilmentThreshold h * Constants.igniteChanceMultiplier)) && not (avoidsAilment h "Ignite") then
+      w |> unlessCharm h "Ignited" (fun w ->
+        let dps =
+            fire * Constants.ignitePercentPerSecond / 100.0 * ailmentEffectOnPlayer h "Ignite"
+            * (1.0 - (Map.tryFind Fire v.Resist |> Option.defaultValue 0.0) / 100.0) * (Map.tryFind Fire v.TakenMult |> Option.defaultValue 1.0)
+        let until = w.Time + Constants.igniteDuration * ailmentLastsOnPlayer h "Ignite"
+        { w with
+            Player =
+                w.Player |> Option.map (fun p ->
+                    let stronger = p.Dots |> List.exists (fun d -> d.Damage = Fire && d.Until > w.Time && d.PerSecond >= dps)
+                    if stronger then p else { p with Dots = { Until = until; PerSecond = dps; Damage = Fire } :: (p.Dots |> List.filter (fun d -> d.Damage <> Fire)) })
+            Counts = bump "player:Ignited" w.Counts })
+    else w
+
+/// The hit's lightning damage may Shock the player.
+let shockOnPlayer (h: IncomingHit) (w: World) : World =
+    let lightning = incomingOf h Lightning
+    if lightning > 0.0 && h.Rng.Chance(min 100.0 (lightning / playerAilmentThreshold h * Constants.shockChanceMultiplier)) && not (avoidsAilment h "Shock") then
+        w |> unlessCharm h "Shocked" (debuffPlayer h "Shocked" [ Mod.base' (Named "ShockTaken") (Constants.baseShockMagnitude * ailmentEffectOnPlayer h "Shock") ] (Constants.playerShockDuration * ailmentLastsOnPlayer h "Shock"))
+    else w
+
+/// The hit's cold damage Chills the player by its size, and builds up Freeze.
+let chillAndFreezeOnPlayer (h: IncomingHit) (w: World) : World =
+    let cold = incomingOf h Cold
+    // (a chill below 30% is discarded; "effect of Chill on you" then scales what is left)
+    let chill = Constants.chillEffectMultiplier * cold / playerAilmentThreshold h
+    let w =
+        if chill >= Constants.chillMinEffect && ailmentEffectOnPlayer h "Chill" > 0.0 && not (avoidsAilment h "Chill") then
+            w |> unlessCharm h "Slowed" (debuffPlayer h "Chilled" [ Mod.more Speed (-(min Constants.chillMaxEffect chill * ailmentEffectOnPlayer h "Chill")) ] (Constants.playerChillDuration * ailmentLastsOnPlayer h "Chill"))
+        else w
+    // freeze builds up with cold damage; full: frozen
+    match w.Player with
+    | Some p when cold > 0.0 && not (avoidsAilment h "Freeze") ->
+        let buildup = p.FreezeBuildup + cold * Constants.playerFreezeScale / max 1.0 h.V.FreezeThreshold * 100.0
+        if buildup >= 100.0 then
+            { w with Player = Some { p with FreezeBuildup = 0.0 } } |> unlessCharm h "Frozen" (lockPlayer (Constants.playerFreezeDuration * ailmentLastsOnPlayer h "Freeze") "Frozen")
+        else { w with Player = Some { p with FreezeBuildup = buildup } }
+    | _ -> w
+
+/// A light stun of the player: chance from the hit's size against the stun threshold.
+let stunOnPlayer (h: IncomingHit) (w: World) : World =
+    let env, v = h.Env, h.V
+    let stunDamage =
+        h.Unmitigated |> Map.toList
+        |> List.sumBy (fun (t, d) -> if t = Physical then d * (1.0 + Constants.monsterPhysicalStunMore / 100.0) else d)
+        |> fun d -> if h.Attack.Melee then d * (1.0 + Constants.monsterMeleeStunMore / 100.0) else d
+    // (50% more threshold for each light stun of the past 4 s)
+    let stuns = match w.Player with Some p -> p.Stuns |> List.filter (fun t -> t > w.Time - Constants.recentlySeconds) | None -> []
+    let stunChance = min 100.0 (stunDamage / (max 1.0 v.StunThreshold * (1.0 + Constants.lightStunThresholdMore / 100.0 * float stuns.Length)) * 100.0)
+    // players are not heavily stunned by ordinary hits (only while raising a shield,
+    // parrying or mounted: not modelled)
+    if stunChance >= Constants.playerLightStunMinimum && h.Rng.Chance stunChance && not (h.Rng.Chance v.AvoidStun) then
+        w |> unlessCharm h "Stunned" (fun w ->
+            lockPlayer (Constants.playerLightStunDuration / v.StunRecovery) "Stunned" w
+            |> fun w -> { w with Player = w.Player |> Option.map (fun p -> { p with Stuns = w.Time :: stuns }) }
+            // "if you've been Stunned Recently"; "Regenerate X% of maximum Life over 1 second when Stunned"
+            |> markStatus env.Fight.Player.Name "StunnedRecently"
+            |> fun w ->
+                if v.RegenOnStun <= 0.0 then w
+                else
+                    let rate = v.RegenOnStun / 100.0 * h.Pools.Life / Constants.stunRegenSeconds
+                    { w with Player = w.Player |> Option.map (fun p -> { p with Recoups = { Until = w.Time + Constants.stunRegenSeconds; Rate = rate; Pool = "Life" } :: p.Recoups }) })
+    else w
+
+/// Ailments and stuns the hit inflicts on the player (not when blocked).
+let ailmentsOnPlayer (h: IncomingHit) (w: World) : World =
+    if h.Blocked then w
+    else w |> igniteOnPlayer h |> shockOnPlayer h |> chillAndFreezeOnPlayer h |> stunOnPlayer h
+
+/// What a block gives the player: ward, life, energy shield and mana on block.
+let gainsOnBlock (h: IncomingHit) (w: World) : World =
+    let v, pools = h.V, h.Pools
+    match w.Player with
+    | Some p when h.Blocked ->
+        { w with
+            Player =
+                Some
+                    { p with
+                        Ward = (if v.WardOnBlock > 0.0 then min (max p.Ward pools.Ward) (p.Ward + v.WardOnBlock) else p.Ward)
+                        Life = min (max p.Life pools.Life) (p.Life + v.LifeOnBlock)
+                        EnergyShield =
+                            (if v.ESOnBlock = 0.0 then p.EnergyShield
+                             else max 0.0 (min (max p.EnergyShield (min pools.EnergyShield v.ESRecoverCap)) (p.EnergyShield + v.ESOnBlock)))
+                        Mana = min pools.Mana (p.Mana + v.ManaOnBlock) } }
+    | _ -> w
+
+/// Blocks feed meta gems (Cast on Block) and OnBlock rules.
+let blockSetsOff (h: IncomingHit) (w: World) : World =
+    if not h.Blocked then w
+    else
+        let env, rng, name = h.Env, h.Rng, h.Monster
+        let player = env.Fight.Player
+        let w =
+            player.Metas
+            |> List.fold
+                (fun w meta ->
+                    let amount = meta.Sources |> List.sumBy (function Blocks e -> e | _ -> 0.0)
+                    // (what a block triggers is aimed at the enemy whose hit was blocked)
+                    if amount > 0.0 then { gainEnergy env rng player meta.Name (amount * meta.EnergyMult) { w with Cause = name } with Cause = w.Cause } else w)
+                w
+        match player.Skills |> List.tryHead with
+        | Some anySkill -> react env rng player OnBlock anySkill (Some name) w
+        | None -> w
+
+/// A hit that was not evaded lands on the player: what is taken (the companion's share
+/// first), what is recouped of what was prevented, and everything it sets off.
+let hitLandsOnPlayer (h: IncomingHit) (p: PlayerState) (w: World) : World =
+    let v = h.V
+    let taken = mitigated h w
+    let preventedRecoup = preventedAsShield h taken
+    let preventedLife = preventedAsLife h taken
+    let taken, w = companionTakesShare h taken w
+    let p = w.Player |> Option.defaultValue p
+    let w = if w.Tracing then { w with Shown = Hurt(w.Time, h.Monster, taken |> Map.fold (fun s _ v -> s + v) 0.0) :: w.Shown } else w
+    let w = takeDamage true h.Pools taken { w with Player = Some p } |> fun w -> { w with Player = w.Player |> Option.map (fun p -> { p with LastHit = w.Time }) }
+    let w = if preventedRecoup > 0.0 then startRecoup preventedRecoup v.RecoupSeconds "ES" w else w
+    let w = if preventedLife > 0.0 then startRecoup preventedLife v.RecoupSeconds "Life" w else w
+    w
+    |> playerAnswersHit h taken
+    |> ailmentsOnPlayer h
+    |> fun w -> { w with Counts = w.Counts |> bump "enemy:hit" |> (if h.Deflected then bump "enemy:deflected" else id) |> (if h.Blocked then bump "enemy:blocked" else id) }
+    |> gainsOnBlock h
+    |> blockSetsOff h
+
 /// A monster's hit at the player: evasion, deflection, armour, resistances, then
 /// energy shield and life. Frozen / stunned / electrocuted monsters don't act; chill
 /// slows them; blind lowers their accuracy.
@@ -95,13 +406,7 @@ let attackPlayer env (rng: Rng) name (w: World) =
             | None -> pools
         let st = status e
         let stopped = e.StunnedUntil > w.Time || [ "Frozen"; "HeavilyStunned"; "Electrocuted" ] |> List.exists st.ContainsKey
-        let chill = e.Debuffs |> Map.tryFind "Chilled" |> Option.map (fun x -> x.Mods |> List.sumBy (fun m -> m.Value)) |> Option.defaultValue 0.0
-        // curses on the monster: action speed (Temporal Chains), damage dealt (Enfeeble)
-        let debuffs = (defender e).Mods
-        let actionSpeed = max 0.1 (Mods.more Ctx.empty [ Named "ActionSpeed" ] debuffs)
-        let dealt = max 0.0 (Mods.more Ctx.empty [ Named "DamageDealt" ] debuffs)
-        let atk = { atk with Damage = atk.Damage |> Map.map (fun _ d -> d * dealt) |> Vitals.withExtraChaos (Mods.sumBase Ctx.empty [ Named "GainAsChaos" ] debuffs) }
-        let next = (if (1.0 - chill / 100.0) * actionSpeed < Constants.slowFloor then atk.Interval / Constants.slowFloor else atk.Interval / max 0.1 (1.0 - chill / 100.0) / actionSpeed)
+        let atk, next = attackUnderDebuffs e atk
         let w = schedule (w.Time + next) (EnemyAttack name) w
         let inRange = Vec.length e.Def.Position - e.Def.Size <= atk.Range + 1e-6
         if stopped then
@@ -109,229 +414,16 @@ let attackPlayer env (rng: Rng) name (w: World) =
         elif not inRange then
             w
         else
-            let accuracy = atk.Accuracy * (if st.ContainsKey "Blinded" then 1.0 - Constants.blindAccuracyLess / 100.0 else 1.0) * (if st.ContainsKey "Marked" then v.MarkedEnemyAccuracyMult else 1.0)
-            let hitChance =
-                let h = Vitals.monsterHitChance v.Evasion accuracy
-                // Glancing Blows: the evade roll is unlucky (both of two rolls must evade)
-                if v.UnluckyEvade then 100.0 - (100.0 - h) * (100.0 - h) / 100.0 else h
+            let accuracy, hitChance = chanceToHitPlayer v st atk
             let landed, w = lands rng "Player" hitChance w
             if not landed then
                 { w with Counts = bump "enemy:evaded" w.Counts }
             else
-                // "Recover X% of Missing Life before being Hit by an Enemy"
-                let w =
-                    match w.Player with
-                    | Some p when v.MissingLifeBeforeHit > 0.0 && p.Life < v.Life -> { w with Player = Some { p with Life = p.Life + (v.Life - p.Life) * v.MissingLifeBeforeHit / 100.0 } }
-                    | _ -> w
-                let blockRoll () = rng.Chance v.Block
-                let blocked = blockRoll () || (v.LuckyBlock && blockRoll ())
-                let deflectChance =
-                    let d = Vitals.deflectChance v.Deflection accuracy
-                    if v.LuckyDeflect then 100.0 - (100.0 - d) * (100.0 - d) / 100.0 else d
-                let deflected = not blocked && rng.Chance deflectChance
-                // "<from> damage taken as <to>" moves part of each type before mitigation
-                let incoming =
-                    v.TakenAs
-                    |> List.fold
-                        (fun (m: Map<DamageType, float>) (from, into, pct) ->
-                            let moved = (Map.tryFind from atk.Damage |> Option.defaultValue 0.0) * pct / 100.0
-                            m |> Map.add from ((Map.tryFind from m |> Option.defaultValue 0.0) - moved)
-                              |> Map.add into ((Map.tryFind into m |> Option.defaultValue 0.0) + moved))
-                        atk.Damage
-                // a critical hit is tested against evasion once more: evaded, it is an ordinary hit
-                let crit = rng.Chance(atk.CritChance * v.EnemyCritChanceMult * (if st.ContainsKey "Blinded" then v.BlindedEnemyCritMult else 1.0) * (if st.ContainsKey "Marked" then v.MarkedEnemyCritMult else 1.0)) && not (hitChance < 100.0 && rng.Chance(100.0 - hitChance))
-                // "Defend with X% of Armour against Projectile Attacks / Critical Hits"
-                let armourShare = (if atk.Melee then 1.0 else v.ArmourVsProjectiles) * (if crit then v.ArmourVsCrits else 1.0) * v.ArmourDefend
-                let critMult = if crit then 1.0 + Constants.monsterBaseCritBonus / 100.0 * (1.0 - v.LessCritDamageTaken / 100.0) * (if st.ContainsKey "Blinded" then v.BlindedEnemyCritBonusMult else 1.0) else 1.0
-                let playerSt = Map.find env.Fight.Player.Name w.Actors
-                let shocked =
-                    Map.tryFind "Shocked" playerSt.Buffs |> Option.filter (fun x -> x.Expires > w.Time)
-                    |> Option.map (fun x -> x.Mods |> List.sumBy (fun m -> m.Value)) |> Option.defaultValue 0.0
-                let unmitigated = incoming |> Map.map (fun _ d -> d * critMult)
-                let taken =
-                    unmitigated
-                    |> Map.map (fun t d ->
-                        let d = if deflected then d * (1.0 - v.DeflectEffect / 100.0) else d
-                        let d =
-                            match t with
-                            | Physical ->
-                                let d = if atk.Melee then max 0.0 (d - v.FlatPhysicalTaken) else d
-                                Vitals.physicalLeft v (v.Armour * armourShare) (match w.Player with Some p -> p.EnergyShield | None -> 0.0) d
-                            | t ->
-                                let d = d * (1.0 - (Map.tryFind t v.Resist |> Option.defaultValue 0.0) / 100.0)
-                                // "X% of Armour also applies to <type> damage"
-                                match Map.tryFind t v.ArmourAppliesTo with
-                                | Some pct -> d * (1.0 - Vitals.armourReduction (v.Armour * armourShare * pct / 100.0) d / 100.0)
-                                | None -> d
-                        d * (Map.tryFind t v.TakenMult |> Option.defaultValue 1.0) * (1.0 + shocked / 100.0)
-                          * (if blocked then v.BlockedDamageTaken / 100.0 else 1.0))
-                // Scarred Faith: "5% of Physical Damage prevented Recouped as Energy Shield per
-                // enemy Power": what mitigation kept of the hit's physical damage
-                let preventedRecoup =
-                    if v.RecoupPreventedPerPower <= 0.0 then 0.0
-                    else
-                        let prevented = max 0.0 ((Map.tryFind Physical unmitigated |> Option.defaultValue 0.0) - (Map.tryFind Physical taken |> Option.defaultValue 0.0))
-                        prevented * v.RecoupPreventedPerPower / 100.0 * MonsterPower.ofRarity e.Def.Rarity * v.ESRecoveryRate
-                // "X% of Physical Damage prevented Recouped as Life"
-                let preventedLife =
-                    if v.RecoupPreventedLife <= 0.0 then 0.0
-                    else
-                        let prevented = max 0.0 ((Map.tryFind Physical unmitigated |> Option.defaultValue 0.0) - (Map.tryFind Physical taken |> Option.defaultValue 0.0))
-                        prevented * v.RecoupPreventedLife / 100.0 * v.LifeRecoveryRate
-                // "x% of Damage from Hits is taken from your Companion's Life before you": the
-                // first minion that does so and is alive takes its share, as much as it has
-                let taken, w =
-                    let guard =
-                        env.Fight.Minions |> List.tryFind (fun m ->
-                            (m.Body |> Option.exists (fun b -> b.TakesForOwner > 0.0)) && not (Map.find m.Name w.Actors).Gone)
-                    match guard with
-                    | Some m ->
-                        let share = m.Body.Value.TakesForOwner / 100.0
-                        let its = Map.find m.Name w.Actors
-                        let total = taken |> Map.toList |> List.sumBy snd
-                        let k = if total <= 0.0 then 0.0 else min share ((its.Life + its.Shield) / total)
-                        taken |> Map.map (fun _ d -> d * (1.0 - k)),
-                        hurtMinion env rng m (taken |> Map.map (fun _ d -> d * k)) { w with Counts = bump "minion:took for owner" w.Counts }
-                    | None -> taken, w
-                let p = w.Player |> Option.defaultValue p
-                let w = if w.Tracing then { w with Shown = Hurt(w.Time, name, taken |> Map.fold (fun s _ v -> s + v) 0.0) :: w.Shown } else w
-                let w = takeDamage true pools taken { w with Player = Some p } |> fun w -> { w with Player = w.Player |> Option.map (fun p -> { p with LastHit = w.Time }) }
-                let w =
-                    if preventedRecoup > 0.0 then
-                        { w with Player = w.Player |> Option.map (fun p -> { p with Recoups = { Until = w.Time + v.RecoupSeconds; Rate = preventedRecoup / v.RecoupSeconds; Pool = "ES" } :: p.Recoups }) }
-                    else w
-                let w =
-                    if preventedLife > 0.0 then
-                        { w with Player = w.Player |> Option.map (fun p -> { p with Recoups = { Until = w.Time + v.RecoupSeconds; Rate = preventedLife / v.RecoupSeconds; Pool = "Life" } :: p.Recoups }) }
-                    else w
-                let w = gainRage env env.Rage.WhenHit w
-                let w = (match env.Fight.Player.Skills |> List.tryHead with Some any -> react env rng env.Fight.Player WhenHit any (Some name) w | None -> w)
-                let w = (match env.Fight.Player.Skills |> List.tryHead with Some any when atk.Melee -> react env rng env.Fight.Player WhenHitMelee any (Some name) w | _ -> w)
-                // "Rage loss is paused for 4 seconds upon gaining Rage, or after taking damage"
-                let w = updateActor env.Fight.Player.Name (fun st -> { st with RageAt = w.Time }) w
-                // charms used when a hit of their damage type is taken (they help from the next hit on)
-                let w = taken |> Map.fold (fun w t d -> if d > 0.0 then fst (charm env rng ("Hit:" + DamageType.name t) w) else w) w
-                let w = if crit then { w with Counts = bump "enemy:crit" w.Counts } else w
-                let w =
-                    updateActor env.Fight.Player.Name (fun st ->
-                        { st with Buffs = Map.add "BeenHitRecently" { Name = "BeenHitRecently"; Mods = []; Stacks = 1; Expires = w.Time + 4.0 } st.Buffs }) w
-                    |> schedule (w.Time + 4.0) Expire
-                // ailments and stuns the hit inflicts on the player (not when blocked)
-                let w =
-                    if blocked then w
-                    else
-                        let get t = Map.tryFind t unmitigated |> Option.defaultValue 0.0
-                        let avoided a = rng.Chance(Map.tryFind a v.Avoid |> Option.defaultValue 0.0)
-                        let effect a = Map.tryFind a v.SelfEffect |> Option.defaultValue 1.0
-                        let lasts a = Map.tryFind a v.SelfDuration |> Option.defaultValue 1.0
-                        let thr = max 1.0 v.AilmentThreshold
-                        let playerName = env.Fight.Player.Name
-                        let buff name mods duration (w: World) =
-                            updateActor playerName (fun st -> { st with Buffs = Map.add name { Name = name; Mods = mods; Stacks = 1; Expires = w.Time + duration } st.Buffs }) w
-                            |> schedule (w.Time + duration) Expire
-                            |> fun w -> { w with Counts = bump ("player:" + name) w.Counts }
-                        let lock seconds what (w: World) =
-                            { w with
-                                Player = w.Player |> Option.map (fun p -> { p with LockedUntil = max p.LockedUntil (w.Time + seconds) })
-                                Counts = bump ("player:" + what) w.Counts }
-                        // a charm for this may stop it (and is used up doing so)
-                        let unlessCharm key (apply: World -> World) (w: World) =
-                            let w, prevented = charm env rng key w
-                            if prevented then { w with Counts = bump ("charm prevented:" + key) w.Counts } else apply w
-                        // ignite: strongest only
-                        let w =
-                            let fire = get Fire
-                            if fire > 0.0 && rng.Chance(min 100.0 (fire / thr * Constants.igniteChanceMultiplier)) && not (avoided "Ignite") then
-                              w |> unlessCharm "Ignited" (fun w ->
-                                let dps =
-                                    fire * Constants.ignitePercentPerSecond / 100.0 * effect "Ignite"
-                                    * (1.0 - (Map.tryFind Fire v.Resist |> Option.defaultValue 0.0) / 100.0) * (Map.tryFind Fire v.TakenMult |> Option.defaultValue 1.0)
-                                let until = w.Time + Constants.igniteDuration * lasts "Ignite"
-                                { w with
-                                    Player =
-                                        w.Player |> Option.map (fun p ->
-                                            let stronger = p.Dots |> List.exists (fun d -> d.Damage = Fire && d.Until > w.Time && d.PerSecond >= dps)
-                                            if stronger then p else { p with Dots = { Until = until; PerSecond = dps; Damage = Fire } :: (p.Dots |> List.filter (fun d -> d.Damage <> Fire)) })
-                                    Counts = bump "player:Ignited" w.Counts })
-                            else w
-                        let w =
-                            let lightning = get Lightning
-                            if lightning > 0.0 && rng.Chance(min 100.0 (lightning / thr * Constants.shockChanceMultiplier)) && not (avoided "Shock") then
-                                w |> unlessCharm "Shocked" (buff "Shocked" [ Mod.base' (Named "ShockTaken") (Constants.baseShockMagnitude * effect "Shock") ] (Constants.playerShockDuration * lasts "Shock"))
-                            else w
-                        let w =
-                            let cold = get Cold
-                            // (a chill below 30% is discarded; "effect of Chill on you" then scales what is left)
-                            let chill = Constants.chillEffectMultiplier * cold / thr
-                            let w =
-                                if chill >= Constants.chillMinEffect && effect "Chill" > 0.0 && not (avoided "Chill") then
-                                    w |> unlessCharm "Slowed" (buff "Chilled" [ Mod.more Speed (-(min Constants.chillMaxEffect chill * effect "Chill")) ] (Constants.playerChillDuration * lasts "Chill"))
-                                else w
-                            // freeze builds up with cold damage; full: frozen
-                            match w.Player with
-                            | Some p when cold > 0.0 && not (avoided "Freeze") ->
-                                let buildup = p.FreezeBuildup + cold * Constants.playerFreezeScale / max 1.0 v.FreezeThreshold * 100.0
-                                if buildup >= 100.0 then
-                                    { w with Player = Some { p with FreezeBuildup = 0.0 } } |> unlessCharm "Frozen" (lock (Constants.playerFreezeDuration * lasts "Freeze") "Frozen")
-                                else { w with Player = Some { p with FreezeBuildup = buildup } }
-                            | _ -> w
-                        // light stun: chance from the hit's size against the stun threshold
-                        let stunDamage =
-                            unmitigated |> Map.toList
-                            |> List.sumBy (fun (t, d) -> if t = Physical then d * (1.0 + Constants.monsterPhysicalStunMore / 100.0) else d)
-                            |> fun d -> if atk.Melee then d * (1.0 + Constants.monsterMeleeStunMore / 100.0) else d
-                        // (50% more threshold for each light stun of the past 4 s)
-                        let stuns = match w.Player with Some p -> p.Stuns |> List.filter (fun t -> t > w.Time - Constants.recentlySeconds) | None -> []
-                        let stunChance = min 100.0 (stunDamage / (max 1.0 v.StunThreshold * (1.0 + Constants.lightStunThresholdMore / 100.0 * float stuns.Length)) * 100.0)
-                        // players are not heavily stunned by ordinary hits (only while raising a shield,
-                        // parrying or mounted: not modelled)
-                        if stunChance >= Constants.playerLightStunMinimum && rng.Chance stunChance && not (rng.Chance v.AvoidStun) then
-                            w |> unlessCharm "Stunned" (fun w ->
-                                lock (Constants.playerLightStunDuration / v.StunRecovery) "Stunned" w
-                                |> fun w -> { w with Player = w.Player |> Option.map (fun p -> { p with Stuns = w.Time :: stuns }) }
-                                // "if you've been Stunned Recently"; "Regenerate X% of maximum Life over 1 second when Stunned"
-                                |> markStatus env.Fight.Player.Name "StunnedRecently"
-                                |> fun w ->
-                                    if v.RegenOnStun <= 0.0 then w
-                                    else
-                                        let rate = v.RegenOnStun / 100.0 * pools.Life / Constants.stunRegenSeconds
-                                        { w with Player = w.Player |> Option.map (fun p -> { p with Recoups = { Until = w.Time + Constants.stunRegenSeconds; Rate = rate; Pool = "Life" } :: p.Recoups }) })
-                        else w
-                let w =
-                    { w with
-                        Counts = w.Counts |> bump "enemy:hit" |> (if deflected then bump "enemy:deflected" else id) |> (if blocked then bump "enemy:blocked" else id) }
-                let w =
-                    match w.Player with
-                    | Some p when blocked ->
-                        { w with
-                            Player =
-                                Some
-                                    { p with
-                                        Ward = (if v.WardOnBlock > 0.0 then min (max p.Ward pools.Ward) (p.Ward + v.WardOnBlock) else p.Ward)
-                                        Life = min (max p.Life pools.Life) (p.Life + v.LifeOnBlock)
-                                        EnergyShield =
-                                            (if v.ESOnBlock = 0.0 then p.EnergyShield
-                                             else max 0.0 (min (max p.EnergyShield (min pools.EnergyShield v.ESRecoverCap)) (p.EnergyShield + v.ESOnBlock)))
-                                        Mana = min pools.Mana (p.Mana + v.ManaOnBlock) } }
-                    | _ -> w
-                if blocked then
-                    // blocks feed meta gems (Cast on Block) and OnBlock rules
-                    let player = env.Fight.Player
-                    let w =
-                        player.Metas
-                        |> List.fold
-                            (fun w meta ->
-                                let amount = meta.Sources |> List.sumBy (function Blocks e -> e | _ -> 0.0)
-                                // (what a block triggers is aimed at the enemy whose hit was blocked)
-                                if amount > 0.0 then { gainEnergy env rng player meta.Name (amount * meta.EnergyMult) { w with Cause = name } with Cause = w.Cause } else w)
-                            w
-                    match player.Skills |> List.tryHead with
-                    | Some anySkill -> react env rng player OnBlock anySkill (Some name) w
-                    | None -> w
-                else w
+                let w = recoverBeforeHit v w
+                let h = rollIncoming env rng name e st atk pools v accuracy hitChance
+                hitLandsOnPlayer h p w
     | _ -> w
 
-/// Mark "<what>Recently" for 4 s (gained / consumed charges...).
 /// A monster's hit at a minion: evasion, armour against physical damage, resistances.
 let attackMinion env (rng: Rng) name (minion: Actor) (w: World) =
     let e = w.Enemies.[name]
