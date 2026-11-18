@@ -136,9 +136,9 @@ let onReadyUnlocked env (rng: Rng) name (w: World) =
                 // Hexblast waits for a curse that can be detonated
                 && (not (partFlag s "DetonatesCurse") || (aimed env w |> Option.exists (fun e -> not (ripeCurses actor e w.Time).IsEmpty)))
                 // a recording debuff is left to run out
-                && not (w.Agonies |> List.exists (fun (a, b, _, _, _, _) -> a = actor.Name && b = s.Name))
+                && not (w.Agonies |> List.exists (fun a -> a.Owner = actor.Name && a.Skill = s.Name))
                 // a seed still in an enemy is not planted over
-                && not (w.Bombs |> List.exists (fun (a, b, _, _, _, _) -> a = actor.Name && b = s.Name)))
+                && not (w.Bombs |> List.exists (fun b -> b.Owner = actor.Name && b.Skill = s.Name)))
         usable |> List.tryFind (fun step -> affordable (skillOf actor step.Use)) |> Option.orElse (List.tryHead usable)
     match choice with
     | Some step ->
@@ -257,7 +257,7 @@ let onReadyUnlocked env (rng: Rng) name (w: World) =
             // not enough mana: wait until regeneration and leech have covered it
             let cost = fst (manaNeeded v skill t cost)
             let rate =
-                v.ManaRegen + (p.Recoups |> List.sumBy (fun (until, rate, pool) -> if pool = "LeechMana" && until > w.Time then rate else 0.0))
+                v.ManaRegen + (p.Recoups |> List.sumBy (fun r -> if r.Pool = "LeechMana" && r.Until > w.Time then r.Rate else 0.0))
                 + (if w.Time < p.FlaskUntil then p.FlaskRate else 0.0)
             let wait = max Constants.serverTick (if rate > 0.0 then (cost - p.Mana) / rate else 1.0)
             { w with Player = Some { p with Starved = p.Starved + wait } } |> schedule (w.Time + wait) (Ready name)

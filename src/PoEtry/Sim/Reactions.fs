@@ -137,7 +137,7 @@ let dropRemnant (c: Reacting) r delay extra (w: World) =
 let regenES (rate: float) (duration: float) (w: World) =
     match w.Player with
     | Some p when p.Died.IsNone ->
-        { w with Player = Some { p with Recoups = (w.Time + duration, rate, "ShroudES") :: (p.Recoups |> List.filter (fun (_, _, pool) -> pool <> "ShroudES")) }
+        { w with Player = Some { p with Recoups = { Until = w.Time + duration; Rate = rate; Pool = "ShroudES" } :: (p.Recoups |> List.filter (fun r -> r.Pool <> "ShroudES")) }
                  Counts = bump "regen:ES" w.Counts }
     | _ -> w
 
@@ -165,8 +165,8 @@ let igniteSelf (c: Reacting) percent (w: World) =
                     Player =
                         w.Player |> Option.map (fun p ->
                             // the strongest Ignite burns; one as strong starts its time again
-                            let stronger = p.Dots |> List.exists (fun (u, d, t) -> t = Fire && u > w.Time && d > dps)
-                            if stronger then p else { p with Dots = (until, dps, Fire) :: (p.Dots |> List.filter (fun (_, _, t) -> t <> Fire)) })
+                            let stronger = p.Dots |> List.exists (fun d -> d.Damage = Fire && d.Until > w.Time && d.PerSecond > dps)
+                            if stronger then p else { p with Dots = { Until = until; PerSecond = dps; Damage = Fire } :: (p.Dots |> List.filter (fun d -> d.Damage <> Fire)) })
                     Counts = bump "player:Ignited" w.Counts }
     | _ -> w
 
@@ -264,11 +264,11 @@ let summonPerWard (c: Reacting) pool wardEach duration (w: World) =
 /// `AttachPustule`: a pustule on the enemy, if it has none (it bursts later, see `Events`).
 let attachPustule (c: Reacting) part seconds per cap (w: World) =
     onTarget c w (fun target ->
-        if w.Pustules |> List.exists (fun (_, _, e, _, _, _, _) -> e = target) then w
+        if w.Pustules |> List.exists (fun p -> p.Enemy = target) then w
         else
             let dealt = Map.tryFind "Poison" w.DamageBy |> Option.defaultValue 0.0
             { w with
-                Pustules = (c.Actor.Name, part, target, dealt, per, cap, w.Time + seconds) :: w.Pustules
+                Pustules = { Pustule.Owner = c.Actor.Name; Part = part; Enemy = target; Mark = dealt; Per = per; Cap = cap; Until = w.Time + seconds } :: w.Pustules
                 Counts = bump "pustule" w.Counts }
             |> schedule (w.Time + seconds) Expire)
 
@@ -721,7 +721,7 @@ and startUse env (rng: Rng) (actor: Actor) (skill: Skill) (useTime: float) (w: W
                 let needed = pct / 100.0 * max 1.0 (Ailments.threshold (defender target))
                 let lasts = if skill.Duration > 0.0 then skill.Duration * Mods.mult ctx [ SkillDuration ] mods else 1e9
                 { w with
-                    Bombs = (actor.Name, skill.Name, target.Def.Name, target.Life, needed, w.Time + useTime + lasts) :: (w.Bombs |> List.filter (fun (a, s, _, _, _, _) -> not (a = actor.Name && s = skill.Name)))
+                    Bombs = { Bomb.Owner = actor.Name; Skill = skill.Name; Enemy = target.Def.Name; Mark = target.Life; Needed = needed; Until = w.Time + useTime + lasts } :: (w.Bombs |> List.filter (fun b -> not (b.Owner = actor.Name && b.Skill = skill.Name)))
                     Counts = bump ("planted:" + skill.Name) w.Counts }
             | None -> w
         // the Rage a part spent
@@ -740,7 +740,7 @@ and startUse env (rng: Rng) (actor: Actor) (skill: Skill) (useTime: float) (w: W
             | Some pct when skill.Duration > 0.0 ->
                 let lasts = skill.Duration * Mods.mult ctx [ SkillDuration ] mods
                 { w with
-                    Agonies = (actor.Name, skill.Name, target.Def.Name, 0.0, pct / 100.0, w.Time + useTime + lasts) :: (w.Agonies |> List.filter (fun (a, s, _, _, _, _) -> not (a = actor.Name && s = skill.Name)))
+                    Agonies = { Agony.Owner = actor.Name; Skill = skill.Name; Enemy = target.Def.Name; Recorded = 0.0; Share = pct / 100.0; Until = w.Time + useTime + lasts } :: (w.Agonies |> List.filter (fun a -> not (a.Owner = actor.Name && a.Skill = skill.Name)))
                     Counts = bump ("recording:" + skill.Name) w.Counts }
             | _ -> w
         // an infusion a part needed is used up; a part that waits is put down

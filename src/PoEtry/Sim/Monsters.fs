@@ -198,13 +198,13 @@ let attackPlayer env (rng: Rng) name (w: World) =
                 let w = takeDamage true pools taken { w with Player = Some p } |> fun w -> { w with Player = w.Player |> Option.map (fun p -> { p with LastHit = w.Time }) }
                 let w =
                     if preventedRecoup > 0.0 then
-                        { w with Player = w.Player |> Option.map (fun p -> { p with Recoups = (w.Time + v.RecoupSeconds, preventedRecoup / v.RecoupSeconds, "ES") :: p.Recoups }) }
+                        { w with Player = w.Player |> Option.map (fun p -> { p with Recoups = { Until = w.Time + v.RecoupSeconds; Rate = preventedRecoup / v.RecoupSeconds; Pool = "ES" } :: p.Recoups }) }
                     else w
                 let w =
                     if preventedLife > 0.0 then
-                        { w with Player = w.Player |> Option.map (fun p -> { p with Recoups = (w.Time + v.RecoupSeconds, preventedLife / v.RecoupSeconds, "Life") :: p.Recoups }) }
+                        { w with Player = w.Player |> Option.map (fun p -> { p with Recoups = { Until = w.Time + v.RecoupSeconds; Rate = preventedLife / v.RecoupSeconds; Pool = "Life" } :: p.Recoups }) }
                     else w
-                let w = (let _, _, _, whenHit, _ = env.Rage in gainRage env whenHit w)
+                let w = gainRage env env.Rage.WhenHit w
                 let w = (match env.Fight.Player.Skills |> List.tryHead with Some any -> react env rng env.Fight.Player WhenHit any (Some name) w | None -> w)
                 let w = (match env.Fight.Player.Skills |> List.tryHead with Some any when atk.Melee -> react env rng env.Fight.Player WhenHitMelee any (Some name) w | _ -> w)
                 // "Rage loss is paused for 4 seconds upon gaining Rage, or after taking damage"
@@ -250,8 +250,8 @@ let attackPlayer env (rng: Rng) name (w: World) =
                                 { w with
                                     Player =
                                         w.Player |> Option.map (fun p ->
-                                            let stronger = p.Dots |> List.exists (fun (u, d, t) -> t = Fire && u > w.Time && d >= dps)
-                                            if stronger then p else { p with Dots = (until, dps, Fire) :: (p.Dots |> List.filter (fun (_, _, t) -> t <> Fire)) })
+                                            let stronger = p.Dots |> List.exists (fun d -> d.Damage = Fire && d.Until > w.Time && d.PerSecond >= dps)
+                                            if stronger then p else { p with Dots = { Until = until; PerSecond = dps; Damage = Fire } :: (p.Dots |> List.filter (fun d -> d.Damage <> Fire)) })
                                     Counts = bump "player:Ignited" w.Counts })
                             else w
                         let w =
@@ -295,7 +295,7 @@ let attackPlayer env (rng: Rng) name (w: World) =
                                     if v.RegenOnStun <= 0.0 then w
                                     else
                                         let rate = v.RegenOnStun / 100.0 * pools.Life / Constants.stunRegenSeconds
-                                        { w with Player = w.Player |> Option.map (fun p -> { p with Recoups = (w.Time + Constants.stunRegenSeconds, rate, "Life") :: p.Recoups }) })
+                                        { w with Player = w.Player |> Option.map (fun p -> { p with Recoups = { Until = w.Time + Constants.stunRegenSeconds; Rate = rate; Pool = "Life" } :: p.Recoups }) })
                         else w
                 let w =
                     { w with

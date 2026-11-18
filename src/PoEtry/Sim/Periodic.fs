@@ -127,7 +127,7 @@ let dotKillGains env (rng: Rng) (e: EnemyState) mine (w: World) =
             if rng.Chance r.OnKillChance then
                 let count = if rng.Chance r.ExtraChance then 2.0 else 1.0
                 let rate = (r.LifePerRemnant + r.PercentOfMaxLife / 100.0 * v.Life) * count * v.LifeRecoveryRate / r.Delay
-                { w with Player = Some { p with Recoups = (w.Time + r.Delay, rate, "Life") :: p.Recoups }; Counts = bump "life remnant" w.Counts }
+                { w with Player = Some { p with Recoups = { Until = w.Time + r.Delay; Rate = rate; Pool = "Life" } :: p.Recoups }; Counts = bump "life remnant" w.Counts }
             else w
         | _ -> w
     let w =
@@ -145,7 +145,7 @@ let dotKillGains env (rng: Rng) (e: EnemyState) mine (w: World) =
             if e.Def.Rarity = Rare || e.Def.Rarity = Unique then fst (charm env rng "KillRare" w) else w
     if not mine then w
     else
-        let _, _, _, _, onKill = env.Rage
+        let onKill = env.Rage.OnKill
         gainRage env onKill w |> markRecently player.Name false false true
 
 /// An enemy killed by damage over time or recorded damage coming due: the player's kill

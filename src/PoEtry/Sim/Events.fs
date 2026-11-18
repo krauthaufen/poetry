@@ -59,29 +59,29 @@ let eventRng (rng: Rng) (ev: Event) (w: World) : Rng * World =
 let checkBombs (env: Env) (w: World) =
     if w.Bombs.IsEmpty then w
     else
-        w.Bombs |> List.fold (fun w ((owner, skill, enemy, mark, needed, until) as bomb) ->
+        w.Bombs |> List.fold (fun w (bomb: Bomb) ->
             let drop w = { w with Bombs = w.Bombs |> List.filter (fun b -> b <> bomb) }
-            match Map.tryFind enemy w.Enemies with
-            | Some e when e.Life > 0.0 && mark - e.Life >= needed ->
-                drop w |> schedule w.Time (Strike(owner, skill, 1.0, enemy))
+            match Map.tryFind bomb.Enemy w.Enemies with
+            | Some e when e.Life > 0.0 && bomb.Mark - e.Life >= bomb.Needed ->
+                drop w |> schedule w.Time (Strike(bomb.Owner, bomb.Skill, 1.0, bomb.Enemy))
             | Some e when e.Life > 0.0 ->
-                if w.Time >= until then { drop w with Counts = bump ("fizzled:" + skill) w.Counts } else w
+                if w.Time >= bomb.Until then { drop w with Counts = bump ("fizzled:" + bomb.Skill) w.Counts } else w
             | _ ->
                 match aimed env w with
-                | Some other -> drop w |> schedule w.Time (Strike(owner, skill, 1.0, other.Def.Name))
+                | Some other -> drop w |> schedule w.Time (Strike(bomb.Owner, bomb.Skill, 1.0, other.Def.Name))
                 | None -> drop w) w
 
 /// Pustules: burst when their time is up or they hold all the Poison they can use.
 let checkPustules (w: World) =
     if w.Pustules.IsEmpty then w
     else
-        w.Pustules |> List.fold (fun w ((owner, part, enemy, mark, per, cap, until) as pustule) ->
+        w.Pustules |> List.fold (fun w (pustule: Pustule) ->
             let drop w = { w with Pustules = w.Pustules |> List.filter (fun x -> x <> pustule) }
-            match Map.tryFind enemy w.Enemies with
+            match Map.tryFind pustule.Enemy w.Enemies with
             | Some e when e.Life > 0.0 ->
-                let stored = (Map.tryFind "Poison" w.DamageBy |> Option.defaultValue 0.0) - mark
-                let more = if per > 0.0 then min cap (stored / per) else 0.0
-                if w.Time >= until || (cap > 0.0 && more >= cap) then drop w |> schedule w.Time (Strike(owner, part, 1.0 + more / 100.0, enemy)) else w
+                let stored = (Map.tryFind "Poison" w.DamageBy |> Option.defaultValue 0.0) - pustule.Mark
+                let more = if pustule.Per > 0.0 then min pustule.Cap (stored / pustule.Per) else 0.0
+                if w.Time >= pustule.Until || (pustule.Cap > 0.0 && more >= pustule.Cap) then drop w |> schedule w.Time (Strike(pustule.Owner, pustule.Part, 1.0 + more / 100.0, pustule.Enemy)) else w
             | _ -> drop w) w
 
 /// Ice Crystals: destroyed once the enemy beside them has lost as much life as one
@@ -89,13 +89,13 @@ let checkPustules (w: World) =
 let checkCrystals (w: World) =
     if w.Crystals.IsEmpty then w
     else
-        w.Crystals |> List.fold (fun w ((owner, part, enemy, mark, life, count, until) as c) ->
+        w.Crystals |> List.fold (fun w (c: IceCrystals) ->
             let drop w = { w with Crystals = w.Crystals |> List.filter (fun x -> x <> c) }
-            match Map.tryFind enemy w.Enemies with
-            | Some e when e.Life > 0.0 && mark - e.Life >= life ->
-                [ 1 .. count ] |> List.fold (fun w _ -> schedule w.Time (Strike(owner, part, 1.0, enemy)) w) (drop w)
-                |> fun w -> { w with Counts = bump ("shattered:" + part) w.Counts }
-            | Some e when e.Life > 0.0 && w.Time < until -> w
+            match Map.tryFind c.Enemy w.Enemies with
+            | Some e when e.Life > 0.0 && c.Mark - e.Life >= c.LifeEach ->
+                [ 1 .. c.Count ] |> List.fold (fun w _ -> schedule w.Time (Strike(c.Owner, c.Part, 1.0, c.Enemy)) w) (drop w)
+                |> fun w -> { w with Counts = bump ("shattered:" + c.Part) w.Counts }
+            | Some e when e.Life > 0.0 && w.Time < c.Until -> w
             | _ -> drop w) w
 
 /// Inevitable Agony: recorded damage is taken again as life when the debuff ends, or as soon
@@ -105,12 +105,13 @@ let checkAgonies (env: Env) (rng: Rng) (w: World) =
     else
         // (whose debuff killed which enemy, in order)
         let killed = ResizeArray<string * string>()
-        w.Agonies |> List.fold (fun w ((owner, skill, enemy, mark, share, until) as a) ->
+        w.Agonies |> List.fold (fun w (a: Agony) ->
             let drop w = { w with Agonies = w.Agonies |> List.filter (fun x -> x <> a) }
+            let owner, skill, enemy = a.Owner, a.Skill, a.Enemy
             match Map.tryFind enemy w.Enemies with
             | Some e when e.Life > 0.0 ->
-                let owed = share * mark
-                if w.Time >= until || owed >= e.Life then
+                let owed = a.Share * a.Recorded
+                if w.Time >= a.Until || owed >= e.Life then
                     let dealt = min owed e.Life
                     let dead = owed >= e.Life
                     if dead then killed.Add((enemy, owner))
@@ -156,7 +157,7 @@ let demonForm (env: Env) (dt: float) (w: World) =
 /// Rage: regenerated all the time, lost once none has been gained for a while.
 /// `dt`: the time since the last event.
 let rageUpkeep (env: Env) (dt: float) (w: World) =
-    let regen, loss, delay, _, _ = env.Rage
+    let regen, loss, delay = env.Rage.Regen, env.Rage.Loss, env.Rage.Delay
     let name = env.Fight.Player.Name
     let st = Map.find name w.Actors
     let have = stacksOf st "Rage"
@@ -207,13 +208,13 @@ let notePlayerStates (env: Env) (w: World) =
               "FlaskEffect",
               (w.Time < p.FlaskUntil || w.Time < p.LifeFlaskUntil
                || (let st = Map.find env.Fight.Player.Name w.Actors in stacksOf st "ConstantManaFlask" > 0 || stacksOf st "ConstantLifeFlask" > 0))
-              "Leeching", p.Recoups |> List.exists (fun (until, _, pool) -> pool.StartsWith "Leech" && until > w.Time)
+              "Leeching", p.Recoups |> List.exists (fun r -> r.Pool.StartsWith "Leech" && r.Until > w.Time)
               // surrounded: at least 5 monsters within 3 m (PoB SurroundedRadiusBase, game constant)
               "Surrounded", (alive w |> List.filter (fun e -> Vec.length e.Def.Position - e.Def.Size <= v.SurroundedRadius) |> List.length) >= max 1 v.SurroundedAt
               // the player's own ailments: Ignite is the only damaging one a monster's hit or the
               // character itself puts on it (Shocked, Chilled, Frozen, Stunned are buffs of their own)
-              "Ignited", p.Dots |> List.exists (fun (until, _, t) -> t = Fire && until > w.Time)
-              "DamagingAilment", p.Dots |> List.exists (fun (until, _, t) -> t = Fire && until > w.Time)
+              "Ignited", p.Dots |> List.exists (fun d -> d.Damage = Fire && d.Until > w.Time)
+              "DamagingAilment", p.Dots |> List.exists (fun d -> d.Damage = Fire && d.Until > w.Time)
               // on Low Energy Shield: at most 35% of its maximum (DefaultLowStatusThresholdPercent); none without any
               "LowEnergyShield", v.EnergyShield > 0.0 && p.EnergyShield <= Constants.lowStatusShare * v.EnergyShield
               // energy shield recharge started in the past 2 seconds: its delay since the last
@@ -326,10 +327,10 @@ let plantCrystals owner part enemy count life limit lasts (w: World) =
     match Map.tryFind enemy w.Enemies with
     | Some e when e.Life > 0.0 ->
         // more than the limit: the oldest go (without exploding)
-        let all = (owner, part, enemy, e.Life, life, count, w.Time + lasts) :: w.Crystals
+        let all = { IceCrystals.Owner = owner; Part = part; Enemy = enemy; Mark = e.Life; LifeEach = life; Count = count; Until = w.Time + lasts } :: w.Crystals
         let kept, _ =
-            all |> List.fold (fun (kept, n) ((o, p, _, _, _, c, _) as x) ->
-                if o = owner && p = part then (if n + c <= max count limit then x :: kept, n + c else kept, n + c) else x :: kept, n) ([], 0)
+            all |> List.fold (fun (kept, n) (x: IceCrystals) ->
+                if x.Owner = owner && x.Part = part then (if n + x.Count <= max count limit then x :: kept, n + x.Count else kept, n + x.Count) else x :: kept, n) ([], 0)
         { w with Crystals = List.rev kept; Counts = bump ("crystals:" + part) w.Counts }
     | _ -> w
 

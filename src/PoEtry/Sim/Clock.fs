@@ -203,8 +203,8 @@ let takeDamage (fromHit: bool) (pools: PlayerStats) (damage: Map<DamageType, flo
             |> List.choose (fun (pool, types, pct) ->
                 let rate = match pool with "Life" -> pools.LifeRecoveryRate | "Mana" -> pools.ManaRecoveryRate | _ -> pools.ESRecoveryRate
                 let amount = (types |> List.sumBy (fun t -> Map.tryFind t damage |> Option.defaultValue 0.0)) * pct / 100.0 * rate
-                if amount > 0.0 then Some(w.Time + pools.RecoupSeconds, amount / pools.RecoupSeconds, pool) else None)
-        let recoups = (if later > 0.0 then [ w.Time + Constants.deferredLossSeconds, -later / Constants.deferredLossSeconds, "Life" ] else []) @ recoups
+                if amount > 0.0 then Some { Until = w.Time + pools.RecoupSeconds; Rate = amount / pools.RecoupSeconds; Pool = pool } else None)
+        let recoups = (if later > 0.0 then [ { Until = w.Time + Constants.deferredLossSeconds; Rate = -later / Constants.deferredLossSeconds; Pool = "Life" } ] else []) @ recoups
         let p =
             { p with
                 Mana = p.Mana - fromMana
@@ -259,7 +259,7 @@ let recover (stats: PlayerStats option) (rates: PlayerStats option) (flask: Mana
         let t0 = w.Time - dt
         let overlap until = max 0.0 (min w.Time until - t0)
         let stream (pool: string) =
-            let parts = p.Recoups |> List.filter (fun (_, _, pl) -> pl = pool) |> List.map (fun (until, rate, _) -> rate * overlap until)
+            let parts = p.Recoups |> List.filter (fun r -> r.Pool = pool) |> List.map (fun r -> r.Rate * overlap r.Until)
             // leech: "only the instance with the highest recovery rate will be active" (wiki, Leech)
             if pool.StartsWith "Leech" then (if parts.IsEmpty then 0.0 else List.max parts) else List.sum parts
         // leech: each instance is recovered over one second (keyword text)
@@ -287,7 +287,7 @@ let recover (stats: PlayerStats option) (rates: PlayerStats option) (flask: Mana
             | None -> p.LifeFlaskCharges
         let dots =
             p.Dots
-            |> List.fold (fun (m: Map<DamageType, float>) (until, dps, t) -> Map.add t ((Map.tryFind t m |> Option.defaultValue 0.0) + dps * overlap until) m) Map.empty
+            |> List.fold (fun (m: Map<DamageType, float>) (d: PlayerDot) -> Map.add d.Damage ((Map.tryFind d.Damage m |> Option.defaultValue 0.0) + d.PerSecond * overlap d.Until) m) Map.empty
         let burning = dots |> Map.exists (fun _ d -> d > 0.0)
         let w =
             { w with
@@ -299,8 +299,8 @@ let recover (stats: PlayerStats option) (rates: PlayerStats option) (flask: Mana
                             Life = min (max p.Life v.Life) (p.Life + lifeGain)
                             LifeFlaskCharges = lifeCharges
                             Ward = (if p.Ward >= v.Ward then p.Ward else min v.Ward (p.Ward + r.WardRegen * dt))
-                            Recoups = p.Recoups |> List.filter (fun (until, _, _) -> until > w.Time)
-                            Dots = p.Dots |> List.filter (fun (until, _, _) -> until > w.Time)
+                            Recoups = p.Recoups |> List.filter (fun r -> r.Until > w.Time)
+                            Dots = p.Dots |> List.filter (fun d -> d.Until > w.Time)
                             // damage over time keeps energy shield from recharging
                             LastHit = (if burning then w.Time else p.LastHit)
                             ManaGained = gained } }

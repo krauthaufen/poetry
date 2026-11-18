@@ -26,11 +26,11 @@ let envOf (trace: (float -> string -> string -> string -> float -> unit) option)
       Rage =
         (let db = ModDb.ofList fight.Player.Mods
          let c = Ctx.empty
-         Mods.sumBase c [ Named "RageRegen" ] db,
-         (if Mods.flag c (Named "NoRageLoss") db then 0.0 else Constants.rageLossPerSecond * Mods.inc c [ Named "RageDecay" ] db),
-         Constants.rageLossDelay + Mods.sumBase c [ Named "RageLossDelay" ] db,
-         Mods.sumBase c [ Named "RageWhenHit" ] db,
-         Mods.sumBase c [ Named "RageOnKill" ] db)
+         { Regen = Mods.sumBase c [ Named "RageRegen" ] db
+           Loss = (if Mods.flag c (Named "NoRageLoss") db then 0.0 else Constants.rageLossPerSecond * Mods.inc c [ Named "RageDecay" ] db)
+           Delay = Constants.rageLossDelay + Mods.sumBase c [ Named "RageLossDelay" ] db
+           WhenHit = Mods.sumBase c [ Named "RageWhenHit" ] db
+           OnKill = Mods.sumBase c [ Named "RageOnKill" ] db })
       BerserkLoss = Mods.sumBase Ctx.empty [ Named "LifeLossPercentPerMinutePerRage" ] (ModDb.ofList fight.Player.Mods)
       CharmKeep = Mods.sumBase Ctx.empty [ Named "CharmKeepCharges" ] (ModDb.ofList fight.Player.Mods)
       SlowMagnitude = Mods.inc Ctx.empty [ Named "SlowMagnitude" ] (ModDb.ofList fight.Player.Mods)

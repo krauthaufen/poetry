@@ -74,6 +74,89 @@ type ActorState =
       /// When a temporary minion's time is up.
       Leaves: float }
 
+/// A seed planted in an enemy (Living Bomb): it explodes once the enemy has taken enough
+/// damage since.
+type Bomb =
+    { Owner: string
+      Skill: string
+      Enemy: string
+      /// The enemy's life when the seed was planted.
+      Mark: float
+      /// The damage the enemy has to take to set the seed off.
+      Needed: float
+      /// When it fizzles.
+      Until: float }
+
+/// A debuff that records a share of the hit damage an enemy takes and takes it again as
+/// life at the end (Inevitable Agony).
+type Agony =
+    { Owner: string
+      Skill: string
+      Enemy: string
+      /// The hit damage recorded so far.
+      Recorded: float
+      /// The share of it that is taken again.
+      Share: float
+      /// When the debuff ends.
+      Until: float }
+
+/// Ice Crystals of one use beside an enemy.
+type IceCrystals =
+    { Owner: string
+      /// The part of the skill that is their explosion.
+      Part: string
+      Enemy: string
+      /// The enemy's life when they appeared.
+      Mark: float
+      /// The life of one crystal.
+      LifeEach: float
+      /// How many there are.
+      Count: int
+      /// When they are gone.
+      Until: float }
+
+/// A pustule on an enemy: it stores the Poison dealt while it is there, and bursts.
+type Pustule =
+    { Owner: string
+      /// The part of the skill that is its burst.
+      Part: string
+      Enemy: string
+      /// The Poison damage dealt (in the whole fight) when it was attached.
+      Mark: float
+      /// Poison per 1% more damage of the burst.
+      Per: float
+      /// The most (%) it can hold.
+      Cap: float
+      /// When it bursts at the latest.
+      Until: float }
+
+/// Damage over time on the player (an Ignite).
+type PlayerDot =
+    { Until: float
+      PerSecond: float
+      Damage: DamageType }
+
+/// A recovery stream of the player (recoup, leech, regeneration for a while).
+type Recoup =
+    { Until: float
+      /// What it recovers a second (negative: what is lost).
+      Rate: float
+      /// "Life" | "Mana" | "ES" | "LeechLife" | "LeechMana" | "ShroudES"
+      Pool: string }
+
+/// The player's rage upkeep.
+type RageUpkeep =
+    { /// Rage regenerated a second.
+      Regen: float
+      /// Rage lost a second, once none has been gained for a while.
+      Loss: float
+      /// Seconds without gaining any before it is lost.
+      Delay: float
+      /// Rage gained when hit.
+      WhenHit: float
+      /// Rage gained on kill.
+      OnKill: float }
+
 type EnemyState =
     { Def: EnemyDef
       Life: float
@@ -121,10 +204,10 @@ type PlayerState =
       LifeFlaskCharges: float
       LifeFlaskUntil: float
       LifeFlaskRate: float
-      /// Damage over time on the player (ignite): (until, damage per second, type).
-      Dots: (float * float * DamageType) list
-      /// Recovery streams (recoup): (until, per second, pool "Life" | "Mana" | "ES").
-      Recoups: (float * float * string) list
+      /// Damage over time on the player (ignite).
+      Dots: PlayerDot list
+      /// Recovery streams (recoup, leech).
+      Recoups: Recoup list
       /// Stunned or frozen: no action before this time.
       LockedUntil: float
       FreezeBuildup: float
@@ -195,25 +278,21 @@ type World =
       Kills: (string * Rarity * float) list
       /// Corpses already used up by corpse skills (every kill leaves one).
       CorpsesUsed: int
-      /// Seeds planted in enemies (Living Bomb): owner, skill, enemy, the enemy's life when
-      /// planted, the damage it takes to set the seed off, when it fizzles.
-      Bombs: (string * string * string * float * float * float) list
+      /// Seeds planted in enemies (Living Bomb).
+      Bombs: Bomb list
       /// Debuffs that record a share of the damage an enemy takes and take it again as life
-      /// at the end (Inevitable Agony): owner, skill, enemy, the enemy's life when applied,
-      /// the share, when it ends.
-      Agonies: (string * string * string * float * float * float) list // (owner, skill, enemy, hit damage recorded, share, ends at)
-      /// Ice Crystals beside an enemy: (owner, explosion part, enemy, the enemy's life when
-      /// they appeared, life of one crystal, how many, gone at). Newest first.
-      Crystals: (string * string * string * float * float * int * float) list
+      /// at the end (Inevitable Agony).
+      Agonies: Agony list
+      /// Ice Crystals beside enemies, newest first.
+      Crystals: IceCrystals list
       /// Evasion entropy of each defender: (value 0..99, time of the last attempted hit).
       Entropy: Map<string, float * float>
       /// Killed minions are revived at this time; how many have died since the last revival.
       Revival: (float * int) option
       /// Killed minions whose bones have been used (Unearth) since they died.
       Boned: Set<string>
-      /// Pustules on enemies: owner, part, enemy, the Poison damage dealt when it was attached,
-      /// Poison per 1% more damage, the most (%), when it bursts at the latest.
-      Pustules: (string * string * string * float * float * float * float) list
+      /// Pustules on enemies.
+      Pustules: Pustule list
       /// The enemy that is the cause of what happens now (the one just hit, the one whose hit
       /// was blocked; "": none), and the enemy a triggered skill is aimed at while it starts.
       Cause: string
@@ -239,9 +318,8 @@ type Env =
       /// (an event: its place in the queue's order; a hit: what it dealt). Nothing in the
       /// fight depends on it.
       Trace: (float -> string -> string -> string -> float -> unit) option
-      /// The player's rage upkeep: regeneration per second, loss per second, seconds without
-      /// gaining before it is lost, rage when hit, rage on kill.
-      Rage: float * float * float * float * float
+      /// The player's rage upkeep.
+      Rage: RageUpkeep
       /// "Debuffs you inflict have X% increased Slow Magnitude": how much more the Maim and
       /// Hinder on the monsters slow them (the player's, for all of them).
       SlowMagnitude: float

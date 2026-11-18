@@ -259,7 +259,7 @@ let hitEnemy env (rng: Rng) (actor: Actor) (skill: Skill) mult (target: string) 
                     // (a hit that deals more than the enemy has left: each type's share of what was left)
                     DamageByType = (let k = if dealt > e.Life && dealt > 0.0 then e.Life / dealt else 1.0 in hit.Dealt |> Map.fold (fun m t v -> if v > 0.0 then addf (DamageType.name t) (v * k) m else m) w.DamageByType)
                     // "25% of Hit Damage dealt to them while Debuffed": hits are what is recorded
-                    Agonies = w.Agonies |> List.map (fun ((o, s, en, recorded, share, until) as a) -> if en = target && until > w.Time then (o, s, en, recorded + min dealt e.Life, share, until) else a)
+                    Agonies = w.Agonies |> List.map (fun a -> if a.Enemy = target && a.Until > w.Time then { a with Recorded = a.Recorded + min dealt e.Life } else a)
                     Counts = w.Counts |> bump ("hits:" + skill.Name) |> (if hit.Crit then bump ("crits:" + skill.Name) else id)
                     Shown = (if w.Tracing then Struck(w.Time, target, min dealt e.Life, hit.Crit) :: w.Shown else w.Shown)
                     // (on a march a hit wakes who it lands on, and in rooms the whole of its pack)
@@ -375,10 +375,10 @@ let hitEnemy env (rng: Rng) (actor: Actor) (skill: Skill) mult (target: string) 
                                     { p with
                                         Recoups =
                                             // a leech instance comes back over one second ("Leech Life X% less quickly" stretches it)
-                                            (if extra > 0.0 then [ w.Time + Constants.leechSeconds, extra / Constants.leechSeconds, "LeechMana" ] else [])
+                                            (if extra > 0.0 then [ { Until = w.Time + Constants.leechSeconds; Rate = extra / Constants.leechSeconds; Pool = "LeechMana" } ] else [])
                                             @ (if lifeLeech > 0.0 && v.Life > 1.0 then
                                                    (let t = Constants.leechSeconds / max 0.05 v.LifeLeechRate
-                                                    [ w.Time + t, lifeLeech / t, "LeechLife" ])
+                                                    [ { Until = w.Time + t; Rate = lifeLeech / t; Pool = "LeechLife" } ])
                                                else [])
                                             @ p.Recoups
                                         StrikeLeech = max leech p.StrikeLeech
@@ -616,7 +616,7 @@ let hitEnemy env (rng: Rng) (actor: Actor) (skill: Skill) mult (target: string) 
                         let count = if rng.Chance r.ExtraChance then 2.0 else 1.0
                         let rate = (r.LifePerRemnant + r.PercentOfMaxLife / 100.0 * v.Life) * count * v.LifeRecoveryRate / r.Delay
                         { w with
-                            Player = Some { p with LastLifeRemnant = (if fromHit then w.Time else p.LastLifeRemnant); Recoups = (w.Time + r.Delay, rate, "Life") :: p.Recoups }
+                            Player = Some { p with LastLifeRemnant = (if fromHit then w.Time else p.LastLifeRemnant); Recoups = { Until = w.Time + r.Delay; Rate = rate; Pool = "Life" } :: p.Recoups }
                             Counts = bump "life remnant" w.Counts }
                     else w
                 | _ -> w
@@ -661,7 +661,7 @@ let hitEnemy env (rng: Rng) (actor: Actor) (skill: Skill) mult (target: string) 
                     let fresh = w.Time - (Map.tryFind "RageHitAt" st.Energy |> Option.defaultValue -1e9) >= 0.5
                     let onHit = if fresh then Mods.sumBase ctx [ Named "RageOnHit" ] mods else 0.0
                     let w = if onHit > 0.0 then updateActor actor.Name (fun st -> { st with Energy = Map.add "RageHitAt" w.Time st.Energy }) w else w
-                    let _, _, _, _, onKill = env.Rage
+                    let onKill = env.Rage.OnKill
                     gainRage env (onHit + (if dead then onKill else 0.0)) w
             // Knockback: a hit that knocks back pushes the monster straight away from the player
             // (a boss is not moved). How far: the skill's own distance, or a metre where it names
