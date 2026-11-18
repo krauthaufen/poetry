@@ -235,6 +235,12 @@ module GameData =
                   WeaponRequirements =
                     (Json.strField "weaponRequirements" j |> Option.defaultValue "").Split(',')
                     |> Array.map (fun x -> x.Trim()) |> Array.filter ((<>) "") |> List.ofArray })
+            // (a skill a unique item grants has a gem entry of its own under the same name,
+            // "Herald of Ice" of UniqueHeraldOfIcePlayer: the gem one sockets comes first)
+            // (the export marks them "fromItem" where the game data says so)
+            |> List.sortBy (fun g ->
+                let marked = Map.tryFind g.GameId m |> Option.bind (Json.field "fromItem") |> Option.exists (fun v -> v = JBool true)
+                if marked || g.GrantedEffectId.StartsWith "Unique" || g.GameId.Contains "Unique" then 1 else 0)
         | _ -> []
 
     /// gems.json, keyed by gem name (the first entry of a name).

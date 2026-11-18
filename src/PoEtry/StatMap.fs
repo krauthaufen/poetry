@@ -1565,6 +1565,11 @@ module StatMap =
         | "corrupted_skill_gem_level_+" -> one (Mod.base' (Named "CorruptedGemLevel") v)
         | "corrupted_spell_skill_gem_level_+" -> one (Mod.base' (Named "CorruptedSpellGemLevel") v)
         | "mark_skill_gem_level_+" -> one (Mod.base' (Named "GemLevel") v |> Mod.whenever (SkillIs(Tag "Type:Mark")))
+        // "+N to Level of all Nova / Grenade / Slam ... Skill Gems": by the skill type of that name
+        | "nova_skill_gem_level_+" | "grenade_skill_gem_level_+" | "hazard_skill_gem_level_+" | "herald_skill_gem_level_+" | "plant_skill_gem_level_+"
+        | "slam_skill_gem_level_+" | "storm_skill_gem_level_+" | "strike_skill_gem_level_+" | "warcry_skill_gem_level_+" | "wind_skill_gem_level_+" ->
+            let word = id.Substring(0, id.IndexOf '_')
+            one (Mod.base' (Named "GemLevel") v |> Mod.whenever (SkillIs(Tag("Type:" + string (System.Char.ToUpperInvariant word.[0]) + word.Substring 1))))
         | "despair_gem_level_+" -> one (Mod.base' (Named "GemLevel") v |> Mod.whenever (SkillNamed "Despair"))
         // "Increases and Reductions to Spell damage also apply to Attacks" (Behaviours.minionIncreasesOnYou)
         | "additive_spell_damage_modifiers_apply_to_attack_damage" -> one (Mod.flag (Named "SpellDamageAppliesToAttacks"))
