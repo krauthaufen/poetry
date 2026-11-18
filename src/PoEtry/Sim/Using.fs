@@ -143,6 +143,153 @@ let nextStep (env: Env) (actor: Actor) (st: ActorState) (v: View) (w: World) : S
             && not (w.Bombs |> List.exists (fun b -> b.Owner = actor.Name && b.Skill = s.Name)))
     usable |> List.tryFind (fun step -> affordable env actor st w (skillOf actor step.Use)) |> Option.orElse (List.tryHead usable)
 
+/// A skill an actor is about to use, as the steps of paying for it and setting it going see it.
+type ReadyUse =
+    { Env: Env
+      Rng: Rng
+      Actor: Actor
+      Who: string
+      Skill: Skill
+      /// The actor's state when it got ready.
+      State: ActorState
+      /// How long the use takes.
+      Takes: float
+      /// What the skill's cost is asked with, and the actor's modifiers with the skill.
+      CostCtx: Ctx
+      Db: ModDb }
+
+/// What the use costs: the skill's own cost (a load of bolts or an opened window is paid once,
+/// a cost by the second for the time), Archmage's share of maximum mana, cost modifiers and efficiency.
+let useCost (u: ReadyUse) (w: World) : float =
+    let env, rng, actor, name, skill, st, t, costCtx, db = u.Env, u.Rng, u.Actor, u.Who, u.Skill, u.State, u.Takes, u.CostCtx, u.Db
+    // Archmage: spells cost an extra share of maximum mana
+    let extraCost =
+        match actor.Vitals with
+        | Some pools -> pools.Mana * Mods.sumBase costCtx [ Named "ExtraCostPercentOfMaxMana" ] db / 100.0
+        | None -> 0.0
+    // crossbow ammunition: the cost is for loading, paid with the first shot of a new load
+    // (a skill with a window: the cost is for opening it)
+    let ownCost =
+        if (window skill).IsSome then (if windowShut st w.Time skill then skill.Cost else 0.0)
+        elif skill.Clip > 0 && not (st.LoadDue.Contains skill.Name) then 0.0 else skill.Cost
+    let ownCost =
+        if skill.CostPerSecond <= 0.0 then ownCost
+        else (if st.LastUsed = skill.Name then 0.0 else ownCost) + skill.CostPerSecond * (if partFlag skill "CostOverTimeWithSpeed" then Channel.paidSeconds skill else t)
+    let cost = (ownCost + extraCost) * Mods.mult costCtx [ ManaCost ] db / Mods.inc costCtx [ ManaCostEfficiency ] db
+    cost
+
+/// after the last bolt of a load: reload (attack speed and reload speed shorten it;
+/// PoB: increases add up, more multiplies), unless the reload is instant
+let reloadAfter (u: ReadyUse) (w: World) : World * float =
+    let env, rng, actor, name, skill, st, t, costCtx, db = u.Env, u.Rng, u.Actor, u.Who, u.Skill, u.State, u.Takes, u.CostCtx, u.Db
+    if skill.Clip <= 0 then w, 0.0
+    else
+        let st = Map.find name w.Actors
+        let ctx = { costCtx with Buffs = buffStacks st } |> owned env w
+        let left = (Map.tryFind skill.Name st.Ammo |> Option.defaultValue skill.Clip)
+        let kept = rng.Chance(Mods.sumBase ctx [ Named "KeepAmmoChance" ] db)
+        let left = if kept then left else left - 1
+        let w = updateActor name (fun st -> { st with Ammo = Map.add skill.Name left st.Ammo; LoadDue = st.LoadDue.Remove skill.Name }) w
+        if left > 0 then w, 0.0
+        else
+            let speed = (1.0 + (Mods.sumInc ctx [ Speed ] db + Mods.sumInc ctx [ Named "ReloadSpeed" ] db) / 100.0) * Mods.more ctx [ Speed ] db * Mods.more ctx [ Named "ReloadSpeed" ] db
+            let instant = rng.Chance(Mods.sumBase ctx [ Named "InstantReloadChance" ] db)
+            let seconds = if instant then 0.0 else skill.ReloadTime / max 0.1 speed
+            let w =
+                updateActor name (fun st ->
+                    { st with
+                        Ammo = Map.add skill.Name skill.Clip st.Ammo
+                        LoadDue = st.LoadDue.Add skill.Name
+                        Buffs = Map.add "ReloadedRecently" { Name = "ReloadedRecently"; Mods = []; Stacks = 1; Expires = w.Time + t + seconds + 4.0 } st.Buffs }) w
+                |> schedule (w.Time + t + seconds + 4.0) Expire
+            { w with Counts = bump ("reload:" + skill.Name) w.Counts }, seconds
+
+/// The use goes ahead: a window it opens, the use itself, a reload after it, and when the actor is ready again.
+let goAhead (u: ReadyUse) (w: World) : World =
+    let env, rng, actor, name, skill, st, t, costCtx, db = u.Env, u.Rng, u.Actor, u.Who, u.Skill, u.State, u.Takes, u.CostCtx, u.Db
+    // the use that opens a window: it lasts so long, and charges again after it
+    let w =
+        match window skill with
+        | Some (secs, recharge) when windowShut st w.Time skill ->
+            { w with Counts = bump ("window:" + skill.Name) w.Counts }
+            |> updateActor name (fun st ->
+                { st with Energy = st.Energy |> Map.add ("Window:" + skill.Name) (w.Time + secs) |> Map.add ("WindowNext:" + skill.Name) (w.Time + secs + recharge) })
+        | _ -> w
+    let w = startUse env rng actor skill t w
+    let w, extra = reloadAfter u w
+    let w =
+        if env.Fight.March.IsNone || name <> env.Fight.Player.Name then w
+        else { w with WalkHeldUntil = w.Time + t + extra; WalkKept = (if extra > 0.0 then 0.0 else Channel.walked skill t); Lead = t }
+    schedule (w.Time + t + extra) (Ready name) w
+
+/// drink the mana flask when mana is getting low and it isn't already running
+let drinkManaFlask (u: ReadyUse) (cost: float) (w: World) : World =
+    let env, rng, actor, name, skill, st, t, costCtx, db = u.Env, u.Rng, u.Actor, u.Who, u.Skill, u.State, u.Takes, u.CostCtx, u.Db
+    let w =
+        match actor.ManaFlask, w.Player with
+        | Some f, Some p when p.Mana < 2.0 * cost && w.Time >= p.FlaskUntil && p.FlaskCharges >= f.ChargesPerUse ->
+            { w with
+                Player =
+                    // "X% of Flask Recovery applied Instantly"
+                    (let manaMax = actor.Vitals |> Option.map (fun pools -> pools.Mana) |> Option.defaultValue p.Mana
+                     Some
+                         { p with
+                             FlaskCharges = p.FlaskCharges - f.ChargesPerUse
+                             FlaskUntil = w.Time + f.Duration
+                             FlaskRate = f.Amount * (1.0 - f.Instant) / f.Duration
+                             Mana = min (max p.Mana manaMax) (p.Mana + f.Amount * f.Instant) })
+                Counts = bump "flask:mana" w.Counts }
+        | _ -> w
+    w
+
+/// The cost is paid (with mana, life or Infernal Flame) and the use goes ahead; or it
+/// cannot be paid yet and the actor waits; or never, and the skill is given up.
+let payAndGo (u: ReadyUse) (cost: float) (lifeCost: float) (w: World) : World =
+    let env, rng, actor, name, skill, st, t, costCtx, db = u.Env, u.Rng, u.Actor, u.Who, u.Skill, u.State, u.Takes, u.CostCtx, u.Db
+    match actor.Vitals, w.Player with
+    | Some v, Some p when lifeCost > 0.0 && p.Life - lifeCost < 1.0 ->
+        // a life cost that would kill: the skill waits (and the life flask is drunk)
+        let wait = max Constants.serverTick 0.25
+        { w with Player = Some { p with Starved = p.Starved + wait } } |> drinkLifeFlask v |> schedule (w.Time + wait) (Ready name)
+    | Some v, Some p when v.CostsLife ->
+        // Blood Magic: the cost is paid with life; a skill that would kill waits
+        if p.Life - cost >= 1.0 || cost <= 0.0 then
+            { w with Player = Some { p with Life = p.Life - cost } } |> goAhead u
+        else
+            let wait = max Constants.serverTick 0.25
+            { w with Player = Some { p with Starved = p.Starved + wait } } |> schedule (w.Time + wait) (Ready name)
+    | Some v, Some p when v.CostsInfernalFlame ->
+        // Pyromantic Pact: the cost builds Infernal Flame (max: twice max mana); reaching the
+        // maximum empties it and burns maximum life + energy shield as fire damage
+        let flame = p.InfernalFlame + cost
+        let w =
+            if flame >= 2.0 * v.Mana then
+                // a fire hit on yourself: fire resistance applies
+                let fireRes = Map.tryFind Fire v.Resist |> Option.defaultValue 0.0
+                let burn = (v.Life + v.EnergyShield) * Mods.sumBase Ctx.empty [ Named "InfernalFlameBurn" ] (ModDb.ofList actor.Mods) / 100.0 * (1.0 - fireRes / 100.0)
+                { w with Player = Some { p with InfernalFlame = 0.0 }; Counts = bump "infernal flame burn" w.Counts }
+                |> takeDamage false v (Map.ofList [ Fire, burn ])
+            else { w with Player = Some { p with InfernalFlame = flame } }
+        goAhead u w
+    | Some v, Some p when p.Mana < cost - 1e-9 * max 1.0 cost && cost > v.Mana && skill.CostPerSecond <= 0.0 ->
+        // costs more than the whole mana pool: this skill can never be used
+        // (a cost by the second is paid as far as the pool goes: `manaNeeded`)
+        { w with Counts = bump ("cannot afford:" + skill.Name) w.Counts }
+        |> updateActor name (fun st -> { st with Cooldowns = Map.add skill.Name infinity st.Cooldowns })
+        |> schedule (w.Time + Constants.serverTick) (Ready name)
+    | Some v, Some p when (let need = fst (manaNeeded v skill t cost) in p.Mana < need - 1e-9 * max 1.0 need) ->
+        // not enough mana: wait until regeneration and leech have covered it
+        let cost = fst (manaNeeded v skill t cost)
+        let rate =
+            v.ManaRegen + (p.Recoups |> List.sumBy (fun r -> if r.Pool = "LeechMana" && r.Until > w.Time then r.Rate else 0.0))
+            + (if w.Time < p.FlaskUntil then p.FlaskRate else 0.0)
+        let wait = max Constants.serverTick (if rate > 0.0 then (cost - p.Mana) / rate else 1.0)
+        { w with Player = Some { p with Starved = p.Starved + wait } } |> schedule (w.Time + wait) (Ready name)
+    | Some v, Some p ->
+        { w with Player = Some { p with Mana = max (-(snd (manaNeeded v skill t cost))) (p.Mana - cost); Life = p.Life - lifeCost } }
+        |> (if lifeCost > 0.0 then drinkLifeFlask v else id) |> sigilSpend name cost v.Mana |> goAhead u
+    | _ -> goAhead u w
+
 /// An actor that is free to act uses the next step of its rotation: the cost is paid (or
 /// waited for), the use starts, and the actor is ready again when it is over.
 let onReadyUnlocked env (rng: Rng) name (w: World) =
@@ -157,123 +304,15 @@ let onReadyUnlocked env (rng: Rng) name (w: World) =
         // mana cost: base x increased cost / (1 + cost efficiency)
         let db = skillDb env actor skill st
         let costCtx = { Ctx.empty with SkillTags = skill.Tags; SkillName = skill.Name }
-        // Archmage: spells cost an extra share of maximum mana
-        let extraCost =
-            match actor.Vitals with
-            | Some pools -> pools.Mana * Mods.sumBase costCtx [ Named "ExtraCostPercentOfMaxMana" ] db / 100.0
-            | None -> 0.0
-        // crossbow ammunition: the cost is for loading, paid with the first shot of a new load
-        // (a skill with a window: the cost is for opening it)
-        let ownCost =
-            if (window skill).IsSome then (if windowShut st w.Time skill then skill.Cost else 0.0)
-            elif skill.Clip > 0 && not (st.LoadDue.Contains skill.Name) then 0.0 else skill.Cost
-        let ownCost =
-            if skill.CostPerSecond <= 0.0 then ownCost
-            else (if st.LastUsed = skill.Name then 0.0 else ownCost) + skill.CostPerSecond * (if partFlag skill "CostOverTimeWithSpeed" then Channel.paidSeconds skill else t)
-        let cost = (ownCost + extraCost) * Mods.mult costCtx [ ManaCost ] db / Mods.inc costCtx [ ManaCostEfficiency ] db
-        // after the last bolt of a load: reload (attack speed and reload speed shorten it;
-        // PoB: increases add up, more multiplies), unless the reload is instant
-        let reload (w: World) : World * float =
-            if skill.Clip <= 0 then w, 0.0
-            else
-                let st = Map.find name w.Actors
-                let ctx = { costCtx with Buffs = buffStacks st } |> owned env w
-                let left = (Map.tryFind skill.Name st.Ammo |> Option.defaultValue skill.Clip)
-                let kept = rng.Chance(Mods.sumBase ctx [ Named "KeepAmmoChance" ] db)
-                let left = if kept then left else left - 1
-                let w = updateActor name (fun st -> { st with Ammo = Map.add skill.Name left st.Ammo; LoadDue = st.LoadDue.Remove skill.Name }) w
-                if left > 0 then w, 0.0
-                else
-                    let speed = (1.0 + (Mods.sumInc ctx [ Speed ] db + Mods.sumInc ctx [ Named "ReloadSpeed" ] db) / 100.0) * Mods.more ctx [ Speed ] db * Mods.more ctx [ Named "ReloadSpeed" ] db
-                    let instant = rng.Chance(Mods.sumBase ctx [ Named "InstantReloadChance" ] db)
-                    let seconds = if instant then 0.0 else skill.ReloadTime / max 0.1 speed
-                    let w =
-                        updateActor name (fun st ->
-                            { st with
-                                Ammo = Map.add skill.Name skill.Clip st.Ammo
-                                LoadDue = st.LoadDue.Add skill.Name
-                                Buffs = Map.add "ReloadedRecently" { Name = "ReloadedRecently"; Mods = []; Stacks = 1; Expires = w.Time + t + seconds + 4.0 } st.Buffs }) w
-                        |> schedule (w.Time + t + seconds + 4.0) Expire
-                    { w with Counts = bump ("reload:" + skill.Name) w.Counts }, seconds
-        let go (w: World) =
-            // the use that opens a window: it lasts so long, and charges again after it
-            let w =
-                match window skill with
-                | Some (secs, recharge) when windowShut st w.Time skill ->
-                    { w with Counts = bump ("window:" + skill.Name) w.Counts }
-                    |> updateActor name (fun st ->
-                        { st with Energy = st.Energy |> Map.add ("Window:" + skill.Name) (w.Time + secs) |> Map.add ("WindowNext:" + skill.Name) (w.Time + secs + recharge) })
-                | _ -> w
-            let w = startUse env rng actor skill t w
-            let w, extra = reload w
-            let w =
-                if env.Fight.March.IsNone || name <> env.Fight.Player.Name then w
-                else { w with WalkHeldUntil = w.Time + t + extra; WalkKept = (if extra > 0.0 then 0.0 else Channel.walked skill t); Lead = t }
-            schedule (w.Time + t + extra) (Ready name) w
-        // drink the mana flask when mana is getting low and it isn't already running
-        let w =
-            match actor.ManaFlask, w.Player with
-            | Some f, Some p when p.Mana < 2.0 * cost && w.Time >= p.FlaskUntil && p.FlaskCharges >= f.ChargesPerUse ->
-                { w with
-                    Player =
-                        // "X% of Flask Recovery applied Instantly"
-                        (let manaMax = actor.Vitals |> Option.map (fun pools -> pools.Mana) |> Option.defaultValue p.Mana
-                         Some
-                             { p with
-                                 FlaskCharges = p.FlaskCharges - f.ChargesPerUse
-                                 FlaskUntil = w.Time + f.Duration
-                                 FlaskRate = f.Amount * (1.0 - f.Instant) / f.Duration
-                                 Mana = min (max p.Mana manaMax) (p.Mana + f.Amount * f.Instant) })
-                    Counts = bump "flask:mana" w.Counts }
-            | _ -> w
+        let u = { ReadyUse.Env = env; Rng = rng; Actor = actor; Who = name; Skill = skill; State = st; Takes = t; CostCtx = costCtx; Db = db }
+        let cost = useCost u w
+        let w = drinkManaFlask u cost w
         // what of the cost is paid with life (after the flask, which goes by the whole cost)
         let cost, lifeCost =
             match actor.Vitals with
             | Some v when not v.CostsLife && not v.CostsInfernalFlame -> splitCost v costCtx db cost
             | _ -> cost, 0.0
-        match actor.Vitals, w.Player with
-        | Some v, Some p when lifeCost > 0.0 && p.Life - lifeCost < 1.0 ->
-            // a life cost that would kill: the skill waits (and the life flask is drunk)
-            let wait = max Constants.serverTick 0.25
-            { w with Player = Some { p with Starved = p.Starved + wait } } |> drinkLifeFlask v |> schedule (w.Time + wait) (Ready name)
-        | Some v, Some p when v.CostsLife ->
-            // Blood Magic: the cost is paid with life; a skill that would kill waits
-            if p.Life - cost >= 1.0 || cost <= 0.0 then
-                { w with Player = Some { p with Life = p.Life - cost } } |> go
-            else
-                let wait = max Constants.serverTick 0.25
-                { w with Player = Some { p with Starved = p.Starved + wait } } |> schedule (w.Time + wait) (Ready name)
-        | Some v, Some p when v.CostsInfernalFlame ->
-            // Pyromantic Pact: the cost builds Infernal Flame (max: twice max mana); reaching the
-            // maximum empties it and burns maximum life + energy shield as fire damage
-            let flame = p.InfernalFlame + cost
-            let w =
-                if flame >= 2.0 * v.Mana then
-                    // a fire hit on yourself: fire resistance applies
-                    let fireRes = Map.tryFind Fire v.Resist |> Option.defaultValue 0.0
-                    let burn = (v.Life + v.EnergyShield) * Mods.sumBase Ctx.empty [ Named "InfernalFlameBurn" ] (ModDb.ofList actor.Mods) / 100.0 * (1.0 - fireRes / 100.0)
-                    { w with Player = Some { p with InfernalFlame = 0.0 }; Counts = bump "infernal flame burn" w.Counts }
-                    |> takeDamage false v (Map.ofList [ Fire, burn ])
-                else { w with Player = Some { p with InfernalFlame = flame } }
-            go w
-        | Some v, Some p when p.Mana < cost - 1e-9 * max 1.0 cost && cost > v.Mana && skill.CostPerSecond <= 0.0 ->
-            // costs more than the whole mana pool: this skill can never be used
-            // (a cost by the second is paid as far as the pool goes: `manaNeeded`)
-            { w with Counts = bump ("cannot afford:" + skill.Name) w.Counts }
-            |> updateActor name (fun st -> { st with Cooldowns = Map.add skill.Name infinity st.Cooldowns })
-            |> schedule (w.Time + Constants.serverTick) (Ready name)
-        | Some v, Some p when (let need = fst (manaNeeded v skill t cost) in p.Mana < need - 1e-9 * max 1.0 need) ->
-            // not enough mana: wait until regeneration and leech have covered it
-            let cost = fst (manaNeeded v skill t cost)
-            let rate =
-                v.ManaRegen + (p.Recoups |> List.sumBy (fun r -> if r.Pool = "LeechMana" && r.Until > w.Time then r.Rate else 0.0))
-                + (if w.Time < p.FlaskUntil then p.FlaskRate else 0.0)
-            let wait = max Constants.serverTick (if rate > 0.0 then (cost - p.Mana) / rate else 1.0)
-            { w with Player = Some { p with Starved = p.Starved + wait } } |> schedule (w.Time + wait) (Ready name)
-        | Some v, Some p ->
-            { w with Player = Some { p with Mana = max (-(snd (manaNeeded v skill t cost))) (p.Mana - cost); Life = p.Life - lifeCost } }
-            |> (if lifeCost > 0.0 then drinkLifeFlask v else id) |> sigilSpend name cost v.Mana |> go
-        | _ -> go w
+        payAndGo u cost lifeCost w
     | None ->
         // Nothing usable: wait for the next cooldown, or a server tick.
         let next =
