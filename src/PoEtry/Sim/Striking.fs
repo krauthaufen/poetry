@@ -20,10 +20,9 @@ let syncDarkness (env: Env) (actor: Actor) (w: World) =
         | _ -> updateActor actor.Name (fun st -> { st with Buffs = Map.add "UnreservedDarkness" { Name = "UnreservedDarkness"; Mods = []; Stacks = n; Expires = infinity } st.Buffs }) w
     | _ -> w
 
-let onStrike env (rng: Rng) name skillName mult aimedAt (elapsed: float option) (direct: bool) (w: World) =
-    let actor = actorDef env name
-    let skill = skillOf actor skillName
-    let w = syncDarkness env actor w
+/// Whom a strike lands on: the enemy the use was aimed at, or another if that one has died
+/// meanwhile (and whether it springs from where a dead one lies).
+let strikeAim (env: Env) (name: string) (skill: Skill) (aimedAt: string) (w: World) : bool * EnemyDef option =
     let living = alive w |> List.map (fun e -> e.Def)
     // Aim where the use was aimed; if that enemy died meanwhile, at the next one.
     // (On a map the player's skill lands where it was aimed: on someone near enough to where
@@ -49,83 +48,102 @@ let onStrike env (rng: Rng) name skillName mult aimedAt (elapsed: float option) 
                     | _ -> None
                 near |> Option.orElse (Geometry.aim env.Fight.Targeting (living |> List.filter (fun e -> Vec.length e.Position - e.Size <= m.Engage)))
             | _ -> Geometry.aim env.Fight.Targeting living)
-    // On a march a strike that teleports (Flicker Strike) takes the player to whom it
-    // strikes: reckoned around the player, everything comes that much nearer
-    let w =
-        match env.Fight.March, primary with
-        | Some _, Some e when name = "Player" && skill.Mods |> List.exists (fun m -> m.Stat = Named "FlickersPerPowerCharge") ->
-            let d = Vec.length e.Position
-            let step = d - e.Size
-            if step <= 0.0 then w
-            else
-                let by = Vec.scale (step / d) e.Position
-                { w with
-                    Walked = w.Walked + step
-                    Front = w.Front - by.X
-                    Enemies = w.Enemies |> Map.map (fun _ e -> if e.Life > 0.0 then { e with Def = { e.Def with Position = Vec.sub e.Def.Position by } } else e) }
-        | _ -> w
+    fromCorpse, primary
+
+/// On a march a strike that teleports (Flicker Strike) takes the player to whom it
+/// strikes: reckoned around the player, everything comes that much nearer.
+let flickerTo (env: Env) (name: string) (skill: Skill) (primary: EnemyDef option) (w: World) : World =
+    match env.Fight.March, primary with
+    | Some _, Some e when name = "Player" && skill.Mods |> List.exists (fun m -> m.Stat = Named "FlickersPerPowerCharge") ->
+        let d = Vec.length e.Position
+        let step = d - e.Size
+        if step <= 0.0 then w
+        else
+            let by = Vec.scale (step / d) e.Position
+            { w with
+                Walked = w.Walked + step
+                Front = w.Front - by.X
+                Enemies = w.Enemies |> Map.map (fun _ e -> if e.Life > 0.0 then { e with Def = { e.Def with Position = Vec.sub e.Def.Position by } } else e) }
+    | _ -> w
+
+/// The shape of a strike with a skill: the modifiers it is asked with, the area's size, and
+/// how it is delivered (projectiles: how many, what they do), with what is rolled for it.
+let strikeShape (env: Env) (rng: Rng) (actor: Actor) (st: ActorState) (w: World) (skill: Skill) =
+    let ctx = Skill.ctx skill false (skillStacks actor skill st) Map.empty |> owned env w
+    let mods = skillDb env actor skill st
+    let areaMult = Mods.mult ctx [ AreaOfEffect ] mods
+    let delivery =
+        match skill.Delivery with
+        | Projectiles p ->
+            let fromCharges =
+                match p.PerCharge with
+                | Some (charge, per) -> per * (Map.tryFind charge (skillStacks actor skill st) |> Option.defaultValue 0)
+                | None -> 0
+            Projectiles
+                { p with
+                    Count =
+                        p.Count + fromCharges
+                        + (if p.Count + fromCharges > 0 && not (skill.Tags.Contains(Tag "Type:ProjectilesNumberModifiersNotApplied")) then
+                               int (Mods.sumBase ctx [ AdditionalProjectiles ] mods)
+                               + (if rng.Chance(Mods.sumBase ctx [ Named "ExtraProjectileChance2" ] mods) then 2 else 0)
+                               + (let c = Mods.sumBase ctx [ Named "ExtraProjectileChance1" ] mods
+                                  int (c / 100.0) + (if rng.Chance(c - 100.0 * floor (c / 100.0)) then 1 else 0))
+                           else 0)
+                    Pierce = p.Pierce + int (Mods.sumBase ctx [ Pierce ] mods) + (if rng.Chance(Mods.sumBase ctx [ Named "PierceChance" ] mods) then 1 else 0)
+                    Chains = (if Mods.flag ctx (Named "CannotChain") mods then 0 else p.Chains + int (Mods.sumBase ctx [ Chains ] mods))
+                    TerrainChain = p.TerrainChain + Mods.sumBase ctx [ Named "TerrainChain" ] mods
+                    // "Projectiles Fork" (a chance of 100%), "Fork an additional time"
+                    Forks =
+                        (let chance = Mods.sumBase ctx [ Named "ForkChance" ] mods
+                         if Mods.flag ctx (Named "CannotFork") mods || not (rng.Chance chance) then 0
+                         else p.Forks + 1 + int (Mods.sumBase ctx [ Named "AdditionalForks" ] mods))
+                    ForkExtraChance = p.ForkExtraChance + Mods.sumBase ctx [ Named "ForkExtraChance" ] mods
+                    ForkAngle = p.ForkAngle * Mods.inc ctx [ Named "ForkAngle" ] mods }
+        | d -> d
+    ctx, mods, areaMult, delivery
+
+/// Infusions: each impact consumes one of the skill's element (or the wildcard) and
+/// uses the infused copy; without one, the plain skill.
+let infusedVariant (env: Env) (rng: Rng) (actor: Actor) (skill: Skill) (w: World) : Skill * World =
+    let consumer = actor.Infusions |> Option.bind (fun inf -> Map.tryFind skill.Name inf.Consumers |> Option.map (fun c -> inf, c))
+    match consumer with
+    | None -> skill, w
+    | Some (inf, (element, infusedName)) ->
+        let st = Map.find actor.Name w.Actors
+        let have r = stacksOf st r > 0
+        let source = if have element then Some element else inf.Wildcard |> Option.filter have
+        match source with
+        | None -> skill, { w with Counts = bump ("uninfused:" + skill.Name) w.Counts }
+        | Some r ->
+            let infused = skillOf actor infusedName
+            let keep = Mods.sumBase Ctx.empty [ Named "InfusionKeepChance" ] (skillDb env actor infused st)
+            let w = { w with Counts = bump ("infused:" + skill.Name) w.Counts }
+            let w = markStatus actor.Name "ConsumedInfusionRecently" w
+            // "Gain a Power Charge when you consume an Elemental Infusion"
+            let w =
+                let n = int (Mods.sumBase Ctx.empty [ Named "PowerChargeOnInfusionConsumed" ] (skillDb env actor infused st))
+                if n > 0 then schedule w.Time (GainStacks(actor.Name, "PowerCharge", n)) w else w
+            if rng.Chance keep then infused, w
+            else infused, setStacksWith env actor.Name false r (stacksOf st r - 1) w
+
+/// A strike lands (an event): whom it reaches, and each of its hits (`hitEnemy`).
+/// `elapsed`: a projectile in flight, so long after it was launched; `direct`: one hit on
+/// the one enemy, worked out when the skill was used.
+let onStrike env (rng: Rng) name skillName mult aimedAt (elapsed: float option) (direct: bool) (w: World) =
+    let actor = actorDef env name
+    let skill = skillOf actor skillName
+    let w = syncDarkness env actor w
+    let fromCorpse, primary = strikeAim env name skill aimedAt w
+    let w = flickerTo env name skill primary w
     let living = alive w |> List.map (fun e -> e.Def)
     let primary = if fromCorpse then primary else primary |> Option.bind (fun e -> living |> List.tryFind (fun x -> x.Name = e.Name))
     match primary with
     | None -> w
     | Some primary ->
         let st = Map.find name w.Actors
-        let shape (skill: Skill) =
-            let ctx = Skill.ctx skill false (skillStacks actor skill st) Map.empty |> owned env w
-            let mods = skillDb env actor skill st
-            let areaMult = Mods.mult ctx [ AreaOfEffect ] mods
-            let delivery =
-                match skill.Delivery with
-                | Projectiles p ->
-                    let fromCharges =
-                        match p.PerCharge with
-                        | Some (charge, per) -> per * (Map.tryFind charge (skillStacks actor skill st) |> Option.defaultValue 0)
-                        | None -> 0
-                    Projectiles
-                        { p with
-                            Count =
-                                p.Count + fromCharges
-                                + (if p.Count + fromCharges > 0 && not (skill.Tags.Contains(Tag "Type:ProjectilesNumberModifiersNotApplied")) then
-                                       int (Mods.sumBase ctx [ AdditionalProjectiles ] mods)
-                                       + (if rng.Chance(Mods.sumBase ctx [ Named "ExtraProjectileChance2" ] mods) then 2 else 0)
-                                       + (let c = Mods.sumBase ctx [ Named "ExtraProjectileChance1" ] mods
-                                          int (c / 100.0) + (if rng.Chance(c - 100.0 * floor (c / 100.0)) then 1 else 0))
-                                   else 0)
-                            Pierce = p.Pierce + int (Mods.sumBase ctx [ Pierce ] mods) + (if rng.Chance(Mods.sumBase ctx [ Named "PierceChance" ] mods) then 1 else 0)
-                            Chains = (if Mods.flag ctx (Named "CannotChain") mods then 0 else p.Chains + int (Mods.sumBase ctx [ Chains ] mods))
-                            TerrainChain = p.TerrainChain + Mods.sumBase ctx [ Named "TerrainChain" ] mods
-                            // "Projectiles Fork" (a chance of 100%), "Fork an additional time"
-                            Forks =
-                                (let chance = Mods.sumBase ctx [ Named "ForkChance" ] mods
-                                 if Mods.flag ctx (Named "CannotFork") mods || not (rng.Chance chance) then 0
-                                 else p.Forks + 1 + int (Mods.sumBase ctx [ Named "AdditionalForks" ] mods))
-                            ForkExtraChance = p.ForkExtraChance + Mods.sumBase ctx [ Named "ForkExtraChance" ] mods
-                            ForkAngle = p.ForkAngle * Mods.inc ctx [ Named "ForkAngle" ] mods }
-                | d -> d
-            ctx, mods, areaMult, delivery
-        // Infusions: each impact consumes one of the skill's element (or the wildcard) and
-        // uses the infused copy; without one, the plain skill
-        let consumer = actor.Infusions |> Option.bind (fun inf -> Map.tryFind skillName inf.Consumers |> Option.map (fun c -> inf, c))
-        let variant (w: World) =
-            match consumer with
-            | None -> skill, w
-            | Some (inf, (element, infusedName)) ->
-                let st = Map.find name w.Actors
-                let have r = stacksOf st r > 0
-                let source = if have element then Some element else inf.Wildcard |> Option.filter have
-                match source with
-                | None -> skill, { w with Counts = bump ("uninfused:" + skillName) w.Counts }
-                | Some r ->
-                    let infused = skillOf actor infusedName
-                    let keep = Mods.sumBase Ctx.empty [ Named "InfusionKeepChance" ] (skillDb env actor infused st)
-                    let w = { w with Counts = bump ("infused:" + skillName) w.Counts }
-                    let w = markStatus name "ConsumedInfusionRecently" w
-                    // "Gain a Power Charge when you consume an Elemental Infusion"
-                    let w =
-                        let n = int (Mods.sumBase Ctx.empty [ Named "PowerChargeOnInfusionConsumed" ] (skillDb env actor infused st))
-                        if n > 0 then schedule w.Time (GainStacks(name, "PowerCharge", n)) w else w
-                    if rng.Chance keep then infused, w
-                    else infused, setStacksWith env name false r (stacksOf st r - 1) w
+        // (with the actor and the world as they are here: the strike's own hits do not change its shape)
+        let shape (sk: Skill) = strikeShape env rng actor st w sk
+        let variant (w: World) = infusedVariant env rng actor skill w
         let w = { w with Player = w.Player |> Option.map (fun p -> { p with StrikeLeech = 0.0; StrikeLifeLeech = 0.0 }) }
         // Spell Cascade: extra impacts on either side of the target "along a randomly chosen
         // axis"; side impacts have their own less area; spacing: user observation
@@ -136,6 +154,7 @@ let onStrike env (rng: Rng) name skillName mult aimedAt (elapsed: float option) 
         // turn apart, so many impacts along each, spaced like Spell Cascade's (the pattern's
         // measures are not in the data). The empowerment is used up.
         let arms = int (Mods.sumBase ctx0 [ Named "TriskelionArms" ] mods0)
+        // ---- the strike itself, by how the skill is delivered ----
         match skill.Delivery with
         | AreaAtTarget _ | AreaAroundSelf _ when arms > 0 ->
             let sk, w = variant w
