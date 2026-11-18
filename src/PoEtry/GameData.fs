@@ -48,6 +48,8 @@ type SkillData =
       Levels: Map<int, SkillLevel>
       StatSets: StatSetData list
       QualityStats: (string * float) list
+      /// The stat sets (by position, from 0) a quality stat is for; none listed: all of them.
+      QualitySets: Map<string, int list>
       /// Alternate quality effects (granted by e.g. Gemling's Advanced Thaumaturgy).
       AltQualityStats: (string * float) list
       /// Minions the skill summons (ids in minions.json).
@@ -172,6 +174,16 @@ module GameData =
           Levels = Json.items (Json.field "levels" j) |> List.map (fun (i, l) -> i, skillLevel l) |> Map.ofList
           StatSets = Json.list (Json.field "statSets" j) |> List.map statSet
           QualityStats = statPairs (Json.field "qualityStats" j)
+          QualitySets =
+            Json.list (Json.field "qualityStats" j) @ Json.list (Json.field "altQualityStats" j)
+            |> List.choose (fun p ->
+                match Json.list (Some p) with
+                | JStr st :: _ :: sets :: _ ->
+                    match Json.list (Some sets) |> List.choose Json.num |> List.map int with
+                    | [] -> None
+                    | l -> Some(st, l)
+                | _ -> None)
+            |> Map.ofList
           AltQualityStats = statPairs (Json.field "altQualityStats" j)
           MinionList = Json.list (Json.field "minionList" j) |> List.choose Json.str
           Color = Json.numField "color" j |> Option.map int |> Option.defaultValue 0

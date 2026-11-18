@@ -115,8 +115,22 @@ module Gems =
                     stat, value)
         let qualityStats =
             (skill.QualityStats @ (if altQuality then skill.AltQualityStats else []))
+            // a quality stat can be for some of the skill's stat sets only (Falling Thunder's
+            // more damage for each Power Charge is its projectiles', not the slam's)
+            // (the chance to keep the charges is listed for the set that spends them, and is the skill's)
+            |> List.filter (fun (s, _) ->
+                match (if s = "charge_skip_consume_chance_%" then None else Map.tryFind s skill.QualitySets) with
+                | Some sets -> skill.StatSets |> List.tryFindIndex (fun x -> x.Label = set.Label) |> Option.exists (fun i -> List.contains i sets)
+                | None -> true)
             |> List.map (fun (s, per) -> s, System.Math.Truncate(per * float quality))
-        levelStats @ set.ConstantStats @ qualityStats |> List.filter (fun (_, v) -> v <> 0.0)
+        // a stat has one value: what quality adds goes onto what the set has of it
+        let own = levelStats @ set.ConstantStats
+        let added, fresh = qualityStats |> List.partition (fun (s, _) -> own |> List.exists (fun (o, _) -> o = s))
+        let own =
+            own |> List.fold (fun (seen, acc) (s, v) ->
+                if Set.contains s seen then seen, (s, v) :: acc
+                else Set.add s seen, (s, v + (added |> List.filter (fun (a, _) -> a = s) |> List.sumBy snd)) :: acc) (Set.empty, []) |> snd |> List.rev
+        own @ fresh |> List.filter (fun (_, v) -> v <> 0.0)
 
     let stats skill set level quality = statsWith false skill set level quality
 
