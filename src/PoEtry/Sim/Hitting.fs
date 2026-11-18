@@ -86,6 +86,236 @@ let syncResonance (env: Env) (actor: Actor) (w: World) =
                     let buffs = values |> List.fold (fun b (t, n) -> put (key t) n b) st.Buffs
                     { st with Energy = energy; Buffs = put "Resonance" (values |> List.sumBy snd) buffs }) w
 
+/// A hit about to be tried on an enemy, as the steps before its damage see it.
+type HitAttempt =
+    { Env: Env
+      Rng: Rng
+      Actor: Actor
+      Skill: Skill
+      /// The enemy's name, and the enemy as it is before the hit.
+      Target: string
+      Enemy: EnemyState
+      /// The attacker's modifiers with this skill, and what they are asked with.
+      Ctx: Ctx
+      Mods: ModDb
+      /// What the enemy suffers from, as this hit sees it (Isolated, at Close Range, an Open Weakness among it).
+      Status: Map<string, int>
+      /// The chance (%) that the hit lands.
+      HitChance: float }
+
+/// The hit as rolled: the enemy's defences as it met them, the hit, what it deals on average
+/// over a critical and an ordinary one (as a factor), and the ailments it rolled.
+type RolledHit =
+    { Def: Defender
+      Hit: HitResult
+      Evenly: float
+      Inflicted: Inflict list }
+
+/// What the enemy suffers from as a hit sees it: its statuses, whether it is Isolated or at
+/// Close Range, and whether the hit finds an Open Weakness.
+let statusForHit (rng: Rng) (mods: ModDb) (e: EnemyState) (w: World) : Map<string, int> =
+    // Isolated: none of its allies within 6 m (keyword text)
+    let isolated = alive w |> List.forall (fun o -> o.Def.Name = e.Def.Name || Vec.dist o.Def.Position e.Def.Position > 60.0)
+    // Close Range: within 2 m of the player (keyword text)
+    let close = Vec.length e.Def.Position - e.Def.Size <= 20.0
+    let enemyStatus = status e |> (fun m -> if isolated then Map.add "Isolated" 1 m else m) |> (fun m -> if close then Map.add "Close" 1 m else m)
+    // Revealed Weaknesses cover 45% of a rare or unique enemy's life in random segments, and
+    // it has an Open Weakness while its life is inside one. Over a kill that is the share of
+    // the time spent in those segments, where damage is higher: (c / m) / (1 - c + c / m).
+    let enemyStatus =
+        let more = Mods.sumBase Ctx.empty [ Named "OpenWeaknessMore" ] mods
+        if e.Def.Rarity <> Normal && e.Def.Rarity <> Magic && Mods.flag Ctx.empty (Named "RevealWeakness") mods then
+            let c, m = Constants.revealedWeaknessLifeShare, 1.0 + more / 100.0
+            if rng.Float() < (c / m) / (1.0 - c + c / m) then Map.add "OpenWeakness" 1 enemyStatus else enemyStatus
+        else enemyStatus
+    enemyStatus
+
+/// The chance (%) that the hit lands: attacks roll accuracy against the monster's evasion, spells always hit.
+let chanceToHit (ctx: Ctx) (mods: ModDb) (skill: Skill) (e: EnemyState) (enemyStatus: Map<string, int>) : float =
+    let hitChance =
+        match Mods.override' ctx HitChance mods with
+        | Some v -> v
+        | None when skill.Tags.Contains Attack ->
+            // attacks roll accuracy against the monster's evasion; spells always hit.
+            // Actors without any accuracy (hand-built) always hit.
+            let accuracy = Mods.total ctx [ Named "Accuracy" ] mods
+            if accuracy <= 0.0 then 100.0
+            else
+                // Blind: 20% less evasion (and accuracy); Maim: 15% reduced evasion (wiki, Blind, Maim)
+                let evasion =
+                    Constants.monsterEvasion e.Def.Level * Mods.mult Ctx.empty [ Evasion ] e.Db
+                    * (if enemyStatus.ContainsKey "Blinded" then 1.0 - Constants.blindAccuracyLess / 100.0 else 1.0)
+                    * (if enemyStatus.ContainsKey "Maimed" then 1.0 - Constants.maimEvasionReduced / 100.0 else 1.0)
+                let distance = max 0.0 (Vec.length e.Def.Position - e.Def.Size)
+                Hit.accuracyHitChance evasion (Hit.accuracyAtDistance distance accuracy)
+        | None -> 100.0
+    hitChance
+
+/// Whether this part of a skill happens at all against the enemy as it is (a part only for
+/// Frozen enemies, Hexblast without a ripe curse), and the world with what it consumes for it taken.
+let partHappens (a: HitAttempt) (w: World) : bool * World =
+    let env, rng, actor, skill, target, e, ctx, mods, enemyStatus, hitChance = a.Env, a.Rng, a.Actor, a.Skill, a.Target, a.Enemy, a.Ctx, a.Mods, a.Status, a.HitChance
+    // a part that only happens against an enemy in some state ("Vs Frozen"): nothing otherwise;
+    // one that consumes the state takes it off
+    let onlyVs = skill.Mods |> List.tryPick (fun m -> match m.Stat with Named n when n.StartsWith "OnlyVs:" -> Some(n.Substring 7) | _ -> None)
+    let consumesVs = skill.Mods |> List.exists (fun m -> m.Stat = Named "ConsumesVs")
+    let states = onlyVs |> Option.map (fun (st: string) -> st.Split '|' |> List.ofArray) |> Option.defaultValue []
+    // and one that gives way to another part against that state ("NotVs")
+    let notVs =
+        skill.Mods |> List.tryPick (fun m -> match m.Stat with Named n when n.StartsWith "NotVs:" -> Some(n.Substring 6) | _ -> None)
+        |> Option.map (fun (st: string) -> st.Split '|' |> List.ofArray) |> Option.defaultValue []
+    // Hexblast: nothing without a curse that is ripe; the curses it detonates are gone
+    let ripe = if partFlag skill "DetonatesCurse" then ripeCurses actor e w.Time else []
+    if partFlag skill "DetonatesCurse" && ripe.IsEmpty then false, w
+    else
+    let w =
+        if ripe.IsEmpty then w
+        else
+            updateEnemy target (fun en -> { en with Debuffs = ripe |> List.fold (fun m k -> Map.remove k m) en.Debuffs }) w
+            |> fun w -> { w with Counts = bump "curse detonated" w.Counts }
+    // a warp into a projectile explodes there, whatever the enemy's state
+    let warped = (Map.find actor.Name w.Actors).Buffs.ContainsKey("Warped:" + skill.Name)
+    let w = if warped then updateActor actor.Name (fun st -> { st with Buffs = Map.remove ("Warped:" + skill.Name) st.Buffs }) w else w
+    let states, consumesVs = if warped then [], false else states, consumesVs
+    if not states.IsEmpty && not (states |> List.exists enemyStatus.ContainsKey) then false, w
+    elif notVs |> List.exists enemyStatus.ContainsKey then false, w
+    else
+    let w =
+        if consumesVs && not states.IsEmpty then
+            let st = states |> List.find enemyStatus.ContainsKey
+            updateEnemy target (fun en -> { en with Debuffs = Map.remove st en.Debuffs; Immune = Map.add st (w.Time + Constants.consumedImmunity) en.Immune }) w |> fun w -> { w with Counts = bump ("consumed:" + st) w.Counts }
+        else w
+    true, w
+
+/// A hit that takes a state off the enemy without needing it ("Consumes Shock").
+let takeStateOff (a: HitAttempt) (w: World) : World =
+    let env, rng, actor, skill, target, e, ctx, mods, enemyStatus, hitChance = a.Env, a.Rng, a.Actor, a.Skill, a.Target, a.Enemy, a.Ctx, a.Mods, a.Status, a.HitChance
+    let takes = skill.Mods |> List.tryPick (fun m -> match m.Stat with Named n when n.StartsWith "Takes:" -> Some(n.Substring 6) | _ -> None)
+    // a hit that takes a state off the enemy without needing it ("Consumes Shock")
+    let w =
+        match takes with
+        | Some st when enemyStatus.ContainsKey st ->
+            updateEnemy target (fun en -> { en with Debuffs = Map.remove st en.Debuffs; Immune = Map.add st (w.Time + Constants.consumedImmunity) en.Immune }) w |> fun w -> { w with Counts = bump ("consumed:" + st) w.Counts }
+        | _ -> w
+    w
+
+/// The hit is rolled against the enemy's defences: critical or not, culling, distance, the
+/// ailments it inflicts (a Shock of its own already counts for it), Flammability left behind.
+let rollDamage (a: HitAttempt) (mult: float) (w: World) : RolledHit * World =
+    let env, rng, actor, skill, target, e, ctx, mods, enemyStatus, hitChance = a.Env, a.Rng, a.Actor, a.Skill, a.Target, a.Enemy, a.Ctx, a.Mods, a.Status, a.HitChance
+    let def = defender e
+    // "Enemies you Curse / Mark take X% increased Damage": additive with what the enemy already takes
+    let def =
+        match Mods.sumInc ctx [ Named "EnemyDamageTaken" ] mods with
+        | 0.0 -> def
+        | x -> { def with Mods = ModDb.add def.Mods (Mod.inc (DamageTaken AllDamage) x) }
+    // one critical hit roll per use, shared by all its hits; skills that keep hitting
+    // on their own (Sustained) roll for every hit
+    let critRoll = if skill.Tags.Contains(Tag "Type:Sustained") then None else Map.tryFind skill.Name (Map.find actor.Name w.Actors).CritRolls
+    // "If ... that hit would deal a critical hit, the chance to evade is tested again
+    // independently. If this check is passed, the critical hit is downgraded to a
+    // non-critical hit" (wiki, Evasion)
+    let critRoll = if hitChance < 100.0 && rng.Chance(100.0 - hitChance) then Some 1.0 else critRoll
+    let hit = Hit.rollWith critRoll rng ctx mods skill def
+    // The same hit the other way (a critical hit if it was none, none if it was one),
+    // rolled apart from the fight's stream, and with it what the hit deals on average
+    // over the two, as a factor on what it did deal. (Not where a critical hit is
+    // rolled in a way of its own.)
+    let evenly =
+        let chance = if critRoll |> Option.exists (fun r -> r >= 1.0) then 0.0 else min 100.0 (max 0.0 (Hit.critChance ctx mods skill))
+        let was = Dmg.total hit.Dealt
+        if chance <= 0.0 || chance >= 100.0 || was <= 0.0 || Mods.flag ctx (Named "InevitableCrits") mods || Mods.flag ctx (Named "BifurcateCrits") mods then 1.0
+        else
+            let other = Dmg.total (Hit.rollWith (Some(if hit.Crit then 1.0 else 0.0)) (Rng(uint32 (w.Seq % 1000000) + 7919u)) ctx mods skill def).Dealt
+            let p = chance / 100.0
+            (if hit.Crit then p * was + (1.0 - p) * other else p * other + (1.0 - p) * was) / was
+    // Culling Strike: an enemy at or below the threshold for its rarity dies, before the hit's damage
+    let hit =
+        let cctx = { ctx with Crit = hit.Crit }
+        if Mods.flag cctx (Named "CullingStrike") mods
+           && e.Life <= e.Def.Life * Constants.cullingThreshold (Rarity.name e.Def.Rarity) / 100.0 * Mods.inc cctx [ Named "CullingThreshold" ] mods then
+            { hit with Dealt = Dmg.map (fun _ v -> v + e.Life) hit.Dealt }
+        else hit
+    // more attack damage by distance: Close Combat, full within 1 m, none from 3.5 m;
+    // Longshot, none within 3.5 m, full from 7 m
+    let mult =
+        let near, far = Mods.sumBase ctx [ Named "CloseCombatMore" ] mods, Mods.sumBase ctx [ Named "FarCombatMore" ] mods
+        if near = 0.0 && far = 0.0 then mult
+        else
+            let d = max 0.0 (Vec.length e.Def.Position - e.Def.Size)
+            let closeness = max 0.0 (min 1.0 ((35.0 - d) / 25.0))
+            let farness = max 0.0 (min 1.0 ((d - 35.0) / 35.0))
+            mult * (1.0 + near * closeness / 100.0) * (1.0 + far * farness / 100.0)
+    let hit =
+        { hit with
+            Unmitigated = Dmg.map (fun _ v -> v * mult) hit.Unmitigated
+            Dealt = Dmg.map (fun _ v -> v * mult) hit.Dealt }
+    // ailments are rolled before the damage lands; a shock the hit applies already
+    // counts for the hit itself (user observation)
+    // Flammability earlier hits left on the enemy adds to this hit's chance to Ignite,
+    // and this hit leaves its own
+    let flammable = e.Flammability |> List.filter (fun (_, until) -> until > w.Time)
+    let inflicted =
+        let total = flammable |> List.sumBy fst
+        Ailments.fromHit rng ctx mods (if total > 0.0 then { def with Mods = ModDb.add def.Mods (Mod.base' (Named "Flammability") total) } else def) hit
+    let w =
+        match Ailments.flammability ctx mods def hit with
+        | f when f > 0.0 -> updateEnemy target (fun en -> { en with Flammability = (f, w.Time + Constants.flammabilityDuration) :: flammable }) w
+        | _ -> w
+    // a part that only inflicts (a poison burst): what it would have dealt counts
+    // for the ailment, the hit itself deals nothing
+    let hit = if Mods.flag ctx (Named "NoHitDamage") mods then { hit with Dealt = Dmg.map (fun _ _ -> 0.0) hit.Dealt; Unmitigated = Dmg.map (fun _ _ -> 0.0) hit.Unmitigated } else hit
+    let hit =
+        let currentShock =
+            Map.tryFind "Shocked" e.Debuffs
+            |> Option.filter (fun x -> x.Expires > w.Time)
+            |> Option.map (fun x -> x.Mods |> List.sumBy (fun m -> m.Value))
+            |> Option.defaultValue 0.0
+        let newShock = inflicted |> List.tryPick (function Status (Shock, m, _) when m > currentShock -> Some m | _ -> None)
+        match newShock with
+        | Some m ->
+            let withoutOld = def.Mods |> ModDb.toList |> List.filter (fun x -> x.Source <> "Shock")
+            let def' = { def with Mods = ModDb.ofList ((Mod.inc (DamageTaken AllDamage) m |> Mod.from "Shock") :: withoutOld) }
+            { hit with Dealt = Hit.mitigate ctx mods def' hit.Unmitigated }
+        | None -> hit
+    { RolledHit.Def = def; Hit = hit; Evenly = evenly; Inflicted = inflicted }, w
+
+/// The damage lands: the enemy's life, the books (damage by skill and type, overkill), a kill,
+/// and on a march who the hit wakes. What it dealt, whether it killed, and the world after.
+let landDamage (a: HitAttempt) (r: RolledHit) (w: World) : float * bool * World =
+    let env, rng, actor, skill, target, e, ctx, mods, enemyStatus, hitChance = a.Env, a.Rng, a.Actor, a.Skill, a.Target, a.Enemy, a.Ctx, a.Mods, a.Status, a.HitChance
+    let hit, evenly = r.Hit, r.Evenly
+    let dealt = Dmg.total hit.Dealt
+    let life = e.Life - dealt
+    let dead = life <= 1e-9
+    (match env.Trace with Some tell -> tell w.Time (if hit.Crit then "crit" else "hit") target skill.Name dealt | None -> ())
+    let w =
+        { w with
+            // the enemy as it is now: what the hit consumed stays consumed
+            Enemies = Map.add target { (Map.find target w.Enemies) with Life = (if dead then 0.0 else life) } w.Enemies
+            DamageBy = addf (skill.Name + " (hit)") (min dealt e.Life) w.DamageBy
+            // (only of a hit the enemy outlives: what a killing hit deals is the life that was left)
+            Evened = (if dead then w.Evened else w.Evened + dealt * (evenly - 1.0))
+            Overkill = w.Overkill + max 0.0 (dealt - e.Life)
+            // (a hit that deals more than the enemy has left: each type's share of what was left)
+            DamageByType = (let k = if dealt > e.Life && dealt > 0.0 then e.Life / dealt else 1.0 in hit.Dealt |> Map.fold (fun m t v -> if v > 0.0 then addf (DamageType.name t) (v * k) m else m) w.DamageByType)
+            // "25% of Hit Damage dealt to them while Debuffed": hits are what is recorded
+            Agonies = w.Agonies |> List.map (fun a -> if a.Enemy = target && a.Until > w.Time then { a with Recorded = a.Recorded + min dealt e.Life } else a)
+            Counts = w.Counts |> bump ("hits:" + skill.Name) |> (if hit.Crit then bump ("crits:" + skill.Name) else id)
+            Shown = (if w.Tracing then Struck(w.Time, target, min dealt e.Life, hit.Crit) :: w.Shown else w.Shown)
+            // (on a march a hit wakes who it lands on, and in rooms the whole of its pack)
+            Woken =
+                (match env.Fight.March with
+                 | Some m when not (w.Woken.Contains target) ->
+                     if not m.Rooms then w.Woken.Add target
+                     else
+                         let pack = target.Substring(target.LastIndexOf '#')
+                         w.Enemies |> Map.fold (fun (woken: Set<string>) name x -> if x.Life > 0.0 && name.TrimEnd('+').EndsWith pack then woken.Add name else woken) w.Woken
+                 | _ -> w.Woken)
+            CorpsesUsed = corpsesAfter dead target w.Time w
+            Kills = if dead then (target, e.Def.Rarity, w.Time) :: w.Kills else w.Kills }
+    dealt, dead, w
+
 /// A hit that has landed and dealt its damage, as everything that follows from it sees it
 /// (the functions below, in the order `hitEnemy` goes through them).
 type LandedHit =
@@ -567,209 +797,44 @@ let hitEnemy env (rng: Rng) (actor: Actor) (skill: Skill) mult (target: string) 
     else
         let st = Map.find actor.Name w.Actors
         let mods = skillDb env actor skill st
-        // Isolated: none of its allies within 6 m (keyword text)
-        let isolated = alive w |> List.forall (fun o -> o.Def.Name = e.Def.Name || Vec.dist o.Def.Position e.Def.Position > 60.0)
-        // Close Range: within 2 m of the player (keyword text)
-        let close = Vec.length e.Def.Position - e.Def.Size <= 20.0
-        let enemyStatus = status e |> (fun m -> if isolated then Map.add "Isolated" 1 m else m) |> (fun m -> if close then Map.add "Close" 1 m else m)
-        // Revealed Weaknesses cover 45% of a rare or unique enemy's life in random segments, and
-        // it has an Open Weakness while its life is inside one. Over a kill that is the share of
-        // the time spent in those segments, where damage is higher: (c / m) / (1 - c + c / m).
-        let enemyStatus =
-            let more = Mods.sumBase Ctx.empty [ Named "OpenWeaknessMore" ] mods
-            if e.Def.Rarity <> Normal && e.Def.Rarity <> Magic && Mods.flag Ctx.empty (Named "RevealWeakness") mods then
-                let c, m = Constants.revealedWeaknessLifeShare, 1.0 + more / 100.0
-                if rng.Float() < (c / m) / (1.0 - c + c / m) then Map.add "OpenWeakness" 1 enemyStatus else enemyStatus
-            else enemyStatus
+        let enemyStatus = statusForHit rng mods e w
         let ctx = Skill.ctx skill false (skillStacks actor skill st) enemyStatus |> owned env w
-        let hitChance =
-            match Mods.override' ctx HitChance mods with
-            | Some v -> v
-            | None when skill.Tags.Contains Attack ->
-                // attacks roll accuracy against the monster's evasion; spells always hit.
-                // Actors without any accuracy (hand-built) always hit.
-                let accuracy = Mods.total ctx [ Named "Accuracy" ] mods
-                if accuracy <= 0.0 then 100.0
-                else
-                    // Blind: 20% less evasion (and accuracy); Maim: 15% reduced evasion (wiki, Blind, Maim)
-                    let evasion =
-                        Constants.monsterEvasion e.Def.Level * Mods.mult Ctx.empty [ Evasion ] e.Db
-                        * (if enemyStatus.ContainsKey "Blinded" then 1.0 - Constants.blindAccuracyLess / 100.0 else 1.0)
-                        * (if enemyStatus.ContainsKey "Maimed" then 1.0 - Constants.maimEvasionReduced / 100.0 else 1.0)
-                    let distance = max 0.0 (Vec.length e.Def.Position - e.Def.Size)
-                    Hit.accuracyHitChance evasion (Hit.accuracyAtDistance distance accuracy)
-            | None -> 100.0
-        // a part that only happens against an enemy in some state ("Vs Frozen"): nothing otherwise;
-        // one that consumes the state takes it off
-        let onlyVs = skill.Mods |> List.tryPick (fun m -> match m.Stat with Named n when n.StartsWith "OnlyVs:" -> Some(n.Substring 7) | _ -> None)
-        let consumesVs = skill.Mods |> List.exists (fun m -> m.Stat = Named "ConsumesVs")
-        let states = onlyVs |> Option.map (fun (st: string) -> st.Split '|' |> List.ofArray) |> Option.defaultValue []
-        // and one that gives way to another part against that state ("NotVs")
-        let notVs =
-            skill.Mods |> List.tryPick (fun m -> match m.Stat with Named n when n.StartsWith "NotVs:" -> Some(n.Substring 6) | _ -> None)
-            |> Option.map (fun (st: string) -> st.Split '|' |> List.ofArray) |> Option.defaultValue []
-        let takes = skill.Mods |> List.tryPick (fun m -> match m.Stat with Named n when n.StartsWith "Takes:" -> Some(n.Substring 6) | _ -> None)
-        // Hexblast: nothing without a curse that is ripe; the curses it detonates are gone
-        let ripe = if partFlag skill "DetonatesCurse" then ripeCurses actor e w.Time else []
-        if partFlag skill "DetonatesCurse" && ripe.IsEmpty then w
+        let a = { HitAttempt.Env = env; Rng = rng; Actor = actor; Skill = skill; Target = target; Enemy = e; Ctx = ctx; Mods = mods; Status = enemyStatus; HitChance = chanceToHit ctx mods skill e enemyStatus }
+        let happens, w = partHappens a w
+        if not happens then w
         else
-        let w =
-            if ripe.IsEmpty then w
-            else
-                updateEnemy target (fun en -> { en with Debuffs = ripe |> List.fold (fun m k -> Map.remove k m) en.Debuffs }) w
-                |> fun w -> { w with Counts = bump "curse detonated" w.Counts }
-        // a warp into a projectile explodes there, whatever the enemy's state
-        let warped = (Map.find actor.Name w.Actors).Buffs.ContainsKey("Warped:" + skill.Name)
-        let w = if warped then updateActor actor.Name (fun st -> { st with Buffs = Map.remove ("Warped:" + skill.Name) st.Buffs }) w else w
-        let states, consumesVs = if warped then [], false else states, consumesVs
-        if not states.IsEmpty && not (states |> List.exists enemyStatus.ContainsKey) then w
-        elif notVs |> List.exists enemyStatus.ContainsKey then w
-        else
-        let w =
-            if consumesVs && not states.IsEmpty then
-                let st = states |> List.find enemyStatus.ContainsKey
-                updateEnemy target (fun en -> { en with Debuffs = Map.remove st en.Debuffs; Immune = Map.add st (w.Time + Constants.consumedImmunity) en.Immune }) w |> fun w -> { w with Counts = bump ("consumed:" + st) w.Counts }
-            else w
-        let landed, w = lands rng target hitChance w
+        let landed, w = lands rng target a.HitChance w
         if not landed then
             { w with Counts = bump ("miss:" + skill.Name) w.Counts }
         else
-        // a hit that takes a state off the enemy without needing it ("Consumes Shock")
+        let w = takeStateOff a w
+        let r, w = rollDamage a mult w
+        let def, hit, inflicted = r.Def, r.Hit, r.Inflicted
+        let dealt, dead, w = landDamage a r w
+        // ---- what follows from the hit, in this order (each is a function above) ----
+        let h =
+            { Env = env; Rng = rng; Actor = actor; Skill = skill; Target = target; Enemy = e; Ctx = ctx; Mods = mods
+              Def = def; Hit = hit; Dealt = dealt; Dead = dead; Inflicted = inflicted }
         let w =
-            match takes with
-            | Some st when enemyStatus.ContainsKey st ->
-                updateEnemy target (fun en -> { en with Debuffs = Map.remove st en.Debuffs; Immune = Map.add st (w.Time + Constants.consumedImmunity) en.Immune }) w |> fun w -> { w with Counts = bump ("consumed:" + st) w.Counts }
-            | _ -> w
-        if false then w
-        else
-            let def = defender e
-            // "Enemies you Curse / Mark take X% increased Damage": additive with what the enemy already takes
-            let def =
-                match Mods.sumInc ctx [ Named "EnemyDamageTaken" ] mods with
-                | 0.0 -> def
-                | x -> { def with Mods = ModDb.add def.Mods (Mod.inc (DamageTaken AllDamage) x) }
-            // one critical hit roll per use, shared by all its hits; skills that keep hitting
-            // on their own (Sustained) roll for every hit
-            let critRoll = if skill.Tags.Contains(Tag "Type:Sustained") then None else Map.tryFind skill.Name (Map.find actor.Name w.Actors).CritRolls
-            // "If ... that hit would deal a critical hit, the chance to evade is tested again
-            // independently. If this check is passed, the critical hit is downgraded to a
-            // non-critical hit" (wiki, Evasion)
-            let critRoll = if hitChance < 100.0 && rng.Chance(100.0 - hitChance) then Some 1.0 else critRoll
-            let hit = Hit.rollWith critRoll rng ctx mods skill def
-            // The same hit the other way (a critical hit if it was none, none if it was one),
-            // rolled apart from the fight's stream, and with it what the hit deals on average
-            // over the two, as a factor on what it did deal. (Not where a critical hit is
-            // rolled in a way of its own.)
-            let evenly =
-                let chance = if critRoll |> Option.exists (fun r -> r >= 1.0) then 0.0 else min 100.0 (max 0.0 (Hit.critChance ctx mods skill))
-                let was = Dmg.total hit.Dealt
-                if chance <= 0.0 || chance >= 100.0 || was <= 0.0 || Mods.flag ctx (Named "InevitableCrits") mods || Mods.flag ctx (Named "BifurcateCrits") mods then 1.0
-                else
-                    let other = Dmg.total (Hit.rollWith (Some(if hit.Crit then 1.0 else 0.0)) (Rng(uint32 (w.Seq % 1000000) + 7919u)) ctx mods skill def).Dealt
-                    let p = chance / 100.0
-                    (if hit.Crit then p * was + (1.0 - p) * other else p * other + (1.0 - p) * was) / was
-            // Culling Strike: an enemy at or below the threshold for its rarity dies, before the hit's damage
-            let hit =
-                let cctx = { ctx with Crit = hit.Crit }
-                if Mods.flag cctx (Named "CullingStrike") mods
-                   && e.Life <= e.Def.Life * Constants.cullingThreshold (Rarity.name e.Def.Rarity) / 100.0 * Mods.inc cctx [ Named "CullingThreshold" ] mods then
-                    { hit with Dealt = Dmg.map (fun _ v -> v + e.Life) hit.Dealt }
-                else hit
-            // more attack damage by distance: Close Combat, full within 1 m, none from 3.5 m;
-            // Longshot, none within 3.5 m, full from 7 m
-            let mult =
-                let near, far = Mods.sumBase ctx [ Named "CloseCombatMore" ] mods, Mods.sumBase ctx [ Named "FarCombatMore" ] mods
-                if near = 0.0 && far = 0.0 then mult
-                else
-                    let d = max 0.0 (Vec.length e.Def.Position - e.Def.Size)
-                    let closeness = max 0.0 (min 1.0 ((35.0 - d) / 25.0))
-                    let farness = max 0.0 (min 1.0 ((d - 35.0) / 35.0))
-                    mult * (1.0 + near * closeness / 100.0) * (1.0 + far * farness / 100.0)
-            let hit =
-                { hit with
-                    Unmitigated = Dmg.map (fun _ v -> v * mult) hit.Unmitigated
-                    Dealt = Dmg.map (fun _ v -> v * mult) hit.Dealt }
-            // ailments are rolled before the damage lands; a shock the hit applies already
-            // counts for the hit itself (user observation)
-            // Flammability earlier hits left on the enemy adds to this hit's chance to Ignite,
-            // and this hit leaves its own
-            let flammable = e.Flammability |> List.filter (fun (_, until) -> until > w.Time)
-            let inflicted =
-                let total = flammable |> List.sumBy fst
-                Ailments.fromHit rng ctx mods (if total > 0.0 then { def with Mods = ModDb.add def.Mods (Mod.base' (Named "Flammability") total) } else def) hit
-            let w =
-                match Ailments.flammability ctx mods def hit with
-                | f when f > 0.0 -> updateEnemy target (fun en -> { en with Flammability = (f, w.Time + Constants.flammabilityDuration) :: flammable }) w
-                | _ -> w
-            // a part that only inflicts (a poison burst): what it would have dealt counts
-            // for the ailment, the hit itself deals nothing
-            let hit = if Mods.flag ctx (Named "NoHitDamage") mods then { hit with Dealt = Dmg.map (fun _ _ -> 0.0) hit.Dealt; Unmitigated = Dmg.map (fun _ _ -> 0.0) hit.Unmitigated } else hit
-            let hit =
-                let currentShock =
-                    Map.tryFind "Shocked" e.Debuffs
-                    |> Option.filter (fun x -> x.Expires > w.Time)
-                    |> Option.map (fun x -> x.Mods |> List.sumBy (fun m -> m.Value))
-                    |> Option.defaultValue 0.0
-                let newShock = inflicted |> List.tryPick (function Status (Shock, m, _) when m > currentShock -> Some m | _ -> None)
-                match newShock with
-                | Some m ->
-                    let withoutOld = def.Mods |> ModDb.toList |> List.filter (fun x -> x.Source <> "Shock")
-                    let def' = { def with Mods = ModDb.ofList ((Mod.inc (DamageTaken AllDamage) m |> Mod.from "Shock") :: withoutOld) }
-                    { hit with Dealt = Hit.mitigate ctx mods def' hit.Unmitigated }
-                | None -> hit
-            let dealt = Dmg.total hit.Dealt
-            let life = e.Life - dealt
-            let dead = life <= 1e-9
-            (match env.Trace with Some tell -> tell w.Time (if hit.Crit then "crit" else "hit") target skill.Name dealt | None -> ())
-            let w =
-                { w with
-                    // the enemy as it is now: what the hit consumed stays consumed
-                    Enemies = Map.add target { (Map.find target w.Enemies) with Life = (if dead then 0.0 else life) } w.Enemies
-                    DamageBy = addf (skill.Name + " (hit)") (min dealt e.Life) w.DamageBy
-                    // (only of a hit the enemy outlives: what a killing hit deals is the life that was left)
-                    Evened = (if dead then w.Evened else w.Evened + dealt * (evenly - 1.0))
-                    Overkill = w.Overkill + max 0.0 (dealt - e.Life)
-                    // (a hit that deals more than the enemy has left: each type's share of what was left)
-                    DamageByType = (let k = if dealt > e.Life && dealt > 0.0 then e.Life / dealt else 1.0 in hit.Dealt |> Map.fold (fun m t v -> if v > 0.0 then addf (DamageType.name t) (v * k) m else m) w.DamageByType)
-                    // "25% of Hit Damage dealt to them while Debuffed": hits are what is recorded
-                    Agonies = w.Agonies |> List.map (fun a -> if a.Enemy = target && a.Until > w.Time then { a with Recorded = a.Recorded + min dealt e.Life } else a)
-                    Counts = w.Counts |> bump ("hits:" + skill.Name) |> (if hit.Crit then bump ("crits:" + skill.Name) else id)
-                    Shown = (if w.Tracing then Struck(w.Time, target, min dealt e.Life, hit.Crit) :: w.Shown else w.Shown)
-                    // (on a march a hit wakes who it lands on, and in rooms the whole of its pack)
-                    Woken =
-                        (match env.Fight.March with
-                         | Some m when not (w.Woken.Contains target) ->
-                             if not m.Rooms then w.Woken.Add target
-                             else
-                                 let pack = target.Substring(target.LastIndexOf '#')
-                                 w.Enemies |> Map.fold (fun (woken: Set<string>) name x -> if x.Life > 0.0 && name.TrimEnd('+').EndsWith pack then woken.Add name else woken) w.Woken
-                         | _ -> w.Woken)
-                    CorpsesUsed = corpsesAfter dead target w.Time w
-                    Kills = if dead then (target, e.Def.Rarity, w.Time) :: w.Kills else w.Kills }
-            // ---- what follows from the hit, in this order (each is a function above) ----
-            let h =
-                { Env = env; Rng = rng; Actor = actor; Skill = skill; Target = target; Enemy = e; Ctx = ctx; Mods = mods
-                  Def = def; Hit = hit; Dealt = dealt; Dead = dead; Inflicted = inflicted }
-            let w =
-                w
-                |> overkillBurns h
-                |> breakArmour h
-                |> lightStun h
-                |> attackerRecovers h
-                |> killOrAilments h
-                |> ownDamageOverTime h
-                |> buildGloryAndCombo h
-                |> buildBannerGlory h
-                |> metaEnergy h
-                |> infusionRemnants h
-                |> gainArchon h
-                |> wardRemnants h
-                |> manaRemnants h
-                |> lifeRemnants h
-                |> trinity h
-                |> charmCharges h
-                |> rageFromHit h
-                |> knockback h
-            let w = markRecently actor.Name true hit.Crit dead w
-            let w = react env rng actor OnHit skill (Some target) w
-            if hit.Crit then react env rng actor OnCrit skill (Some target) w else w
+            w
+            |> overkillBurns h
+            |> breakArmour h
+            |> lightStun h
+            |> attackerRecovers h
+            |> killOrAilments h
+            |> ownDamageOverTime h
+            |> buildGloryAndCombo h
+            |> buildBannerGlory h
+            |> metaEnergy h
+            |> infusionRemnants h
+            |> gainArchon h
+            |> wardRemnants h
+            |> manaRemnants h
+            |> lifeRemnants h
+            |> trinity h
+            |> charmCharges h
+            |> rageFromHit h
+            |> knockback h
+        let w = markRecently actor.Name true hit.Crit dead w
+        let w = react env rng actor OnHit skill (Some target) w
+        if hit.Crit then react env rng actor OnCrit skill (Some target) w else w
