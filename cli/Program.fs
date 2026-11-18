@@ -262,6 +262,11 @@ let main argv =
                     let p = match Map.tryFind "scenario" o, r with
                             | Some "pinnacle", Unique -> { p with ElementalResist = 50.0 } // PoB pinnacle default
                             | _ -> p
+                    // (a boss has several times the life of its level and rarity, as on the page:
+                    // MonsterVarieties.LifeMultiplier, 250% for a map boss, 990% for the pinnacle)
+                    let p =
+                        if r <> Unique then p
+                        else { p with Life = p.Life * (if Map.tryFind "scenario" o = Some "pinnacle" then 9.9 else 2.5) }
                     match Map.tryFind "res" o with
                     | Some v -> { p with ElementalResist = float v }
                     | None -> p
