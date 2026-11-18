@@ -34,7 +34,7 @@ Confidence levels:
 | Mechanic | Rule | Source | Confidence |
 |---|---|---|---|
 | Who rolls | attacks roll accuracy against the monster's evasion; spells always hit; "always hit" overrides | game rule | data |
-| Player accuracy | 6 per level above 1 + 6 per Dexterity + flat, x increased / more | Character.ot, PoB AccuracyPerDexBase | pob |
+| Player accuracy | 6 per level above 1 + 8 per Dexterity + flat, x increased / more | Character.ot (per level); the game's character sheet "1 Dexterity = +8 Accuracy" (user's screenshot, 2026-11-18; PoB and the wiki still say 6) | data |
 | Hit chance | round(1.25 A / (A + 0.3 E)), between 5% and 100% | PoB calcs.hitChance; wiki Accuracy: chance = Acc x 1.25 x 100 / (Acc + Eva x 0.3), 5% to 100%; no penalty within 2 m, up to 90% less accuracy beyond 9 m | data |
 | Distance | accuracy is full up to 2 m and falls linearly to 90% less at 9 m | Character.ot accuracy_rating_+%_final_at_max_distance_scaled, PoB falloff; wiki Accuracy: no penalty within 2 m, up to 90% less beyond 9 m | data |
 | Monster evasion | DefaultMonsterStats evasion for its level | game data | data |

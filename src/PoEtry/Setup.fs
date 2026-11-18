@@ -343,12 +343,13 @@ module Setup =
         let vitals =
             let reserved = min 0.99 (vitals.LifeReserved + (Behaviours.spiritUses db sheet build |> List.sumBy (fun u -> u.LifePercent)) / 100.0)
             if reserved > 0.0 && vitals.Life > 1.0 then { vitals with LifeReserved = reserved; StartLife = min vitals.StartLife (1.0 - reserved) } else vitals
-        // accuracy: 6 per level above the first and 6 per Dexterity (Character.ot, PoB AccuracyPerDexBase)
+        // accuracy: 6 per level above the first (Character.ot) and 8 per Dexterity (the game's
+        // character sheet: "1 Dexterity = +8 Accuracy"; PoB's AccuracyPerDexBase 6 is older)
         let sheet =
             { sheet with
                 Mods =
                     sheet.Mods
-                    @ [ Mod.base' (Named "Accuracy") (6.0 * float (sheet.Level - 1) + 6.0 * vitals.Dex) |> Mod.from "level and Dexterity" ]
+                    @ [ Mod.base' (Named "Accuracy") (6.0 * float (sheet.Level - 1) + 8.0 * vitals.Dex) |> Mod.from "level and Dexterity" ]
                     // "Gain Accuracy Rating equal to your Intelligence"
                     @ (if Mods.flag Ctx.empty (Named "AccuracyFromIntelligence") (ModDb.ofList sheet.Mods) then [ Mod.base' (Named "Accuracy") vitals.Int |> Mod.from "Intelligence" ] else []) }
         let periodics = Behaviours.periodics db sheet build o.ChargeGen
