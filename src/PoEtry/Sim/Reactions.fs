@@ -1,4 +1,8 @@
 /// Rules: what an actor does besides hitting when something happens (`Hook` and `Reaction`).
+///
+/// Each kind of `Reaction` has its own function here; `perform` at the end of them says which
+/// one a reaction is. A new reaction: a case in `Reaction` (Model.fs), a function here, and a
+/// line in `perform`.
 [<AutoOpen>]
 module internal PoEtry.Engine.Reactions
 
@@ -6,6 +10,315 @@ open PoEtry
 // (again, after PoEtry: where both have a record with a field of one name, the engine's is meant)
 open PoEtry.Engine
 
+/// What the reactions of one rule share: whose rule it is, the skill that set it off, and
+/// the enemy the triggering event concerns (the one hit, or the one aimed at).
+type Reacting =
+    { Env: Env
+      Rng: Rng
+      Actor: Actor
+      Skill: Skill
+      Target: string option }
+
+/// What `f` makes of the world with the enemy concerned, if there is one and it lives.
+let onTarget (c: Reacting) (w: World) (f: string -> World) : World =
+    match c.Target with
+    | Some t when w.Enemies.[t].Life > 0.0 -> f t
+    | _ -> w
+
+// ---- conditions: reactions that let another one happen ----
+
+/// `SpendStack`: one stack of a buff is used up, if the actor has one (else: nothing).
+let spendStack (c: Reacting) buff (w: World) : World option =
+    let st = Map.find c.Actor.Name w.Actors
+    match Map.tryFind buff st.Buffs with
+    | Some e when e.Stacks > 0 && e.Expires > w.Time ->
+        let st' = if e.Stacks = 1 then { st with Buffs = Map.remove buff st.Buffs } else { st with Buffs = Map.add buff { e with Stacks = e.Stacks - 1 } st.Buffs }
+        Some { w with Actors = Map.add c.Actor.Name st' w.Actors }
+    | _ -> None
+
+/// `IfBuff`: whether the actor has the buff now.
+let hasBuff (c: Reacting) buff (w: World) : bool =
+    match Map.tryFind buff (Map.find c.Actor.Name w.Actors).Buffs with
+    | Some e when e.Stacks > 0 && e.Expires > w.Time -> true
+    | _ -> false
+
+/// `Every`: at most once in so many seconds; the world with the time noted, if it is due.
+let everyDue (c: Reacting) key seconds (w: World) : World option =
+    let k = "Every:" + key
+    if w.Time >= (Map.tryFind k (Map.find c.Actor.Name w.Actors).Energy |> Option.defaultValue -infinity) - 1e-9 then
+        { w with Counts = bump ("every:" + key) w.Counts }
+        |> updateActor c.Actor.Name (fun st -> { st with Energy = Map.add k (w.Time + seconds) st.Energy })
+        |> Some
+    else None
+
+/// `IfEnemyHas`: whether the enemy concerned lives and has the status.
+let targetHas (c: Reacting) st (w: World) : bool =
+    match c.Target with
+    | Some t when w.Enemies.[t].Life > 0.0 && (status w.Enemies.[t]).ContainsKey st -> true
+    | _ -> false
+
+// ---- buffs and stacks of the actor ----
+
+/// `SetStacks`: the buff has that many stacks from now on.
+let setStacks (c: Reacting) buff n (w: World) =
+    updateActor c.Actor.Name (fun st -> { st with Buffs = Map.add buff { Name = buff; Mods = []; Stacks = n; Expires = infinity } st.Buffs }) w
+
+/// `Empower`: stacks of a buff by the power of the monsters in the fight (a warcry).
+let empower (c: Reacting) buff perPower cap (w: World) =
+    let power = alive w |> List.sumBy (fun e -> MonsterPower.ofRarity e.Def.Rarity)
+    let n = max 1 (int (floor (min cap power / max 1.0 perPower)))
+    { w with Counts = bump ("empowered:" + string n) w.Counts }
+    |> updateActor c.Actor.Name (fun st -> { st with Buffs = Map.add buff { Name = buff; Mods = []; Stacks = n; Expires = infinity } st.Buffs })
+
+/// `GrantOneOf`: one of the buffs, picked at random, in place of the others.
+let grantOneOf (c: Reacting) (names: string list) duration (w: World) =
+    if names.IsEmpty then w
+    else
+        let pick = names.[min (names.Length - 1) (int (c.Rng.Float() * float names.Length))]
+        updateActor c.Actor.Name (fun st ->
+            let buffs = names |> List.fold (fun b n -> Map.remove n b) st.Buffs
+            { st with Buffs = Map.add pick { Name = pick; Mods = []; Stacks = 1; Expires = w.Time + duration } buffs }) w
+        |> schedule (w.Time + duration) Expire
+
+/// `GrantBuff`: a buff on the actor (one stack more of it, up to its most).
+let grantBuff (c: Reacting) name duration maxStacks mods (w: World) =
+    let w =
+        updateActor c.Actor.Name (fun st ->
+            let e = stackEffect w.Time (Map.tryFind name st.Buffs) name duration maxStacks mods
+            { st with Buffs = Map.add name e st.Buffs }) w
+    schedule (w.Time + duration) Expire w
+
+/// `RemoveBuff`: the actor loses the buff.
+let removeBuff (c: Reacting) name (w: World) =
+    updateActor c.Actor.Name (fun st -> { st with Buffs = Map.remove name st.Buffs }) w
+
+/// `GrantMinionBuff`: a buff on every minion there is.
+let grantMinionBuff (c: Reacting) name duration mods (w: World) =
+    c.Env.Fight.Minions
+    |> List.fold (fun w (m: Actor) ->
+        if Map.containsKey m.Name w.Actors then
+            updateActor m.Name (fun st -> { st with Buffs = Map.add name { Name = name; Mods = mods; Stacks = 1; Expires = w.Time + duration } st.Buffs }) w
+        else w) w
+    |> schedule (w.Time + duration) Expire
+
+/// `ChargeBuff`: a buff with a stack for every charge of a kind the actor holds.
+let chargeBuff (c: Reacting) name charge perStack seconds doubleChance (w: World) =
+    let held = Map.tryFind charge (Map.find c.Actor.Name w.Actors).Buffs |> Option.map (fun e -> e.Stacks) |> Option.defaultValue 0
+    if held = 0 then w
+    else
+        let stacks = if c.Rng.Chance doubleChance then 2 * held else held
+        // mods are per stack: the buff's stacks scale them
+        let e = { Name = name; Mods = perStack; Stacks = stacks; Expires = w.Time + seconds * float stacks }
+        updateActor c.Actor.Name (fun st -> { st with Buffs = Map.add name e st.Buffs }) w
+        |> schedule e.Expires Expire
+        |> fun w -> { w with Counts = bump ("buff:" + name) w.Counts }
+
+/// `GainRareMods`: the modifiers of the rare monster concerned, as buffs on the actor.
+let gainRareMods (c: Reacting) duration (w: World) =
+    match c.Target with
+    | Some t ->
+        w.Enemies.[t].Def.Affixes
+        |> List.fold (fun w id ->
+            let name = RareMods.buffName id
+            updateActor c.Actor.Name (fun st ->
+                { st with Buffs = Map.add name (stackEffect w.Time (Map.tryFind name st.Buffs) name duration 1 []) st.Buffs }) w
+            |> schedule (w.Time + duration) Expire
+            |> fun w -> { w with Counts = bump "rare modifiers gained" w.Counts }) w
+    | None -> w
+
+/// `DropRemnant`: a remnant drops and is picked up a little later (sometimes two).
+let dropRemnant (c: Reacting) r delay extra (w: World) =
+    let n = if c.Rng.Chance extra then 2 else 1
+    { w with Counts = bump ("remnant:" + r) w.Counts } |> schedule (w.Time + delay) (GainStacks(c.Actor.Name, r, n))
+
+// ---- the player's own pools ----
+
+/// `RegenES`: energy shield regenerates for a while (one such stream at a time).
+let regenES (rate: float) (duration: float) (w: World) =
+    match w.Player with
+    | Some p when p.Died.IsNone ->
+        { w with Player = Some { p with Recoups = (w.Time + duration, rate, "ShroudES") :: (p.Recoups |> List.filter (fun (_, _, pool) -> pool <> "ShroudES")) }
+                 Counts = bump "regen:ES" w.Counts }
+    | _ -> w
+
+/// `IgniteSelf`: the player is ignited, for a share of its life and energy shield a second.
+let igniteSelf (c: Reacting) percent (w: World) =
+    let player = c.Env.Fight.Player
+    match player.Vitals, w.Player with
+    | Some pools, Some p when p.Died.IsNone && c.Actor.Name = player.Name ->
+        // (resistance and what there is against Ignite: with the buffs of the moment)
+        let v =
+            match player.VitalsAt with
+            | Some at -> at (buffStacks (Map.find player.Name w.Actors))
+            | None -> pools
+        if c.Rng.Chance(Map.tryFind "Ignite" v.Avoid |> Option.defaultValue 0.0) then w
+        else
+            // a charm against Ignite answers (and is used up doing so)
+            let w, prevented = charm c.Env c.Rng "Ignited" w
+            if prevented then { w with Counts = bump "charm prevented:Ignited" w.Counts }
+            else
+                let dps =
+                    percent / 100.0 * (pools.Life + pools.EnergyShield) * (Map.tryFind "Ignite" v.SelfEffect |> Option.defaultValue 1.0)
+                    * (1.0 - (Map.tryFind Fire v.Resist |> Option.defaultValue 0.0) / 100.0) * (Map.tryFind Fire v.TakenMult |> Option.defaultValue 1.0)
+                let until = w.Time + Constants.igniteDuration * (Map.tryFind "Ignite" v.SelfDuration |> Option.defaultValue 1.0)
+                { w with
+                    Player =
+                        w.Player |> Option.map (fun p ->
+                            // the strongest Ignite burns; one as strong starts its time again
+                            let stronger = p.Dots |> List.exists (fun (u, d, t) -> t = Fire && u > w.Time && d > dps)
+                            if stronger then p else { p with Dots = (until, dps, Fire) :: (p.Dots |> List.filter (fun (_, _, t) -> t <> Fire)) })
+                    Counts = bump "player:Ignited" w.Counts }
+    | _ -> w
+
+// ---- the ground ----
+
+/// `LayGround`: a ground surface or storm appears where the enemy concerned is.
+let layGround (c: Reacting) (g: Ground) (w: World) =
+    // where the enemy concerned is (if it has just died: where it was)
+    let spot =
+        match c.Target |> Option.bind (fun t -> Map.tryFind t w.Enemies) with
+        | Some e -> Some e.Def.Position
+        | None -> aimed c.Env w |> Option.map (fun e -> e.Def.Position)
+    match spot with
+    | None -> w
+    | Some spot ->
+        let live = w.Grounds |> List.filter (fun x -> x.Until > w.Time)
+        let from = if g.Speed > 0.0 then Vec.zero else spot
+        // (a patch poured where one of the skill lies already is that patch, for its time anew)
+        let there = if g.Kind = Storm then None else live |> List.tryFindIndex (fun x -> x.Spec.Skill = g.Skill && x.Owner = c.Actor.Name && x.Kind <> Storm && x.To = spot && x.From = from)
+        (match c.Env.Trace with Some tell -> tell w.Time "Ground" g.Skill "laid" g.Radius | None -> ())
+        match there with
+        | Some i ->
+            { w with Grounds = live |> List.mapi (fun k x -> if k = i then { x with Until = w.Time + g.Seconds } else x); Counts = bump ("ground:" + g.Skill) w.Counts }
+            |> schedule (w.Time + g.Seconds) Expire
+        | None ->
+            // "Limit N": one more takes the oldest of the skill away
+            let live =
+                let mine = live |> List.filter (fun x -> x.Spec.Shared = g.Shared && x.Owner = c.Actor.Name)
+                if g.Limit <= 0 || mine.Length < g.Limit then live
+                else
+                    let gone = mine.Length - g.Limit + 1
+                    live
+                    |> List.fold (fun (kept, seen) x ->
+                        if x.Spec.Shared = g.Shared && x.Owner = c.Actor.Name then (if seen < gone then kept, seen + 1 else x :: kept, seen + 1)
+                        else x :: kept, seen) ([], 0)
+                    |> fst |> List.rev
+            let laid =
+                { Spec = g
+                  Owner = c.Actor.Name
+                  ExposureEffect = Mods.inc Ctx.empty [ Named "ExposureEffect" ] (ModDb.ofList c.Actor.Mods)
+                  From = from
+                  To = spot
+                  Born = w.Time
+                  Until = w.Time + g.Seconds
+                  Kind = g.Kind
+                  Carried = (if g.Kind = Burning then g.Ignite else 0.0)
+                  Ignite = (if g.Kind = Burning then g.Ignite else 0.0) }
+            { w with Grounds = live @ [ laid ]; Counts = bump ("ground:" + g.Skill) w.Counts }
+            |> schedule laid.Until Expire
+
+// ---- corpses and summoning ----
+
+/// `Explode`: the enemy concerned explodes (the explosion is an event of its own).
+let explode (c: Reacting) percent dt radius (w: World) =
+    match c.Target with
+    | Some t -> schedule w.Time (Explosion(c.Actor.Name, t, percent, dt, radius)) w
+    | None -> w
+
+/// `ExplodeCorpses`: every corpse there is explodes, and is used up.
+let explodeCorpses (c: Reacting) percent dt radius (w: World) =
+    // (the corpses there are: of the enemies killed last, the earlier ones first)
+    let n = w.Kills.Length - w.CorpsesUsed
+    if n <= 0 then w
+    else
+        w.Kills |> List.truncate n |> List.rev
+        |> List.fold (fun w (name, _, _) -> schedule w.Time (Explosion(c.Actor.Name, name, percent, dt, radius)) w) { w with CorpsesUsed = w.Kills.Length }
+
+/// `SummonPerCorpse`: a minion of the pool for every corpse (and, where the skill says so,
+/// for every killed minion whose bones are still there).
+let summonPerCorpse (c: Reacting) pool duration deadMinions (w: World) =
+    let size = c.Env.Fight.Minions |> List.filter (fun m -> m.Pool = Some pool) |> List.length
+    let corpses = min size (w.Kills.Length - w.CorpsesUsed)
+    let bones =
+        if not deadMinions then []
+        else
+            c.Env.Fight.Minions
+            |> List.filter (fun m ->
+                (m.Body |> Option.exists (fun b -> b.Revive.IsSome)) && (Map.find m.Name w.Actors).Gone && not (w.Boned.Contains m.Name))
+            |> List.map (fun m -> m.Name)
+            |> List.truncate (size - corpses)
+    if corpses + bones.Length = 0 then w
+    else
+        summon c.Env pool (corpses + bones.Length) duration
+            { w with CorpsesUsed = w.CorpsesUsed + corpses; Boned = bones |> List.fold (fun s n -> Set.add n s) w.Boned }
+
+/// `SummonPerWard`: all the player's ward becomes minions, one for so much of it.
+let summonPerWard (c: Reacting) pool wardEach duration (w: World) =
+    match w.Player with
+    | Some p when wardEach > 0.0 && p.Ward >= wardEach ->
+        summon c.Env pool (int (p.Ward / wardEach)) duration { w with Player = Some { p with Ward = 0.0 } }
+    | _ -> w
+
+// ---- what is put on the enemy concerned ----
+
+/// `AttachPustule`: a pustule on the enemy, if it has none (it bursts later, see `Events`).
+let attachPustule (c: Reacting) part seconds per cap (w: World) =
+    onTarget c w (fun target ->
+        if w.Pustules |> List.exists (fun (_, _, e, _, _, _, _) -> e = target) then w
+        else
+            let dealt = Map.tryFind "Poison" w.DamageBy |> Option.defaultValue 0.0
+            { w with
+                Pustules = (c.Actor.Name, part, target, dealt, per, cap, w.Time + seconds) :: w.Pustules
+                Counts = bump "pustule" w.Counts }
+            |> schedule (w.Time + seconds) Expire)
+
+/// `ApplyCurse`: a curse or a mark on the enemy; over the limit, the oldest gives way.
+let applyCurse (c: Reacting) (name: string) duration mods (w: World) =
+    onTarget c w (fun t ->
+        let k = effectOnSelf w.Enemies.[t] "CurseEffectOnSelf"
+        // "Curse:X" / "Mark:X" keep their prefix; plain names are curses
+        let full = if name.StartsWith "Curse:" || name.StartsWith "Mark:" then name else "Curse:" + name
+        let prefix = full.Substring(0, full.IndexOf ':' + 1)
+        // one curse (plus "additional curses"), one mark: the oldest gives way
+        let limit = if prefix = "Mark:" then 1 else 1 + int (Mods.sumBase Ctx.empty [ Named "MaxCurses" ] (ModDb.ofList c.Actor.Mods))
+        let others =
+            w.Enemies.[t].Debuffs |> Map.toList
+            |> List.filter (fun (n, x) -> n.StartsWith prefix && n <> full && x.Expires > w.Time)
+            |> List.sortBy (fun (_, x) -> x.Expires)
+        let drop = others |> List.truncate (max 0 (others.Length + 1 - limit)) |> List.map fst
+        let w = updateEnemy t (fun e -> { e with Debuffs = drop |> List.fold (fun d n -> Map.remove n d) e.Debuffs }) w
+        addDebuff t full duration 1 (mods |> List.map (Mod.scaled k)) w
+        |> fun w -> { w with Counts = bump ("apply:" + full) w.Counts })
+
+/// `GrowExposure`: exposure on the enemy that grows pulse by pulse (each an event).
+let growExposure (c: Reacting) dt start perPulse cap every pulses duration (w: World) =
+    onTarget c w (fun t ->
+        [ 1 .. pulses ] |> List.fold (fun w k ->
+            schedule (w.Time + every * float k) (Expose(c.Actor.Name, t, dt, min cap (start + perPulse * float k), duration)) w) w)
+
+/// `SpreadPoison`: the killed enemy's worst Poison goes to those near where it died.
+let spreadPoison (c: Reacting) radius hinder (w: World) =
+    match c.Target with
+    | Some t ->
+        let dead = w.Enemies.[t]
+        // "Spreads the most Damaging Poison" (of equals, the one with the most time left)
+        let poisons =
+            dead.Dots |> List.filter (fun d -> d.Ailment = Some Poison && d.Expires > w.Time)
+            |> List.sortByDescending (fun d -> d.Dps, d.Expires) |> List.truncate 1
+        if poisons.IsEmpty then w
+        else
+            let longest = poisons |> List.map (fun d -> d.Expires - w.Time) |> List.max
+            alive w
+            |> List.filter (fun o -> o.Def.Name <> t && Vec.dist o.Def.Position dead.Def.Position <= radius + o.Def.Size)
+            |> List.fold (fun w o ->
+                let w = poisons |> List.fold (fun w d -> inflict o.Def.Name c.Actor.Name (Dot(Poison, d.Type, d.Dps, d.Expires - w.Time, d.MaxStacks)) w) w
+                let w = { w with Counts = bump "spread:Poison" w.Counts }
+                if c.Rng.Chance hinder then addDebuff o.Def.Name "Hindered" longest 1 [] w else w) w
+    | None -> w
+
+// ---- the rules ----
+
+/// What the actor's rules for `hook` do, for a use or hit of `skill`.
 /// `target`: the enemy the triggering event concerns (hit enemy, or the one aimed at).
 let rec react env (rng: Rng) (actor: Actor) hook (skill: Skill) (target: string option) (w: World) =
     actor.Rules
@@ -15,266 +328,59 @@ let rec react env (rng: Rng) (actor: Actor) hook (skill: Skill) (target: string 
             if not (rng.Chance r.Chance) then
                 w
             else
-                let onTarget f =
-                    match target with
-                    | Some t when w.Enemies.[t].Life > 0.0 -> f t
-                    | _ -> w
-                let rec perform reaction (w: World) =
-                  match reaction with
-                  | SpendStack (buff, next) ->
-                      let st = Map.find actor.Name w.Actors
-                      match Map.tryFind buff st.Buffs with
-                      | Some e when e.Stacks > 0 && e.Expires > w.Time ->
-                          let st' = if e.Stacks = 1 then { st with Buffs = Map.remove buff st.Buffs } else { st with Buffs = Map.add buff { e with Stacks = e.Stacks - 1 } st.Buffs }
-                          perform next { w with Actors = Map.add actor.Name st' w.Actors }
-                      | _ -> w
-                  | RegenES (rate, duration) ->
-                      match w.Player with
-                      | Some p when p.Died.IsNone ->
-                          { w with Player = Some { p with Recoups = (w.Time + duration, rate, "ShroudES") :: (p.Recoups |> List.filter (fun (_, _, pool) -> pool <> "ShroudES")) }
-                                   Counts = bump "regen:ES" w.Counts }
-                      | _ -> w
-                  | SetStacks (buff, n) ->
-                      updateActor actor.Name (fun st -> { st with Buffs = Map.add buff { Name = buff; Mods = []; Stacks = n; Expires = infinity } st.Buffs }) w
-                  | WithCorpse (next, otherwise) ->
-                      if w.Kills.Length > w.CorpsesUsed then perform next { w with CorpsesUsed = w.CorpsesUsed + 1 } else perform otherwise w
-                  | NoReaction -> w
-                  | IfBuff (buff, next) ->
-                      match Map.tryFind buff (Map.find actor.Name w.Actors).Buffs with
-                      | Some e when e.Stacks > 0 && e.Expires > w.Time -> perform next w
-                      | _ -> w
-                  | LayGround g ->
-                      // where the enemy concerned is (if it has just died: where it was)
-                      let spot =
-                          match target |> Option.bind (fun t -> Map.tryFind t w.Enemies) with
-                          | Some e -> Some e.Def.Position
-                          | None -> aimed env w |> Option.map (fun e -> e.Def.Position)
-                      match spot with
-                      | None -> w
-                      | Some spot ->
-                          let live = w.Grounds |> List.filter (fun x -> x.Until > w.Time)
-                          let from = if g.Speed > 0.0 then Vec.zero else spot
-                          // (a patch poured where one of the skill lies already is that patch, for its time anew)
-                          let there = if g.Kind = Storm then None else live |> List.tryFindIndex (fun x -> x.Spec.Skill = g.Skill && x.Owner = actor.Name && x.Kind <> Storm && x.To = spot && x.From = from)
-                          (match env.Trace with Some tell -> tell w.Time "Ground" g.Skill "laid" g.Radius | None -> ())
-                          match there with
-                          | Some i ->
-                              { w with Grounds = live |> List.mapi (fun k x -> if k = i then { x with Until = w.Time + g.Seconds } else x); Counts = bump ("ground:" + g.Skill) w.Counts }
-                              |> schedule (w.Time + g.Seconds) Expire
-                          | None ->
-                              // "Limit N": one more takes the oldest of the skill away
-                              let live =
-                                  let mine = live |> List.filter (fun x -> x.Spec.Shared = g.Shared && x.Owner = actor.Name)
-                                  if g.Limit <= 0 || mine.Length < g.Limit then live
-                                  else
-                                      let gone = mine.Length - g.Limit + 1
-                                      live
-                                      |> List.fold (fun (kept, seen) x ->
-                                          if x.Spec.Shared = g.Shared && x.Owner = actor.Name then (if seen < gone then kept, seen + 1 else x :: kept, seen + 1)
-                                          else x :: kept, seen) ([], 0)
-                                      |> fst |> List.rev
-                              let laid =
-                                  { Spec = g
-                                    Owner = actor.Name
-                                    ExposureEffect = Mods.inc Ctx.empty [ Named "ExposureEffect" ] (ModDb.ofList actor.Mods)
-                                    From = from
-                                    To = spot
-                                    Born = w.Time
-                                    Until = w.Time + g.Seconds
-                                    Kind = g.Kind
-                                    Carried = (if g.Kind = Burning then g.Ignite else 0.0)
-                                    Ignite = (if g.Kind = Burning then g.Ignite else 0.0) }
-                              { w with Grounds = live @ [ laid ]; Counts = bump ("ground:" + g.Skill) w.Counts }
-                              |> schedule laid.Until Expire
-                  | Every (key, seconds, next) ->
-                      let k = "Every:" + key
-                      if w.Time >= (Map.tryFind k (Map.find actor.Name w.Actors).Energy |> Option.defaultValue -infinity) - 1e-9 then
-                          { w with Counts = bump ("every:" + key) w.Counts }
-                          |> updateActor actor.Name (fun st -> { st with Energy = Map.add k (w.Time + seconds) st.Energy })
-                          |> perform next
-                      else w
-                  | IfEnemyHas (st, next) ->
-                      match target with
-                      | Some t when w.Enemies.[t].Life > 0.0 && (status w.Enemies.[t]).ContainsKey st -> perform next w
-                      | _ -> w
-                  | IgniteSelf percent ->
-                      let player = env.Fight.Player
-                      match player.Vitals, w.Player with
-                      | Some pools, Some p when p.Died.IsNone && actor.Name = player.Name ->
-                          // (resistance and what there is against Ignite: with the buffs of the moment)
-                          let v =
-                              match player.VitalsAt with
-                              | Some at -> at (buffStacks (Map.find player.Name w.Actors))
-                              | None -> pools
-                          if rng.Chance(Map.tryFind "Ignite" v.Avoid |> Option.defaultValue 0.0) then w
-                          else
-                              // a charm against Ignite answers (and is used up doing so)
-                              let w, prevented = charm env rng "Ignited" w
-                              if prevented then { w with Counts = bump "charm prevented:Ignited" w.Counts }
-                              else
-                                  let dps =
-                                      percent / 100.0 * (pools.Life + pools.EnergyShield) * (Map.tryFind "Ignite" v.SelfEffect |> Option.defaultValue 1.0)
-                                      * (1.0 - (Map.tryFind Fire v.Resist |> Option.defaultValue 0.0) / 100.0) * (Map.tryFind Fire v.TakenMult |> Option.defaultValue 1.0)
-                                  let until = w.Time + Constants.igniteDuration * (Map.tryFind "Ignite" v.SelfDuration |> Option.defaultValue 1.0)
-                                  { w with
-                                      Player =
-                                          w.Player |> Option.map (fun p ->
-                                              // the strongest Ignite burns; one as strong starts its time again
-                                              let stronger = p.Dots |> List.exists (fun (u, d, t) -> t = Fire && u > w.Time && d > dps)
-                                              if stronger then p else { p with Dots = (until, dps, Fire) :: (p.Dots |> List.filter (fun (_, _, t) -> t <> Fire)) })
-                                      Counts = bump "player:Ignited" w.Counts }
-                      | _ -> w
-                  | Empower (buff, perPower, cap) ->
-                      let power = alive w |> List.sumBy (fun e -> MonsterPower.ofRarity e.Def.Rarity)
-                      let n = max 1 (int (floor (min cap power / max 1.0 perPower)))
-                      { w with Counts = bump ("empowered:" + string n) w.Counts }
-                      |> updateActor actor.Name (fun st -> { st with Buffs = Map.add buff { Name = buff; Mods = []; Stacks = n; Expires = infinity } st.Buffs })
-                  | other -> performSimple other w
-                and performSimple reaction (w: World) =
-                 let onTarget f =
-                    match target with
-                    | Some t when w.Enemies.[t].Life > 0.0 -> f t
-                    | _ -> w
-                 match reaction with
-                 | SpendStack _ | SetStacks _ | Empower _ | IfEnemyHas _ | IfBuff _ | Every _ | WithCorpse _ | IgniteSelf _ | RegenES _ | LayGround _ | NoReaction -> w
-                 | Explode (percent, dt, radius) ->
-                     match target with
-                     | Some t -> schedule w.Time (Explosion(actor.Name, t, percent, dt, radius)) w
-                     | None -> w
-                 | ExplodeCorpses (percent, dt, radius) ->
-                     // (the corpses there are: of the enemies killed last, the earlier ones first)
-                     let n = w.Kills.Length - w.CorpsesUsed
-                     if n <= 0 then w
-                     else
-                         w.Kills |> List.truncate n |> List.rev
-                         |> List.fold (fun w (name, _, _) -> schedule w.Time (Explosion(actor.Name, name, percent, dt, radius)) w) { w with CorpsesUsed = w.Kills.Length }
-                 | SummonEmpowered (pool, count, duration, first) -> summonWith env pool count duration first w
-                 | SummonPerCorpse (pool, duration, deadMinions) ->
-                     let size = env.Fight.Minions |> List.filter (fun m -> m.Pool = Some pool) |> List.length
-                     let corpses = min size (w.Kills.Length - w.CorpsesUsed)
-                     let bones =
-                         if not deadMinions then []
-                         else
-                             env.Fight.Minions
-                             |> List.filter (fun m ->
-                                 (m.Body |> Option.exists (fun b -> b.Revive.IsSome)) && (Map.find m.Name w.Actors).Gone && not (w.Boned.Contains m.Name))
-                             |> List.map (fun m -> m.Name)
-                             |> List.truncate (size - corpses)
-                     if corpses + bones.Length = 0 then w
-                     else
-                         summon env pool (corpses + bones.Length) duration
-                             { w with CorpsesUsed = w.CorpsesUsed + corpses; Boned = bones |> List.fold (fun s n -> Set.add n s) w.Boned }
-                 | GrantOneOf (names, duration) when not names.IsEmpty ->
-                     let pick = names.[min (names.Length - 1) (int (rng.Float() * float names.Length))]
-                     updateActor actor.Name (fun st ->
-                         let buffs = names |> List.fold (fun b n -> Map.remove n b) st.Buffs
-                         { st with Buffs = Map.add pick { Name = pick; Mods = []; Stacks = 1; Expires = w.Time + duration } buffs }) w
-                     |> schedule (w.Time + duration) Expire
-                 | GrantOneOf _ -> w
-                 | AttachPustule (part, seconds, per, cap) ->
-                     onTarget (fun target ->
-                         if w.Pustules |> List.exists (fun (_, _, e, _, _, _, _) -> e = target) then w
-                         else
-                             let dealt = Map.tryFind "Poison" w.DamageBy |> Option.defaultValue 0.0
-                             { w with
-                                 Pustules = (actor.Name, part, target, dealt, per, cap, w.Time + seconds) :: w.Pustules
-                                 Counts = bump "pustule" w.Counts }
-                             |> schedule (w.Time + seconds) Expire)
-                 | SummonPerWard (pool, wardEach, duration) ->
-                     match w.Player with
-                     | Some p when wardEach > 0.0 && p.Ward >= wardEach ->
-                         summon env pool (int (p.Ward / wardEach)) duration { w with Player = Some { p with Ward = 0.0 } }
-                     | _ -> w
-                 | GrantBuff (name, duration, maxStacks, mods) ->
-                     let w =
-                         updateActor actor.Name (fun st ->
-                             let e = stackEffect w.Time (Map.tryFind name st.Buffs) name duration maxStacks mods
-                             { st with Buffs = Map.add name e st.Buffs }) w
-                     schedule (w.Time + duration) Expire w
-                 | Summon (pool, count, duration) -> summon env pool count duration w
-                 | RemoveBuff name ->
-                     updateActor actor.Name (fun st -> { st with Buffs = Map.remove name st.Buffs }) w
-                 | GrantMinionBuff (name, duration, mods) ->
-                     env.Fight.Minions
-                     |> List.fold (fun w (m: Actor) ->
-                         if Map.containsKey m.Name w.Actors then
-                             updateActor m.Name (fun st -> { st with Buffs = Map.add name { Name = name; Mods = mods; Stacks = 1; Expires = w.Time + duration } st.Buffs }) w
-                         else w) w
-                     |> schedule (w.Time + duration) Expire
-                 | ApplyDebuff (name, _, _, _) when partFlag skill ("CannotInflict:" + name) -> w
-                 | ApplyDebuff (name, duration, maxStacks, mods) ->
-                     onTarget (fun t -> addDebuff t name duration maxStacks mods w)
-                 | ApplyCurse (name, duration, mods) ->
-                     onTarget (fun t ->
-                         let k = effectOnSelf w.Enemies.[t] "CurseEffectOnSelf"
-                         // "Curse:X" / "Mark:X" keep their prefix; plain names are curses
-                         let full = if name.StartsWith "Curse:" || name.StartsWith "Mark:" then name else "Curse:" + name
-                         let prefix = full.Substring(0, full.IndexOf ':' + 1)
-                         // one curse (plus "additional curses"), one mark: the oldest gives way
-                         let limit = if prefix = "Mark:" then 1 else 1 + int (Mods.sumBase Ctx.empty [ Named "MaxCurses" ] (ModDb.ofList actor.Mods))
-                         let others =
-                             w.Enemies.[t].Debuffs |> Map.toList
-                             |> List.filter (fun (n, x) -> n.StartsWith prefix && n <> full && x.Expires > w.Time)
-                             |> List.sortBy (fun (_, x) -> x.Expires)
-                         let drop = others |> List.truncate (max 0 (others.Length + 1 - limit)) |> List.map fst
-                         let w = updateEnemy t (fun e -> { e with Debuffs = drop |> List.fold (fun d n -> Map.remove n d) e.Debuffs }) w
-                         addDebuff t full duration 1 (mods |> List.map (Mod.scaled k)) w
-                         |> fun w -> { w with Counts = bump ("apply:" + full) w.Counts })
-                 | ApplyExposure (dt, amount, duration) -> onTarget (fun t -> expose actor t dt amount duration w)
-                 | GrowExposure (dt, start, perPulse, cap, every, pulses, duration) ->
-                     onTarget (fun t ->
-                         [ 1 .. pulses ] |> List.fold (fun w k ->
-                             schedule (w.Time + every * float k) (Expose(actor.Name, t, dt, min cap (start + perPulse * float k), duration)) w) w)
-                 | RemoveDebuff name -> onTarget (fun t -> updateEnemy t (fun en -> { en with Debuffs = Map.remove name en.Debuffs }) w)
-                 | InflictStatus (a, magnitude, duration) -> onTarget (fun t -> inflict t actor.Name (Status(a, magnitude, duration)) w)
-                 | SpreadPoison (radius, hinder) ->
-                     match target with
-                     | Some t ->
-                         let dead = w.Enemies.[t]
-                         // "Spreads the most Damaging Poison" (of equals, the one with the most time left)
-                         let poisons =
-                             dead.Dots |> List.filter (fun d -> d.Ailment = Some Poison && d.Expires > w.Time)
-                             |> List.sortByDescending (fun d -> d.Dps, d.Expires) |> List.truncate 1
-                         if poisons.IsEmpty then w
-                         else
-                             let longest = poisons |> List.map (fun d -> d.Expires - w.Time) |> List.max
-                             alive w
-                             |> List.filter (fun o -> o.Def.Name <> t && Vec.dist o.Def.Position dead.Def.Position <= radius + o.Def.Size)
-                             |> List.fold (fun w o ->
-                                 let w = poisons |> List.fold (fun w d -> inflict o.Def.Name actor.Name (Dot(Poison, d.Type, d.Dps, d.Expires - w.Time, d.MaxStacks)) w) w
-                                 let w = { w with Counts = bump "spread:Poison" w.Counts }
-                                 if rng.Chance hinder then addDebuff o.Def.Name "Hindered" longest 1 [] w else w) w
-                     | None -> w
-                 | GainRareMods duration ->
-                     match target with
-                     | Some t ->
-                         w.Enemies.[t].Def.Affixes
-                         |> List.fold (fun w id ->
-                             let name = RareMods.buffName id
-                             updateActor actor.Name (fun st ->
-                                 { st with Buffs = Map.add name (stackEffect w.Time (Map.tryFind name st.Buffs) name duration 1 []) st.Buffs }) w
-                             |> schedule (w.Time + duration) Expire
-                             |> fun w -> { w with Counts = bump "rare modifiers gained" w.Counts }) w
-                     | None -> w
-                 | TriggerSkill name -> trigger env rng actor name w
-                 | GainEnergy (meta, amount) -> gainEnergy env rng actor meta amount w
-                 | GainResource (r, n) -> schedule w.Time (GainStacks(actor.Name, r, n)) w
-                 | ChargeBuff (name, charge, perStack, seconds, doubleChance) ->
-                     let held = Map.tryFind charge (Map.find actor.Name w.Actors).Buffs |> Option.map (fun e -> e.Stacks) |> Option.defaultValue 0
-                     if held = 0 then w
-                     else
-                         let stacks = if rng.Chance doubleChance then 2 * held else held
-                         // mods are per stack: the buff's stacks scale them
-                         let e = { Name = name; Mods = perStack; Stacks = stacks; Expires = w.Time + seconds * float stacks }
-                         updateActor actor.Name (fun st -> { st with Buffs = Map.add name e st.Buffs }) w
-                         |> schedule e.Expires Expire
-                         |> fun w -> { w with Counts = bump ("buff:" + name) w.Counts }
-                 | DropRemnant (r, delay, extra) ->
-                     let n = if rng.Chance extra then 2 else 1
-                     { w with Counts = bump ("remnant:" + r) w.Counts } |> schedule (w.Time + delay) (GainStacks(actor.Name, r, n))
-                perform r.Reaction w)
+                perform { Env = env; Rng = rng; Actor = actor; Skill = skill; Target = target } r.Reaction w)
         w
 
+/// One reaction happens: which function above (or below, for those that use a skill) it is.
+and perform (c: Reacting) reaction (w: World) : World =
+    match reaction with
+    | NoReaction -> w
+    // conditions
+    | SpendStack (buff, next) -> (match spendStack c buff w with Some w -> perform c next w | None -> w)
+    | IfBuff (buff, next) -> if hasBuff c buff w then perform c next w else w
+    | Every (key, seconds, next) -> (match everyDue c key seconds w with Some w -> perform c next w | None -> w)
+    | IfEnemyHas (st, next) -> if targetHas c st w then perform c next w else w
+    | WithCorpse (next, otherwise) ->
+        if w.Kills.Length > w.CorpsesUsed then perform c next { w with CorpsesUsed = w.CorpsesUsed + 1 } else perform c otherwise w
+    // buffs and stacks of the actor
+    | SetStacks (buff, n) -> setStacks c buff n w
+    | Empower (buff, perPower, cap) -> empower c buff perPower cap w
+    | GrantOneOf (names, duration) -> grantOneOf c names duration w
+    | GrantBuff (name, duration, maxStacks, mods) -> grantBuff c name duration maxStacks mods w
+    | RemoveBuff name -> removeBuff c name w
+    | GrantMinionBuff (name, duration, mods) -> grantMinionBuff c name duration mods w
+    | ChargeBuff (name, charge, perStack, seconds, doubleChance) -> chargeBuff c name charge perStack seconds doubleChance w
+    | GainRareMods duration -> gainRareMods c duration w
+    | GainResource (r, n) -> schedule w.Time (GainStacks(c.Actor.Name, r, n)) w
+    | DropRemnant (r, delay, extra) -> dropRemnant c r delay extra w
+    // the player's own pools
+    | RegenES (rate, duration) -> regenES rate duration w
+    | IgniteSelf percent -> igniteSelf c percent w
+    // the ground
+    | LayGround g -> layGround c g w
+    // corpses and summoning
+    | Explode (percent, dt, radius) -> explode c percent dt radius w
+    | ExplodeCorpses (percent, dt, radius) -> explodeCorpses c percent dt radius w
+    | Summon (pool, count, duration) -> summon c.Env pool count duration w
+    | SummonEmpowered (pool, count, duration, first) -> summonWith c.Env pool count duration first w
+    | SummonPerCorpse (pool, duration, deadMinions) -> summonPerCorpse c pool duration deadMinions w
+    | SummonPerWard (pool, wardEach, duration) -> summonPerWard c pool wardEach duration w
+    // what is put on the enemy concerned
+    | ApplyDebuff (name, _, _, _) when partFlag c.Skill ("CannotInflict:" + name) -> w
+    | ApplyDebuff (name, duration, maxStacks, mods) -> onTarget c w (fun t -> addDebuff t name duration maxStacks mods w)
+    | RemoveDebuff name -> onTarget c w (fun t -> updateEnemy t (fun en -> { en with Debuffs = Map.remove name en.Debuffs }) w)
+    | ApplyCurse (name, duration, mods) -> applyCurse c name duration mods w
+    | ApplyExposure (dt, amount, duration) -> onTarget c w (fun t -> expose c.Actor t dt amount duration w)
+    | GrowExposure (dt, start, perPulse, cap, every, pulses, duration) -> growExposure c dt start perPulse cap every pulses duration w
+    | InflictStatus (a, magnitude, duration) -> onTarget c w (fun t -> inflict t c.Actor.Name (Status(a, magnitude, duration)) w)
+    | AttachPustule (part, seconds, per, cap) -> attachPustule c part seconds per cap w
+    | SpreadPoison (radius, hinder) -> spreadPoison c radius hinder w
+    // skills and energy
+    | TriggerSkill name -> trigger c.Env c.Rng c.Actor name w
+    | GainEnergy (meta, amount) -> gainEnergy c.Env c.Rng c.Actor meta amount w
+
+/// A meta gem gains energy (more of it with what the actor has for that), and releases it
+/// if that is enough.
 and gainEnergy env rng (actor: Actor) metaName amount w =
     match actor.Metas |> List.tryFind (fun m -> m.Name = metaName) with
     | None -> w
