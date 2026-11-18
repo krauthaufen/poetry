@@ -115,3 +115,22 @@ minion skills without a monster, description handlers `describe.mjs` does not kn
   the tree data it needs comes from `tree-full.json`.
 - `tools/export/export.lua`, `tools/gen_tables.py`, `tools/export/minion_sizes.py` are the PoB route and are
   not needed for any of the above.
+
+## After the data is in: what the simulator does not know yet
+
+```bash
+python3 tools/gamefiles/gen_web_classes.py                         # new classes and ascendancies for "new build" on the page
+nice -n 19 dotnet build -c Release cli
+nice -n 19 dotnet run --project tests/PoEtry.Tests -c Release      # tests that fail name what the game changed
+nice -n 19 dotnet fsi tools/census/census.fsx                      # every stat of every affix, passive and gem: read, unmapped, unsimulated
+nice -n 19 dotnet fsi tools/skills/ledger.fsx                      # every player skill with the stats and skill types nothing reads
+```
+
+Work the lists from the top (most used first):
+
+- **`out/game-direct/whatsnew.txt`**: new skills, supports, bases, mods, passives and the stat ids seen for the first time.
+- **Unmapped stats** go into `src/PoEtry/StatMap.fs`; many new ones are a known stat with a new prefix or suffix and need one line.
+- **New skill types** show as "NOT MODELLED for this skill" until they are in `modelledTypes` or `descriptiveTypes` in `Gems.fs`.
+- **A character from the new patch** says under "not understood" what the data lacks: gems and classes that are not in the game data, passives that are not in the tree data. If those appear the export is older than the character.
+- **New mechanics** get a row in `RULES.md` with the keyword text as source (`reference/poe2db-keywords.txt`, or the game's own keyword table) before they are built.
+- **`out/game-direct/derived-minions.txt`, `derived-skills.txt`**: monsters and monster skills chosen by rule, to be reviewed into `export/hand/`.
