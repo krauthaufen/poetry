@@ -96,6 +96,14 @@ minion skills without a monster, description handlers `describe.mjs` does not kn
 
 - `export/hand/minion-lists.json`: which monster a minion skill summons. The client files have no table
   for it. The export links new minion skills by name where it can and prints the rest.
+- `export/hand/minions.json`: the monsters whose skills were picked by hand, with the simulator's key for
+  them where it is not the monster id ("RaisedZombie") and the name of their count limit.
+- `export/hand/monster-skills.json`: which granted effects of those monsters are skills (a monster also
+  has animations, triggers and audio as granted effects; PoB picks by hand, 310 of about 1600).
+- `export/hand/skill-names.json`: display names of skills the game leaves unnamed or all calls "Basic Attack".
+- A monster that is not in `minions.json` gets its skills by rule (`minions.mjs`: no helper effects, nothing a
+  reviewed monster has) and the game's names. The export writes them to `out/game-direct/derived-minions.txt`
+  and `derived-skills.txt`: review these on patch day and move what matters into the hand files.
 - Rules, not lists, written in the code: item class to type name and rune socket limit (`bases.mjs`),
   which monsters can be spectres (`minions.mjs`, PoB's rule), orbit radii of the tree (`tree.mjs`,
   constants of the game's tree drawing), `baseFlags` from skill types (`baseflags.mjs`).

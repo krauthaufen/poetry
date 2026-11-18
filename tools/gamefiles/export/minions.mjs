@@ -2,7 +2,28 @@
 // or tamed (the rule of PoB's Export/Scripts/spectreList.lua) and the monsters of minion skills
 // (monster types flagged as a player's minion). Fields as PoB's Export/Scripts/minions.lua writes them.
 // The key is the monster's id in MonsterVarieties (PoB uses hand-given short names for 32 of them).
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { GAMEFILES_DIR } from './lib/game.mjs';
 import { round } from './lib/text.mjs';
+
+const hand = name => JSON.parse(fs.readFileSync(path.join(GAMEFILES_DIR, 'export', 'hand', name), 'utf8'));
+let handMinions = null;
+/** hand/minions.json: the monsters reviewed by hand, monster id -> { key?, limit? }. */
+export function reviewedMinions() {
+  if (!handMinions) handMinions = hand('minions.json').monsters;
+  return handMinions;
+}
+/** The id the simulator knows a minion by: the hand-given key where there is one, else the monster id. */
+export function minionKey(id) {
+  const h = reviewedMinions()[id];
+  return (h && h.key) || id;
+}
+
+// Granted effects of a monster that are no skill of its own: by the prefix of the id (EA, EAA, EAS: empty
+// action; EG: execute; GT: geometry trigger; SO: spawn object; MD: monster dodge) or a word in it. None of
+// PoB's 310 hand-picked monster skills is one of these, of 1600 granted effects on the monsters it has.
+const HELPER = /^(EA|EAA|EAS|EG|GT|SO|MD|EDA|CTS|GCE)(?=[A-Z][a-z])|EmptyAction|Audio|DoLiterallyNothing|WalkEmerge|Dodge(Left|Right|Back)/;
 
 const itemClassMap = {
   'Claw': 'Claw', 'Dagger': 'Dagger', 'Wand': 'Wand', 'One Hand Sword': 'One Hand Sword', 'Thrusting One Hand Sword': 'One Hand Sword',
@@ -45,19 +66,53 @@ export function minionVarieties(game) {
     if (/Mtx|Test|Royale/.test(m.Id)) continue;
     if (!picked.has(m._index)) picked.set(m._index, 'minion');
   }
+  // ---- every monster reviewed by hand, whatever the rules above say ----
+  const missing = [];
+  for (const id of Object.keys(reviewedMinions())) {
+    const m = game.rowBy('MonsterVarieties', 'Id', id);
+    if (!m) missing.push(id);
+    else picked.set(m._index, 'hand');
+  }
+  if (missing.length) console.log(`  monsters of hand/minions.json the game no longer has: ${missing.join(', ')}`);
   cached = [...picked].sort((a, b) => a[0] - b[0]).map(([i, why]) => ({ row: MV[i], why }));
   return cached;
 }
 
-/** Ids of the granted effects the exported monsters have. */
-export function monsterSkillIds(game) {
+let skillChoice = null;
+/**
+ * Which granted effects of the exported monsters go to skills.json.
+ * A monster in hand/minions.json: those of hand/monster-skills.json (PoB's hand-picked ones).
+ * Any other monster: its granted effects that are not helpers (HELPER) and that no reviewed monster has
+ * (for a reviewed monster, a skill left out was left out on purpose).
+ * Returns { include: Set, derived: Map monster id -> [skill id] }.
+ */
+export function monsterSkills(game) {
+  if (skillChoice) return skillChoice;
   const GE = game.table('GrantedEffects');
-  const ids = new Set();
-  for (const { row } of minionVarieties(game)) for (const i of row.GrantedEffects) ids.add(GE[i].Id);
-  return ids;
+  const reviewed = reviewedMinions();
+  const handSkills = new Set(hand('monster-skills.json').skills);
+  const include = new Set(), ofReviewed = new Set();
+  const all = minionVarieties(game);
+  for (const { row } of all) if (reviewed[row.Id]) for (const i of row.GrantedEffects) ofReviewed.add(GE[i].Id);
+  for (const id of handSkills) if (game.rowBy('GrantedEffects', 'Id', id)) include.add(id);
+  const derived = new Map();
+  for (const { row } of all) {
+    if (reviewed[row.Id]) continue;
+    const own = [];
+    for (const i of row.GrantedEffects) {
+      const id = GE[i].Id;
+      if (handSkills.has(id)) continue;
+      if (HELPER.test(id) || ofReviewed.has(id)) continue;
+      include.add(id);
+      own.push(id);
+    }
+    derived.set(row.Id, own);
+  }
+  skillChoice = { include, derived, handSkills, ofReviewed };
+  return skillChoice;
 }
 
-export function run(game) {
+export function run(game, ctx = {}) {
   const MT = game.table('MonsterTypes'), TAGS = game.table('Tags'), GE = game.table('GrantedEffects');
   const minions = {};
   for (const { row: m } of minionVarieties(game)) {
@@ -92,7 +147,16 @@ export function run(game) {
     if (cat) o.monsterCategory = cat.Name;
     o.skillList = m.GrantedEffects.map(i => GE[i].Id);
     o.objectSize = m.ObjectSize;                      // tools/export/minion_sizes.py
-    minions[m.Id] = o;
+    const h = reviewedMinions()[m.Id];
+    if (h && h.limit) o.limit = h.limit;
+    minions[minionKey(m.Id)] = o;
+  }
+  // what was decided by rule, not by hand: to be looked at on patch day
+  const { derived } = monsterSkills(game);
+  if (derived.size) {
+    const lines = [...derived].map(([id, skills]) => `${id}\t${game.rowBy('MonsterVarieties', 'Id', id).Name}\t${skills.join(' ')}`);
+    console.log(`  ${derived.size} monsters are not in hand/minions.json; their skills were chosen by rule (list: derived-minions.txt), e.g. ${[...derived.keys()].slice(0, 4).map(k => k.split('/').pop()).join(', ')}`);
+    return { 'minions.json': minions, 'derived-minions.txt': { text: '# monster id, name, skills exported by rule (no hand entry in export/hand/minions.json)\n' + lines.join('\n') + '\n' } };
   }
   return { 'minions.json': minions };
 }

@@ -19,7 +19,7 @@ for (let i = 0; i < args.length; i++) {
   else pos.push(args[i]);
 }
 const outDir = path.resolve(pos[0] || path.join(GAMEFILES_DIR, '..', '..', 'out', 'game-direct'));
-const steps = ['statdesc', 'skills', 'minions', 'bases', 'mods', 'tree'];
+const steps = ['statdesc', 'minions', 'skills', 'bases', 'mods', 'tree'];
 const game = await openGame();
 console.log(`game: ${game.gameDir}\nout:  ${outDir}`);
 ctx.outDir = outDir;

@@ -683,7 +683,7 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
             Json.parse (sprintf "{\"rarity\": \"Unique\", \"name\": \"Test Globe\", \"typeLine\": \"Sacred Focus\", \"explicitMods\": [\"+10 to maximum Life\"], \"mutatedMods\": [\"%s\"], \"mods\": {\"explicit\": [%s]}}" mutated mods)
         let life = "{\"id\": \"A\", \"stats\": {\"base_maximum_life\": 10}}"
         let crit = "{\"id\": \"B\", \"stats\": {\"spell_critical_strike_chance_+%_per_100_max_mana_with_non_channelling_skills\": 3}}"
-        let line = "Non-[Channelling] Skills have 3% increased [Spell] [Critical|Critical Hit Chance] per 100 maximum Mana"
+        let line = "Non-[Channelling] Skills are granted 3% increased [Spell] [Critical|Critical Hit Chance] for every 100 maximum Mana"
         let parsed (j: Json) = Items.parse db.Value (Api.itemText j)
         let p = parsed (item (life + ", " + crit) line)
         equal (box ([]: string list)) (box p.Coverage.UnknownText)
@@ -693,7 +693,7 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         near 10.0 (p.Mods |> List.sumBy (fun m -> if m.Stat = MaxLife then m.Value else 0.0))
         // a mod whose values are not the line's numbers does not explain it
         let wrong = "{\"id\": \"B\", \"stats\": {\"spell_critical_strike_chance_+%_per_100_max_mana_with_non_channelling_skills\": 4}}"
-        equal (box [ "Non-Channelling Skills have 3% increased Spell Critical Hit Chance per 100 maximum Mana" ]) (box (parsed (item (life + ", " + wrong) line)).Coverage.UnknownText)
+        equal (box [ "Non-Channelling Skills are granted 3% increased Spell Critical Hit Chance for every 100 maximum Mana" ]) (box (parsed (item (life + ", " + wrong) line)).Coverage.UnknownText)
         // without the API's mods: as before, not understood
         let bare = Json.parse (sprintf "{\"rarity\": \"Unique\", \"name\": \"Test Globe\", \"typeLine\": \"Sacred Focus\", \"mutatedMods\": [\"%s\"]}" line)
         equal (box 1) (box (parsed bare).Coverage.UnknownText.Length)

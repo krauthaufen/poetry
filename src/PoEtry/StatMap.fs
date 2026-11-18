@@ -2519,7 +2519,9 @@ module StatMap =
         [ "_per_different_warcry_used_recently", "Different:Warcry:4"
           "_per_num_unique_spells_cast_in_last_8_seconds", "Different:Spell:8"
           "_per_different_grenade_type_fired_in_past_8_seconds", "Different:Grenade:8"
-          "_per_ammo_type_fired_in_past_10_seconds", "Different:Ammo:10" ]
+          "_per_ammo_type_fired_in_past_10_seconds", "Different:Ammo:10"
+          // "... for each Corrupted Item Equipped"
+          "_per_equipped_corrupted_item", "CorruptedItems" ]
         |> List.tryPick (fun (suffix, state) ->
             if id.EndsWith suffix then
                 match direct (id.Substring(0, id.Length - suffix.Length)) value with

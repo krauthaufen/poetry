@@ -9,7 +9,7 @@ import { LuaTable, byInt, flagSet } from './lib/lua.mjs';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { GAMEFILES_DIR } from './lib/game.mjs';
-import { monsterSkillIds, minionVarieties } from './minions.mjs';
+import { monsterSkills, minionVarieties, minionKey } from './minions.mjs';
 import { deriveBaseFlags } from './baseflags.mjs';
 import { MAIN_FILES, specificFiles } from './statdesc.mjs';
 
@@ -46,13 +46,19 @@ export function run(game, ctx) {
   const wanted = new Map();   // GrantedEffects row index -> why
   const want = (i, why) => { if (i !== null && i !== undefined && !wanted.has(i)) wanted.set(i, why); };
   for (const e of GEMFX) { want(e.GrantedEffect, 'gem'); for (const a of e.AdditionalGrantedEffects) want(a, 'gem'); }
-  for (const r of GE) if (/Player/.test(r.Id)) want(r._index, 'player');
-  for (const id of monsterSkillIds(game)) { const r = game.rowBy('GrantedEffects', 'Id', id); if (r) want(r._index, 'monster'); }
+
+  const monsterChoice = monsterSkills(game);
+  for (const id of monsterChoice.include) { const r = game.rowBy('GrantedEffects', 'Id', id); if (r) want(r._index, 'monster'); }
+  // (an effect of a reviewed monster that was left out by hand stays out, also when its id says "Player")
+  for (const r of GE) if (/Player/.test(r.Id) && !(monsterChoice.ofReviewed.has(r.Id) && !monsterChoice.handSkills.has(r.Id))) want(r._index, 'player');
+  const handNames = JSON.parse(fs.readFileSync(path.join(GAMEFILES_DIR, 'export', 'hand', 'skill-names.json'), 'utf8')).skills;
+  const unnamed = [];
   if (ctx.allEffects) for (const r of GE) want(r._index, 'all');
 
   const trueGemNames = new Map();
   const gemsUsed = new Set();
   const skills = {};
+  const extra = {};
   const skipped = [];
 
   for (const gi of [...wanted.keys()].sort((a, b) => a - b)) {
@@ -86,8 +92,10 @@ export function run(game, ctx) {
       }
       out.color = gemColor(skillGem);
     } else {
-      // many monster skills have no display name (PoB names them by hand in its lists): the id then
-      displayName = granted.IsSupport ? granted.Id : ((gemEffect && trueGemNames.get(gemEffect.Id)) || active.DisplayedName || granted.Id);
+      // a skill that is no gem: the hand-given name if there is one (PoB's "#skill <id> <name>"), the game's
+      // name, or the id: most monster skills have no name in the game
+      displayName = granted.Id in handNames ? handNames[granted.Id] : (granted.IsSupport ? granted.Id : ((gemEffect && trueGemNames.get(gemEffect.Id)) || active.DisplayedName || granted.Id));
+      if (!(granted.Id in handNames) && wanted.get(gi) === 'monster' && !monsterChoice.handSkills.has(granted.Id)) unnamed.push(`${granted.Id}\t${displayName}`);
       out.name = displayName;
       displayName = sanitise(displayName);
       out.hidden = true;
@@ -191,6 +199,10 @@ export function run(game, ctx) {
   }
   if (skipped.length) console.log(`  ${skipped.length} granted effects have no active skill and are no support: skipped (${skipped.slice(0, 5).join(', ')}...)`);
 
+  if (unnamed.length) {
+    console.log(`  ${unnamed.length} monster skills were added by rule and have no hand-given name in hand/skill-names.json (list: derived-skills.txt)`);
+    extra['derived-skills.txt'] = { text: '# granted effect id, name used (the game\'s, or the id): monster skills exported by rule, without an entry in export/hand/\n' + unnamed.join('\n') + '\n' };
+  }
   // every description file a skill names should exist
   const scopes = new Set([...MAIN_FILES, ...specificFiles(game).map(f => f[0])]);
   const noScope = new Map();
@@ -202,6 +214,12 @@ export function run(game, ctx) {
   }
 
   // ---- gems.json ----
+  // A gem that only an item gives: a modifier (ModGrantedSkills) or an item base (ItemInherentSkills) grants
+  // it, and it cannot be cut from an uncut gem (no CraftingTypes). A unique's own version of a skill
+  // ("UniqueSkillGemHeraldOfIce") is one of these; the real Herald of Ice, which some base also grants, is not.
+  const grantedByItem = new Set();
+  for (const r of game.table('ModGrantedSkills')) if (r.Skill !== null) grantedByItem.add(r.Skill);
+  for (const r of game.table('ItemInherentSkills')) for (const g of r.SkillsGranted) grantedByItem.add(g);
   const gems = {};
   for (const gem of SKILLGEMS) {
     const baseItem = BASEITEMS[gem.BaseItemType];
@@ -222,6 +240,7 @@ export function run(game, ctx) {
       if (e.GrantedEffectDisplayOrder.length) g.grantedEffectDisplayOrder = e.GrantedEffectDisplayOrder;
       if (e.SupportName.length > 0) g.secondaryEffectName = e.SupportName;
       if (gem.IsVaalVariant) g.vaalGem = true;
+      if (grantedByItem.has(gem._index) && gem.CraftingTypes.length === 0) g.fromItem = true;
       const tags = {};
       let gemType;
       const tagNames = [];
@@ -260,7 +279,7 @@ export function run(game, ctx) {
       gems['Metadata/Items/Gems/SkillGem' + e.Id] = g;
     }
   }
-  return { 'skills.json': skills, 'gems.json': gems };
+  return { 'skills.json': skills, 'gems.json': gems, ...extra };
 }
 
 // One stat set of a skill (skills.lua, the "#set" and "#mods" directives).
@@ -419,10 +438,10 @@ function minionListOf(game, granted, active, out) {
     minionLinks = { hand, byName, unlinked: [], guessed: [] };
   }
   const known = new Set(minionVarieties(game).map(m => m.row.Id));
-  if (minionLinks.hand[granted.Id]) return minionLinks.hand[granted.Id].filter(id => known.has(id));
+  if (minionLinks.hand[granted.Id]) return minionLinks.hand[granted.Id].filter(id => known.has(id)).map(minionKey);
   if (!out.skillTypes || !out.skillTypes.CreatesMinion) return [];
   const found = minionLinks.byName.get(normName(out.name)) || [];
-  if (found.length === 1) { minionLinks.guessed.push(`${granted.Id} -> ${found[0]}`); return found; }
+  if (found.length === 1) { minionLinks.guessed.push(`${granted.Id} -> ${found[0]}`); return found.map(minionKey); }
   minionLinks.unlinked.push(granted.Id);
   return [];
 }

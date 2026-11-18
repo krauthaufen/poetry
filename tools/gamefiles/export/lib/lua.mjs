@@ -57,6 +57,7 @@ export function flagSet(names) {
 
 export function writeJson(outDir, name, value) {
   fs.mkdirSync(outDir, { recursive: true });
+  if (value && typeof value.text === 'string' && Object.keys(value).length === 1) { fs.writeFileSync(path.join(outDir, name), value.text); console.log(`wrote ${name}`); return; }
   // { plainJson: value } is written as ordinary JSON (empty lists stay lists): files that are not read like data/game
   const plain = value && value.plainJson !== undefined && Object.keys(value).length === 1;
   if (plain) value = value.plainJson;
