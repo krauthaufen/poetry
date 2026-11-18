@@ -842,6 +842,16 @@ let run (test: string -> (unit -> unit) -> unit) =
         if standing <= 0.0 || abs (walking / standing - 2.0) > 0.05 then failwithf "bleeding dealt %g to the walker, %g to the one that stands" walking standing
         same (Fight.single walker player 20.0) seeds)
 
+    test "flat: a hit that takes a good part of a monster's life light stuns it" (fun () ->
+        let player = { Actor.make "Player" [] [ spell "Shard" Physical 30000.0 30000.0 ] with Rotation = [ Actor.always "Shard" ]; Vitals = Some(PlayerStats.basic 1e9 0.0) }
+        // 30000 physical (armour takes little of so large a hit) of 200000 life: some 20% (physical 50% more); regenerated life is not in it, so the monster is given plenty
+        let brute life = { EnemyDef.make Rarity.defaults 80 Rare "Brute" (Vec.make 5.0 0.0) with Life = life }
+        let stuns life = [ 1u .. 20u ] |> List.sumBy (fun seed -> (Sim.run (Fight.single (brute life) player 2.5) seed).Counts |> Map.tryFind "light stun" |> Option.defaultValue 0)
+        if stuns 200000.0 <= 0 then failwith "no light stun on a monster that loses a seventh of its life to a hit"
+        // a boss loses too little to a hit: under 15% is none
+        if stuns 1e9 <> 0 then failwith "a boss was light stunned"
+        same (Fight.single (brute 200000.0) player 2.5) seeds)
+
     test "flat: mana, costs, a flask and leech; a skill that waits for mana" (fun () ->
         let vitals = { PlayerStats.basic 1000.0 120.0 with ManaRegen = 8.0; EnergyShield = 200.0; EnergyShieldRecharge = 40.0; LifeRegen = 5.0; StartLife = 0.6 }
         let flask = { Amount = 90.0; Duration = 3.0; ChargesPerUse = 20.0; MaxCharges = 60.0; ChargesPerSecond = 1.0; ChargeGainMult = 1.0; Instant = 0.3 }

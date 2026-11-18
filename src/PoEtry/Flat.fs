@@ -1340,6 +1340,7 @@ module Flat =
               BBeenHit: int
               BAftershock: int
               CStopped: int
+              CLightStun: int
               CKnockback: int
               CEvaded: int
               CEnemyHit: int
@@ -2433,6 +2434,7 @@ module Flat =
                       BBeenHit = bBeenHit
                       BAftershock = bAftershock
                       CStopped = cStopped
+                      CLightStun = count "light stun"
                       CKnockback = counts.Id "knockback"
                       CEvaded = cEvaded
                       CEnemyHit = cEnemyHit
@@ -2687,6 +2689,7 @@ module Flat =
           mutable RatesVersion: int
           Buildup: float[]
           mutable StunBuildupAt: float
+          mutable StunnedUntil: float
           /// Flammability left by fire hits, oldest first from `FlamFrom` up to `FlamTo`: how
           /// much, and when it is gone (each lasts the same, so the oldest goes first).
           mutable FlamValue: float[]
@@ -3597,6 +3600,9 @@ module Flat =
     let private kill (s: State) (e: Foe) (at: float) =
         e.Life <- 0.0
         s.Kills.Add((e.Def.Name, e.Def.Rarity, at))
+        // (one killed while frozen shatters and leaves no corpse: `Sim.corpsesAfter`)
+        (let frozen = Array.get s.P.AilmentStatus 5
+         if (Array.get e.Has frozen) && (Array.get e.Expires frozen) > at then s.CorpsesUsed <- s.CorpsesUsed + 1)
         s.AliveCount <- s.AliveCount - 1
         s.AliveStale <- true
 
@@ -3641,7 +3647,7 @@ module Flat =
     let private stopped (s: State) (e: Foe) (pinned: bool) : bool =
         refreshStatus s e
         let ailments = s.P.AilmentStatus
-        (at e.SHas (at ailments 5)) || (at e.SHas (at ailments 7)) || (at e.SHas (at ailments 6)) || (pinned && (at e.SHas (at ailments 8)))
+        e.StunnedUntil > s.Time || (at e.SHas (at ailments 5)) || (at e.SHas (at ailments 7)) || (at e.SHas (at ailments 6)) || (pinned && (at e.SHas (at ailments 8)))
 
     // ---- time passing ----
 
@@ -6427,6 +6433,11 @@ module Flat =
                         addDebuff s e p.SFullyBroken seconds 1 (scopes |> List.map (fun sc -> Mod.inc (DamageTaken sc) taken |> Mod.from "Fully Broken Armour"))
                         // (a break of armour that was not fully broken already)
                         if brokenBefore < baseArmour && p.OnFullBreak.Length > 0 then react s rng p.OnFullBreak "" sid target)
+                // a light stun (`Sim.hitEnemy`)
+                (let chance = min 100.0 ((dealt + (at de 0) * Constants.playerPhysicalStunMore / 100.0) * (if info.IsMelee then 1.0 + Constants.playerMeleeStunMore / 100.0 else 1.0) / max 1.0 def0.Life * 100.0)
+                 if not dead && chance >= Constants.lightStunMinimum && rng.Chance chance then
+                    e.StunnedUntil <- s.Time + Constants.monsterLightStunDuration
+                    bump s p.CLightStun)
                 // leech, and what a hit and a kill give back
                 (match (if s.Main.Vitals.IsSome then p.Vitals else None) with
                  | Some v ->
@@ -6692,7 +6703,13 @@ module Flat =
                         let mutable sum = 0
                         for t in 1 .. 3 do
                             let b = at p.BResonance (t - 1)
-                            let n = if t = top then min 100 (stacksOf s b + int gain) else max 0 (stacksOf s b - int loss)
+                            // (the drain of an element not gained for 8 s: `Sim.hitEnemy`)
+                            let clock = "ResonanceClock:" + DamageType.name (List.item (t - 1) DamageType.elemental)
+                            let late = match Map.tryFind clock s.A.Energy with Some c -> s.Time > c | None -> false
+                            let had = if late then max 0 (stacksOf s b - int ((s.Time - Map.find clock s.A.Energy) * Constants.trinityDecayPerSecond)) else stacksOf s b
+                            if t = top then s.A.Energy <- Map.add clock (s.Time + Constants.trinityDecayDelay) s.A.Energy
+                            elif late then s.A.Energy <- Map.add clock s.Time s.A.Energy
+                            let n = if t = top then min 100 (had + int gain) else max 0 (had - int loss)
                             if n > 0 then setBuff s b n infinity [] else removeBuff s b
                             sum <- sum + n
                         if sum > 0 then setBuff s p.BResonanceSum sum infinity [] else removeBuff s p.BResonanceSum
@@ -8011,6 +8028,7 @@ module Flat =
               RatesVersion = -1
               Buildup = Array.zeroCreate 13
               StunBuildupAt = 0.0
+              StunnedUntil = 0.0
               FlamValue = Array.zeroCreate 16
               FlamUntil = Array.zeroCreate 16
               FlamFrom = 0

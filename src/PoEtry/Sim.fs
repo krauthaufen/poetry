@@ -774,6 +774,8 @@ module Sim =
           Immune: Map<string, float>
           /// When the Heavy Stun bar last grew (it drains after a while without).
           StunBuildupAt: float
+          /// A light stun keeps it from acting and walking until then.
+          StunnedUntil: float
           /// Flammability left by fire hits: (magnitude in percent, gone at), each on its own.
           Flammability: (float * float) list
           Db: ModDb }
@@ -966,6 +968,13 @@ module Sim =
 
     let private alive (w: World) = w.Enemies |> Map.toList |> List.map snd |> List.filter (fun e -> e.Life > 0.0)
     let private allDead (w: World) = alive w |> List.isEmpty
+
+    /// Corpses used up, with the one a kill at `t` does not leave: "Monsters killed while frozen
+    /// will shatter, leaving behind no corpse".
+    let private corpsesAfter (dead: bool) name t (w: World) =
+        match Map.tryFind name w.Enemies with
+        | Some e when dead && (e.Debuffs |> Map.tryFind "Frozen" |> Option.exists (fun x -> x.Expires > t)) -> w.CorpsesUsed + 1
+        | _ -> w.CorpsesUsed
 
     let private updateEnemyDef name (pos: Vec) (w: World) =
         { w with Enemies = w.Enemies |> Map.change name (Option.map (fun e -> { e with Def = { e.Def with Position = pos } })) }
@@ -1328,6 +1337,7 @@ module Sim =
                     DamageBy = parts |> List.fold (fun m (k, v) -> addf k (v * span) m) w.DamageBy
                     DamageByType = types |> List.fold (fun m (k, v) -> addf k (v * span) m) w.DamageByType
                     Uptime = status e |> Map.fold (fun m k _ -> addf k (span / n) m) w.Uptime
+                    CorpsesUsed = corpsesAfter dead e.Def.Name (w.Time + span) w
                     Kills = if dead then (e.Def.Name, e.Def.Rarity, w.Time + span) :: w.Kills else w.Kills }
             let w = living |> List.fold step w
             // monsters walk towards the player until they're in attack range
@@ -1335,7 +1345,7 @@ module Sim =
                 match e.Def.Attack with
                 | Some atk when e.Life > 0.0 && w.Player.IsSome ->
                     let st = status e
-                    let stopped = [ "Frozen"; "HeavilyStunned"; "Electrocuted"; "Pinned" ] |> List.exists st.ContainsKey
+                    let stopped = e.StunnedUntil > w.Time || [ "Frozen"; "HeavilyStunned"; "Electrocuted"; "Pinned" ] |> List.exists st.ContainsKey
                     // (a slow weakens with rarity, and never brings a monster below a quarter of its speed)
                     let potency = Rarity.slowPotency e.Def.Rarity
                     let slow =
@@ -3372,6 +3382,7 @@ module Sim =
                                      let pack = target.Substring(target.LastIndexOf '#')
                                      w.Enemies |> Map.fold (fun (woken: Set<string>) name x -> if x.Life > 0.0 && name.TrimEnd('+').EndsWith pack then woken.Add name else woken) w.Woken
                              | _ -> w.Woken)
+                        CorpsesUsed = corpsesAfter dead target w.Time w
                         Kills = if dead then (target, e.Def.Rarity, w.Time) :: w.Kills else w.Kills }
                 // overkill explosions: nearby enemies are ignited for a share of the overkill
                 let w =
@@ -3430,6 +3441,13 @@ module Sim =
                             // (a break of armour that was not fully broken already)
                             if before < baseArmour then react env rng actor OnFullBreak skill (Some target) w else w
                         else w
+                // a light stun: the chance is the hit against the monster's life (physical damage and a
+                // melee hit 50% more each), nothing below 15%; it stops the monster for half a second
+                let w =
+                    let chance = min 100.0 ((dealt + Dmg.get Physical hit.Dealt * Constants.playerPhysicalStunMore / 100.0) * (if skill.Tags.Contains Melee then 1.0 + Constants.playerMeleeStunMore / 100.0 else 1.0) / max 1.0 e.Def.Life * 100.0)
+                    if not dead && chance >= Constants.lightStunMinimum && rng.Chance chance then
+                        updateEnemy target (fun en -> { en with StunnedUntil = w.Time + Constants.monsterLightStunDuration }) w |> fun w -> { w with Counts = bump "light stun" w.Counts }
+                    else w
                 // mana leech from physical attack damage dealt, recovered over time
                 let w =
                     match actor.Vitals, w.Player with
@@ -3723,7 +3741,18 @@ module Sim =
                         let loss = Mods.sumBase ctx [ Named "TrinityLoss" ] mods
                         updateActor actor.Name (fun st ->
                             let key t = "Resonance:" + DamageType.name t
-                            let get t = Map.tryFind (key t) st.Buffs |> Option.map (fun e -> e.Stacks) |> Option.defaultValue 0
+                            // (an element not gained for 8 s has drained since, 10 a second: reckoned at the next hit)
+                            let clock t = "ResonanceClock:" + DamageType.name t
+                            let late t = match Map.tryFind (clock t) st.Energy with Some c -> w.Time > c | None -> false
+                            let get t =
+                                let n = Map.tryFind (key t) st.Buffs |> Option.map (fun e -> e.Stacks) |> Option.defaultValue 0
+                                if late t then max 0 (n - int ((w.Time - Map.find (clock t) st.Energy) * Constants.trinityDecayPerSecond)) else n
+                            let energy =
+                                DamageType.elemental |> List.fold (fun (m: Map<string, float>) t ->
+                                    if t = top then Map.add (clock t) (w.Time + Constants.trinityDecayDelay) m
+                                    elif late t then Map.add (clock t) w.Time m
+                                    else m) st.Energy
+                            let st = { st with Energy = energy }
                             let values = DamageType.elemental |> List.map (fun t -> t, (if t = top then min 100 (get t + int gain) else max 0 (get t - int loss)))
                             let put k n (b: Map<string, Effect>) = if n > 0 then Map.add k { Name = k; Mods = []; Stacks = n; Expires = infinity } b else Map.remove k b
                             let buffs = values |> List.fold (fun b (t, n) -> put (key t) n b) st.Buffs
@@ -4124,7 +4153,7 @@ module Sim =
                 | Some at -> at (buffStacks (Map.find env.Fight.Player.Name w.Actors))
                 | None -> pools
             let st = status e
-            let stopped = [ "Frozen"; "HeavilyStunned"; "Electrocuted" ] |> List.exists st.ContainsKey
+            let stopped = e.StunnedUntil > w.Time || [ "Frozen"; "HeavilyStunned"; "Electrocuted" ] |> List.exists st.ContainsKey
             let chill = e.Debuffs |> Map.tryFind "Chilled" |> Option.map (fun x -> x.Mods |> List.sumBy (fun m -> m.Value)) |> Option.defaultValue 0.0
             // curses on the monster: action speed (Temporal Chains), damage dealt (Enfeeble)
             let debuffs = (defender e).Mods
@@ -4368,7 +4397,7 @@ module Sim =
         let atk = e.Def.Attack.Value
         let body = minion.Body.Value
         let st = status e
-        let stopped = [ "Frozen"; "HeavilyStunned"; "Electrocuted" ] |> List.exists st.ContainsKey
+        let stopped = e.StunnedUntil > w.Time || [ "Frozen"; "HeavilyStunned"; "Electrocuted" ] |> List.exists st.ContainsKey
         let chill = e.Debuffs |> Map.tryFind "Chilled" |> Option.map (fun x -> x.Mods |> List.sumBy (fun m -> m.Value)) |> Option.defaultValue 0.0
         let debuffs = (defender e).Mods
         let actionSpeed = max 0.1 (Mods.more Ctx.empty [ Named "ActionSpeed" ] debuffs)
@@ -4704,6 +4733,7 @@ module Sim =
                                     Enemies = Map.add enemy { e with Life = (if dead then 0.0 else e.Life - dealt) } w.Enemies
                                     DamageBy = addf skill dealt w.DamageBy
                                     DamageByType = addf "Other" dealt w.DamageByType
+                                    CorpsesUsed = corpsesAfter dead enemy w.Time w
                                     Kills = if dead then (enemy, e.Def.Rarity, w.Time) :: w.Kills else w.Kills }
                             else w
                         | _ -> drop w) w
@@ -4930,6 +4960,7 @@ module Sim =
                             DamageBy = addf "Explosion" took w.DamageBy
                             DamageByType = addf (DamageType.name dt) took w.DamageByType
                             Counts = bump "hits:Explosion" w.Counts
+                            CorpsesUsed = corpsesAfter dies e.Def.Name w.Time w
                             Kills = if dies then (e.Def.Name, e.Def.Rarity, w.Time) :: w.Kills else w.Kills }) { w with Counts = bump "explosion" w.Counts }
                 killed |> Seq.fold (fun w k -> killedOverTime env rng k (name = env.Fight.Player.Name) w) w
             // Conduit: "If you would gain a Charge, Allies in your Presence gain that Charge
@@ -5049,6 +5080,7 @@ module Sim =
               Dots = []
               Buildup = Map.empty
               Immune = Map.empty
+              StunnedUntil = 0.0
               StunBuildupAt = 0.0
               Flammability = []
               Db = ModDb.ofList d.Mods }

@@ -195,6 +195,14 @@ module Constants =
         | HeavyStun -> gc "HeavyStunThresholdModifier", gc "HeavyStunModifierDuration"
         | Pin -> gc "PinThresholdModifier", gc "PinModifierDuration"
         | _ -> 0.0, 0.0
+    /// Trinity: an element's Affinity not gained for this long drains at this rate (the gem's
+    /// trinity_resonance_decay_delay_ms and trinity_resonance_loss_per_second; keyword text Affinity).
+    let trinityDecayDelay = 8.0
+    let trinityDecayPerSecond = 10.0
+    /// A light stun stops a monster for this long (Monster.ot stun_base_duration_override_ms).
+    let monsterLightStunDuration = mc "stun_base_duration_override_ms" / 1000.0
+    /// "Chances lower than 15% are treated as 0%" (GameConstants LightStunMinimumChance).
+    let lightStunMinimum = gc "LightStunMinimumChance"
     /// "Consuming a Debuff on an enemy causes the enemy to be immune to that Debuff for 1
     /// seconds" (keyword text, Effect Consumption).
     let consumedImmunity = 1.0
