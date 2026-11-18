@@ -104,7 +104,7 @@ type IncomingHit =
 /// The monster's attack as the curses and debuffs on it leave it (damage dealt, chaos gained
 /// as extra), and how long until its next one (slowed by chill and by its action speed).
 let attackUnderDebuffs (e: EnemyState) (atk: EnemyAttack) : EnemyAttack * float =
-    let chill = e.Debuffs |> Map.tryFind "Chilled" |> Option.map (fun x -> x.Mods |> List.sumBy (fun m -> m.Value)) |> Option.defaultValue 0.0
+    let chill = e.Debuffs |> Map.tryFind Statuses.Chilled |> Option.map (fun x -> x.Mods |> List.sumBy (fun m -> m.Value)) |> Option.defaultValue 0.0
     // curses on the monster: action speed (Temporal Chains), damage dealt (Enfeeble)
     let debuffs = (defender e).Mods
     let actionSpeed = max 0.1 (Mods.more Ctx.empty [ Named "ActionSpeed" ] debuffs)
@@ -162,7 +162,7 @@ let mitigated (h: IncomingHit) (w: World) : Map<DamageType, float> =
     let armourShare = (if atk.Melee then 1.0 else v.ArmourVsProjectiles) * (if h.Crit then v.ArmourVsCrits else 1.0) * v.ArmourDefend
     let playerSt = Map.find h.Env.Fight.Player.Name w.Actors
     let shocked =
-        Map.tryFind "Shocked" playerSt.Buffs |> Option.filter (fun x -> x.Expires > w.Time)
+        Map.tryFind Statuses.Shocked playerSt.Buffs |> Option.filter (fun x -> x.Expires > w.Time)
         |> Option.map (fun x -> x.Mods |> List.sumBy (fun m -> m.Value)) |> Option.defaultValue 0.0
     h.Unmitigated
     |> Map.map (fun t d ->
@@ -329,7 +329,7 @@ let stunOnPlayer (h: IncomingHit) (w: World) : World =
                 if v.RegenOnStun <= 0.0 then w
                 else
                     let rate = v.RegenOnStun / 100.0 * h.Pools.Life / Constants.stunRegenSeconds
-                    { w with Player = w.Player |> Option.map (fun p -> { p with Recoups = { Until = w.Time + Constants.stunRegenSeconds; Rate = rate; Pool = "Life" } :: p.Recoups }) })
+                    { w with Player = w.Player |> Option.map (fun p -> { p with Recoups = { Until = w.Time + Constants.stunRegenSeconds; Rate = rate; Pool = RecoupPool.Life } :: p.Recoups }) })
     else w
 
 /// Ailments and stuns the hit inflicts on the player (not when blocked).
@@ -383,8 +383,8 @@ let hitLandsOnPlayer (h: IncomingHit) (p: PlayerState) (w: World) : World =
     let p = w.Player |> Option.defaultValue p
     let w = if w.Tracing then { w with Shown = Hurt(w.Time, h.Monster, taken |> Map.fold (fun s _ v -> s + v) 0.0) :: w.Shown } else w
     let w = takeDamage true h.Pools taken { w with Player = Some p } |> fun w -> { w with Player = w.Player |> Option.map (fun p -> { p with LastHit = w.Time }) }
-    let w = if preventedRecoup > 0.0 then startRecoup preventedRecoup v.RecoupSeconds "ES" w else w
-    let w = if preventedLife > 0.0 then startRecoup preventedLife v.RecoupSeconds "Life" w else w
+    let w = if preventedRecoup > 0.0 then startRecoup preventedRecoup v.RecoupSeconds RecoupPool.Shield w else w
+    let w = if preventedLife > 0.0 then startRecoup preventedLife v.RecoupSeconds RecoupPool.Life w else w
     w
     |> playerAnswersHit h taken
     |> ailmentsOnPlayer h
@@ -405,7 +405,7 @@ let attackPlayer env (rng: Rng) name (w: World) =
             | Some at -> at (buffStacks (Map.find env.Fight.Player.Name w.Actors))
             | None -> pools
         let st = status e
-        let stopped = e.StunnedUntil > w.Time || [ "Frozen"; "HeavilyStunned"; "Electrocuted" ] |> List.exists st.ContainsKey
+        let stopped = e.StunnedUntil > w.Time || [ Statuses.Frozen; Statuses.HeavilyStunned; Statuses.Electrocuted ] |> List.exists st.ContainsKey
         let atk, next = attackUnderDebuffs e atk
         let w = schedule (w.Time + next) (EnemyAttack name) w
         let inRange = Vec.length e.Def.Position - e.Def.Size <= atk.Range + 1e-6
@@ -430,8 +430,8 @@ let attackMinion env (rng: Rng) name (minion: Actor) (w: World) =
     let atk = e.Def.Attack.Value
     let body = minion.Body.Value
     let st = status e
-    let stopped = e.StunnedUntil > w.Time || [ "Frozen"; "HeavilyStunned"; "Electrocuted" ] |> List.exists st.ContainsKey
-    let chill = e.Debuffs |> Map.tryFind "Chilled" |> Option.map (fun x -> x.Mods |> List.sumBy (fun m -> m.Value)) |> Option.defaultValue 0.0
+    let stopped = e.StunnedUntil > w.Time || [ Statuses.Frozen; Statuses.HeavilyStunned; Statuses.Electrocuted ] |> List.exists st.ContainsKey
+    let chill = e.Debuffs |> Map.tryFind Statuses.Chilled |> Option.map (fun x -> x.Mods |> List.sumBy (fun m -> m.Value)) |> Option.defaultValue 0.0
     let debuffs = (defender e).Mods
     let actionSpeed = max 0.1 (Mods.more Ctx.empty [ Named "ActionSpeed" ] debuffs)
     let dealt = max 0.0 (Mods.more Ctx.empty [ Named "DamageDealt" ] debuffs)

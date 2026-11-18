@@ -127,7 +127,7 @@ let dotKillGains env (rng: Rng) (e: EnemyState) mine (w: World) =
             if rng.Chance r.OnKillChance then
                 let count = if rng.Chance r.ExtraChance then 2.0 else 1.0
                 let rate = (r.LifePerRemnant + r.PercentOfMaxLife / 100.0 * v.Life) * count * v.LifeRecoveryRate / r.Delay
-                { w with Player = Some { p with Recoups = { Until = w.Time + r.Delay; Rate = rate; Pool = "Life" } :: p.Recoups }; Counts = bump "life remnant" w.Counts }
+                { w with Player = Some { p with Recoups = { Until = w.Time + r.Delay; Rate = rate; Pool = RecoupPool.Life } :: p.Recoups }; Counts = bump "life remnant" w.Counts }
             else w
         | _ -> w
     let w =

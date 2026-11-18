@@ -36,7 +36,7 @@ let inflict target owner (i: Inflict) (w: World) =
         // Shocks don't stack: keep the strongest.
         let e = w.Enemies.[target]
         let current =
-            Map.tryFind "Shocked" e.Debuffs
+            Map.tryFind Statuses.Shocked e.Debuffs
             |> Option.filter (fun x -> x.Expires > w.Time)
             |> Option.map (fun x -> x.Mods |> List.sumBy (fun m -> m.Value))
             |> Option.defaultValue 0.0

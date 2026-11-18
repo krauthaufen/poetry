@@ -135,7 +135,7 @@ let sealsReady (b: BeginningUse) (w: World) : int =
         let interval = own "SealIntervalMs" / 1000.0 + own "SealIntervalPercentOfUse" / 100.0 * useTime
         if maxSeals <= 0.0 || interval <= 0.0 || useTime <= 0.0 then 0
         else
-            match Map.tryFind ("SealBreak:" + skill.Name) st.Cooldowns with
+            match Map.tryFind (Keys.sealBreak skill.Name) st.Cooldowns with
             | Some last -> int (min maxSeals (floor ((w.Time - last) / interval)))
             | None -> int maxSeals
     seals
@@ -150,7 +150,7 @@ let breakSeals (b: BeginningUse) (seals: int) (w: World) : World =
             let perSeal = sealOwn "SealProjectiles"
             updateActor actor.Name (fun st ->
                 { st with
-                    Cooldowns = Map.add ("SealBreak:" + skill.Name) w.Time st.Cooldowns
+                    Cooldowns = Map.add (Keys.sealBreak skill.Name) w.Time st.Cooldowns
                     // "additional Projectiles are fired": for this use
                     Buffs =
                         if perSeal > 0.0 then
@@ -159,8 +159,8 @@ let breakSeals (b: BeginningUse) (seals: int) (w: World) : World =
             |> fun w -> { w with Counts = bump ("seals:" + skill.Name) w.Counts }
     let w =
         // a use without seals still restarts the count
-        if seals = 0 && sealOwn "MaxSeals" > 0.0 && not (Map.containsKey ("SealBreak:" + skill.Name) st.Cooldowns) then
-            updateActor actor.Name (fun st -> { st with Cooldowns = Map.add ("SealBreak:" + skill.Name) w.Time st.Cooldowns }) w
+        if seals = 0 && sealOwn "MaxSeals" > 0.0 && not (Map.containsKey (Keys.sealBreak skill.Name) st.Cooldowns) then
+            updateActor actor.Name (fun st -> { st with Cooldowns = Map.add (Keys.sealBreak skill.Name) w.Time st.Cooldowns }) w
         else w
     w
 
@@ -284,7 +284,7 @@ let warpIntoOwn (b: BeginningUse) (w: World) : World =
                         | _ -> true)
                 Counts = bump ("warped into:" + gem) w.Counts }
             |> updateActor actor.Name (fun st ->
-                { st with Buffs = st.Buffs |> Map.remove (gem + " buff") |> Map.add ("Warped:" + skill.Name) { Name = "Warped:" + skill.Name; Mods = []; Stacks = 1; Expires = infinity } })
+                { st with Buffs = st.Buffs |> Map.remove (gem + " buff") |> Map.add (Keys.warped skill.Name) { Name = Keys.warped skill.Name; Mods = []; Stacks = 1; Expires = infinity } })
         | _ -> w
     w
 
@@ -295,7 +295,7 @@ let advanceChain (b: BeginningUse) (w: World) : int option * World =
     let step = seqStep skill st
     let w =
         match step with
-        | Some k -> updateActor actor.Name (fun st -> { st with Energy = Map.add ("Seq:" + skill.Name) (float (k + 1)) st.Energy }) w
+        | Some k -> updateActor actor.Name (fun st -> { st with Energy = Map.add (Keys.chainStep skill.Name) (float (k + 1)) st.Energy }) w
         | None -> w
     step, w
 
@@ -426,7 +426,7 @@ let dropRemnant (c: Reacting) r delay extra (w: World) =
 let regenES (rate: float) (duration: float) (w: World) =
     match w.Player with
     | Some p when p.Died.IsNone ->
-        { w with Player = Some { p with Recoups = { Until = w.Time + duration; Rate = rate; Pool = "ShroudES" } :: (p.Recoups |> List.filter (fun r -> r.Pool <> "ShroudES")) }
+        { w with Player = Some { p with Recoups = { Until = w.Time + duration; Rate = rate; Pool = RecoupPool.Shroud } :: (p.Recoups |> List.filter (fun r -> r.Pool <> RecoupPool.Shroud)) }
                  Counts = bump "regen:ES" w.Counts }
     | _ -> w
 

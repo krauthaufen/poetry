@@ -62,13 +62,13 @@ let walk (env: Env) (dt: float) (w: World) (e: EnemyState) : World =
     match e.Def.Attack with
     | Some atk when e.Life > 0.0 && w.Player.IsSome ->
         let st = status e
-        let stopped = e.StunnedUntil > w.Time || [ "Frozen"; "HeavilyStunned"; "Electrocuted"; "Pinned" ] |> List.exists st.ContainsKey
+        let stopped = e.StunnedUntil > w.Time || [ Statuses.Frozen; Statuses.HeavilyStunned; Statuses.Electrocuted; Statuses.Pinned ] |> List.exists st.ContainsKey
         // (a slow weakens with rarity, and never brings a monster below a quarter of its speed)
         let potency = Rarity.slowPotency e.Def.Rarity
         let slow =
             (if st.ContainsKey "Maimed" then max 0.0 (1.0 - Constants.maimSlow * env.SlowMagnitude * potency / 100.0) else 1.0)
             * (if st.ContainsKey "Hindered" then max 0.0 (1.0 - Constants.hinderSlow * env.SlowMagnitude * potency / 100.0) else 1.0)
-            * (1.0 - (e.Debuffs |> Map.tryFind "Chilled" |> Option.map (fun x -> x.Mods |> List.sumBy (fun m -> m.Value)) |> Option.defaultValue 0.0) / 100.0)
+            * (1.0 - (e.Debuffs |> Map.tryFind Statuses.Chilled |> Option.map (fun x -> x.Mods |> List.sumBy (fun m -> m.Value)) |> Option.defaultValue 0.0) / 100.0)
         // what its debuffs make of its movement speed (Jagged Ground, "Hindered, with 15% reduced Movement Speed")
         let slow = if e.Debuffs.IsEmpty then slow else slow * Rarity.slowed e.Def.Rarity (max 0.0 (Mods.more Ctx.empty [ Named "MovementSpeed" ] (defender e).Mods))
         let slow = max Constants.slowFloor slow
@@ -213,10 +213,10 @@ let takeDamage (fromHit: bool) (pools: PlayerStats) (damage: Map<DamageType, flo
         let recoups =
             pools.Recoup
             |> List.choose (fun (pool, types, pct) ->
-                let rate = match pool with "Life" -> pools.LifeRecoveryRate | "Mana" -> pools.ManaRecoveryRate | _ -> pools.ESRecoveryRate
+                let rate = match pool with RecoupPool.Life -> pools.LifeRecoveryRate | RecoupPool.Mana -> pools.ManaRecoveryRate | _ -> pools.ESRecoveryRate
                 let amount = (types |> List.sumBy (fun t -> Map.tryFind t damage |> Option.defaultValue 0.0)) * pct / 100.0 * rate
                 if amount > 0.0 then Some { Until = w.Time + pools.RecoupSeconds; Rate = amount / pools.RecoupSeconds; Pool = pool } else None)
-        let recoups = (if later > 0.0 then [ { Until = w.Time + Constants.deferredLossSeconds; Rate = -later / Constants.deferredLossSeconds; Pool = "Life" } ] else []) @ recoups
+        let recoups = (if later > 0.0 then [ { Until = w.Time + Constants.deferredLossSeconds; Rate = -later / Constants.deferredLossSeconds; Pool = RecoupPool.Life } ] else []) @ recoups
         let p =
             { p with
                 Mana = p.Mana - fromMana
@@ -273,26 +273,26 @@ let recover (stats: PlayerStats option) (rates: PlayerStats option) (flask: Mana
         let stream (pool: string) =
             let parts = p.Recoups |> List.filter (fun r -> r.Pool = pool) |> List.map (fun r -> r.Rate * overlap r.Until)
             // leech: "only the instance with the highest recovery rate will be active" (wiki, Leech)
-            if pool.StartsWith "Leech" then (if parts.IsEmpty then 0.0 else List.max parts) else List.sum parts
+            if RecoupPool.isLeech pool then (if parts.IsEmpty then 0.0 else List.max parts) else List.sum parts
         // leech: each instance is recovered over one second (keyword text)
-        let leech = stream "LeechMana"
+        let leech = stream RecoupPool.LeechMana
         let regen = r.ManaRegen * dt
         // (mana below nothing: a channel's cost that regeneration is still to cover, `manaNeeded`)
         let mana = min v.Mana (max (min 0.0 p.Mana) (p.Mana + regen + leech))
         let es =
             (if w.Time - p.LastHit >= r.ESRechargeDelay then p.EnergyShield + r.EnergyShieldRecharge * dt else p.EnergyShield)
-            + r.ESRegen * dt + stream "ES" + stream "ShroudES"
+            + r.ESRegen * dt + stream RecoupPool.Shield + stream RecoupPool.Shroud
             + (if v.LifeFlaskAlsoES then p.LifeFlaskRate * overlap p.LifeFlaskUntil else 0.0)
             |> min (max p.EnergyShield (min v.EnergyShield v.ESRecoverCap))
         let flask = p.FlaskRate * overlap p.FlaskUntil
-        let recouped = stream "Mana"
+        let recouped = stream RecoupPool.Mana
         let mana = min v.Mana (mana + flask + recouped)
         let gained =
             p.ManaGained |> addf "regen" (min regen (v.Mana - p.Mana)) |> addf "leech" leech |> addf "flask" flask
             |> (if recouped > 0.0 then addf "recoup" recouped else id)
-        let lifeLeech = stream "LeechLife"
+        let lifeLeech = stream RecoupPool.LeechLife
         let lifeRecharge = if r.LifeRecharge > 0.0 && w.Time - p.LastHit >= r.ESRechargeDelay then r.LifeRecharge * dt else 0.0
-        let lifeGain = r.LifeRegen * dt + lifeLeech + lifeRecharge + p.LifeFlaskRate * overlap p.LifeFlaskUntil + stream "Life"
+        let lifeGain = r.LifeRegen * dt + lifeLeech + lifeRecharge + p.LifeFlaskRate * overlap p.LifeFlaskUntil + stream RecoupPool.Life
         let lifeCharges =
             match v.LifeFlask with
             | Some f -> min f.MaxCharges (p.LifeFlaskCharges + f.ChargesPerSecond * f.ChargeGainMult * dt)

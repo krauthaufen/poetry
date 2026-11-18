@@ -213,7 +213,7 @@ let goAhead (u: ReadyUse) (w: World) : World =
         | Some (secs, recharge) when windowShut st w.Time skill ->
             { w with Counts = bump ("window:" + skill.Name) w.Counts }
             |> updateActor name (fun st ->
-                { st with Energy = st.Energy |> Map.add ("Window:" + skill.Name) (w.Time + secs) |> Map.add ("WindowNext:" + skill.Name) (w.Time + secs + recharge) })
+                { st with Energy = st.Energy |> Map.add (Keys.window skill.Name) (w.Time + secs) |> Map.add (Keys.windowNext skill.Name) (w.Time + secs + recharge) })
         | _ -> w
     let w = startUse env rng actor skill t w
     let w, extra = reloadAfter u w
@@ -281,7 +281,7 @@ let payAndGo (u: ReadyUse) (cost: float) (lifeCost: float) (w: World) : World =
         // not enough mana: wait until regeneration and leech have covered it
         let cost = fst (manaNeeded v skill t cost)
         let rate =
-            v.ManaRegen + (p.Recoups |> List.sumBy (fun r -> if r.Pool = "LeechMana" && r.Until > w.Time then r.Rate else 0.0))
+            v.ManaRegen + (p.Recoups |> List.sumBy (fun r -> if r.Pool = RecoupPool.LeechMana && r.Until > w.Time then r.Rate else 0.0))
             + (if w.Time < p.FlaskUntil then p.FlaskRate else 0.0)
         let wait = max Constants.serverTick (if rate > 0.0 then (cost - p.Mana) / rate else 1.0)
         { w with Player = Some { p with Starved = p.Starved + wait } } |> schedule (w.Time + wait) (Ready name)

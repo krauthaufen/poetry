@@ -50,7 +50,7 @@ let seqStep (skill: Skill) (st: ActorState) =
     let n = seqLength skill
     if n <= 0 then None
     elif st.LastUsed <> skill.Name then Some 0
-    else Some(int (Map.tryFind ("Seq:" + skill.Name) st.Energy |> Option.defaultValue 0.0) % n)
+    else Some(int (Map.tryFind (Keys.chainStep skill.Name) st.Energy |> Option.defaultValue 0.0) % n)
 let inStep (step: int option) (p: Skill) =
     match step, partNamed p "SeqSteps:" with
     | Some k, Some steps -> (steps: string).Split ',' |> Array.exists (fun x -> int x = k)
@@ -79,8 +79,8 @@ let lands (rng: Rng) (defender: string) (hitChance: float) (w: World) : bool * W
 /// Glory and Combo a skill needs before it can be used: (counter, amount).
 let requirements (skill: Skill) =
     let own name = skill.Mods |> List.sumBy (fun m -> if m.Stat = Named name && m.Kind = Base then m.Value else 0.0)
-    [ "Glory:" + skill.Name, own "Requires:Glory" * (1.0 + own "GloryRequiredMore" / 100.0)
-      "Combo:" + skill.Name, own "Requires:Combo" ]
+    [ Keys.glory skill.Name, own "Requires:Glory" * (1.0 + own "GloryRequiredMore" / 100.0)
+      Keys.combo skill.Name, own "Requires:Combo" ]
     |> List.filter (fun (_, n) -> n > 0.0)
 let built (st: ActorState) (skill: Skill) =
     requirements skill |> List.forall (fun (key, n) -> (Map.tryFind key st.Energy |> Option.defaultValue 0.0) >= n - 1e-9)
@@ -93,10 +93,10 @@ let window (skill: Skill) =
     if secs > 0.0 then Some(secs, own "WindowRecharge") else None
 /// Is its window shut (the next use opens one)?
 let windowShut (st: ActorState) now (skill: Skill) =
-    (window skill).IsSome && now >= (Map.tryFind ("Window:" + skill.Name) st.Energy |> Option.defaultValue -1.0)
+    (window skill).IsSome && now >= (Map.tryFind (Keys.window skill.Name) st.Energy |> Option.defaultValue -1.0)
 /// Can it be used: inside its window, or charged for the next.
 let windowOk (st: ActorState) now (skill: Skill) =
-    not (windowShut st now skill) || now >= (Map.tryFind ("WindowNext:" + skill.Name) st.Energy |> Option.defaultValue 0.0)
+    not (windowShut st now skill) || now >= (Map.tryFind (Keys.windowNext skill.Name) st.Energy |> Option.defaultValue 0.0)
 
 let ready (st: ActorState) now (skill: Skill) =
     Map.tryFind skill.Name st.Cooldowns |> Option.forall (fun t -> t <= now)

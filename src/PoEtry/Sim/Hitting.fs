@@ -68,7 +68,7 @@ let syncResonance (env: Env) (actor: Actor) (w: World) =
         let st = Map.find actor.Name w.Actors
         if not (st.Buffs.ContainsKey "Resonance") then w
         else
-            let clock t = "ResonanceClock:" + DamageType.name t
+            let clock t = Keys.resonanceClock (DamageType.name t)
             let drained t =
                 match Map.tryFind (clock t) st.Energy with
                 | Some c when w.Time > c -> int ((w.Time - c) * Constants.trinityDecayPerSecond)
@@ -76,7 +76,7 @@ let syncResonance (env: Env) (actor: Actor) (w: World) =
             if DamageType.elemental |> List.forall (fun t -> drained t = 0) then w
             else
                 updateActor actor.Name (fun st ->
-                    let key t = "Resonance:" + DamageType.name t
+                    let key t = Keys.resonance (DamageType.name t)
                     let put k n (b: Map<string, Effect>) = if n > 0 then Map.add k { Name = k; Mods = []; Stacks = n; Expires = infinity } b else Map.remove k b
                     let values = DamageType.elemental |> List.map (fun t -> t, max 0 ((Map.tryFind (key t) st.Buffs |> Option.map (fun e -> e.Stacks) |> Option.defaultValue 0) - drained t))
                     let energy =
@@ -174,8 +174,8 @@ let partHappens (a: HitAttempt) (w: World) : bool * World =
             updateEnemy target (fun en -> { en with Debuffs = ripe |> List.fold (fun m k -> Map.remove k m) en.Debuffs }) w
             |> fun w -> { w with Counts = bump "curse detonated" w.Counts }
     // a warp into a projectile explodes there, whatever the enemy's state
-    let warped = (Map.find actor.Name w.Actors).Buffs.ContainsKey("Warped:" + skill.Name)
-    let w = if warped then updateActor actor.Name (fun st -> { st with Buffs = Map.remove ("Warped:" + skill.Name) st.Buffs }) w else w
+    let warped = (Map.find actor.Name w.Actors).Buffs.ContainsKey(Keys.warped skill.Name)
+    let w = if warped then updateActor actor.Name (fun st -> { st with Buffs = Map.remove (Keys.warped skill.Name) st.Buffs }) w else w
     let states, consumesVs = if warped then [], false else states, consumesVs
     if not states.IsEmpty && not (states |> List.exists enemyStatus.ContainsKey) then false, w
     elif notVs |> List.exists enemyStatus.ContainsKey then false, w
@@ -267,7 +267,7 @@ let rollDamage (a: HitAttempt) (mult: float) (w: World) : RolledHit * World =
     let hit = if Mods.flag ctx (Named "NoHitDamage") mods then { hit with Dealt = Dmg.map (fun _ _ -> 0.0) hit.Dealt; Unmitigated = Dmg.map (fun _ _ -> 0.0) hit.Unmitigated } else hit
     let hit =
         let currentShock =
-            Map.tryFind "Shocked" e.Debuffs
+            Map.tryFind Statuses.Shocked e.Debuffs
             |> Option.filter (fun x -> x.Expires > w.Time)
             |> Option.map (fun x -> x.Mods |> List.sumBy (fun m -> m.Value))
             |> Option.defaultValue 0.0
@@ -448,10 +448,10 @@ let attackerRecovers (h: LandedHit) (w: World) : World =
                         { p with
                             Recoups =
                                 // a leech instance comes back over one second ("Leech Life X% less quickly" stretches it)
-                                (if extra > 0.0 then [ { Until = w.Time + Constants.leechSeconds; Rate = extra / Constants.leechSeconds; Pool = "LeechMana" } ] else [])
+                                (if extra > 0.0 then [ { Until = w.Time + Constants.leechSeconds; Rate = extra / Constants.leechSeconds; Pool = RecoupPool.LeechMana } ] else [])
                                 @ (if lifeLeech > 0.0 && v.Life > 1.0 then
                                        (let t = Constants.leechSeconds / max 0.05 v.LifeLeechRate
-                                        [ { Until = w.Time + t; Rate = lifeLeech / t; Pool = "LeechLife" } ])
+                                        [ { Until = w.Time + t; Rate = lifeLeech / t; Pool = RecoupPool.LeechLife } ])
                                    else [])
                                 @ p.Recoups
                             StrikeLeech = max leech p.StrikeLeech
@@ -555,10 +555,10 @@ let buildGloryAndCombo (h: LandedHit) (w: World) : World =
                             { st with Energy = st.Energy |> Map.add key (min cap (have + amount)) |> Map.add stamp w.Time |> Map.add lastKey w.Time }) w
             w
             // "Skills lose 2 Glory per second if they haven't gained Glory in the past 15 seconds"
-            |> add ("Glory:" + s.Name) glory (own "Requires:Glory" * (1.0 + own "GloryRequiredMore" / 100.0)) h.Target 0.5
+            |> add (Keys.glory s.Name) glory (own "Requires:Glory" * (1.0 + own "GloryRequiredMore" / 100.0)) h.Target 0.5
                    (fun have idle -> if idle > 15.0 && idle < 1e8 then max 0.0 (have - 2.0 * (idle - 15.0)) else have)
             // Combo counts the strikes "in the last 8 seconds" (less, where Combo is lost faster)
-            |> add ("Combo:" + s.Name) combo (own "Requires:Combo") "strike" 1e-9
+            |> add (Keys.combo s.Name) combo (own "Requires:Combo") "strike" 1e-9
                    (let window = match own "ComboWindow" with 0.0 -> Constants.comboWindow | w -> w
                     fun have idle -> if idle > window && idle < 1e8 then 0.0 else have)) w
 
@@ -569,19 +569,19 @@ let buildBannerGlory (h: LandedHit) (w: World) : World =
     else
         let power = MonsterPower.ofRarity h.Enemy.Def.Rarity
         h.Actor.Banners |> List.fold (fun w b ->
-            let key = "Glory:" + b.Name
+            let key = Keys.glory b.Name
             // once every 0.5 seconds per monster
             let stamp = key + "@" + h.Target
             let fresh = w.Time - (Map.tryFind stamp (Map.find h.Actor.Name w.Actors).Energy |> Option.defaultValue -1e9) >= 0.5
             let w = if fresh then updateActor h.Actor.Name (fun st -> { st with Energy = Map.add stamp w.Time st.Energy }) w else w
             let have = (Map.tryFind key (Map.find h.Actor.Name w.Actors).Energy |> Option.defaultValue 0.0) + (if fresh then power * b.PerAttackHit / 100.0 else 0.0)
-            let up = (Map.find h.Actor.Name w.Actors).Buffs |> Map.tryFind ("Banner:" + b.Name) |> Option.exists (fun x -> x.Expires > w.Time)
+            let up = (Map.find h.Actor.Name w.Actors).Buffs |> Map.tryFind (Keys.banner b.Name) |> Option.exists (fun x -> x.Expires > w.Time)
             if up then updateActor h.Actor.Name (fun st -> { st with Energy = Map.add key (min b.Glory have) st.Energy }) w
             elif have >= b.Glory then
                 updateActor h.Actor.Name (fun st ->
                     { st with
                         Energy = Map.add key 0.0 st.Energy
-                        Buffs = Map.add ("Banner:" + b.Name) { Name = "Banner:" + b.Name; Mods = b.Mods; Stacks = 1; Expires = w.Time + b.Duration } st.Buffs }) w
+                        Buffs = Map.add (Keys.banner b.Name) { Name = Keys.banner b.Name; Mods = b.Mods; Stacks = 1; Expires = w.Time + b.Duration } st.Buffs }) w
                 |> schedule (w.Time + b.Duration) Expire
                 |> fun w -> { w with Counts = bump ("banner:" + b.Name) w.Counts }
             else updateActor h.Actor.Name (fun st -> { st with Energy = Map.add key have st.Energy }) w) w
@@ -709,7 +709,7 @@ let lifeRemnants (h: LandedHit) (w: World) : World =
             let count = if h.Rng.Chance r.ExtraChance then 2.0 else 1.0
             let rate = (r.LifePerRemnant + r.PercentOfMaxLife / 100.0 * v.Life) * count * v.LifeRecoveryRate / r.Delay
             { w with
-                Player = Some { p with LastLifeRemnant = (if fromHit then w.Time else p.LastLifeRemnant); Recoups = { Until = w.Time + r.Delay; Rate = rate; Pool = "Life" } :: p.Recoups }
+                Player = Some { p with LastLifeRemnant = (if fromHit then w.Time else p.LastLifeRemnant); Recoups = { Until = w.Time + r.Delay; Rate = rate; Pool = RecoupPool.Life } :: p.Recoups }
                 Counts = bump "life remnant" w.Counts }
         else w
     | _ -> w
@@ -724,10 +724,10 @@ let trinity (h: LandedHit) (w: World) : World =
         let top = elemental |> List.maxBy snd |> fst
         let loss = Mods.sumBase h.Ctx [ Named "TrinityLoss" ] h.Mods
         updateActor h.Actor.Name (fun st ->
-            let key t = "Resonance:" + DamageType.name t
+            let key t = Keys.resonance (DamageType.name t)
             // (the element gained does not drain for 8 s: `syncResonance`)
             let get t = Map.tryFind (key t) st.Buffs |> Option.map (fun x -> x.Stacks) |> Option.defaultValue 0
-            let st = { st with Energy = Map.add ("ResonanceClock:" + DamageType.name top) (w.Time + Constants.trinityDecayDelay) st.Energy }
+            let st = { st with Energy = Map.add (Keys.resonanceClock (DamageType.name top)) (w.Time + Constants.trinityDecayDelay) st.Energy }
             let values = DamageType.elemental |> List.map (fun t -> t, (if t = top then min 100 (get t + int gain) else max 0 (get t - int loss)))
             let put k n (b: Map<string, Effect>) = if n > 0 then Map.add k { Name = k; Mods = []; Stacks = n; Expires = infinity } b else Map.remove k b
             let buffs = values |> List.fold (fun b (t, n) -> put (key t) n b) st.Buffs

@@ -136,12 +136,79 @@ type PlayerDot =
       PerSecond: float
       Damage: DamageType }
 
+/// What an enemy can suffer from, by the names the engine asks its statuses with (`status`).
+/// The same names are data elsewhere (an ailment's debuff, a rule's condition): these are
+/// for the engine's own checks, so that a misspelt one does not compile.
+module Statuses =
+    [<Literal>]
+    let Frozen = "Frozen"
+    [<Literal>]
+    let Shocked = "Shocked"
+    [<Literal>]
+    let Ignited = "Ignited"
+    [<Literal>]
+    let Chilled = "Chilled"
+    [<Literal>]
+    let HeavilyStunned = "HeavilyStunned"
+    [<Literal>]
+    let Electrocuted = "Electrocuted"
+    [<Literal>]
+    let Blinded = "Blinded"
+    [<Literal>]
+    let Marked = "Marked"
+    [<Literal>]
+    let Pinned = "Pinned"
+    [<Literal>]
+    let Maimed = "Maimed"
+    [<Literal>]
+    let Hindered = "Hindered"
+
+/// The names the engine keeps an actor's own bookkeeping under (in its `Energy`, `Cooldowns`
+/// and `Buffs`), each for one skill or one damage type.
+module Keys =
+    /// A chained attack: the place in the chain its next use has.
+    let chainStep (skill: string) = "Seq:" + skill
+    /// A skill with a window: until when it is open, and when it can be opened again.
+    let window (skill: string) = "Window:" + skill
+    let windowNext (skill: string) = "WindowNext:" + skill
+    /// A warp into one's own projectile is under way.
+    let warped (skill: string) = "Warped:" + skill
+    /// When a Sealed skill last broke its seals.
+    let sealBreak (skill: string) = "SealBreak:" + skill
+    /// The Glory or Combo built up for a skill, and the Glory of a banner.
+    let glory (skill: string) = "Glory:" + skill
+    let combo (skill: string) = "Combo:" + skill
+    let banner (skill: string) = "Banner:" + skill
+    /// Resonance of a damage type, and the time its count started.
+    let resonance (damageType: string) = "Resonance:" + damageType
+    let resonanceClock (damageType: string) = "ResonanceClock:" + damageType
+
+/// The pools a recovery stream of the player goes into (`Recoup.Pool`). A character's own
+/// recoup lines name the first three (`PlayerStats.Recoup`), so they stay strings.
+module RecoupPool =
+    [<Literal>]
+    let Life = "Life"
+    [<Literal>]
+    let Mana = "Mana"
+    /// Energy shield.
+    [<Literal>]
+    let Shield = "ES"
+    /// Leech: of several instances only the one that recovers fastest counts.
+    [<Literal>]
+    let LeechLife = "LeechLife"
+    [<Literal>]
+    let LeechMana = "LeechMana"
+    /// Energy shield regenerated for a while by a reaction (`RegenES`): one at a time.
+    [<Literal>]
+    let Shroud = "ShroudES"
+    let isLeech (pool: string) = pool.StartsWith "Leech"
+
 /// A recovery stream of the player (recoup, leech, regeneration for a while).
 type Recoup =
     { Until: float
       /// What it recovers a second (negative: what is lost).
       Rate: float
-      /// "Life" | "Mana" | "ES" | "LeechLife" | "LeechMana" | "ShroudES"
+      /// One of `RecoupPool`.
       Pool: string }
 
 /// The player's rage upkeep.
@@ -361,7 +428,7 @@ let allDead (w: World) = alive w |> List.isEmpty
 /// will shatter, leaving behind no corpse".
 let corpsesAfter (dead: bool) name t (w: World) =
     match Map.tryFind name w.Enemies with
-    | Some e when dead && (e.Debuffs |> Map.tryFind "Frozen" |> Option.exists (fun x -> x.Expires > t)) -> w.CorpsesUsed + 1
+    | Some e when dead && (e.Debuffs |> Map.tryFind Statuses.Frozen |> Option.exists (fun x -> x.Expires > t)) -> w.CorpsesUsed + 1
     | _ -> w.CorpsesUsed
 
 let updateEnemyDef name (pos: Vec) (w: World) =
