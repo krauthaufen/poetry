@@ -1,0 +1,19 @@
+name: A line is not understood
+description: A line on an item, passive or gem that PoEtry lists as not understood and that matters for a build.
+title: "Not understood: <line>"
+labels: ["not understood"]
+body:
+  - type: textarea
+    id: line
+    attributes: { label: The line, description: Exactly as the page lists it. }
+    validations: { required: true }
+  - type: input
+    id: where
+    attributes: { label: Where it is, placeholder: "Unique belt X, notable Y, support gem Z" }
+    validations: { required: true }
+  - type: textarea
+    id: does
+    attributes: { label: What it does in play, description: As far as you know, and how you know. }
+  - type: textarea
+    id: character
+    attributes: { label: A character that has it, description: A Path of Building code or link. Optional. }

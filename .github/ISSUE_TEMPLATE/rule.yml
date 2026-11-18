@@ -1,0 +1,23 @@
+name: A rule is wrong or missing
+description: How a mechanic really works, or evidence for one of the open guesses.
+title: "Rule: <mechanic>"
+labels: ["rule"]
+body:
+  - type: input
+    id: mechanic
+    attributes: { label: Mechanic, description: The row of RULES.md or GUESSES.md it concerns, if there is one. }
+    validations: { required: true }
+  - type: textarea
+    id: rule
+    attributes: { label: The rule as it should be }
+    validations: { required: true }
+  - type: dropdown
+    id: source
+    attributes:
+      label: How you know
+      options: ["Game data", "Seen in the game (recording or screenshot)", "Stated by the developers", "The wiki", "Path of Building", "My own reasoning"]
+    validations: { required: true }
+  - type: textarea
+    id: evidence
+    attributes: { label: Evidence, description: Links, screenshots, the test you made. }
+    validations: { required: true }

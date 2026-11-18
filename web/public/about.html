@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#0c0a08" />
+<meta name="color-scheme" content="dark" />
+<title>PoEtry: how it works</title>
+<link rel="icon" href="data:," />
+<style>
+  @font-face { font-family: "Fontin"; src: url("fonts/fontin-regular-webfont.woff") format("woff"); font-display: swap; }
+  @font-face { font-family: "Fontin SmallCaps"; src: url("fonts/fontin-smallcaps-webfont.woff") format("woff"); font-display: swap; }
+  :root {
+    --stone: #0c0a08; --panel-a: #17120d; --panel-b: #0d0a08; --edge: #4a3a28; --edge-hi: #6b5438;
+    --gold: #d8b878; --ink: #e6dcc8; --dim: #a8987c; --faint: #7d6f5a;
+    --good: #8fbf7a; --warn: #e0a860; --bad: #e08060; --link: #e8c888;
+  }
+  * { box-sizing: border-box; }
+  html { background: var(--stone); color-scheme: dark; }
+  body {
+    margin: 0; color: var(--ink);
+    background: radial-gradient(ellipse at top, #1c1814 0%, var(--stone) 60%) fixed;
+    font-family: "Fontin", "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif;
+    font-size: 17px; line-height: 1.55; -webkit-text-size-adjust: 100%;
+  }
+  header.top {
+    display: flex; align-items: baseline; gap: 16px; padding: 12px 16px;
+    background: linear-gradient(180deg, #1c150f, #120e0a); border-bottom: 1px solid #5a4630;
+  }
+  header.top .name { font-family: "Fontin SmallCaps", "Fontin", Georgia, serif; font-size: 24px; letter-spacing: 2px; color: var(--gold); text-decoration: none; }
+  header.top nav { margin-left: auto; display: flex; gap: 16px; font-size: 15px; }
+  a { color: var(--link); text-underline-offset: 3px; }
+  a:hover { color: #fff0c8; }
+  main { max-width: 760px; margin: 0 auto; padding: 8px 16px 64px; }
+  h1, h2, h3 { font-family: "Fontin SmallCaps", "Fontin", Georgia, serif; font-weight: normal; color: var(--gold); letter-spacing: 1px; text-wrap: balance; }
+  h1 { font-size: 34px; line-height: 1.15; margin: 36px 0 8px; }
+  h2 { font-size: 24px; margin: 48px 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--edge); }
+  h3 { font-size: 19px; margin: 0 0 6px; }
+  p { margin: 0 0 14px; }
+  .lead { font-size: 19px; color: var(--ink); }
+  .dim { color: var(--dim); }
+  code { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 0.85em; color: #e8d8b8; background: #1c1610; padding: 1px 5px; border: 1px solid #33281c; overflow-wrap: anywhere; }
+  .panel { background: linear-gradient(180deg, var(--panel-a), var(--panel-b)); border: 1px solid var(--edge); box-shadow: inset 0 0 0 1px rgba(0,0,0,.6), 0 2px 8px rgba(0,0,0,.5); padding: 14px 16px; }
+  .panel p:last-child, .panel ul:last-child { margin-bottom: 0; }
+
+  /* the way from the character to the result */
+  ol.way { list-style: none; counter-reset: step; margin: 16px 0 0; padding: 0; }
+  ol.way li { counter-increment: step; position: relative; padding: 0 0 18px 46px; }
+  ol.way li::before {
+    content: counter(step); position: absolute; left: 0; top: 0; width: 30px; height: 30px;
+    display: grid; place-items: center; font-family: "Fontin SmallCaps", serif; font-size: 16px;
+    color: var(--gold); border: 1px solid var(--edge-hi); background: #1c150f;
+  }
+  ol.way li::after { content: ""; position: absolute; left: 15px; top: 32px; bottom: 2px; width: 1px; background: var(--edge); }
+  ol.way li:last-child::after { display: none; }
+  ol.way b { color: #f0e6d2; font-weight: normal; font-family: "Fontin SmallCaps", serif; font-size: 18px; letter-spacing: .5px; }
+  ol.way span { display: block; color: var(--dim); }
+
+  /* how far a number can be trusted */
+  .trust { display: grid; gap: 10px; grid-template-columns: repeat(3, 1fr); margin: 16px 0; }
+  .trust .panel { border-top-width: 3px; }
+  .trust .ok { border-top-color: var(--good); } .trust .ok h3 { color: var(--good); }
+  .trust .mid { border-top-color: var(--warn); } .trust .mid h3 { color: var(--warn); }
+  .trust .low { border-top-color: var(--bad); } .trust .low h3 { color: var(--bad); }
+  .trust p { font-size: 15.5px; color: var(--dim); }
+
+  /* the two engines */
+  .engines { display: grid; grid-template-columns: 1fr auto 1fr; gap: 10px; align-items: stretch; margin: 16px 0; }
+  .engines .panel p { font-size: 15.5px; color: var(--dim); }
+  .engines .tie { display: grid; place-items: center; text-align: center; color: var(--faint); font-size: 13px; line-height: 1.3; padding: 0 2px; }
+  .engines .tie b { display: block; color: var(--gold); font-size: 22px; font-weight: normal; }
+
+  table { border-collapse: collapse; width: 100%; font-size: 15.5px; margin: 12px 0; }
+  th, td { text-align: left; vertical-align: top; padding: 7px 10px 7px 0; border-bottom: 1px solid #2c2318; }
+  th { color: var(--faint); font-weight: normal; font-size: 13px; letter-spacing: .5px; text-transform: uppercase; }
+  td:first-child { color: #f0e6d2; white-space: nowrap; }
+  td { color: var(--dim); }
+
+  /* ways to help */
+  .asks { display: grid; gap: 12px; margin: 16px 0; }
+  .ask { display: grid; grid-template-columns: 1fr auto; gap: 6px 16px; align-items: start; }
+  .ask h3 { grid-column: 1; }
+  .ask .body { grid-column: 1; color: var(--dim); font-size: 15.5px; }
+  .ask .body ul { margin: 6px 0 0; padding-left: 18px; }
+  .ask .body li { margin-bottom: 3px; }
+  .ask a.go {
+    grid-column: 2; grid-row: 1 / span 2; align-self: center; white-space: nowrap; text-decoration: none;
+    font-family: "Fontin SmallCaps", serif; font-size: 16px; letter-spacing: .5px; color: #e8c888;
+    padding: 8px 14px; border: 1px solid var(--edge-hi); background: linear-gradient(180deg, #2a1f15, #19120c);
+  }
+  .ask a.go:hover { border-color: var(--gold); color: #fff0c8; }
+  ul.plain { padding-left: 18px; margin: 0 0 14px; }
+  ul.plain li { margin-bottom: 5px; }
+  footer { margin-top: 56px; padding-top: 14px; border-top: 1px solid var(--edge); color: var(--faint); font-size: 14px; }
+
+  @media (max-width: 640px) {
+    body { font-size: 16px; }
+    h1 { font-size: 28px; margin-top: 24px; }
+    header.top { gap: 10px; } header.top .name { font-size: 21px; } header.top nav { gap: 12px; font-size: 14px; }
+    .trust { grid-template-columns: 1fr; }
+    .engines { grid-template-columns: 1fr; }
+    .engines .tie { padding: 2px 0; }
+    .ask { grid-template-columns: 1fr; }
+    .ask a.go { grid-column: 1; grid-row: auto; justify-self: start; margin-top: 4px; }
+    td:first-child { white-space: normal; }
+  }
+</style>
+</head>
+<body>
+<header class="top">
+  <a class="name" href="./">PoEtry</a>
+  <nav>
+    <a href="./">Simulator</a>
+    <a href="https://github.com/krauthaufen/poetry">Source</a>
+  </nav>
+</header>
+<main>
+
+<h1>A fight, played out hit by hit</h1>
+<p class="lead">PoEtry does not add up a DPS number. It plays your Path of Exile 2 character through a fight, event by event, many times over, and reports what happened.</p>
+<p class="dim">This page says how it does that, how far its numbers can be trusted, and how you can make them better.</p>
+
+<h2>How it works</h2>
+<ol class="way">
+  <li><b>The game's own data</b>
+    <span>Skills and gems per level, item bases, affixes, the passive tree and monsters are read straight from the installed game's files. Nothing about a skill or a build is written in by hand.</span></li>
+  <li><b>Your character</b>
+    <span>Read with your own login from the game's API, or from a Path of Building code. It stays in your browser; nothing is uploaded.</span></li>
+  <li><b>Text becomes modifiers</b>
+    <span>Every line on your items, passives and gems is matched against the game's stat descriptions and turned into a modifier. A line the simulator does not understand is listed on the page. It is never guessed and never dropped silently.</span></li>
+  <li><b>The fight</b>
+    <span>A queue of events: a skill is used, its hits land, a buff runs out, a monster hits back. Charges, energy, ailments, cooldowns, minions and where everyone stands are all followed as they change.</span></li>
+  <li><b>Many fights</b>
+    <span>The same fight with other dice gives another result. You see the spread, not one average: how long the kill takes on a good run and on a bad one, and what did the damage.</span></li>
+</ol>
+
+<h2>How far to trust a number</h2>
+<p>Every rule the simulator applies is written down in the <a href="https://github.com/krauthaufen/poetry/blob/main/RULES.md">rules ledger</a>, with where it comes from and how sure it is. What is still assumed without a source is listed apart, as <a href="https://github.com/krauthaufen/poetry/blob/main/GUESSES.md">open guesses</a>.</p>
+<div class="trust">
+  <div class="panel ok"><h3>Comparing two setups</h3><p>This staff or that one, this support or that one, on the same skill. Whatever is wrong about the skill is wrong on both sides and mostly cancels out.</p></div>
+  <div class="panel mid"><h3>Damage of one hit</h3><p>Comes from machinery all skills share. Where it was compared with the game's tooltip it was within a few percent out of combat.</p></div>
+  <div class="panel low"><h3>Hits landing per use</h3><p>How many projectiles reach the boss, how areas overlap, where you stand. This is particular to each skill, and for an unchecked skill the total can be several times off.</p></div>
+</div>
+<p>A skill counts as <b>checked</b> once its simulated hits have been laid beside a recording of the same character in the game. So far that is one skill: Falling Thunder, against four boss kills. Every other skill is unchecked. That is the main thing you can help with.</p>
+
+<h2>Two engines, one of them for people</h2>
+<div class="engines">
+  <div class="panel"><h3>The reference</h3><p>Written to be read and changed by a person. Plain immutable code, one mechanic in one place. Whatever it does is, by definition, what PoEtry does.</p></div>
+  <div class="tie"><b>=</b>same result,<br />to the last bit</div>
+  <div class="panel"><h3>The fast one</h3><p>About twenty times as fast, and what the page runs. It is written by an AI and nobody is expected to read it. Tests hold it to the reference on thousands of fights.</p></div>
+</div>
+<p>So a change to a mechanic is made in the reference, where it is easy to see whether it is right. The fast engine is then brought back into agreement, and the tests say when it is.</p>
+
+<h2>How to help</h2>
+<p>All of it goes through <a href="https://github.com/krauthaufen/poetry/issues">GitHub issues</a>. You do not need to read code for any of the first four.</p>
+<div class="asks">
+  <div class="panel ask">
+    <h3>Check a skill against the game</h3>
+    <div class="body">The most useful thing there is. Record one boss kill with the skill and say which character it was.
+      <ul>
+        <li>A map boss, with its life bar and the damage counter beside it in frame</li>
+        <li>The buff bar visible, and as little else going on as you can manage</li>
+        <li>A link to the video, the boss, the area level and the map's modifiers</li>
+      </ul>
+    </div>
+    <a class="go" href="https://github.com/krauthaufen/poetry/issues/new?template=skill-check.yml">Send a recording</a>
+  </div>
+  <div class="panel ask">
+    <h3>A number is wrong</h3>
+    <div class="body">The game shows one thing, PoEtry another: a tooltip, a pool, a resistance, a kill that takes far longer or shorter than in play. A screenshot of the game's side and the character is enough.</div>
+    <a class="go" href="https://github.com/krauthaufen/poetry/issues/new?template=wrong-number.yml">Report a number</a>
+  </div>
+  <div class="panel ask">
+    <h3>A line is not understood</h3>
+    <div class="body">The page lists what it could not read on your character. If one of those lines matters for your build, say which, and what it does in play.</div>
+    <a class="go" href="https://github.com/krauthaufen/poetry/issues/new?template=not-understood.yml">Report a line</a>
+  </div>
+  <div class="panel ask">
+    <h3>A rule is wrong or missing</h3>
+    <div class="body">You know how a mechanic really works, or can settle one of the open guesses. Say what the rule is and how you know.</div>
+    <a class="go" href="https://github.com/krauthaufen/poetry/issues/new?template=rule.yml">Report a rule</a>
+  </div>
+</div>
+
+<h2>What counts as evidence</h2>
+<p>A rule is only as good as its source. From strongest to weakest:</p>
+<table>
+  <tr><th>Source</th><th>What it is</th></tr>
+  <tr><td>Game data</td><td>A number or a stat in the game's own files</td></tr>
+  <tr><td>Seen in the game</td><td>A recording or a screenshot that shows it, with the character it was made on</td></tr>
+  <tr><td>Stated by the developers</td><td>Patch notes, or a post by Grinding Gear Games</td></tr>
+  <tr><td>The wiki</td><td>Good for formulas, sometimes behind the current patch</td></tr>
+  <tr><td>Path of Building</td><td>A formula taken over and not checked on its own</td></tr>
+  <tr><td>A guess</td><td>Marked as one, and waiting for any of the above</td></tr>
+</table>
+<p class="dim">"It feels stronger than that" is a good reason to open an issue, and not yet a reason to change a rule. A recording turns the one into the other.</p>
+
+<h2>Changing the code</h2>
+<ul class="plain">
+  <li>Mechanics live in the reference engine, <code>src/PoEtry/Sim/</code>. <a href="https://github.com/krauthaufen/poetry/blob/main/ENGINE.md">ENGINE.md</a> says which file holds what and walks through adding a mechanic.</li>
+  <li>A changed or new rule gets its row in <code>RULES.md</code> with its source, and a test.</li>
+  <li>You do not have to touch the fast engine. Say in the pull request that it is behind, and it is brought into line before the change goes live.</li>
+  <li>Open an issue first for anything larger than a fix, so nobody builds what will not be merged.</li>
+</ul>
+
+<footer>PoEtry is a fan project and is not affiliated with or endorsed by Grinding Gear Games.</footer>
+</main>
+</body>
+</html>

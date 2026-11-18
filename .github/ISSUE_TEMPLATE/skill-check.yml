@@ -1,0 +1,39 @@
+name: Check a skill against the game
+description: A recording of a boss kill, to lay the game's hits beside the simulator's.
+title: "Skill check: <skill>"
+labels: ["skill check"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        One boss kill is enough. Keep the boss's life bar and the damage counter beside it in frame, and the buff bar visible.
+        Do not post login tokens or anything else you would not want public. The video and what you write here can be seen by everyone.
+  - type: input
+    id: skill
+    attributes: { label: Skill, description: The skill that does the damage in the recording. }
+    validations: { required: true }
+  - type: input
+    id: video
+    attributes: { label: Link to the recording }
+    validations: { required: true }
+  - type: textarea
+    id: character
+    attributes:
+      label: The character
+      description: A Path of Building code or link of the character exactly as it was in the recording (same weapon, same gems), or the character's name if its profile is public.
+    validations: { required: true }
+  - type: input
+    id: boss
+    attributes: { label: Boss and area level, placeholder: "Tetzcatl, map level 80" }
+    validations: { required: true }
+  - type: textarea
+    id: map
+    attributes: { label: Map modifiers, description: A screenshot or the text. "None" if there are none. }
+  - type: textarea
+    id: play
+    attributes:
+      label: How you played it
+      description: What you pressed and in what order, where you stood, what was up before the boss appeared (charges, buffs, flasks).
+  - type: textarea
+    id: sim
+    attributes: { label: What PoEtry shows for it, description: Kill time and DPS from the page for the same boss, if you looked. }

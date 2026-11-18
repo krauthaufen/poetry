@@ -1,0 +1,24 @@
+name: A number is wrong
+description: The game shows one thing, PoEtry another.
+title: "Wrong number: <what>"
+labels: ["wrong number"]
+body:
+  - type: input
+    id: what
+    attributes: { label: Which number, placeholder: "Tooltip damage of Ice Nova, maximum life, fire resistance, kill time" }
+    validations: { required: true }
+  - type: textarea
+    id: game
+    attributes: { label: What the game shows, description: A screenshot is best. For a skill, the skill's detailed tooltip. }
+    validations: { required: true }
+  - type: textarea
+    id: sim
+    attributes: { label: What PoEtry shows }
+    validations: { required: true }
+  - type: textarea
+    id: character
+    attributes: { label: The character, description: A Path of Building code or link, or the character's name if its profile is public. }
+    validations: { required: true }
+  - type: textarea
+    id: more
+    attributes: { label: Anything else, description: Buffs that were up, charges, the weapon set in use. }
