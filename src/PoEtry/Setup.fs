@@ -185,6 +185,19 @@ module Setup =
         let sheet = Pob.character db tree jewelSlots build
         let build = corruptedLevels db sheet.Mods build
         let sheet = Pob.withPersistentBuffs db sheet build
+        // what the data does not have at all, a gem or the class: the game data is older than
+        // the character's game. Said, not passed over.
+        let sheet =
+            let gems =
+                build.Groups
+                |> List.filter (fun g -> g.Enabled)
+                |> List.collect (fun g -> g.Gems |> List.filter (fun x -> x.Enabled && x.Name <> "" && not (Gems.known db x.Name)))
+                |> List.map (fun x -> sprintf "gem %s is not in the game data" x.Name)
+                |> List.distinct
+            let lines =
+                if sheet.ClassName = "" || classBases.ContainsKey(Defence.baseClass sheet.ClassName) then gems
+                else gems @ [ sprintf "class %s is not in the tree data" sheet.ClassName ]
+            if lines.IsEmpty then sheet else { sheet with Coverage = { sheet.Coverage with UnknownText = sheet.Coverage.UnknownText @ lines } }
         // charms: their effects are sheet mods that hold while the charm lasts
         let charms, charmMods = Behaviours.charms db sheet build
         let sheet = { sheet with Mods = sheet.Mods @ charmMods }

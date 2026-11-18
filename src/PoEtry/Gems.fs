@@ -343,6 +343,9 @@ module Gems =
     /// Skill data for a gem name.
     let data (db: GameDb) name = skillOfGem db name
 
+    /// Whether the game data has a gem of that name at all (skill or support).
+    let known (db: GameDb) (name: string) = (skillOfGem db name).IsSome || (supportOfGem db name).IsSome
+
     /// Skills that put something down which explodes after the skill's detonation time, the
     /// explosion being a part of its own (Behaviours.detonation): a lodged Explosive Spear.
     let lodged = set [ "Explosive Spear" ]

@@ -596,3 +596,10 @@ module Tree =
                 let unknown = unknown |> List.map (fun l -> sprintf "%s: %s" node.Name l)
                 mods @ ms, Coverage.merge cov { c with UnknownText = c.UnknownText @ unknown })
             ([], Coverage.empty)
+        // (a passive the tree data does not have: the tree is older than the character's game)
+        |> fun (mods, cov) ->
+            match allocated |> List.filter (fun id -> not (Map.containsKey id nodes)) with
+            | [] -> mods, cov
+            | missing ->
+                let shown = missing |> List.truncate 5 |> List.map string |> String.concat ", "
+                mods, { cov with UnknownText = cov.UnknownText @ [ sprintf "%d allocated passives are not in the tree data (%s%s): the passive tree data is out of date" missing.Length shown (if missing.Length > 5 then ", ..." else "") ] }
