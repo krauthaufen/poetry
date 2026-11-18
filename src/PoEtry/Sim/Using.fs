@@ -322,7 +322,6 @@ let onReadyUnlocked env (rng: Rng) name (w: World) =
                 | ts -> List.min ts
         schedule next (Ready name) w
 
-/// The actor is free to act; a stunned or frozen player waits.
 /// Has this melee minion no room at the enemy aimed at? The melee minions in the fight
 /// take their places in order (see Geometry.meleePlaces).
 let crowdedOut env name (w: World) =
@@ -335,6 +334,7 @@ let crowdedOut env name (w: World) =
         List.zip melee places |> List.exists (fun (m, has) -> m.Name = name && not has)
     | _ -> false
 
+/// The actor is free to act; a stunned or frozen player waits.
 let onReady env rng name (w: World) =
     let actor = actorDef env name
     let standing =
