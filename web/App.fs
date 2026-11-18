@@ -1518,15 +1518,17 @@ let private kept (m : Model) : string =
               "\"notes\":" + quote m.Notes ] + "}"
 
 /// The classes and their ascendancies (the tree's "classes"), for a new build.
+// <classes>
 let private classes =
-    [ "Warrior", [ "Titan"; "Warbringer"; "Smith of Kitava" ]
-      "Mercenary", [ "Tactician"; "Witchhunter"; "Gemling Legionnaire" ]
+    [ "Witch", [ "Infernalist"; "Blood Mage"; "Lich"; "Abyssal Lich" ]
       "Ranger", [ "Deadeye"; "Pathfinder" ]
-      "Huntress", [ "Amazon"; "Spirit Walker"; "Ritualist" ]
-      "Monk", [ "Martial Artist"; "Invoker"; "Acolyte of Chayula" ]
+      "Warrior", [ "Titan"; "Warbringer"; "Smith of Kitava" ]
       "Sorceress", [ "Stormweaver"; "Chronomancer"; "Disciple of Varashta" ]
-      "Witch", [ "Infernalist"; "Blood Mage"; "Lich"; "Abyssal Lich" ]
+      "Huntress", [ "Amazon"; "Spirit Walker"; "Ritualist" ]
+      "Mercenary", [ "Tactician"; "Witchhunter"; "Gemling Legionnaire" ]
+      "Monk", [ "Martial Artist"; "Invoker"; "Acolyte of Chayula" ]
       "Druid", [ "Oracle"; "Shaman" ] ]
+// </classes>
 
 /// The picture of the character's ascendancy: the tree's once that is read, before that by
 /// the ascendancy's name as the pictures are named ("art/class-blood-mage.png").
