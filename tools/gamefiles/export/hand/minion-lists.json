@@ -1,0 +1,101 @@
+{
+ "_comment": "Which monsters a minion skill summons: skill id (GrantedEffects.Id) -> monster ids (MonsterVarieties.Id, the keys of minions.json). The game's client data has no table for this link, so it is kept by hand; skills.mjs adds links it can find by name and prints the minion skills that have none. Seeded from PoB's '#minionList' lines.",
+ "skills": {
+  "AncestralSpiritsPlayer": [
+   "Metadata/Monsters/LeagueAncestral/AncestralTurtleTotemSpirit",
+   "Metadata/Monsters/LeagueAncestral/AncestralJadeHulkTotemSpirit",
+   "Metadata/Monsters/LeagueAncestral/AncestralSpiritCasterTotemSpirit",
+   "Metadata/Monsters/LeagueAncestral/AncestralKaruiHornTotemSpirit"
+  ],
+  "AzmerianSwarmPlayer": [
+   "Metadata/Monsters/UniqueItemMonsters/AzmerianSwarmMinion/AzmerianSwarmMinion"
+  ],
+  "CorpseBeetlesPlayer": [
+   "Metadata/Monsters/Monsters/CorpseBeetlePlayerSummoned"
+  ],
+  "HyenaCacklePlayer": [
+   "Metadata/Monsters/HyenaMonster/HyenaCompanionPlayerSummoned"
+  ],
+  "ManifestWeaponPlayer": [
+   "Metadata/Monsters/AnimatedItem/AnimatedWeaponPlayerSummoned"
+  ],
+  "RagingSpiritsPlayer": [
+   "Metadata/Monsters/RagingSpirit/RagingSpiritPlayerSummoned"
+  ],
+  "RaiseZombiePlayer": [
+   "Metadata/Monsters/Zombies/PlayerSummoned/PlayerSummonedZombie_"
+  ],
+  "RavenousSwarmPlayer": [
+   "Metadata/Monsters/Daemon/RavenousSwarmPlayer/RavenousSwarmPlayerSummoned"
+  ],
+  "RhoaMountPlayer": [
+   "Metadata/Monsters/RhoaPlayerSummoned/RhoaPlayerSummoned"
+  ],
+  "SummonAzmerianWolfPlayer": [
+   "Metadata/Monsters/UniqueItemMonsters/AzmerianPackleader/PackleaderWolfMinion"
+  ],
+  "SummonFireDjinnPlayer": [
+   "Metadata/Monsters/MarakethTimeDjinn/FireDjinn"
+  ],
+  "SummonInfernalHoundPlayer": [
+   "Metadata/Monsters/Hellhound/HellhoundPlayerSummoned"
+  ],
+  "SummonSandDjinnPlayer": [
+   "Metadata/Monsters/MarakethSamdDjinn/SandDjinn"
+  ],
+  "SummonSkeletalArsonistsPlayer": [
+   "Metadata/Monsters/Skeletons/PlayerSummoned/SkeletonArsonistPlayerSummoned"
+  ],
+  "SummonSkeletalBrutesPlayer": [
+   "Metadata/Monsters/Skeletons/PlayerSummoned/SkeletonBrutePlayerSummoned_"
+  ],
+  "SummonSkeletalClericsPlayer": [
+   "Metadata/Monsters/Skeletons/PlayerSummoned/SkeletonClericPlayerSummoned_"
+  ],
+  "SummonSkeletalFrostMagesPlayer": [
+   "Metadata/Monsters/Skeletons/PlayerSummoned/SkeletonFrostMagePlayerSummoned"
+  ],
+  "SummonSkeletalReaversPlayer": [
+   "Metadata/Monsters/Skeletons/PlayerSummoned/SkeletonReaverPlayerSummoned"
+  ],
+  "SummonSkeletalSnipersPlayer": [
+   "Metadata/Monsters/Skeletons/PlayerSummoned/SkeletonArcherPlayerSummoned"
+  ],
+  "SummonSkeletalStormMagesPlayer": [
+   "Metadata/Monsters/Skeletons/PlayerSummoned/SkeletonStormMagePlayerSummoned_"
+  ],
+  "SummonSkeletalWarriorsPlayer": [
+   "Metadata/Monsters/Skeletons/PlayerSummoned/SkeletonWarriorPlayerSummoned"
+  ],
+  "SummonSpiralingConspiracyPlayer": [
+   "Metadata/Monsters/Daemon/TangmazuRavensDaemon/TangmazuRavensDaemon"
+  ],
+  "SummonWaterDjinnPlayer": [
+   "Metadata/Monsters/MarakethWaterDjinn/WaterDjinn"
+  ],
+  "SupportingFirePlayer": [
+   "Metadata/Monsters/Daemon/ArtilleryPlayer/SummonArtilleryDaemon"
+  ],
+  "TriggeredLivingLightningPlayer": [
+   "Metadata/Monsters/Monsters/LivingLightningPlayerSummoned"
+  ],
+  "TriggeredLivingLightningPlayerTwo": [
+   "Metadata/Monsters/Monsters/LivingLightningPlayerSummoned"
+  ],
+  "UnearthPlayer": [
+   "Metadata/Monsters/SkeletalConstruct/BoneConstructPlayerSummoned"
+  ],
+  "WardboundMinionsPlayer": [
+   "Metadata/Monsters/LeagueExpeditionNew/PlayerSummoned/WardboundMinionPlayerSummoned"
+  ],
+  "WildProtectorPlayer": [
+   "Metadata/Monsters/CompanionBear/CompanionBearPlayerSummoned"
+  ],
+  "WolfPackPlayer": [
+   "Metadata/Monsters/Wolves/WolfCompanionPlayerSummoned"
+  ],
+  "WolfPounceSummonWolfPlayer": [
+   "Metadata/Monsters/Wolves/WolfCompanionPlayerSummoned"
+  ]
+ }
+}

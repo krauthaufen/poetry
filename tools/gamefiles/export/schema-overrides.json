@@ -1,0 +1,31 @@
+{
+  "_comment": "Local corrections to the community dat schema (../schema.min.json). Per table either \"patch\": { \"<column number, 0-based>\": \"Name\" or { name, type, array, references } } to name or retype a column, \"append\": [columns] for columns added at the end of a row, or \"columns\": [...] to give the whole row layout by hand. A column is { name, type, array?, interval?, references? } with type one of bool string i16 u16 i32 u32 f32 enumrow row foreignrow array. See PATCHDAY.md.",
+  "tables": {
+    "Stats": {
+      "patch": {
+        "13": "CannotGrantToMinion"
+      }
+    },
+    "GemEffects": {
+      "patch": {
+        "12": "GrantedEffectDisplayOrder"
+      }
+    },
+    "GrantedEffectStatSets": {
+      "patch": {
+        "9": "UseSetAttackMulti"
+      }
+    },
+    "MonsterVarieties": {
+      "patch": {
+        "73": "NotSummoned",
+        "74": "NotSpectre"
+      }
+    },
+    "MonsterTypes": {
+      "patch": {
+        "8": "BaseDamageIgnoresAttackSpeed"
+      }
+    }
+  }
+}
