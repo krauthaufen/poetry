@@ -29,8 +29,8 @@ Encounters and geometry / Spark	Sparks spread wider the more there are and zigza
 Encounters and geometry / Full circle from the player	A skill that fires projectiles in a full circle is not aimed, so its first projectile points in a random direction and the rest follow evenly around.
 Encounters and geometry / Damage per target	When one use hits several enemies, each enemy gets its own damage roll. The game might roll once for the whole use instead.
 Encounters and geometry / Resistances "treated as negated"	With a chance to treat resistance "as negated", a positive resistance counts as its negative for that hit. Whether penetration and exposure are applied before or after the flip is assumed.
-Encounters and geometry / States of a while ago	Bonuses "for each X recently" count stacks that all share one timer, restarted by each new one (the game lets each run out alone). Igniting the same enemy again counts again.
-Encounters and geometry / Chance to not remove charges	Chances not to lose charges on use are simply added up, and at 100% charges are never lost. Flicker Strike is known to be capped at 75% in the game; other skills may have a hidden cap too.
+Timing and the event engine / States of a while ago	Bonuses "for each X recently" count stacks that all share one timer, restarted by each new one (the game lets each run out alone). Igniting the same enemy again counts again.
+Resources over time / Chance to not remove charges	Chances not to lose charges on use are simply added up, and at 100% charges are never lost. Flicker Strike is known to be capped at 75% in the game; other skills may have a hidden cap too.
 Encounters and geometry / Projectiles of `ProjectilesNotFromUser` skills (Falling Thunder)	Some skills fire projectiles from where they strike, not from the character (Falling Thunder). They are taken to start at the impact, fly outwards away from the player, and hit an enemy they start inside at once.
 Encounters and geometry / Slam impact point	A slam lands a set distance in front of the character (1.5 metres unless changed), or on the enemy's centre if that is closer.
 Encounters and geometry / Walls and terrain chain	A projectile that can chain off terrain flies from the wall to the nearest enemy it has not hit, within 3 metres. With nobody in range it bounces like off a mirror. Range and fallback are assumed.
@@ -103,83 +103,83 @@ Heralds / Herald of Plague	Herald of Plague can Hinder the enemies its Poison sp
 Heralds / Kills by damage over time	An enemy that dies of damage over time counts as the player's kill and gives everything a kill gives that is not tied to a hit. The game may be stricter for some "on kill" effects.
 Heralds / Chains	A herald's own hits never set off heralds. This is from memory of the game, with no source to hand.
 Heralds / Herald of Ash	The Ignite that Herald of Ash spreads is a share of the overkill damage and is not raised by anything else the character has.
-Heralds / Item modifier magnitudes	"Increased magnitudes of modifiers" on an item add nothing extra: the item's lines are taken to show the raised values already.
-Heralds / A cost by the second and the pool	A channelled skill is held as long as mana allows and released with the stages reached by then. That is how the simulator plays it; a player might stop earlier.
-Heralds / Counting different skills used	"For each different Spell cast recently": the cast being made counts itself.
-Heralds / Tempest Bell	Tempest Bell is taken to stand where the attacks land and to last for 10 hits. Its 6 second time limit is left out.
-Heralds / Lightning Warp	Lightning Warp is only used on an enemy that can be culled or into one's own Ball Lightning, and the ball is taken to be close enough to the enemy for its explosion to hit.
-Heralds / Rain of Arrows	Rain of Arrows: every arrow lands at a random point of the skill's area, each point equally likely. A boss in the middle is then hit by about a fifth of them.
-Heralds / Volcano	Volcano's projectiles land at random within 3 metres, each point equally likely, so a boss is hit by about a quarter of them.
-Heralds / Combat Frenzy	Combat Frenzy can give a charge only "once every few seconds". The simulator makes it available again on a fixed beat, not that long after it was last used.
-Heralds / Sigil of Power	Sigil of Power starts with one stage, and the character is taken to stand in it the whole time.
-Heralds / Temper Weapon	Temper Weapon: an empowered attack sets off the fire burst with every hit, and counts as used up after its last hit lands.
-Heralds / Freezing Mark, Voltaic Mark	Freezing Mark and Voltaic Mark stay on the enemy after giving their buff, so the buff is renewed for as long as the enemy stays frozen or electrocuted.
-Heralds / Spearfield	Spearfield's spears appear at random spots in a cone in front of the character, taken to be 90 degrees wide. Only spears the enemy already stands on go off.
-Heralds / Parts that go for other enemies	Extra parts aimed "at other enemies" (Lightning Arrow's beams, Molten Blast's shrapnel) cannot hit the enemy that was struck, so they do nothing against a lone boss.
-Heralds / More parts of one use	Skills with an extra part (a second slam, a star, a serpent) get exactly one of it per use, even where the game can make several.
-Heralds / An explosion per ailment consumed	Skills that explode an ailment (Elemental Sundering, Snap) do nothing unless the enemy has that ailment, and always take it off.
-Heralds / Forms that spend something	Furious Slam spends Rage for its stronger form whenever it has enough, and Rend uses a Power Charge for its charged form whenever it has one.
-Heralds / Crushing Fear	Crushing Fear's shockwave happens only when the skill kills, where the enemy stood. Against a lone boss it never does anything.
-Heralds / Frost Bomb's exposure	Frost Bomb's exposure grows with every pulse. A pulse every quarter second is assumed; in the game the pulses start slower and speed up, so early exposure is a little too high here.
-Heralds / The Stars Answer	The Stars Answer needs 10,000 mana to cast. A character that has it is treated as having cast it before the fight, with it active throughout.
-Heralds / Triskelion Cascade	Triskelion Cascade repeats a spell at six more spots on three arms. The spacing is copied from Spell Cascade and the arms point at random; the data has no measures.
-Heralds / Oil Ground	One use of Oil Grenade leaves one patch of oil however many grenades it throws, and oil poured exactly onto an existing patch only renews it.
-Heralds / Covered in Oil	An enemy counts as covered in oil only while it stands in the patch, and the oil's exposure lowers fire resistance only.
-Heralds / What lit Oil burns with	Oil that is set alight burns with the strength of the Ignite that lit it, plus a fixed addition from the grenade. This follows players' accounts; the game's data says nothing.
-Heralds / Ignited Ground	Burning ground ignites whoever stands on it at once and again the moment the Ignite ends. The game builds it up first and leaves a short gap.
-Heralds / Tornado	A Tornado that touches burning ground takes on that Ignite and keeps the first one it took. The burning ground itself is not used up.
-Heralds / Ice Crystals (Grim Pillars)	Ice Crystals stand at random spots and break once the enemy beside them has lost as much life as one crystal has. Where they stand and what breaks them are both assumed.
-Heralds / What a fight starts with	A fight starts with full charges if the build can make them without kills, and with nothing that needs a recent kill. A boss's introduction is assumed to outlast such effects.
-Heralds / Darkness	Darkness absorbs damage before life. Every damage type is absorbed by the same share, and recoup counts only the damage that got past it.
-Heralds / Life flasks that are never drunk	With life flasks that apply constantly, a flask's instant part is spread over time like the rest of its recovery.
-Heralds / Life Remnants	A Life Remnant's life arrives evenly over the time it takes to walk over and pick it up, which is a setting, not a known number.
-Heralds / Weapon for a skill	If weapons in both sets could be used for a skill, the stronger one is. The API does not say which set a gem is bound to.
-Heralds / Default attacks	A weapon's plain default attack is not woven into the rotation beside the main skill.
-Heralds / Charged variants	A skill's "Frenzy-Charged" part happens only when a charge is consumed and replaces the normal explosion. This was worked out on Explosive Spear alone.
-Heralds / Glory	Glory builds faster against stronger monsters: a normal one counts 1, magic 2, rare 5, a boss 20. These are community numbers, not from the data.
-Heralds / Combo	Combo is never lost between hits, as the rotation is assumed never to pause long enough for it to run out.
-Heralds / Skills that must be built up	A skill that needs Glory or Combo is used as soon as it is ready; if it is the main skill, the plain attack fills the time in between.
-Heralds / Banners	A banner is placed the moment its Glory is full, and the character is taken to stay inside its aura.
-Heralds / Perfect Timing	Skills with a Perfect Timing window are always released perfectly. The release is taken to add its time on top of the channel.
-Heralds / Chained attacks	Attacks that are a chain of strikes (Ice Strike, Tempest Flurry) go through their strikes in order, and any other skill in between starts the chain over.
-Heralds / Several strikes in one use	Rapid Assault's stabs are spread evenly over the use, and both cuts of Cross Slash always hit the target. Against small monsters the second is generous.
-Heralds / Requiem (The Last Lament)	Requiem starts the fight charged, and its charge only begins to build again once its 12 seconds of firing are over.
-Heralds / Hailstorm Rounds	Hailstorm Rounds starts the fight with all its bolts, and each bolt lands at a random spot within 4 metres of the target.
-Heralds / Twister	A twister wanders up to 1 metre to either side of its line as it travels. How far it really strays is not in the data.
-Heralds / Whirlwind	Whirling Slash's whirlwind is taken to be at full strength when the fight starts, as if built up beforehand. It matters most for fights that last only seconds.
-Heralds / Wind skills boosted by elemental ground	If several lines say wind skills count as boosted by chilled, ignited or shocked ground, only the first applies, unless a line says several may.
-Heralds / Ball Lightning	Ball Lightning travels 10 metres and zaps what is near it on the way. The 10 metres is assumed.
-Heralds / Living Bomb	A Living Bomb seed that is not set off within its duration disappears without exploding.
-Heralds / Flicker Strike	Flicker Strike's extra strikes each take a fixed fraction of the first one's time, and the Power Charges are consumed all together or not at all.
-Heralds / Reach on a map	On a map a triggered skill reaches up to 8 metres, and a skill whose target died goes for someone within 2 metres of that spot. Both distances are assumed.
-Heralds / Timing on a map	On a map the player starts a skill a little before an approaching enemy is in reach, so that it lands as the enemy arrives.
-Heralds / Grenades activating twice	A grenade's chance to "activate a second time" is rolled for each enemy its blast hits, not once for the whole blast. On average it is the same.
-Heralds / A grenade's blast	A grenade is taken to come to rest at its target and to burst where the target is when the fuse ends. Bounces are not followed.
-Heralds / Mirage Archer	A Mirage Archer has the owner's buffs, starts with its skills off cooldown, and what it has shot still arrives after it vanishes.
-Heralds / Per block chance, per lowest attribute	"Damage per 1% Chance to Block" counts the block chance before "Block is Lucky" raises it. The game might count the higher value its sheet shows.
-Heralds / While moving	"While moving" bonuses always hold if the build has any and all its skills can be used on the move: a character that gains from moving moves.
-Heralds / Which weapon set is in hand	The API does not say which weapon set is in hand. The stronger set is taken for the character sheet and the defences.
-Heralds / Fear Incarnate	Fear Incarnate stacks all share one timer that each new stack restarts.
-Heralds / Totems	A totem uses its skill with the character's own modifiers and numbers ("per 100 maximum Mana" and the like).
-Heralds / Flames of Chayula	Flames of Chayula are taken to be picked up the moment they appear. One in three is the purple kind that adds chaos damage, a number from patch notes.
-Heralds / Low life	The fight starts at low life (35%) only if the build gains from low life and has a way to stay there. Otherwise it starts at full life.
-Heralds / Hollow Palm Technique	Bare-handed attacks (Hollow Palm) are made 1.2 times a second with no base critical hit chance, numbers from the first game, and count as quarterstaff attacks for bonuses.
-Heralds / Skills an item triggers	"Hits with this Weapon have a chance to trigger X" is rolled for every attack hit the player makes, without checking that this weapon dealt it.
-Heralds / Entangle	Entangle's vines deal their hit when they attach, and the limit of three vines is per enemy however many fissures stand.
-Heralds / Damage that starts from a Unique enemy	Bonuses for explosions "originating from a Unique enemy" apply whenever the enemy that is hit is unique.
-Heralds / Secondary radius as a width or an impact	Some skills hit a strip, not a circle (Entangle's fissure, Shield Wall). Where the data gives a length but no width, a width is assumed.
+The sheet: items, passives, attributes / Item modifier magnitudes	"Increased magnitudes of modifiers" on an item add nothing extra: the item's lines are taken to show the raised values already.
+Costs / A cost by the second and the pool	A channelled skill is held as long as mana allows and released with the stages reached by then. That is how the simulator plays it; a player might stop earlier.
+How a fight starts and is played / Counting different skills used	"For each different Spell cast recently": the cast being made counts itself.
+Skills by name / Tempest Bell	Tempest Bell is taken to stand where the attacks land and to last for 10 hits. Its 6 second time limit is left out.
+Skills by name / Lightning Warp	Lightning Warp is only used on an enemy that can be culled or into one's own Ball Lightning, and the ball is taken to be close enough to the enemy for its explosion to hit.
+Skills by name / Rain of Arrows	Rain of Arrows: every arrow lands at a random point of the skill's area, each point equally likely. A boss in the middle is then hit by about a fifth of them.
+Skills by name / Volcano	Volcano's projectiles land at random within 3 metres, each point equally likely, so a boss is hit by about a quarter of them.
+Skills by name / Combat Frenzy	Combat Frenzy can give a charge only "once every few seconds". The simulator makes it available again on a fixed beat, not that long after it was last used.
+Skills by name / Sigil of Power	Sigil of Power starts with one stage, and the character is taken to stand in it the whole time.
+Skills by name / Temper Weapon	Temper Weapon: an empowered attack sets off the fire burst with every hit, and counts as used up after its last hit lands.
+Skills by name / Freezing Mark, Voltaic Mark	Freezing Mark and Voltaic Mark stay on the enemy after giving their buff, so the buff is renewed for as long as the enemy stays frozen or electrocuted.
+Skills by name / Spearfield	Spearfield's spears appear at random spots in a cone in front of the character, taken to be 90 degrees wide. Only spears the enemy already stands on go off.
+Parts and forms of a skill / Parts that go for other enemies	Extra parts aimed "at other enemies" (Lightning Arrow's beams, Molten Blast's shrapnel) cannot hit the enemy that was struck, so they do nothing against a lone boss.
+Parts and forms of a skill / More parts of one use	Skills with an extra part (a second slam, a star, a serpent) get exactly one of it per use, even where the game can make several.
+Parts and forms of a skill / An explosion per ailment consumed	Skills that explode an ailment (Elemental Sundering, Snap) do nothing unless the enemy has that ailment, and always take it off.
+Parts and forms of a skill / Forms that spend something	Furious Slam spends Rage for its stronger form whenever it has enough, and Rend uses a Power Charge for its charged form whenever it has one.
+Skills by name / Crushing Fear	Crushing Fear's shockwave happens only when the skill kills, where the enemy stood. Against a lone boss it never does anything.
+Skills by name / Frost Bomb's exposure	Frost Bomb's exposure grows with every pulse. A pulse every quarter second is assumed; in the game the pulses start slower and speed up, so early exposure is a little too high here.
+Skills by name / The Stars Answer	The Stars Answer needs 10,000 mana to cast. A character that has it is treated as having cast it before the fight, with it active throughout.
+Skills by name / Triskelion Cascade	Triskelion Cascade repeats a spell at six more spots on three arms. The spacing is copied from Spell Cascade and the arms point at random; the data has no measures.
+Ground surfaces and storms / Oil Ground	One use of Oil Grenade leaves one patch of oil however many grenades it throws, and oil poured exactly onto an existing patch only renews it.
+Ground surfaces and storms / Covered in Oil	An enemy counts as covered in oil only while it stands in the patch, and the oil's exposure lowers fire resistance only.
+Ground surfaces and storms / What lit Oil burns with	Oil that is set alight burns with the strength of the Ignite that lit it, plus a fixed addition from the grenade. This follows players' accounts; the game's data says nothing.
+Ground surfaces and storms / Ignited Ground	Burning ground ignites whoever stands on it at once and again the moment the Ignite ends. The game builds it up first and leaves a short gap.
+Ground surfaces and storms / Tornado	A Tornado that touches burning ground takes on that Ignite and keeps the first one it took. The burning ground itself is not used up.
+Skills by name / Ice Crystals (Grim Pillars)	Ice Crystals stand at random spots and break once the enemy beside them has lost as much life as one crystal has. Where they stand and what breaks them are both assumed.
+How a fight starts and is played / What a fight starts with	A fight starts with full charges if the build can make them without kills, and with nothing that needs a recent kill. A boss's introduction is assumed to outlast such effects.
+Pools and remnants / Darkness	Darkness absorbs damage before life. Every damage type is absorbed by the same share, and recoup counts only the damage that got past it.
+How a fight starts and is played / Life flasks that are never drunk	With life flasks that apply constantly, a flask's instant part is spread over time like the rest of its recovery.
+Pools and remnants / Life Remnants	A Life Remnant's life arrives evenly over the time it takes to walk over and pick it up, which is a setting, not a known number.
+The sheet: items, passives, attributes / Weapon for a skill	If weapons in both sets could be used for a skill, the stronger one is. The API does not say which set a gem is bound to.
+How a fight starts and is played / Default attacks	A weapon's plain default attack is not woven into the rotation beside the main skill.
+Parts and forms of a skill / Charged variants	A skill's "Frenzy-Charged" part happens only when a charge is consumed and replaces the normal explosion. This was worked out on Explosive Spear alone.
+Glory, Combo and banners / Glory	Glory builds faster against stronger monsters: a normal one counts 1, magic 2, rare 5, a boss 20. These are community numbers, not from the data.
+Glory, Combo and banners / Combo	Combo is never lost between hits, as the rotation is assumed never to pause long enough for it to run out.
+Glory, Combo and banners / Skills that must be built up	A skill that needs Glory or Combo is used as soon as it is ready; if it is the main skill, the plain attack fills the time in between.
+Glory, Combo and banners / Banners	A banner is placed the moment its Glory is full, and the character is taken to stay inside its aura.
+Parts and forms of a skill / Perfect Timing	Skills with a Perfect Timing window are always released perfectly. The release is taken to add its time on top of the channel.
+Parts and forms of a skill / Chained attacks	Attacks that are a chain of strikes (Ice Strike, Tempest Flurry) go through their strikes in order, and any other skill in between starts the chain over.
+Parts and forms of a skill / Several strikes in one use	Rapid Assault's stabs are spread evenly over the use, and both cuts of Cross Slash always hit the target. Against small monsters the second is generous.
+Skills by name / Requiem (The Last Lament)	Requiem starts the fight charged, and its charge only begins to build again once its 12 seconds of firing are over.
+Skills by name / Hailstorm Rounds	Hailstorm Rounds starts the fight with all its bolts, and each bolt lands at a random spot within 4 metres of the target.
+Skills by name / Twister	A twister wanders up to 1 metre to either side of its line as it travels. How far it really strays is not in the data.
+Skills by name / Whirlwind	Whirling Slash's whirlwind is taken to be at full strength when the fight starts, as if built up beforehand. It matters most for fights that last only seconds.
+Skills by name / Wind skills boosted by elemental ground	If several lines say wind skills count as boosted by chilled, ignited or shocked ground, only the first applies, unless a line says several may.
+Skills by name / Ball Lightning	Ball Lightning travels 10 metres and zaps what is near it on the way. The 10 metres is assumed.
+Skills by name / Living Bomb	A Living Bomb seed that is not set off within its duration disappears without exploding.
+Skills by name / Flicker Strike	Flicker Strike's extra strikes each take a fixed fraction of the first one's time, and the Power Charges are consumed all together or not at all.
+How a fight starts and is played / Reach on a map	On a map a triggered skill reaches up to 8 metres, and a skill whose target died goes for someone within 2 metres of that spot. Both distances are assumed.
+How a fight starts and is played / Timing on a map	On a map the player starts a skill a little before an approaching enemy is in reach, so that it lands as the enemy arrives.
+Skills by name / Grenades activating twice	A grenade's chance to "activate a second time" is rolled for each enemy its blast hits, not once for the whole blast. On average it is the same.
+Skills by name / A grenade's blast	A grenade is taken to come to rest at its target and to burst where the target is when the fuse ends. Bounces are not followed.
+Skills by name / Mirage Archer	A Mirage Archer has the owner's buffs, starts with its skills off cooldown, and what it has shot still arrives after it vanishes.
+The sheet: items, passives, attributes / Per block chance, per lowest attribute	"Damage per 1% Chance to Block" counts the block chance before "Block is Lucky" raises it. The game might count the higher value its sheet shows.
+How a fight starts and is played / While moving	"While moving" bonuses always hold if the build has any and all its skills can be used on the move: a character that gains from moving moves.
+The sheet: items, passives, attributes / Which weapon set is in hand	The API does not say which weapon set is in hand. The stronger set is taken for the character sheet and the defences.
+Skills by name / Fear Incarnate	Fear Incarnate stacks all share one timer that each new stack restarts.
+How a fight starts and is played / Totems	A totem uses its skill with the character's own modifiers and numbers ("per 100 maximum Mana" and the like).
+Skills by name / Flames of Chayula	Flames of Chayula are taken to be picked up the moment they appear. One in three is the purple kind that adds chaos damage, a number from patch notes.
+How a fight starts and is played / Low life	The fight starts at low life (35%) only if the build gains from low life and has a way to stay there. Otherwise it starts at full life.
+The sheet: items, passives, attributes / Hollow Palm Technique	Bare-handed attacks (Hollow Palm) are made 1.2 times a second with no base critical hit chance, numbers from the first game, and count as quarterstaff attacks for bonuses.
+The sheet: items, passives, attributes / Skills an item triggers	"Hits with this Weapon have a chance to trigger X" is rolled for every attack hit the player makes, without checking that this weapon dealt it.
+Skills by name / Entangle	Entangle's vines deal their hit when they attach, and the limit of three vines is per enemy however many fissures stand.
+Parts and forms of a skill / Damage that starts from a Unique enemy	Bonuses for explosions "originating from a Unique enemy" apply whenever the enemy that is hit is unique.
+Parts and forms of a skill / Secondary radius as a width or an impact	Some skills hit a strip, not a circle (Entangle's fissure, Shield Wall). Where the data gives a length but no width, a width is assumed.
 Skills granted by supports / Ice Bite	Ice Bite's extra cold damage is given to all the character's damage, as its text says, though its internal name suggests attacks only.
 # Resources over time
 Resources over time / Rageforged	Rageforged spends its Rage before the hits, and only the use's own hits are stronger, not explosions it sets off later.
 Resources over time / "Consumes one of each Charge every X s"	A skill that takes one of each charge every few seconds lets the character's chance to keep charges apply to that too.
-Resources over time / Virtuous Barrier motes	Virtuous Barrier counts active skills for its mote limits. Support gems are not counted as skills.
-Resources over time / Observed per-skill behaviour	Falling Thunder's slam is a narrow cone in front of the character, taken to be 45 degrees wide. The data has no angle.
+Skills by name / Virtuous Barrier motes	Virtuous Barrier counts active skills for its mote limits. Support gems are not counted as skills.
+Skills by name / Observed per-skill behaviour	Falling Thunder's slam is a narrow cone in front of the character, taken to be 45 degrees wide. The data has no angle.
 # Meta gems and triggers
 Meta gems and triggers / Infusion remnants	An infusion remnant is picked up a set time after it drops. That time is a setting standing in for how fast a player walks over it.
-Meta gems and triggers / Fuses	A grenade explodes where it was aimed. Its bounces are not followed.
-Meta gems and triggers / Verisium in the rotation	The skill that makes Verisium infusions is cast when ready, but only while the character has fewer than it can hold.
-Meta gems and triggers / Charged Staff's shockwave	Charged Staff adds one shockwave to each quarterstaff attack, at the moment of the attack's first hit, in a narrow cone 45 degrees wide in all.
-Meta gems and triggers / Block	Block chance is capped at 50% plus whatever raises the maximum.
+Skills by name / Fuses	A grenade explodes where it was aimed. Its bounces are not followed.
+How a fight starts and is played / Verisium in the rotation	The skill that makes Verisium infusions is cast when ready, but only while the character has fewer than it can hold.
+Skills by name / Charged Staff's shockwave	Charged Staff adds one shockwave to each quarterstaff attack, at the moment of the attack's first hit, in a narrow cone 45 degrees wide in all.
+Incoming damage in detail / Block	Block chance is capped at 50% plus whatever raises the maximum.
 Meta gems and triggers / Energy from melee hits / kills	Meta gems that gain energy from melee hits or kills gain it by the monster's power, the same way the ones that count critical hits do.
 # Runic Ward, remnants, Infernal Flame
 Runic Ward, remnants, Infernal Flame / Ward remnants	A ward remnant is collected one second after it appears.
