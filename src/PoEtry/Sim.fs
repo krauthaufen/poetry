@@ -2022,10 +2022,21 @@ module Sim =
         Map.tryFind skill.Name st.Cooldowns |> Option.forall (fun t -> t <= now)
 
     /// A minion goes out of the fight (killed, or its time is up): what it had begun is lost.
-    let private leave name (w: World) =
+    /// The skills (and parts) of an actor whose strikes go on without it: what a minion has
+    /// shot or thrown still arrives when the minion is gone (a Mirage's grenades in the air).
+    /// A projectile or grenade skill, and its parts. Guess: the game has no text for it.
+    let outliving (actor: Actor) : Set<string> =
+        let rec go inherited (s: Skill) =
+            let o = inherited || s.Tags.Contains(Tag "Projectile") || s.Tags.Contains(Tag "Grenade")
+            (if o then [ s.Name ] else []) @ (s.Parts |> List.collect (go o))
+        actor.Skills |> List.collect (go false) |> Set.ofList
+
+    let private leave (env: Env) name (w: World) =
+        let stays = outliving (actorDef env name)
         let its ev =
             match ev with
-            | Ready n | Strike (n, _, _, _) | PassingStrike (n, _, _, _, _) | DirectHit (n, _, _, _) | Landed (n, _, _) -> n = name
+            | Ready n -> n = name
+            | Strike (n, s, _, _) | PassingStrike (n, s, _, _, _) | DirectHit (n, s, _, _) | Landed (n, s, _) -> n = name && not (stays.Contains s)
             | _ -> false
         { w with Queue = w.Queue |> Map.filter (fun _ ev -> not (its ev)) }
         |> updateActor name (fun st -> { st with Gone = true; Life = 0.0; Shield = 0.0 })
@@ -2046,7 +2057,13 @@ module Sim =
                 let buffs (b: Map<string, Effect>) =
                     if i = 0 && not first.IsEmpty then Map.add "Empowered" { Name = "Empowered"; Mods = first; Stacks = 1; Expires = leaves } b
                     else Map.remove "Empowered" b
-                let w = updateActor m.Name (fun st -> { st with Gone = false; Leaves = leaves; Life = life; Shield = shield; HitAt = w.Time; Buffs = buffs st.Buffs }) w
+                // (one that was out is a new one: none of its skills is on cooldown)
+                let w =
+                    updateActor m.Name (fun st ->
+                        { st with
+                            Gone = false; Leaves = leaves; Life = life; Shield = shield; HitAt = w.Time; Buffs = buffs st.Buffs
+                            Cooldowns = (if was.Gone then Map.empty else st.Cooldowns)
+                            Recharges = (if was.Gone then Map.empty else st.Recharges) }) w
                 let w = if was.Gone then schedule w.Time (Ready m.Name) w else w
                 let w = if leaves < infinity then schedule leaves (MinionLeaves(m.Name, leaves)) w else w
                 { w with Counts = bump ("summoned:" + pool) w.Counts })
@@ -4081,7 +4098,7 @@ module Sim =
     let private killMinion env (rng: Rng) (minion: Actor) (w: World) =
         let body = minion.Body.Value
         let player = env.Fight.Player
-        let w = leave minion.Name w
+        let w = leave env minion.Name w
         let w = { w with Counts = bump "minion:died" w.Counts } |> markStatus player.Name "MinionDiedRecently"
         match body.Revive with
         | None -> w
@@ -4848,7 +4865,9 @@ module Sim =
             let gone name = Map.tryFind name w.Actors |> Option.exists (fun st -> st.Gone)
             match ev with
             // a minion that is out of the fight does nothing, and what it had begun is lost
-            | Ready name | Strike (name, _, _, _) | PassingStrike (name, _, _, _, _) | DirectHit (name, _, _, _) when gone name -> w
+            // (but what it has shot or thrown still arrives: `outliving`)
+            | Ready name when gone name -> w
+            | Strike (name, skill, _, _) | PassingStrike (name, skill, _, _, _) | DirectHit (name, skill, _, _) when gone name && not ((outliving (actorDef env name)).Contains skill) -> w
             | Ready name -> onReady env rng name w
             | Strike (name, skill, mult, aimedAt) -> onStrike env rng name skill mult aimedAt None false w
             | PassingStrike (name, skill, mult, aimedAt, elapsed) -> onStrike env rng name skill mult aimedAt (Some elapsed) false w
@@ -4857,7 +4876,7 @@ module Sim =
             | ReviveMinions at -> reviveMinions env at w
             | MinionLeaves (name, at) ->
                 let st = Map.find name w.Actors
-                if st.Gone || st.Leaves <> at then w else { leave name w with Counts = bump "minion:left" w.Counts }
+                if st.Gone || st.Leaves <> at then w else { leave env name w with Counts = bump "minion:left" w.Counts }
             | Landed (name, skill, aimedAt) ->
                 let actor = actorDef env name
                 react env rng actor OnLand (skillOf actor skill) (Some aimedAt) w

@@ -1032,6 +1032,8 @@ module Flat =
           /// that says the warp went into one, and where that is counted.
           WarpsInto: int[]
           Warps: bool
+          /// Its strikes go on when the actor has left the fight (`Sim.outliving`).
+          Outlives: bool
           WarpBuff: int
           Warped: int
           CWarped: int
@@ -1569,6 +1571,7 @@ module Flat =
             // them). A part of a part has no name anyone can find it by.
             let firstParts = actor.Skills |> List.collect (fun s -> s.Parts)
             let named = actor.Skills @ firstParts
+            let stays = Sim.outliving actor
             let all = named @ (firstParts |> List.collect (fun part -> part.Parts))
             // (where the parts of each of these stand among them)
             let partsAt =
@@ -2122,6 +2125,7 @@ module Flat =
                          | Some gem -> [| for (i, o) in List.indexed named do if skillIds.[o.Name] = i && (o.Name = gem || o.Name.StartsWith(gem + " ")) then yield i |]
                          | None -> [||])
                       Warps = (named' "WarpsInto:").IsSome
+                      Outlives = stays.Contains s.Name
                       WarpBuff = (match named' "WarpsInto:" with Some gem -> buffs.Id(gem + " buff") | None -> -1)
                       Warped = (match named' "WarpsInto:" with Some _ -> buffs.Id("Warped:" + s.Name) | None -> -1)
                       CWarped = (match named' "WarpsInto:" with Some gem -> counts.Id("warped into:" + gem) | None -> -1)
@@ -3067,21 +3071,26 @@ module Flat =
     /// its actor is in and, of a strike on its way, which of the skill's flights it belongs
     /// to (see `Agent.Epoch`, `Agent.Flight`). A strike that is put in the queue is counted
     /// as on its way.
-    let private stamp (agent: Agent) (kind: int) (skill: int) : int =
+    let private epochOf (agent: Agent) (skills: SkillInfo[]) (kind: int) (skill: int) : int =
+        // (what was shot or thrown belongs to no time of the actor's: it is not lost with it)
+        if (kind = EStrike || kind = EPassing || kind = EDirect || kind = ELand) && skill >= 0 && (at skills skill).Outlives then 0
+        else agent.Epoch
+
+    let private stamp (agent: Agent) (skills: SkillInfo[]) (kind: int) (skill: int) : int =
         // (a strike of a part no name stands for has no flight to be taken out of)
         if (kind = EStrike || kind = EPassing) && skill >= 0 then
             put agent.InFlight skill ((at agent.InFlight skill) + 1)
-            agent.Epoch * 65536 + (at agent.Flight skill)
-        else agent.Epoch * 65536
+            epochOf agent skills kind skill * 65536 + (at agent.Flight skill)
+        else epochOf agent skills kind skill * 65536
 
     /// An event of the actor that acts now.
     let private schedule (s: State) (t: float) kind a b x y =
-        s.Queue.Push(t, s.Seq, kind, s.Cur, stamp s.A kind a, a, b, x, y)
+        s.Queue.Push(t, s.Seq, kind, s.Cur, stamp s.A s.P.Skills kind a, a, b, x, y)
         s.Seq <- s.Seq + 1
 
     /// An event of another actor.
     let private scheduleFor (s: State) (who: int) (t: float) kind a b x y =
-        s.Queue.Push(t, s.Seq, kind, who, stamp (at s.Agents who) kind a, a, b, x, y)
+        s.Queue.Push(t, s.Seq, kind, who, stamp (at s.Agents who) (at s.Progs who).Skills kind a, a, b, x, y)
         s.Seq <- s.Seq + 1
 
     /// From here on this actor acts: its buffs are the buffs, its program the program.
@@ -4570,8 +4579,9 @@ module Flat =
         let a = at s.Agents who
         s.RoomAt <- -2
         a.Epoch <- a.Epoch + 1
+        let skills = (at s.Progs who).Skills
         for skill in 0 .. a.InFlight.Length - 1 do
-            put a.InFlight skill 0
+            if not (skill < skills.Length && (at skills skill).Outlives) then put a.InFlight skill 0
         a.Gone <- true
         a.Health <- 0.0
         a.Barrier <- 0.0
@@ -4596,6 +4606,16 @@ module Flat =
                 if place = 0 && not first.IsEmpty then setBuff s s.P.BEmpowered 1 leaves first else removeBuff s s.P.BEmpowered
                 a.Gone <- false
                 a.Leaves <- leaves
+                // (one that was out is a new one: none of its skills is on cooldown)
+                if gone then
+                    for k in 0 .. a.Cooldowns.Length - 1 do
+                        put a.Cooldowns k -infinity
+                        put a.Recharges k []
+                    for k in 0 .. a.SealBreak.Length - 1 do
+                        put a.SealBreak k nan
+                    for k in 0 .. a.InvocationReady.Length - 1 do
+                        put a.InvocationReady k -infinity
+                    a.ArchonRecovery <- -infinity
                 (match s.P.Body with
                  | Some body ->
                     a.Health <- body.Life
@@ -7774,11 +7794,12 @@ module Flat =
         // what a minion had begun when it left the fight is lost (the reference takes it out of the queue)
         let lost =
             let agent = at s.Agents q.Who
+            let epoch = epochOf agent (at s.Progs q.Who).Skills q.Kind q.A
             if (q.Kind = EStrike || q.Kind = EPassing) && q.A >= 0 then
-                let still = q.Tag = agent.Epoch * 65536 + (at agent.Flight q.A)
+                let still = q.Tag = epoch * 65536 + (at agent.Flight q.A)
                 if still then put agent.InFlight q.A ((at agent.InFlight q.A) - 1)
                 not still
-            else (q.Kind = EReady || q.Kind = EDirect || q.Kind = EStrike || q.Kind = EPassing || q.Kind = ELand) && q.Tag <> agent.Epoch * 65536
+            else (q.Kind = EReady || q.Kind = EDirect || q.Kind = EStrike || q.Kind = EPassing || q.Kind = ELand) && q.Tag <> epoch * 65536
         if not lost then
             let t, kind, who, a, b, x, y = q.Time, q.Kind, q.Who, q.A, q.B, q.X, q.Y
             let dt = t - s.Time
