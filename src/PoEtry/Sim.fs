@@ -814,6 +814,8 @@ module Sim =
           /// Stunned or frozen: no action before this time.
           LockedUntil: float
           FreezeBuildup: float
+          /// When the player was light stunned, the past 4 s of it (each makes the next harder).
+          Stuns: float list
           /// Charges per charm (by its buff name).
           CharmCharges: Map<string, float> }
 
@@ -1332,12 +1334,15 @@ module Sim =
                 | Some atk when e.Life > 0.0 && w.Player.IsSome ->
                     let st = status e
                     let stopped = [ "Frozen"; "HeavilyStunned"; "Electrocuted"; "Pinned" ] |> List.exists st.ContainsKey
+                    // (a slow weakens with rarity, and never brings a monster below a quarter of its speed)
+                    let potency = Rarity.slowPotency e.Def.Rarity
                     let slow =
-                        (if st.ContainsKey "Maimed" then max 0.0 (1.0 - Constants.maimSlow * env.SlowMagnitude / 100.0) else 1.0)
-                        * (if st.ContainsKey "Hindered" then max 0.0 (1.0 - Constants.hinderSlow * env.SlowMagnitude / 100.0) else 1.0)
+                        (if st.ContainsKey "Maimed" then max 0.0 (1.0 - Constants.maimSlow * env.SlowMagnitude * potency / 100.0) else 1.0)
+                        * (if st.ContainsKey "Hindered" then max 0.0 (1.0 - Constants.hinderSlow * env.SlowMagnitude * potency / 100.0) else 1.0)
                         * (1.0 - (e.Debuffs |> Map.tryFind "Chilled" |> Option.map (fun x -> x.Mods |> List.sumBy (fun m -> m.Value)) |> Option.defaultValue 0.0) / 100.0)
                     // what its debuffs make of its movement speed (Jagged Ground, "Hindered, with 15% reduced Movement Speed")
-                    let slow = if e.Debuffs.IsEmpty then slow else slow * max 0.0 (Mods.more Ctx.empty [ Named "MovementSpeed" ] (defender e).Mods)
+                    let slow = if e.Debuffs.IsEmpty then slow else slow * Rarity.slowed e.Def.Rarity (max 0.0 (Mods.more Ctx.empty [ Named "MovementSpeed" ] (defender e).Mods))
+                    let slow = max Constants.slowFloor slow
                     let d = Vec.length e.Def.Position
                     let gap = d - e.Def.Size - atk.Range
                     // (on a march a monster the player is not near enough to sleeps)
@@ -1679,7 +1684,8 @@ module Sim =
                 w
         | Status (Chill, magnitude, duration) ->
             // the slow is read back by the monster's attack timing
-            addDebuff target "Chilled" duration 1 [ Mod.base' (Named "ChillMagnitude") magnitude ] w
+            // (a slow: what a rarer monster takes of it is less, after the cap)
+            addDebuff target "Chilled" duration 1 [ Mod.base' (Named "ChillMagnitude") (magnitude * Rarity.slowPotency w.Enemies.[target].Def.Rarity) ] w
         | Status (a, _, duration) -> addDebuff target (Ailment.status a) duration 1 [] w
         | AddBuildup (a, pct, seconds) ->
             let e = w.Enemies.[target]
@@ -3422,7 +3428,9 @@ module Sim =
                 let w =
                     match actor.Vitals, w.Player with
                     | Some v, Some p ->
-                        let leech = min (Dmg.get Physical hit.Dealt) Constants.effectiveMaxDamageForLeech * Mods.sumBase ctx [ ManaLeech ] mods / 100.0
+                        // (monsters resist leech, the more the higher their level)
+                        let kept = Rarity.leechKept e.Def.Level
+                        let leech = min (Dmg.get Physical hit.Dealt) Constants.effectiveMaxDamageForLeech * Mods.sumBase ctx [ ManaLeech ] mods / 100.0 * kept
                         // leech counts from one enemy per hit event: only the largest instance
                         let extra = max 0.0 (leech - p.StrikeLeech)
                         let charges =
@@ -3439,7 +3447,7 @@ module Sim =
                             (if Mods.flag ctx (Named "LeechNotFromPhysical") mods then 0.0 else Dmg.get Physical hit.Dealt) + also Lightning + also Cold + also Fire + also Chaos
                         let lifeLeechFull =
                             min leechBase Constants.effectiveMaxDamageForLeech * Mods.sumBase ctx [ Named "LifeLeech" ] mods / 100.0
-                            * Mods.mult ctx [ Named "LifeLeechAmount" ] mods * v.LifeRecoveryRate
+                            * Mods.mult ctx [ Named "LifeLeechAmount" ] mods * v.LifeRecoveryRate * kept
                         let lifeLeech = max 0.0 (lifeLeechFull - p.StrikeLifeLeech)
                         let onHit = Mods.sumBase ctx [ Named "LifeOnHit" ] mods * v.LifeRecoveryRate
                         let manaOnHit = Mods.sumBase ctx [ Named "ManaOnHit" ] mods * v.ManaRecoveryRate
@@ -4117,7 +4125,7 @@ module Sim =
             let actionSpeed = max 0.1 (Mods.more Ctx.empty [ Named "ActionSpeed" ] debuffs)
             let dealt = max 0.0 (Mods.more Ctx.empty [ Named "DamageDealt" ] debuffs)
             let atk = { atk with Damage = atk.Damage |> Map.map (fun _ d -> d * dealt) |> Vitals.withExtraChaos (Mods.sumBase Ctx.empty [ Named "GainAsChaos" ] debuffs) }
-            let next = atk.Interval / max 0.1 (1.0 - chill / 100.0) / actionSpeed
+            let next = (if (1.0 - chill / 100.0) * actionSpeed < Constants.slowFloor then atk.Interval / Constants.slowFloor else atk.Interval / max 0.1 (1.0 - chill / 100.0) / actionSpeed)
             let w = schedule (w.Time + next) (EnemyAttack name) w
             let inRange = Vec.length e.Def.Position - e.Def.Size <= atk.Range + 1e-6
             if stopped then
@@ -4277,10 +4285,11 @@ module Sim =
                                 else w
                             let w =
                                 let cold = get Cold
-                                let chill = Constants.chillEffectMultiplier * cold / thr * effect "Chill"
+                                // (a chill below 30% is discarded; "effect of Chill on you" then scales what is left)
+                                let chill = Constants.chillEffectMultiplier * cold / thr
                                 let w =
-                                    if chill >= 1.0 && not (avoided "Chill") then
-                                        w |> unlessCharm "Slowed" (buff "Chilled" [ Mod.more Speed (-(min Constants.chillMaxEffect (max Constants.chillMinEffect chill))) ] (Constants.playerChillDuration * lasts "Chill"))
+                                    if chill >= Constants.chillMinEffect && effect "Chill" > 0.0 && not (avoided "Chill") then
+                                        w |> unlessCharm "Slowed" (buff "Chilled" [ Mod.more Speed (-(min Constants.chillMaxEffect chill * effect "Chill")) ] (Constants.playerChillDuration * lasts "Chill"))
                                     else w
                                 // freeze builds up with cold damage; full: frozen
                                 match w.Player with
@@ -4295,12 +4304,15 @@ module Sim =
                                 unmitigated |> Map.toList
                                 |> List.sumBy (fun (t, d) -> if t = Physical then d * (1.0 + Constants.monsterPhysicalStunMore / 100.0) else d)
                                 |> fun d -> if atk.Melee then d * (1.0 + Constants.monsterMeleeStunMore / 100.0) else d
-                            let stunChance = min 100.0 (stunDamage / max 1.0 v.StunThreshold * 100.0)
+                            // (50% more threshold for each light stun of the past 4 s)
+                            let stuns = match w.Player with Some p -> p.Stuns |> List.filter (fun t -> t > w.Time - Constants.recentlySeconds) | None -> []
+                            let stunChance = min 100.0 (stunDamage / (max 1.0 v.StunThreshold * (1.0 + Constants.lightStunThresholdMore / 100.0 * float stuns.Length)) * 100.0)
                             // players are not heavily stunned by ordinary hits (only while raising a shield,
                             // parrying or mounted: not modelled)
                             if stunChance >= Constants.playerLightStunMinimum && rng.Chance stunChance && not (rng.Chance v.AvoidStun) then
                                 w |> unlessCharm "Stunned" (fun w ->
                                     lock (Constants.playerLightStunDuration / v.StunRecovery) "Stunned" w
+                                    |> fun w -> { w with Player = w.Player |> Option.map (fun p -> { p with Stuns = w.Time :: stuns }) }
                                     // "if you've been Stunned Recently"; "Regenerate X% of maximum Life over 1 second when Stunned"
                                     |> markStatus env.Fight.Player.Name "StunnedRecently"
                                     |> fun w ->
@@ -4356,7 +4368,7 @@ module Sim =
         let actionSpeed = max 0.1 (Mods.more Ctx.empty [ Named "ActionSpeed" ] debuffs)
         let dealt = max 0.0 (Mods.more Ctx.empty [ Named "DamageDealt" ] debuffs)
         let atk = { atk with Damage = Vitals.withExtraChaos (Mods.sumBase Ctx.empty [ Named "GainAsChaos" ] debuffs) atk.Damage }
-        let next = atk.Interval / max 0.1 (1.0 - chill / 100.0) / actionSpeed
+        let next = (if (1.0 - chill / 100.0) * actionSpeed < Constants.slowFloor then atk.Interval / Constants.slowFloor else atk.Interval / max 0.1 (1.0 - chill / 100.0) / actionSpeed)
         let w = schedule (w.Time + next) (EnemyAttack name) w
         if stopped then { w with Counts = bump "enemy:stopped" w.Counts }
         else
@@ -5066,6 +5078,7 @@ module Sim =
                       Recoups = []
                       LockedUntil = 0.0
                       FreezeBuildup = 0.0
+                      Stuns = []
                       CharmCharges = fight.Player.Charms |> List.map (fun c -> c.Buff, c.MaxCharges) |> Map.ofList })
               Time = 0.0
               Grounds = []

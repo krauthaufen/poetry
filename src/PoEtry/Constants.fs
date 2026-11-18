@@ -195,13 +195,20 @@ module Constants =
         | HeavyStun -> gc "HeavyStunThresholdModifier", gc "HeavyStunModifierDuration"
         | Pin -> gc "PinThresholdModifier", gc "PinModifierDuration"
         | _ -> 0.0, 0.0
-    /// A chill is at least this strong (keyword text; PoB ailmentData.Chill.min).
+    /// "Monsters cannot be slowed below 25% of their base speed" (keyword text, Slow).
+    let slowFloor = 0.25
+    /// "Players have 50% more Light Stun Threshold per time they were Light Stunned in the past
+    /// 4 seconds" (wiki, Stun).
+    let lightStunThresholdMore = 50.0
+    /// A chill is at least this strong; a weaker one is discarded ("Chills smaller than 30% will
+    /// be ignored", keyword text; PoB ailmentData.Chill.min).
     let chillMinEffect = 30.0
     /// "Low" Life, Mana, Energy Shield: at most this share of the maximum (GameConstants
     /// DefaultLowStatusThresholdPercent).
     let lowStatusShare = gc "DefaultLowStatusThresholdPercent" / 100.0
-    /// Seconds a light stun interrupts the player. GUESS (no player constant in the data).
-    let playerLightStunDuration = 0.35
+    /// Seconds a light stun interrupts the player ("Light Stun lasts 0.53 seconds", wiki Stun;
+    /// no constant in the data).
+    let playerLightStunDuration = 0.53
 
     /// "Being Blinded causes 20% less Accuracy Rating and Evasion Rating" (wiki, Blind; the
     /// buff in BuffDefinitions carries no base value).

@@ -115,6 +115,21 @@ module Rarity =
         |> List.tryPick (fun (rr, s, v) -> if rr = key && s = id then Some v else None)
         |> Option.defaultValue 0.0
 
+    let private potencies = [| for r in [ Normal; Magic; Rare; Unique ] -> 1.0 + stat r "slow_potency_+%_final_from_rarity" / 100.0 |]
+
+    /// How much of a slow a monster of that rarity takes: "15% less Slow effect on Magic
+    /// monsters", 30% Rare, 50% Unique (`slow_potency_+%_final_from_rarity`).
+    let slowPotency r = potencies.[rank r]
+
+    /// A slow of `more`% (negative) as that rarity takes it; what speeds it up is left alone.
+    let slowed r (mult: float) = if mult < 1.0 then 1.0 - (1.0 - mult) * slowPotency r else mult
+
+    /// The share of leech a monster of that level lets through (DefaultMonsterStats
+    /// LeechResistance: none below level 31, 92% at 80).
+    let leechKept level =
+        let t = RarityData.leechResistance
+        1.0 - t.[max 0 (min (t.Length - 1) (level - 1))] / 100.0
+
     /// Default profiles, from the game's rarity monster mods: life, poise, curse and
     /// exposure effect, size. Rarity carries no resistances; those come from the
     /// monster and the area (scenario settings). Unique resists default to PoB's

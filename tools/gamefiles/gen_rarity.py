@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate src/PoEtry/RarityData.fs from game tables exported by pathofexile-dat.
 
-Reads tables/English/{Mods,Stats}.json and collects the stats of the MonsterMagicN /
+Reads tables/English/{Mods,Stats,DefaultMonsterStats}.json and collects the stats of the MonsterMagicN /
 MonsterRareN / MonsterUniqueN mods, the rarity mods every magic/rare/unique monster has.
 Usage: gen_rarity.py <tables dir> > src/PoEtry/RarityData.fs
 """
@@ -34,3 +34,10 @@ for r, kv in out.items():
     for k, v in sorted(kv.items()):
         print('          "%s", "%s", %r' % (r, k, float(v)))
 print("        ]")
+
+# DefaultMonsterStats LeechResistance (permyriad) by monster level
+levels = json.load(open(d + "/DefaultMonsterStats.json"))
+print()
+print("    /// Leech resistance in % by monster level - 1 (DefaultMonsterStats LeechResistance; rare and")
+print("    /// unique monsters have the same).")
+print("    let leechResistance = [| %s |]" % "; ".join(repr(r["LeechResistance"] / 100.0) for r in levels))

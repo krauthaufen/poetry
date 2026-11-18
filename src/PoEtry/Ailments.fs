@@ -175,9 +175,9 @@ module Ailments =
         let chill =
             let cold = source Chill
             let effect = Constants.chillEffectMultiplier * cold / threshold defender * magnitudeMult ctx mods Chill
-            [ if effect >= 1.0 then
-                  // at least 30%, at most 50%
-                  yield Status(Chill, min Constants.chillMaxEffect (max Constants.chillMinEffect effect), duration ctx mods Chill) ]
+            [ if effect >= Constants.chillMinEffect then
+                  // a chill below 30% is discarded; at most 50%
+                  yield Status(Chill, min Constants.chillMaxEffect effect, duration ctx mods Chill) ]
 
         let flat =
             [ for a in [ Daze; Maim; Blind; Hinder ] do

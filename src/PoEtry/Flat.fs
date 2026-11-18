@@ -2997,6 +2997,8 @@ module Flat =
           mutable Front: float
           mutable Packs: int
           mutable FreezeBuildup: float
+          /// See `Sim.PlayerState.Stuns`.
+          mutable Stuns: float list
           /// What a hit that takes a state off an enemy still reads of the enemy as it was:
           /// its shock, and how far its armour was broken.
           mutable ShockWas: float
@@ -3731,14 +3733,15 @@ module Flat =
                         // (one that has arrived walks no further: its statuses are not asked)
                         if not asleep && not (gap <= 0.0) && not (stopped s e true) then
                             let ailments = s.P.AilmentStatus
+                            let potency = Rarity.slowPotency e.Def.Rarity
                             let slow =
-                                (if (at e.SHas (at ailments 10)) then max 0.0 (1.0 - Constants.maimSlow * s.P.SlowMagnitude / 100.0) else 1.0)
-                                * (if (at e.SHas (at ailments 12)) then max 0.0 (1.0 - Constants.hinderSlow * s.P.SlowMagnitude / 100.0) else 1.0)
+                                (if (at e.SHas (at ailments 10)) then max 0.0 (1.0 - Constants.maimSlow * s.P.SlowMagnitude * potency / 100.0) else 1.0)
+                                * (if (at e.SHas (at ailments 12)) then max 0.0 (1.0 - Constants.hinderSlow * s.P.SlowMagnitude * potency / 100.0) else 1.0)
                                 * (1.0 - (if (at e.Has s.P.SChilled) then (at e.DMods s.P.SChilled) |> List.sumBy (fun m -> m.Value) else 0.0) / 100.0)
                             // what its debuffs make of its movement speed
                             let slow =
                                 defList s e
-                                slow * max 0.0 (dmore e movementSpeedStat 1.0)
+                                max Constants.slowFloor (slow * Rarity.slowed e.Def.Rarity (max 0.0 (dmore e movementSpeedStat 1.0)))
                             let step = min gap (e.Def.Speed * slow * dt)
                             e.Def <- { e.Def with Position = Vec.scale ((d - step) / d) e.Def.Position }
                             s.AliveStale <- true
@@ -4319,7 +4322,7 @@ module Flat =
             if magnitude >= current then
                 addDebuff s e id duration 1 [ Mod.inc (DamageTaken AllDamage) magnitude |> Mod.from "Shock" ]
         | Status (Chill, magnitude, duration) ->
-            addDebuff s e p.SChilled duration 1 [ Mod.base' (Named "ChillMagnitude") magnitude ]
+            addDebuff s e p.SChilled duration 1 [ Mod.base' (Named "ChillMagnitude") (magnitude * Rarity.slowPotency e.Def.Rarity) ]
         | Status (a, _, duration) -> addDebuff s e (at p.AilmentStatus (ailmentIndex a)) duration 1 []
         | AddBuildup (a, pct, lasts) ->
             let ai = ailmentIndex a
@@ -6056,8 +6059,8 @@ module Flat =
             out.Add(Status(Shock, Constants.baseShockMagnitude * multQ ev (at qMagnitude (ailmentIndex Shock)), ailmentDuration ev Shock))
         (let cold = source ev Chill un
          let effect = Constants.chillEffectMultiplier * cold / threshold * multQ ev (at qMagnitude (ailmentIndex Chill))
-         if effect >= 1.0 then
-            out.Add(Status(Chill, min Constants.chillMaxEffect (max Constants.chillMinEffect effect), ailmentDuration ev Chill)))
+         if effect >= Constants.chillMinEffect then
+            out.Add(Status(Chill, min Constants.chillMaxEffect effect, ailmentDuration ev Chill)))
         for place in 0 .. flatAilments.Length - 1 do
             let a = at flatAilments place
             if rng.Chance(ailmentChance ev n flammable threshold a un) then out.Add(Status(a, 0.0, ailmentDuration ev a))
@@ -6416,7 +6419,8 @@ module Flat =
                 // leech, and what a hit and a kill give back
                 (match (if s.Main.Vitals.IsSome then p.Vitals else None) with
                  | Some v ->
-                    let leech = min (at de 0) Constants.effectiveMaxDamageForLeech * sumQ ev qManaLeech / 100.0
+                    let kept = Rarity.leechKept def0.Level
+                    let leech = min (at de 0) Constants.effectiveMaxDamageForLeech * sumQ ev qManaLeech / 100.0 * kept
                     // leech counts from one enemy per hit event: only the largest instance
                     let extra = max 0.0 (leech - s.StrikeLeech)
                     let charges =
@@ -6433,7 +6437,7 @@ module Flat =
                             + (if flagQ ev qLeechFire then at de (typeIndex Fire) else 0.0) + (if flagQ ev qLeechChaos then at de (typeIndex Chaos) else 0.0)
                     let lifeLeechFull =
                         min leechBase Constants.effectiveMaxDamageForLeech * sumQ ev qLifeLeech / 100.0
-                        * multQ ev qLifeLeechAmount * v.LifeRecoveryRate
+                        * multQ ev qLifeLeechAmount * v.LifeRecoveryRate * kept
                     let lifeLeech = max 0.0 (lifeLeechFull - s.StrikeLifeLeech)
                     let onHit = sumQ ev qLifeOnHit * v.LifeRecoveryRate
                     let manaOnHit = sumQ ev qManaOnHit * v.ManaRecoveryRate
@@ -7126,7 +7130,7 @@ module Flat =
         let actionSpeed = max 0.1 (dmore e actionSpeedStat 1.0)
         let dealt = max 0.0 (dmore e damageDealtStat 1.0)
         let atk = { atk with Damage = Vitals.withExtraChaos (dsum e Base gainAsChaosStat 0.0) atk.Damage }
-        let next = atk.Interval / max 0.1 (1.0 - chill / 100.0) / actionSpeed
+        let next = (if (1.0 - chill / 100.0) * actionSpeed < Constants.slowFloor then atk.Interval / Constants.slowFloor else atk.Interval / max 0.1 (1.0 - chill / 100.0) / actionSpeed)
         schedule s (s.Time + next) EEnemyAttack index 0 0.0 0.0
         if stopped then bump s p.CStopped
         else
@@ -7316,7 +7320,7 @@ module Flat =
             let actionSpeed = max 0.1 (dmore e actionSpeedStat 1.0)
             let dealt = max 0.0 (dmore e damageDealtStat 1.0)
             let atk = { atk with Damage = atk.Damage |> Map.map (fun _ d -> d * dealt) |> Vitals.withExtraChaos (dsum e Base gainAsChaosStat 0.0) }
-            let next = atk.Interval / max 0.1 (1.0 - chill / 100.0) / actionSpeed
+            let next = (if (1.0 - chill / 100.0) * actionSpeed < Constants.slowFloor then atk.Interval / Constants.slowFloor else atk.Interval / max 0.1 (1.0 - chill / 100.0) / actionSpeed)
             schedule s (s.Time + next) EEnemyAttack index 0 0.0 0.0
             let inRange = Vec.length e.Def.Position - e.Def.Size <= atk.Range + 1e-6
             if stopped then bump s p.CStopped
@@ -7446,9 +7450,9 @@ module Flat =
                          if lightning > 0.0 && rng.Chance(min 100.0 (lightning / thr * Constants.shockChanceMultiplier)) && not (avoided "Shock") then
                             unlessCharm "Shocked" (buff p.BShocked p.CPlayerShocked [ Mod.base' (Named "ShockTaken") (Constants.baseShockMagnitude * effect "Shock") ] (Constants.playerShockDuration * lasts "Shock")))
                         (let cold = get Cold
-                         let chill = Constants.chillEffectMultiplier * cold / thr * effect "Chill"
-                         if chill >= 1.0 && not (avoided "Chill") then
-                            unlessCharm "Slowed" (buff p.BChilled p.CPlayerChilled [ Mod.more Speed (-(min Constants.chillMaxEffect (max Constants.chillMinEffect chill))) ] (Constants.playerChillDuration * lasts "Chill"))
+                         let chill = Constants.chillEffectMultiplier * cold / thr
+                         if chill >= Constants.chillMinEffect && effect "Chill" > 0.0 && not (avoided "Chill") then
+                            unlessCharm "Slowed" (buff p.BChilled p.CPlayerChilled [ Mod.more Speed (-(min Constants.chillMaxEffect chill * effect "Chill")) ] (Constants.playerChillDuration * lasts "Chill"))
                          // freeze builds up with cold damage; full: frozen
                          if cold > 0.0 && not (avoided "Freeze") then
                             let buildup = s.FreezeBuildup + cold * Constants.playerFreezeScale / max 1.0 v.FreezeThreshold * 100.0
@@ -7461,10 +7465,12 @@ module Flat =
                             unmitigated |> Map.toList
                             |> List.sumBy (fun (t, d) -> if t = Physical then d * (1.0 + Constants.monsterPhysicalStunMore / 100.0) else d)
                             |> fun d -> if atk.Melee then d * (1.0 + Constants.monsterMeleeStunMore / 100.0) else d
-                        let stunChance = min 100.0 (stunDamage / max 1.0 v.StunThreshold * 100.0)
+                        let stuns = s.Stuns |> List.filter (fun t -> t > s.Time - Constants.recentlySeconds)
+                        let stunChance = min 100.0 (stunDamage / (max 1.0 v.StunThreshold * (1.0 + Constants.lightStunThresholdMore / 100.0 * float stuns.Length)) * 100.0)
                         if stunChance >= Constants.playerLightStunMinimum && rng.Chance stunChance && not (rng.Chance v.AvoidStun) then
                             unlessCharm "Stunned" (fun () ->
                                 lock (Constants.playerLightStunDuration / v.StunRecovery) p.CPlayerStunned ()
+                                s.Stuns <- s.Time :: stuns
                                 // "if you've been Stunned Recently"; life regenerated over a second (`Sim.attackPlayer`)
                                 markStatus s p.BStunnedRecently
                                 if v.RegenOnStun > 0.0 then
@@ -8221,6 +8227,7 @@ module Flat =
               Front = (match p.Fight.March with Some m -> m.Engage | None -> 0.0)
               Packs = 0
               FreezeBuildup = 0.0
+              Stuns = []
               ShockWas = 0.0
               BrokenWas = 0.0
               InfernalFlame = 0.0

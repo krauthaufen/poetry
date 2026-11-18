@@ -114,6 +114,14 @@
         "Value",
         "Divisor"
       ]
+    },
+    {
+      "name": "DefaultMonsterStats",
+      "columns": [
+        "DisplayLevel",
+        "LeechResistance",
+        "RareUniqueLeechResistance"
+      ]
     }
   ]
 }

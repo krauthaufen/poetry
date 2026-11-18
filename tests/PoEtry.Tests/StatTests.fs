@@ -536,12 +536,22 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         let life = (load blank Options.defaults).Vitals.Life
         near (regen [] + life * 0.01) (regen [ "Regenerate 1% of maximum Life per second while stationary" ]))
 
+    test "slows: weaker on rarer monsters, never below a quarter of the speed" (fun () ->
+        near 1.0 (Rarity.slowPotency Normal)
+        near 0.85 (Rarity.slowPotency Magic)
+        near 0.7 (Rarity.slowPotency Rare)
+        near 0.5 (Rarity.slowPotency Unique)
+        // a 40% slow is 20% on a unique monster; what speeds a monster up is left alone
+        near 0.8 (Rarity.slowed Unique 0.6)
+        near 1.2 (Rarity.slowed Unique 1.2)
+        near 0.25 Constants.slowFloor)
+
     test "stun recovery: a light stun on the player is over sooner" (fun () ->
         near 1.2 (load { blank with ExtraLines = [ "20% increased Stun Recovery" ] } Options.defaults).Vitals.StunRecovery
         near 1.0 (load blank Options.defaults).Vitals.StunRecovery
-        // a brute whose every hit stuns (0.35 s), once a second, against a spell of 0.2 s. A stun
-        // delays the next cast to its end (the cast under way goes on): 0.15 to 0.35 s lost
-        // each time, and with twice the recovery (0.175 s, less than a cast) at most 0.175 s
+        // a brute whose every hit stuns (0.53 s), once a second, against a spell of 0.2 s. A stun
+        // delays the next cast to its end (the cast under way goes on): 0.33 to 0.53 s lost
+        // each time, and with twice the recovery (0.265 s) at most 0.265 s
         let brute =
             { EnemyDef.make Rarity.defaults 70 Magic "brute" (Vec.make 5.0 0.0) with
                 Life = 1e9
@@ -553,10 +563,10 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         let uses recovery = count (Sim.run (fight recovery) 1u) "uses:Bolt"
         let slow, fast, never = uses 1.0, uses 2.0, uses 1e9
         if not (slow < fast && fast < never) then failwithf "%d casts, %d with twice the recovery, %d unstunned" slow fast never
-        // 151 casts begun unstunned (the last as the fight ends); 30 stuns cost 4.5 to 10.5 s
-        // (22 to 53 casts), or at most 5.25 s (26 casts)
+        // 151 casts begun unstunned (the last as the fight ends); 30 stuns cost 9.9 to 15.9 s
+        // (49 to 80 casts), or at most 7.95 s (40 casts)
         equal (box 151) (box never)
-        if slow < never - 54 || slow > never - 22 || fast < never - 27 then failwithf "%d and %d casts" slow fast
+        if slow < never - 81 || slow > never - 49 || fast < never - 41 then failwithf "%d and %d casts" slow fast
         same (fight 1.0) seeds
         same (fight 2.0) seeds)
 
@@ -2422,15 +2432,21 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
         equal (box (Named "LifeLeech", 5.0, [ SkillIs Spell ])) (box (leech.Head.Stat, leech.Head.Value, leech.Head.Conds))
         equal 5 leech.Length
         let zap = { Skill.make "Zap" [ Attack ] with BaseDamage = Map.ofList [ Lightning, Range.fixedAt 400.0; Physical, Range.fixedAt 100.0 ]; BaseTime = 0.5; BaseCrit = 0.0 }
-        let leeching (ms: Mod list) =
+        let leeching level (ms: Mod list) =
             let p = { Actor.make "Player" (Mod.base' (Named "Accuracy") 1e9 :: Mod.base' (Named "LifeLeech") 10.0 :: ms) [ zap ] with Rotation = [ Actor.always "Zap" ]; Vitals = Some(PlayerStats.basic 5000.0 0.0) }
-            Fight.single foe p 12.5
-        let lowest ms = (Sim.run (leeching ms) 1u).MinLife
+            Fight.single { foe with Level = level } p 12.5
+        // (a monster below level 31 resists no leech)
+        let lowest ms = (Sim.run (leeching 20 ms) 1u).MinLife
         // 10 a hit from the physical damage, 50 with the lightning: the life sinks less
         equal (box true) (box (lowest (mods "life_leech_also_recovers_based_on_lightning_damage" 1.0) > lowest [] + 0.01))
         equal (box true) (box (lowest (mods "life_leech_recovers_based_on_your_chaos_damage_instead_of_physical_damage" 1.0) < lowest [] - 0.001))
         for ms in [ []; mods "life_leech_also_recovers_based_on_elemental_damage_types" 1.0; mods "life_leech_recovers_based_on_your_chaos_damage_instead_of_physical_damage" 1.0 ] do
-            same (leeching ms) seeds)
+            same (leeching 20 ms) seeds
+        // a level 80 monster resists 92% of it (DefaultMonsterStats LeechResistance)
+        near 0.0796 (Rarity.leechKept 80)
+        near 1.0 (Rarity.leechKept 30)
+        equal (box true) (box ((Sim.run (leeching 80 []) 1u).MinLife < lowest [] - 0.001))
+        same (leeching 80 []) seeds)
 
     test "Ancestral Bond: the totems and the persistent minions share the Spirit that is left, no point is spent twice" (fun () ->
         let b = { blank with Groups = [ group [ gem "Shockwave Totem" ]; group [ gem "Skeletal Warrior Minion" ] ]; ExtraLines = [ "+400 to Spirit" ] }
