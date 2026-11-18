@@ -169,7 +169,13 @@ module Api =
                             if pairs.IsEmpty then None else Some(Items.statsLinePrefix + String.concat ";" pairs)
                         | _ -> None))
             | _ -> []
-        [ "Rarity: " + get "rarity"; get "name"; get "typeLine"; "--------" ] @ quality @ defences @ templated @ radius @ sockets @ [ "--------" ] @ utility @ modLines item @ statLines
+        // a magic item's type line carries its affixes ("Consistent Aegis Quarterstaff of the Boxer"):
+        // that is its name, and the base is given separately
+        let name, baseLine =
+            match get "name", get "typeLine", get "baseType" with
+            | "", t, b when b <> "" && b <> t -> t, b
+            | n, t, _ -> n, t
+        [ "Rarity: " + get "rarity"; name; baseLine; "--------" ] @ quality @ defences @ templated @ radius @ sockets @ [ "--------" ] @ utility @ modLines item @ statLines
         |> String.concat "\n"
 
     let private gemLevel (gem: Json) =
