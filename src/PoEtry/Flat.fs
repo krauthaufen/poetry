@@ -7257,6 +7257,10 @@ module Flat =
             (match p.Vitals with
              | Some v when charge = (at p.BCharges 0) -> gainMana s v 6 (v.Mana * p.ConsumePowerMana / 100.0)
              | _ -> ())
+            // life for each Endurance Charge consumed: kept ones count as consumed too
+            if charge = (at p.BCharges 2) then
+                let had = if (at s.A.BHas charge) then (at s.A.BStacks charge) else 0
+                enduranceLife s (if count > 0 && had > count then count else had)
             if rng.Chance skip then
                 bump s info.CKept
                 let pause = p.Actor.KeptChargesPause
@@ -7272,9 +7276,6 @@ module Flat =
                         put s.A.BPaused charge (newUntil)
                         expireAt s expires
             else
-                if charge = (at p.BCharges 2) then
-                    let had = if (at s.A.BHas charge) then (at s.A.BStacks charge) else 0
-                    enduranceLife s (if count > 0 && had > count then count else had)
                 // one charge, a set number, or all of them (0)
                 if (at s.A.BHas charge) && count > 0 && (at s.A.BStacks charge) > count then setBuff s charge ((at s.A.BStacks charge) - count) (at s.A.BExpires charge) (at s.A.BMods charge)
                 else removeBuff s charge
@@ -7376,10 +7377,11 @@ module Flat =
                     (match p.Vitals with
                      | Some v when r = (at p.BCharges 0) -> gainMana s v 6 (v.Mana * p.ConsumePowerMana / 100.0)
                      | _ -> ())
+                    // (life for an Endurance Charge consumed: a kept one counts as consumed too)
+                    if r = (at p.BCharges 2) then enduranceLife s 1
                     if rng.Chance p.SheetSkip then bump s (at p.CKeptOf r)
                     else
                         setStacks s false r (have - 1)
-                        if r = (at p.BCharges 2) then enduranceLife s 1
                         bump s (at p.CLostOf r)
 
     /// A monster's hit at the player: evasion, deflection, armour, resistances, then energy

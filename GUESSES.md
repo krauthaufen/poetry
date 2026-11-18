@@ -18,7 +18,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
    whose description or behaviour changed.
 5. Go through the lists below; the wiki's version history of a skill says what changed.
 
-## Rules (171)
+## Rules (170)
 
 ### Hit damage
 
@@ -70,7 +70,6 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | Damage per target | When one use hits several enemies, each enemy gets its own damage roll. The game might roll once for the whole use instead. | — | guess |
 | Resistances "treated as negated" | With a chance to treat resistance "as negated", a positive resistance counts as its negative for that hit. Whether penetration and exposure are applied before or after the flip is assumed. | game text | guess (interaction with penetration/exposure order) |
 | States of a while ago | Bonuses "for each X recently" count stacks that all share one timer, restarted by each new one (the game lets each run out alone). Igniting the same enemy again counts again. | stat descriptions; the shared time of a count and that a repeated Ignite of one enemy counts are ours | data; guess |
-| Life per Endurance Charge consumed | "Recover Life for each Endurance Charge consumed": if a chance lets the character keep its charges, the simulator gives no life for them. That reads "consumed" strictly. | stat description; "none when kept" is our reading of "consumed" | data; guess |
 | Chance to not remove charges | Chances not to lose charges on use are simply added up, and at 100% charges are never lost. Flicker Strike is known to be capped at 75% in the game; other skills may have a hidden cap too. | game text | guess (cap: Flicker Strike's equivalent is hard-capped at 75%) |
 | Projectiles of `ProjectilesNotFromUser` skills (Falling Thunder) | Some skills fire projectiles from where they strike, not from the character (Falling Thunder). They are taken to start at the impact, fly outwards away from the player, and hit an enemy they start inside at once. | skill text, skill type | guess (geometry) |
 | Slam impact point | A slam lands a set distance in front of the character (1.5 metres unless changed), or on the enemy's centre if that is closer. | setting (default 15) | guess |

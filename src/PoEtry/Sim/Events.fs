@@ -295,6 +295,11 @@ let consumeCharges (env: Env) (rng: Rng) name charge skillName (w: World) =
             | Some v when charge = "PowerCharge" ->
                 gainMana v "consume" (v.Mana * Mods.sumBase Ctx.empty [ Named "ManaPercentOnConsumePower" ] (ModDb.ofList actor.Mods) / 100.0) w
             | _ -> w
+        // one charge, a set number, or all of them (0)
+        let count = int (Mods.sumBase Ctx.empty [ Named "ConsumeChargeCount" ] (skillDb env actor (skillOf actor skillName) st))
+        let had = match Map.tryFind charge st.Buffs with Some e -> e.Stacks | None -> 0
+        // life for each Endurance Charge consumed: kept ones count as consumed too
+        let w = if charge = "EnduranceCharge" then enduranceLife actor (if count > 0 && had > count then count else had) w else w
         if rng.Chance skip then
             let w = { w with Counts = bump ("kept:" + charge) w.Counts }
             if actor.KeptChargesPause > 0.0 then
@@ -312,10 +317,6 @@ let consumeCharges (env: Env) (rng: Rng) name charge skillName (w: World) =
                 | _ -> w
             else w
         else
-            // one charge, a set number, or all of them (0)
-            let count = int (Mods.sumBase Ctx.empty [ Named "ConsumeChargeCount" ] (skillDb env actor (skillOf actor skillName) st))
-            let had = match Map.tryFind charge st.Buffs with Some e -> e.Stacks | None -> 0
-            let w = if charge = "EnduranceCharge" then enduranceLife actor (if count > 0 && had > count then count else had) w else w
             updateActor name (fun st ->
                 match Map.tryFind charge st.Buffs with
                 | Some e when count > 0 && e.Stacks > count -> { st with Buffs = Map.add charge { e with Stacks = e.Stacks - count } st.Buffs }

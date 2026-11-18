@@ -72,10 +72,11 @@ let onPeriodic env (rng: Rng) actorName periodicName (w: World) =
                             | Some v when r = "PowerCharge" ->
                                 gainMana v "consume" (v.Mana * Mods.sumBase Ctx.empty [ Named "ManaPercentOnConsumePower" ] (ModDb.ofList actor.Mods) / 100.0) w
                             | _ -> w
+                        // (life for an Endurance Charge consumed: a kept one counts as consumed too)
+                        let w = if r = "EnduranceCharge" then enduranceLife actor 1 w else w
                         if rng.Chance skip then { w with Counts = bump ("kept:" + r) w.Counts }
                         else
-                            setStacksWith env actorName false r (stacksOf st r - 1) w |> fun w -> { w with Counts = bump ("lost:" + r) w.Counts }
-                            |> fun w -> if r = "EnduranceCharge" then enduranceLife actor 1 w else w)
+                            setStacksWith env actorName false r (stacksOf st r - 1) w |> fun w -> { w with Counts = bump ("lost:" + r) w.Counts })
                 w
 
 /// Whether an enemy that died of damage over time at `at` is the player's kill: some damage

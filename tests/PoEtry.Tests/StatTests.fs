@@ -1420,7 +1420,12 @@ let run (test: string -> (unit -> unit) -> unit) (near: float -> float -> unit) 
                     MaxResources = Map.ofList [ "EnduranceCharge", 3 ] }
             Fight.single { EnemyDef.atLevel 83 1e9 with Mods = []; Attack = None } player 3.5
         equal (box 3) (box (count (Sim.run (fight 30.0) 1u) "consumed:EnduranceCharge"))
-        same (fight 30.0) seeds)
+        same (fight 30.0) seeds
+        // charges that are kept "still count as consuming": the life comes all the same
+        let kept = { fight 30.0 with Player = { (fight 30.0).Player with Mods = [ Mod.base' (Named "ChargeSkipConsume") 100.0 ] } }
+        equal (box 0) (box (count (Sim.run kept 1u) "consumed:EnduranceCharge"))
+        equal (box 3) (box (count (Sim.run kept 1u) "kept:EnduranceCharge"))
+        same kept seeds)
 
     test "Every Rage also grants X% increased Stun Threshold: in the fight, by the Rage held" (fun () ->
         let c = load { blank with ExtraLines = [ "Every Rage also grants 2% increased Stun Threshold" ] } Options.defaults
