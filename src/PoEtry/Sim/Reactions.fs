@@ -10,6 +10,27 @@ open PoEtry
 // (again, after PoEtry: where both have a record with a field of one name, the engine's is meant)
 open PoEtry.Engine
 
+/// A use of a skill that has begun, as what it sets going sees it.
+type StartedUse =
+    { Env: Env
+      Rng: Rng
+      Actor: Actor
+      Skill: Skill
+      /// The enemy aimed at.
+      Target: EnemyState
+      /// The actor's state as the use began (its cooldown started, its Rage spent).
+      State: ActorState
+      /// The actor's modifiers with the skill, and what they are asked with.
+      Ctx: Ctx
+      Mods: ModDb
+      /// How long the use takes (0: triggered).
+      UseTime: float
+      /// When each of its hits lands, and the damage multiplier of each; the first of those times.
+      Times: (float * float) list
+      First: float
+      /// A chained attack: this use's place in the chain.
+      Step: int option }
+
 /// What the reactions of one rule share: whose rule it is, the skill that set it off, and
 /// the enemy the triggering event concerns (the one hit, or the one aimed at).
 type Reacting =
@@ -316,6 +337,222 @@ let spreadPoison (c: Reacting) radius hinder (w: World) =
                 if c.Rng.Chance hinder then addDebuff o.Def.Name "Hindered" longest 1 [] w else w) w
     | None -> w
 
+// ---- what a use that has begun sets going (`startUse` below goes through these in order) ----
+
+/// The use's hits, each as an event at its time: every part of the skill that happens with this use strikes.
+let scheduleStrikes (u: StartedUse) (w: World) : World =
+    let actor, skill, target, st, times, first, step = u.Actor, u.Skill, u.Target, u.State, u.Times, u.First, u.Step
+    times
+    |> List.fold
+        (fun w (at, mult) ->
+            // every part of the skill strikes together
+            // a "Frenzy-Charged" part happens only when the use has a charge to consume,
+            // and then in place of the plain explosion; other parts need a charge, an
+            // infusion, or wait for another skill to set them off
+            let stacks name = Map.tryFind name st.Buffs |> Option.map (fun e -> e.Stacks) |> Option.defaultValue 0
+            let charged = match skill.Consumes with Some charge -> stacks charge > 0 | None -> false
+            let isCharged (p: Skill) = p.Name.EndsWith "-Charged"
+            let hasCharged = skill.Parts |> List.exists isCharged
+            // a part that spends Rage happens when there is enough, in place of the plain one
+            let rageFor (p: Skill) = p.Mods |> List.sumBy (fun m -> if m.Stat = Named "SpendsRage" then m.Value else 0.0)
+            let enraged = skill.Parts |> List.exists (fun p -> rageFor p > 0.0 && float (stacks "Rage") >= rageFor p)
+            (skill :: skill.Parts)
+            |> List.filter (fun p -> not (partFlag p "DetonatedByDamage"))
+            // a part that happens once however long the skill keeps hitting (an eruption)
+            |> List.filter (fun p -> at <= first || not (partFlag p "OncePerUse"))
+            // a part that only happens when something sets it off (the Bell's shockwave)
+            |> List.filter (fun p -> p.Name = skill.Name || not (partFlag p "OnlyTriggered"))
+            |> List.filter (fun p ->
+                if rageFor p > 0.0 then enraged
+                elif partFlag p "NotEnraged" then not enraged
+                elif partFlag p "NotWithCharge" then not charged
+                elif isCharged p || partFlag p "OnlyWithCharge" then charged
+                elif (partNamed p "DetonatedBy:").IsSome then false
+                else
+                    match partNamed p "OnlyInfused:" with
+                    | Some infusion -> stacks infusion > 0
+                    | None -> not (hasCharged && charged && p.Name.EndsWith ": Explosion"))
+            |> List.filter (inStep step)
+            |> List.fold (fun w (part: Skill) ->
+                // a strike of the chain that hits several times, spread over the use
+                let n = part.Mods |> List.tryPick (fun m -> if m.Stat = Named "SeqHits" then Some(int m.Value) else None) |> Option.defaultValue 1
+                [ 1 .. n ] |> List.fold (fun w i ->
+                    let passing = match part.Delivery with Projectiles p -> p.Passing > 0.0 && p.HitInterval <= 0.0 | _ -> false
+                    if passing then schedule at (PassingStrike(actor.Name, part.Name, mult, target.Def.Name, at - w.Time)) w
+                    else schedule ((if n = 1 then at else w.Time + (at - w.Time) * float i / float n) + (if part.Name = skill.Name then 0.0 else partDelay part)) (Strike(actor.Name, part.Name, mult, target.Def.Name)) w) w) w)
+        w
+
+/// Ice Crystals the use leaves behind (Grim Pillars, a wall of ice).
+let leaveCrystals (u: StartedUse) (w: World) : World =
+    // Ice Crystals the use leaves behind (Grim Pillars): each stands at a random spot of the
+    // skill's area (around the user, or around the target), and those whose explosion
+    // reaches the target count. They appear after the use's own hits, which do not
+    // damage them.
+    let rng, actor, skill, target, ctx, mods, times = u.Rng, u.Actor, u.Skill, u.Target, u.Ctx, u.Mods, u.Times
+    (skill :: skill.Parts) |> List.filter (fun p -> partFlag p "Crystals") |> List.fold (fun w p ->
+        let sum (q: Skill) name = q.Mods |> List.sumBy (fun m -> if m.Stat = Named name then m.Value else 0.0)
+        let areaMult = Mods.mult ctx [ AreaOfEffect ] mods
+        let radius (q: Skill) = match q.Delivery with AreaAroundSelf r | AreaAtTarget r -> Geometry.radius r areaMult | _ -> 0.0
+        let centre = match skill.Delivery with AreaAroundSelf _ -> Vec.zero | _ -> target.Def.Position
+        let spread, reach = radius skill, radius p
+        let stands () =
+            if spread <= 0.0 || reach <= 0.0 then true
+            else
+                let r, a = spread * sqrt (rng.Float()), 2.0 * System.Math.PI * rng.Float()
+                Vec.dist (Vec.add centre (Vec.scale r (Vec.ofAngle a))) target.Def.Position <= reach + target.Def.Size
+        // one crystal where the skill does not say how many
+        let life = sum p "CrystalLife"
+        let last = times |> List.map fst |> List.fold max w.Time
+        // a wall: a row of crystals through the target, across the line to it. Those
+        // that come up inside the monster are broken by it at once (80% less); the
+        // others stand, and count if their explosion reaches it
+        // (only a wall cast onto the target itself: where a bolt's two walls stand is not known)
+        let wall = if p.Name = skill.Name then sum p "WallLength" else 0.0
+        let row =
+            if wall <= 0.0 then []
+            else
+                let n = max 1 (int (wall / Constants.iceCrystalWidth))
+                [ for i in 0 .. n - 1 -> abs ((float i - float (n - 1) / 2.0) * Constants.iceCrystalWidth) ]
+        let broken = row |> List.filter (fun d -> d <= target.Def.Size) |> List.length
+        let w =
+            if life > 0.0 && broken > 0 then
+                [ 1 .. broken ] |> List.fold (fun w _ -> schedule (last + 1e-6) (Strike(actor.Name, p.Name, Constants.freshCrystalDamage, target.Def.Name)) w) w
+            else w
+        let created = if wall > 0.0 then max 1 row.Length else max 1 (int (sum p "CrystalsCreated"))
+        let near =
+            if wall > 0.0 then row |> List.filter (fun d -> d > target.Def.Size && d <= reach + target.Def.Size) |> List.length
+            else [ 1 .. created ] |> List.filter (fun _ -> stands ()) |> List.length
+        if life > 0.0 && near > 0 then
+            let lasts = if p.Duration > 0.0 then p.Duration * Mods.mult ctx [ SkillDuration ] mods else 1e9
+            // the limit counts every crystal; of those, the share that stands near
+            let limit = max near (int (System.Math.Round(max (float created) (sum p "CrystalLimit") * float near / float created)))
+            schedule (last + 1e-6) (PlantCrystals(actor.Name, p.Name, target.Def.Name, near, life, limit, lasts)) w
+        else w) w
+
+/// A seed planted in the enemy aimed at (Living Bomb).
+let plantBomb (u: StartedUse) (w: World) : World =
+    // a seed planted in the target (Living Bomb): it explodes once the enemy has taken
+    // enough damage from then on; a new seed replaces the old one
+    let actor, skill, target, ctx, mods, useTime = u.Actor, u.Skill, u.Target, u.Ctx, u.Mods, u.UseTime
+    match skill.Mods |> List.tryPick (fun m -> if m.Stat = Named "DetonatedByDamage" then Some m.Value else None) with
+    | Some pct ->
+        let needed = pct / 100.0 * max 1.0 (Ailments.threshold (defender target))
+        let lasts = if skill.Duration > 0.0 then skill.Duration * Mods.mult ctx [ SkillDuration ] mods else 1e9
+        { w with
+            Bombs = { Bomb.Owner = actor.Name; Skill = skill.Name; Enemy = target.Def.Name; Mark = target.Life; Needed = needed; Until = w.Time + useTime + lasts } :: (w.Bombs |> List.filter (fun b -> not (b.Owner = actor.Name && b.Skill = skill.Name)))
+            Counts = bump ("planted:" + skill.Name) w.Counts }
+    | None -> w
+
+/// The Rage a part of the skill spent.
+let spendPartRage (u: StartedUse) (w: World) : World =
+    // the Rage a part spent
+    let actor, skill, st = u.Actor, u.Skill, u.State
+    let need = skill.Parts |> List.sumBy (fun p -> p.Mods |> List.sumBy (fun m -> if m.Stat = Named "SpendsRage" then m.Value else 0.0))
+    match Map.tryFind "Rage" st.Buffs with
+    | Some r when need > 0.0 && float r.Stacks >= need ->
+        { w with Counts = bump ("enraged:" + skill.Name) w.Counts }
+        |> updateActor actor.Name (fun st ->
+            let left = r.Stacks - int need
+            { st with Buffs = if left > 0 then Map.add "Rage" { r with Stacks = left } st.Buffs else Map.remove "Rage" st.Buffs })
+    | _ -> w
+
+/// A debuff that records damage (Inevitable Agony), on the enemy aimed at.
+let startRecording (u: StartedUse) (w: World) : World =
+    // a debuff that records damage (Inevitable Agony), on the enemy aimed at
+    let actor, skill, target, ctx, mods, useTime = u.Actor, u.Skill, u.Target, u.Ctx, u.Mods, u.UseTime
+    match skill.Mods |> List.tryPick (fun m -> if m.Stat = Named "RecordsDamage" then Some m.Value else None) with
+    | Some pct when skill.Duration > 0.0 ->
+        let lasts = skill.Duration * Mods.mult ctx [ SkillDuration ] mods
+        { w with
+            Agonies = { Agony.Owner = actor.Name; Skill = skill.Name; Enemy = target.Def.Name; Recorded = 0.0; Share = pct / 100.0; Until = w.Time + useTime + lasts } :: (w.Agonies |> List.filter (fun a -> not (a.Owner = actor.Name && a.Skill = skill.Name)))
+            Counts = bump ("recording:" + skill.Name) w.Counts }
+    | _ -> w
+
+/// An infusion a part needed is used up; a part that waits to be set off is put down.
+let spendInfusionOrWait (u: StartedUse) (w: World) : World =
+    // an infusion a part needed is used up; a part that waits is put down
+    let actor, skill, st = u.Actor, u.Skill, u.State
+    skill.Parts |> List.fold (fun w p ->
+        match partNamed p "OnlyInfused:", partNamed p "DetonatedBy:" with
+        | Some infusion, _ when (Map.tryFind infusion st.Buffs |> Option.map (fun e -> e.Stacks) |> Option.defaultValue 0) > 0 ->
+            updateActor actor.Name (fun st ->
+                match Map.tryFind infusion st.Buffs with
+                | Some e when e.Stacks > 1 -> { st with Buffs = Map.add infusion { e with Stacks = e.Stacks - 1 } st.Buffs }
+                | _ -> { st with Buffs = Map.remove infusion st.Buffs }) w
+        | _, Some _ -> updateActor actor.Name (fun st -> { st with Pending = Map.add p.Name (min (waitLimit p) ((Map.tryFind p.Name st.Pending |> Option.defaultValue 0) + 1)) st.Pending }) w
+        | _ -> w) w
+
+/// A detonator (or a warcry) sets off everything of its kind that waits.
+let detonateWaiting (u: StartedUse) (w: World) : World =
+    // a detonator (or a warcry) sets off everything of that kind that waits
+    let actor, skill, target, st, times = u.Actor, u.Skill, u.Target, u.State, u.Times
+    let st = Map.find actor.Name w.Actors
+    actor.Skills |> List.collect (fun s -> s.Parts) |> List.fold (fun w p ->
+        match partNamed p "DetonatedBy:", Map.tryFind p.Name st.Pending with
+        | Some by, Some n when n > 0 && not (skill.Parts |> List.exists (fun q -> q.Name = p.Name))
+                               && ((by = "Warcry" && skill.Tags.Contains Warcry) || skill.Tags.Contains(Tag by)) ->
+            let last = times |> List.map fst |> List.fold max w.Time
+            let w = updateActor actor.Name (fun st -> { st with Pending = Map.remove p.Name st.Pending }) w
+            [ 1 .. n ] |> List.fold (fun w _ -> schedule (last + 1e-6) (Strike(actor.Name, p.Name, 1.0, target.Def.Name)) w) w
+            |> fun w -> { w with Counts = bump ("detonated:" + p.Name) w.Counts }
+        | _ -> w) w
+
+/// An attack made while empowered by a warcry uses one empowerment up.
+let spendEmpowerments (u: StartedUse) (w: World) : World =
+    // an attack the player makes while empowered by a warcry uses one empowerment up
+    let actor, skill, st, useTime, times = u.Actor, u.Skill, u.State, u.UseTime, u.Times
+    if useTime > 0.0 && skill.Tags.Contains Attack && not (skill.Tags.Contains Warcry) then
+        let last = times |> List.map fst |> List.fold max w.Time
+        // (and by Mantra of Destruction, Temper Weapon: "EmpoweredAttacks:<skill>")
+        st.Buffs |> Map.toList |> List.filter (fun (k, _) -> k.StartsWith "EmpoweredAttacks")
+        |> List.fold (fun w (k, _) -> schedule (last + 1e-9) (SpendBuff(actor.Name, k)) w) w
+    else w
+
+/// A Repeatable attack uses up one of those readied for it (Ice-Tipped Arrows).
+let spendRepeatable (u: StartedUse) (w: World) : World =
+    // and a Repeatable attack one of those readied for it (Ice-Tipped Arrows)
+    let actor, skill, st, useTime, times = u.Actor, u.Skill, u.State, u.UseTime, u.Times
+    if useTime > 0.0 && skill.Tags.Contains Attack && skill.Tags.Contains(Tag "Type:Barrageable") then
+        let last = times |> List.map fst |> List.fold max w.Time
+        st.Buffs |> Map.toList |> List.filter (fun (k, _) -> k.StartsWith "EmpoweredRepeatable:")
+        |> List.fold (fun w (k, _) -> schedule (last + 1e-9) (SpendBuff(actor.Name, k)) w) w
+    else w
+
+/// "Cannot gain Power Charges while using this Skill": until its last strike.
+let lockPowerCharges (u: StartedUse) (w: World) : World =
+    // "Cannot gain Power Charges while using this Skill": until its last strike
+    let actor, skill, st, times = u.Actor, u.Skill, u.State, u.Times
+    if partFlag skill "NoPowerChargesDuringSkill" then
+        let last = times |> List.map fst |> List.fold max w.Time
+        updateActor actor.Name (fun st -> { st with Energy = Map.add "PowerChargeLock" last st.Energy }) w
+    else w
+
+/// The charges the skill consumes go after its last strike (an event of its own).
+let scheduleConsume (u: StartedUse) (w: World) : World =
+    let actor, skill, times = u.Actor, u.Skill, u.Times
+    match skill.Consumes with
+    | Some charge ->
+        let last = times |> List.map fst |> List.fold max w.Time
+        // "Consume it when you leap": at the start, where that is what empowers the use
+        let at = if partFlag skill "NoCooldownWithCharge" then w.Time else last
+        schedule (at + 1e-9) (ConsumeCharges(actor.Name, charge, skill.Name)) w
+    | None -> w
+
+/// Cast on Dodge: energy for the distance a dodge roll covers.
+let dodgeEnergy (u: StartedUse) (w: World) : World =
+    // Cast on Dodge: energy per unit travelled by a dodge roll
+    let actor, skill, ctx, mods, useTime = u.Actor, u.Skill, u.Ctx, u.Mods, u.UseTime
+    if useTime > 0.0 && skill.Tags.Contains(Tag "DodgeRoll") then
+        let distance = Constants.dodgeRollDistance + Mods.sumBase ctx [ Named "DodgeRollDistance" ] mods
+        actor.Metas
+        |> List.fold
+            (fun w meta ->
+                let amount = meta.Sources |> List.sumBy (function DodgeRolls per -> per * distance | _ -> 0.0)
+                // the distance is covered when the roll ends
+                if amount > 0.0 then schedule (w.Time + useTime) (EnergyArrives(actor.Name, meta.Name, amount * meta.EnergyMult)) w else w)
+            w
+    else w
+
 // ---- the rules ----
 
 /// What the actor's rules for `hook` do, for a use or hit of `skill`.
@@ -328,7 +565,7 @@ let rec react env (rng: Rng) (actor: Actor) hook (skill: Skill) (target: string 
             if not (rng.Chance r.Chance) then
                 w
             else
-                perform { Env = env; Rng = rng; Actor = actor; Skill = skill; Target = target } r.Reaction w)
+                perform { Reacting.Env = env; Rng = rng; Actor = actor; Skill = skill; Target = target } r.Reaction w)
         w
 
 /// One reaction happens: which function above (or below, for those that use a skill) it is.
@@ -624,189 +861,28 @@ and startUse env (rng: Rng) (actor: Actor) (skill: Skill) (useTime: float) (w: W
                  | DuringUse f -> w.Time + f * useTime + skill.HitDelay
                  | After s -> w.Time + s + skill.HitDelay), mult * rageforged)
         let first = times |> List.map fst |> List.fold min infinity
-        let w =
-            times
-            |> List.fold
-                (fun w (at, mult) ->
-                    // every part of the skill strikes together
-                    // a "Frenzy-Charged" part happens only when the use has a charge to consume,
-                    // and then in place of the plain explosion; other parts need a charge, an
-                    // infusion, or wait for another skill to set them off
-                    let stacks name = Map.tryFind name st.Buffs |> Option.map (fun e -> e.Stacks) |> Option.defaultValue 0
-                    let charged = match skill.Consumes with Some charge -> stacks charge > 0 | None -> false
-                    let isCharged (p: Skill) = p.Name.EndsWith "-Charged"
-                    let hasCharged = skill.Parts |> List.exists isCharged
-                    // a part that spends Rage happens when there is enough, in place of the plain one
-                    let rageFor (p: Skill) = p.Mods |> List.sumBy (fun m -> if m.Stat = Named "SpendsRage" then m.Value else 0.0)
-                    let enraged = skill.Parts |> List.exists (fun p -> rageFor p > 0.0 && float (stacks "Rage") >= rageFor p)
-                    (skill :: skill.Parts)
-                    |> List.filter (fun p -> not (partFlag p "DetonatedByDamage"))
-                    // a part that happens once however long the skill keeps hitting (an eruption)
-                    |> List.filter (fun p -> at <= first || not (partFlag p "OncePerUse"))
-                    // a part that only happens when something sets it off (the Bell's shockwave)
-                    |> List.filter (fun p -> p.Name = skill.Name || not (partFlag p "OnlyTriggered"))
-                    |> List.filter (fun p ->
-                        if rageFor p > 0.0 then enraged
-                        elif partFlag p "NotEnraged" then not enraged
-                        elif partFlag p "NotWithCharge" then not charged
-                        elif isCharged p || partFlag p "OnlyWithCharge" then charged
-                        elif (partNamed p "DetonatedBy:").IsSome then false
-                        else
-                            match partNamed p "OnlyInfused:" with
-                            | Some infusion -> stacks infusion > 0
-                            | None -> not (hasCharged && charged && p.Name.EndsWith ": Explosion"))
-                    |> List.filter (inStep step)
-                    |> List.fold (fun w (part: Skill) ->
-                        // a strike of the chain that hits several times, spread over the use
-                        let n = part.Mods |> List.tryPick (fun m -> if m.Stat = Named "SeqHits" then Some(int m.Value) else None) |> Option.defaultValue 1
-                        [ 1 .. n ] |> List.fold (fun w i ->
-                            let passing = match part.Delivery with Projectiles p -> p.Passing > 0.0 && p.HitInterval <= 0.0 | _ -> false
-                            if passing then schedule at (PassingStrike(actor.Name, part.Name, mult, target.Def.Name, at - w.Time)) w
-                            else schedule ((if n = 1 then at else w.Time + (at - w.Time) * float i / float n) + (if part.Name = skill.Name then 0.0 else partDelay part)) (Strike(actor.Name, part.Name, mult, target.Def.Name)) w) w) w)
-                w
+        let u =
+            { StartedUse.Env = env; Rng = rng; Actor = actor; Skill = skill; Target = target; State = st; Ctx = ctx; Mods = mods
+              UseTime = useTime; Times = times; First = first; Step = step }
+        let w = scheduleStrikes u w
         // what happens when the use lands: when its first hit is due, after that hit
         let w =
             if first < infinity && actor.Rules |> List.exists (fun r -> r.Hook = OnLand && matches r.Filter skill) then
                 schedule first (Landed(actor.Name, skill.Name, target.Def.Name)) w
             else w
-        // Ice Crystals the use leaves behind (Grim Pillars): each stands at a random spot of the
-        // skill's area (around the user, or around the target), and those whose explosion
-        // reaches the target count. They appear after the use's own hits, which do not
-        // damage them.
         let w =
-            (skill :: skill.Parts) |> List.filter (fun p -> partFlag p "Crystals") |> List.fold (fun w p ->
-                let sum (q: Skill) name = q.Mods |> List.sumBy (fun m -> if m.Stat = Named name then m.Value else 0.0)
-                let areaMult = Mods.mult ctx [ AreaOfEffect ] mods
-                let radius (q: Skill) = match q.Delivery with AreaAroundSelf r | AreaAtTarget r -> Geometry.radius r areaMult | _ -> 0.0
-                let centre = match skill.Delivery with AreaAroundSelf _ -> Vec.zero | _ -> target.Def.Position
-                let spread, reach = radius skill, radius p
-                let stands () =
-                    if spread <= 0.0 || reach <= 0.0 then true
-                    else
-                        let r, a = spread * sqrt (rng.Float()), 2.0 * System.Math.PI * rng.Float()
-                        Vec.dist (Vec.add centre (Vec.scale r (Vec.ofAngle a))) target.Def.Position <= reach + target.Def.Size
-                // one crystal where the skill does not say how many
-                let life = sum p "CrystalLife"
-                let last = times |> List.map fst |> List.fold max w.Time
-                // a wall: a row of crystals through the target, across the line to it. Those
-                // that come up inside the monster are broken by it at once (80% less); the
-                // others stand, and count if their explosion reaches it
-                // (only a wall cast onto the target itself: where a bolt's two walls stand is not known)
-                let wall = if p.Name = skill.Name then sum p "WallLength" else 0.0
-                let row =
-                    if wall <= 0.0 then []
-                    else
-                        let n = max 1 (int (wall / Constants.iceCrystalWidth))
-                        [ for i in 0 .. n - 1 -> abs ((float i - float (n - 1) / 2.0) * Constants.iceCrystalWidth) ]
-                let broken = row |> List.filter (fun d -> d <= target.Def.Size) |> List.length
-                let w =
-                    if life > 0.0 && broken > 0 then
-                        [ 1 .. broken ] |> List.fold (fun w _ -> schedule (last + 1e-6) (Strike(actor.Name, p.Name, Constants.freshCrystalDamage, target.Def.Name)) w) w
-                    else w
-                let created = if wall > 0.0 then max 1 row.Length else max 1 (int (sum p "CrystalsCreated"))
-                let near =
-                    if wall > 0.0 then row |> List.filter (fun d -> d > target.Def.Size && d <= reach + target.Def.Size) |> List.length
-                    else [ 1 .. created ] |> List.filter (fun _ -> stands ()) |> List.length
-                if life > 0.0 && near > 0 then
-                    let lasts = if p.Duration > 0.0 then p.Duration * Mods.mult ctx [ SkillDuration ] mods else 1e9
-                    // the limit counts every crystal; of those, the share that stands near
-                    let limit = max near (int (System.Math.Round(max (float created) (sum p "CrystalLimit") * float near / float created)))
-                    schedule (last + 1e-6) (PlantCrystals(actor.Name, p.Name, target.Def.Name, near, life, limit, lasts)) w
-                else w) w
-        // a seed planted in the target (Living Bomb): it explodes once the enemy has taken
-        // enough damage from then on; a new seed replaces the old one
-        let w =
-            match skill.Mods |> List.tryPick (fun m -> if m.Stat = Named "DetonatedByDamage" then Some m.Value else None) with
-            | Some pct ->
-                let needed = pct / 100.0 * max 1.0 (Ailments.threshold (defender target))
-                let lasts = if skill.Duration > 0.0 then skill.Duration * Mods.mult ctx [ SkillDuration ] mods else 1e9
-                { w with
-                    Bombs = { Bomb.Owner = actor.Name; Skill = skill.Name; Enemy = target.Def.Name; Mark = target.Life; Needed = needed; Until = w.Time + useTime + lasts } :: (w.Bombs |> List.filter (fun b -> not (b.Owner = actor.Name && b.Skill = skill.Name)))
-                    Counts = bump ("planted:" + skill.Name) w.Counts }
-            | None -> w
-        // the Rage a part spent
-        let w =
-            let need = skill.Parts |> List.sumBy (fun p -> p.Mods |> List.sumBy (fun m -> if m.Stat = Named "SpendsRage" then m.Value else 0.0))
-            match Map.tryFind "Rage" st.Buffs with
-            | Some r when need > 0.0 && float r.Stacks >= need ->
-                { w with Counts = bump ("enraged:" + skill.Name) w.Counts }
-                |> updateActor actor.Name (fun st ->
-                    let left = r.Stacks - int need
-                    { st with Buffs = if left > 0 then Map.add "Rage" { r with Stacks = left } st.Buffs else Map.remove "Rage" st.Buffs })
-            | _ -> w
-        // a debuff that records damage (Inevitable Agony), on the enemy aimed at
-        let w =
-            match skill.Mods |> List.tryPick (fun m -> if m.Stat = Named "RecordsDamage" then Some m.Value else None) with
-            | Some pct when skill.Duration > 0.0 ->
-                let lasts = skill.Duration * Mods.mult ctx [ SkillDuration ] mods
-                { w with
-                    Agonies = { Agony.Owner = actor.Name; Skill = skill.Name; Enemy = target.Def.Name; Recorded = 0.0; Share = pct / 100.0; Until = w.Time + useTime + lasts } :: (w.Agonies |> List.filter (fun a -> not (a.Owner = actor.Name && a.Skill = skill.Name)))
-                    Counts = bump ("recording:" + skill.Name) w.Counts }
-            | _ -> w
-        // an infusion a part needed is used up; a part that waits is put down
-        let w =
-            skill.Parts |> List.fold (fun w p ->
-                match partNamed p "OnlyInfused:", partNamed p "DetonatedBy:" with
-                | Some infusion, _ when (Map.tryFind infusion st.Buffs |> Option.map (fun e -> e.Stacks) |> Option.defaultValue 0) > 0 ->
-                    updateActor actor.Name (fun st ->
-                        match Map.tryFind infusion st.Buffs with
-                        | Some e when e.Stacks > 1 -> { st with Buffs = Map.add infusion { e with Stacks = e.Stacks - 1 } st.Buffs }
-                        | _ -> { st with Buffs = Map.remove infusion st.Buffs }) w
-                | _, Some _ -> updateActor actor.Name (fun st -> { st with Pending = Map.add p.Name (min (waitLimit p) ((Map.tryFind p.Name st.Pending |> Option.defaultValue 0) + 1)) st.Pending }) w
-                | _ -> w) w
-        // a detonator (or a warcry) sets off everything of that kind that waits
-        let w =
-            let st = Map.find actor.Name w.Actors
-            actor.Skills |> List.collect (fun s -> s.Parts) |> List.fold (fun w p ->
-                match partNamed p "DetonatedBy:", Map.tryFind p.Name st.Pending with
-                | Some by, Some n when n > 0 && not (skill.Parts |> List.exists (fun q -> q.Name = p.Name))
-                                       && ((by = "Warcry" && skill.Tags.Contains Warcry) || skill.Tags.Contains(Tag by)) ->
-                    let last = times |> List.map fst |> List.fold max w.Time
-                    let w = updateActor actor.Name (fun st -> { st with Pending = Map.remove p.Name st.Pending }) w
-                    [ 1 .. n ] |> List.fold (fun w _ -> schedule (last + 1e-6) (Strike(actor.Name, p.Name, 1.0, target.Def.Name)) w) w
-                    |> fun w -> { w with Counts = bump ("detonated:" + p.Name) w.Counts }
-                | _ -> w) w
-        // an attack the player makes while empowered by a warcry uses one empowerment up
-        let w =
-            if useTime > 0.0 && skill.Tags.Contains Attack && not (skill.Tags.Contains Warcry) then
-                let last = times |> List.map fst |> List.fold max w.Time
-                // (and by Mantra of Destruction, Temper Weapon: "EmpoweredAttacks:<skill>")
-                st.Buffs |> Map.toList |> List.filter (fun (k, _) -> k.StartsWith "EmpoweredAttacks")
-                |> List.fold (fun w (k, _) -> schedule (last + 1e-9) (SpendBuff(actor.Name, k)) w) w
-            else w
-        // and a Repeatable attack one of those readied for it (Ice-Tipped Arrows)
-        let w =
-            if useTime > 0.0 && skill.Tags.Contains Attack && skill.Tags.Contains(Tag "Type:Barrageable") then
-                let last = times |> List.map fst |> List.fold max w.Time
-                st.Buffs |> Map.toList |> List.filter (fun (k, _) -> k.StartsWith "EmpoweredRepeatable:")
-                |> List.fold (fun w (k, _) -> schedule (last + 1e-9) (SpendBuff(actor.Name, k)) w) w
-            else w
-        // "Cannot gain Power Charges while using this Skill": until its last strike
-        let w =
-            if partFlag skill "NoPowerChargesDuringSkill" then
-                let last = times |> List.map fst |> List.fold max w.Time
-                updateActor actor.Name (fun st -> { st with Energy = Map.add "PowerChargeLock" last st.Energy }) w
-            else w
-        let w =
-            match skill.Consumes with
-            | Some charge ->
-                let last = times |> List.map fst |> List.fold max w.Time
-                // "Consume it when you leap": at the start, where that is what empowers the use
-                let at = if partFlag skill "NoCooldownWithCharge" then w.Time else last
-                schedule (at + 1e-9) (ConsumeCharges(actor.Name, charge, skill.Name)) w
-            | None -> w
-        // Cast on Dodge: energy per unit travelled by a dodge roll
-        let w =
-            if useTime > 0.0 && skill.Tags.Contains(Tag "DodgeRoll") then
-                let distance = Constants.dodgeRollDistance + Mods.sumBase ctx [ Named "DodgeRollDistance" ] mods
-                actor.Metas
-                |> List.fold
-                    (fun w meta ->
-                        let amount = meta.Sources |> List.sumBy (function DodgeRolls per -> per * distance | _ -> 0.0)
-                        // the distance is covered when the roll ends
-                        if amount > 0.0 then schedule (w.Time + useTime) (EnergyArrives(actor.Name, meta.Name, amount * meta.EnergyMult)) w else w)
-                    w
-            else w
+            w
+            |> leaveCrystals u
+            |> plantBomb u
+            |> spendPartRage u
+            |> startRecording u
+            |> spendInfusionOrWait u
+            |> detonateWaiting u
+            |> spendEmpowerments u
+            |> spendRepeatable u
+            |> lockPowerCharges u
+            |> scheduleConsume u
+            |> dodgeEnergy u
         // Spellslinger-style energy: per 10 ms of base cast time of spells the player casts
         let w =
             if useTime > 0.0 && skill.Tags.Contains Spell then

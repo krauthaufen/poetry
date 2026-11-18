@@ -62,85 +62,94 @@ let manaNeeded (pools: PlayerStats) (skill: Skill) (seconds: float) (cost: float
         let flows = max 0.0 (pools.ManaRegen * seconds)
         min pools.Mana (max 0.0 (cost - flows)), flows
 
+/// What a use of the skill costs now: base x increased cost / (1 + cost efficiency).
+let costOf (env: Env) (actor: Actor) (st: ActorState) (w: World) (skill: Skill) : float =
+    let db = skillDb env actor skill st
+    let costCtx = { Ctx.empty with SkillTags = skill.Tags; SkillName = skill.Name }
+    let extraCost =
+        match actor.Vitals with
+        | Some pools -> pools.Mana * Mods.sumBase costCtx [ Named "ExtraCostPercentOfMaxMana" ] db / 100.0
+        | None -> 0.0
+    // (a skill with a window: the cost is for opening it)
+    let ownCost =
+        if (window skill).IsSome then (if windowShut st w.Time skill then skill.Cost else 0.0)
+        elif skill.Clip > 0 && not (st.LoadDue.Contains skill.Name) then 0.0 else skill.Cost
+    // a channel: its cost per second for as long as this use takes; what it costs to
+    // start is paid when the channel begins, not with every use that continues it
+    let ownCost =
+        if skill.CostPerSecond <= 0.0 then ownCost
+        // ("Modifiers to Cast / Attack Speed also affect this Skill's cost": so much more
+        // a second as the skill is faster, which is what its unhurried time costs)
+        else (if st.LastUsed = skill.Name then 0.0 else ownCost) + skill.CostPerSecond * (if partFlag skill "CostOverTimeWithSpeed" then Channel.paidSeconds skill else max Constants.serverTick (useTime env actor skill w))
+    (ownCost + extraCost) * Mods.mult costCtx [ ManaCost ] db / Mods.inc costCtx [ ManaCostEfficiency ] db
+
+/// Whether the player can pay for a use of the skill now (mana, or life where that pays).
+let affordable (env: Env) (actor: Actor) (st: ActorState) (w: World) (skill: Skill) : bool =
+    let costOf = costOf env actor st w
+    match actor.Vitals, w.Player with
+    | Some pools, Some p when pools.CostsInfernalFlame -> true
+    | Some pools, Some p when pools.CostsLife -> (let c = costOf skill in c <= 0.0 || p.Life - c >= 1.0)
+    // (enough within rounding: a wait for mana ends with exactly the cost, give or take the last bit)
+    | Some pools, Some p ->
+        let cost, life = splitCost pools { Ctx.empty with SkillTags = skill.Tags; SkillName = skill.Name } (skillDb env actor skill st) (costOf skill)
+        let cost = if skill.CostPerSecond <= 0.0 then cost else fst (manaNeeded pools skill (max Constants.serverTick (useTime env actor skill w)) cost)
+        not (p.Mana < cost - 1e-9 * max 1.0 cost) && (life <= 0.0 || p.Life - life >= 1.0)
+    | _ -> true
+
+/// What the actor does next: the first step of its rotation that is ready and can be paid
+/// for; if none can be paid, the first that is ready (it waits for the mana). `v`: what the
+/// actor sees (`view`), for the conditions of the steps.
+let nextStep (env: Env) (actor: Actor) (st: ActorState) (v: View) (w: World) : Step option =
+    // a skill that works on a corpse needs one: every kill leaves a corpse, each use takes one
+    let corpses = w.Kills.Length - w.CorpsesUsed
+    // (unless it does without: something else in its place, or corpses only add to it)
+    let needsCorpse (s: Skill) =
+        s.Tags.Contains(Tag "Type:TargetsDestructibleCorpses")
+        && (match corpseRule actor s with
+            | Some (SummonPerCorpse _) -> false
+            | Some (WithCorpse (_, SpendStack (buff, _))) -> not (Map.tryFind buff st.Buffs |> Option.exists (fun e -> e.Stacks > 0 && e.Expires > w.Time))
+            | Some _ -> true
+            | None -> not (s.Tags.Contains(Tag "Type:SkillConsumesPowerChargesOnUse")))
+    let usable =
+        actor.Rotation |> List.filter (fun step ->
+            let s = skillOf actor step.Use
+            step.When v && ready st w.Time s && (corpses > 0 || not (needsCorpse s)) && built st s
+            // a form one is in is not pressed again (that would end it)
+            && (match partNamed s "ToggleBuff:" with Some buff -> not (st.Buffs.ContainsKey buff) | None -> true)
+            // a skill that fires what has built up needs some of it
+            && (not (partFlag s "NeedsCharge") || (match s.Consumes with Some charge -> (Map.tryFind charge st.Buffs |> Option.exists (fun e -> e.Stacks > 0 && e.Expires > w.Time)) | None -> true))
+            // a skill with a window waits until it is charged again
+            && windowOk st w.Time s
+            // a warp needs something to warp into: an enemy that can be culled, or a projectile
+            && (match warpsInto s with
+                | Some gem -> ballInFlight actor.Name gem w || (aimed env w |> Option.exists (fun e -> (status e).ContainsKey "Cullable"))
+                | None -> true)
+            // a skill that is empowered by something lying about waits for it, where the character makes it
+            && (not (partFlag s "NoCooldownWithCharge")
+                || (match s.Consumes with
+                    | Some charge -> (Map.tryFind charge actor.MaxResources |> Option.defaultValue 0) = 0 || (Map.tryFind charge st.Buffs |> Option.exists (fun e -> e.Stacks > 0 && e.Expires > w.Time))
+                    | None -> true))
+            // a skill that spends what has piled up on the enemy waits for the pile to be full
+            && (s.Mods |> List.forall (fun m ->
+                    match m.Stat with
+                    | Named n when n.StartsWith "NeedsEnemyStacks:" ->
+                        aimed env w |> Option.exists (fun e -> (Map.tryFind (n.Substring 17) (status e) |> Option.defaultValue 0) >= int m.Value)
+                    | _ -> true))
+            // Hexblast waits for a curse that can be detonated
+            && (not (partFlag s "DetonatesCurse") || (aimed env w |> Option.exists (fun e -> not (ripeCurses actor e w.Time).IsEmpty)))
+            // a recording debuff is left to run out
+            && not (w.Agonies |> List.exists (fun a -> a.Owner = actor.Name && a.Skill = s.Name))
+            // a seed still in an enemy is not planted over
+            && not (w.Bombs |> List.exists (fun b -> b.Owner = actor.Name && b.Skill = s.Name)))
+    usable |> List.tryFind (fun step -> affordable env actor st w (skillOf actor step.Use)) |> Option.orElse (List.tryHead usable)
+
+/// An actor that is free to act uses the next step of its rotation: the cost is paid (or
+/// waited for), the use starts, and the actor is ready again when it is over.
 let onReadyUnlocked env (rng: Rng) name (w: World) =
     let actor = actorDef env name
     let st = Map.find name w.Actors
     let v = view env w st
-    // what a use of the skill costs now: base x increased cost / (1 + cost efficiency)
-    let costOf (skill: Skill) =
-        let db = skillDb env actor skill st
-        let costCtx = { Ctx.empty with SkillTags = skill.Tags; SkillName = skill.Name }
-        let extraCost =
-            match actor.Vitals with
-            | Some pools -> pools.Mana * Mods.sumBase costCtx [ Named "ExtraCostPercentOfMaxMana" ] db / 100.0
-            | None -> 0.0
-        // (a skill with a window: the cost is for opening it)
-        let ownCost =
-            if (window skill).IsSome then (if windowShut st w.Time skill then skill.Cost else 0.0)
-            elif skill.Clip > 0 && not (st.LoadDue.Contains skill.Name) then 0.0 else skill.Cost
-        // a channel: its cost per second for as long as this use takes; what it costs to
-        // start is paid when the channel begins, not with every use that continues it
-        let ownCost =
-            if skill.CostPerSecond <= 0.0 then ownCost
-            // ("Modifiers to Cast / Attack Speed also affect this Skill's cost": so much more
-            // a second as the skill is faster, which is what its unhurried time costs)
-            else (if st.LastUsed = skill.Name then 0.0 else ownCost) + skill.CostPerSecond * (if partFlag skill "CostOverTimeWithSpeed" then Channel.paidSeconds skill else max Constants.serverTick (useTime env actor skill w))
-        (ownCost + extraCost) * Mods.mult costCtx [ ManaCost ] db / Mods.inc costCtx [ ManaCostEfficiency ] db
-    let affordable (skill: Skill) =
-        match actor.Vitals, w.Player with
-        | Some pools, Some p when pools.CostsInfernalFlame -> true
-        | Some pools, Some p when pools.CostsLife -> (let c = costOf skill in c <= 0.0 || p.Life - c >= 1.0)
-        // (enough within rounding: a wait for mana ends with exactly the cost, give or take the last bit)
-        | Some pools, Some p ->
-            let cost, life = splitCost pools { Ctx.empty with SkillTags = skill.Tags; SkillName = skill.Name } (skillDb env actor skill st) (costOf skill)
-            let cost = if skill.CostPerSecond <= 0.0 then cost else fst (manaNeeded pools skill (max Constants.serverTick (useTime env actor skill w)) cost)
-            not (p.Mana < cost - 1e-9 * max 1.0 cost) && (life <= 0.0 || p.Life - life >= 1.0)
-        | _ -> true
-    // the first step that is ready and can be paid for; if none can be paid, wait for the first
-    let choice =
-        // a skill that works on a corpse needs one: every kill leaves a corpse, each use takes one
-        let corpses = w.Kills.Length - w.CorpsesUsed
-        // (unless it does without: something else in its place, or corpses only add to it)
-        let needsCorpse (s: Skill) =
-            s.Tags.Contains(Tag "Type:TargetsDestructibleCorpses")
-            && (match corpseRule actor s with
-                | Some (SummonPerCorpse _) -> false
-                | Some (WithCorpse (_, SpendStack (buff, _))) -> not (Map.tryFind buff st.Buffs |> Option.exists (fun e -> e.Stacks > 0 && e.Expires > w.Time))
-                | Some _ -> true
-                | None -> not (s.Tags.Contains(Tag "Type:SkillConsumesPowerChargesOnUse")))
-        let usable =
-            actor.Rotation |> List.filter (fun step ->
-                let s = skillOf actor step.Use
-                step.When v && ready st w.Time s && (corpses > 0 || not (needsCorpse s)) && built st s
-                // a form one is in is not pressed again (that would end it)
-                && (match partNamed s "ToggleBuff:" with Some buff -> not (st.Buffs.ContainsKey buff) | None -> true)
-                // a skill that fires what has built up needs some of it
-                && (not (partFlag s "NeedsCharge") || (match s.Consumes with Some charge -> (Map.tryFind charge st.Buffs |> Option.exists (fun e -> e.Stacks > 0 && e.Expires > w.Time)) | None -> true))
-                // a skill with a window waits until it is charged again
-                && windowOk st w.Time s
-                // a warp needs something to warp into: an enemy that can be culled, or a projectile
-                && (match warpsInto s with
-                    | Some gem -> ballInFlight actor.Name gem w || (aimed env w |> Option.exists (fun e -> (status e).ContainsKey "Cullable"))
-                    | None -> true)
-                // a skill that is empowered by something lying about waits for it, where the character makes it
-                && (not (partFlag s "NoCooldownWithCharge")
-                    || (match s.Consumes with
-                        | Some charge -> (Map.tryFind charge actor.MaxResources |> Option.defaultValue 0) = 0 || (Map.tryFind charge st.Buffs |> Option.exists (fun e -> e.Stacks > 0 && e.Expires > w.Time))
-                        | None -> true))
-                // a skill that spends what has piled up on the enemy waits for the pile to be full
-                && (s.Mods |> List.forall (fun m ->
-                        match m.Stat with
-                        | Named n when n.StartsWith "NeedsEnemyStacks:" ->
-                            aimed env w |> Option.exists (fun e -> (Map.tryFind (n.Substring 17) (status e) |> Option.defaultValue 0) >= int m.Value)
-                        | _ -> true))
-                // Hexblast waits for a curse that can be detonated
-                && (not (partFlag s "DetonatesCurse") || (aimed env w |> Option.exists (fun e -> not (ripeCurses actor e w.Time).IsEmpty)))
-                // a recording debuff is left to run out
-                && not (w.Agonies |> List.exists (fun a -> a.Owner = actor.Name && a.Skill = s.Name))
-                // a seed still in an enemy is not planted over
-                && not (w.Bombs |> List.exists (fun b -> b.Owner = actor.Name && b.Skill = s.Name)))
-        usable |> List.tryFind (fun step -> affordable (skillOf actor step.Use)) |> Option.orElse (List.tryHead usable)
-    match choice with
+    match nextStep env actor st v w with
     | Some step ->
         let skill = skillOf actor step.Use
         // nothing is faster than a server tick (instant skills)
