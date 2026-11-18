@@ -770,6 +770,8 @@ module Sim =
           Debuffs: Map<string, Effect>
           Dots: DotInstance list
           Buildup: Map<Ailment, float>
+          /// Debuffs a skill consumed off it, and until when it is immune to each.
+          Immune: Map<string, float>
           /// When the Heavy Stun bar last grew (it drains after a while without).
           StunBuildupAt: float
           /// Flammability left by fire hits: (magnitude in percent, gone at), each on its own.
@@ -1649,6 +1651,8 @@ module Sim =
         { w with Enemies = Map.add name (f (Map.find name w.Enemies)) w.Enemies }
 
     let private addDebuff target name duration maxStacks mods (w: World) =
+        // (what a skill has just consumed off the enemy cannot be put on it for a second)
+        if (match Map.tryFind target w.Enemies with Some e -> e.Immune |> Map.tryFind name |> Option.exists (fun t -> t > w.Time) | None -> false) then w else
         let w =
             updateEnemy target (fun e ->
                 let x = stackEffect w.Time (Map.tryFind name e.Debuffs) name duration maxStacks mods
@@ -3252,7 +3256,7 @@ module Sim =
             let w =
                 if consumesVs && not states.IsEmpty then
                     let st = states |> List.find enemyStatus.ContainsKey
-                    updateEnemy target (fun en -> { en with Debuffs = Map.remove st en.Debuffs }) w |> fun w -> { w with Counts = bump ("consumed:" + st) w.Counts }
+                    updateEnemy target (fun en -> { en with Debuffs = Map.remove st en.Debuffs; Immune = Map.add st (w.Time + Constants.consumedImmunity) en.Immune }) w |> fun w -> { w with Counts = bump ("consumed:" + st) w.Counts }
                 else w
             let landed, w = lands rng target hitChance w
             if not landed then
@@ -3262,7 +3266,7 @@ module Sim =
             let w =
                 match takes with
                 | Some st when enemyStatus.ContainsKey st ->
-                    updateEnemy target (fun en -> { en with Debuffs = Map.remove st en.Debuffs }) w |> fun w -> { w with Counts = bump ("consumed:" + st) w.Counts }
+                    updateEnemy target (fun en -> { en with Debuffs = Map.remove st en.Debuffs; Immune = Map.add st (w.Time + Constants.consumedImmunity) en.Immune }) w |> fun w -> { w with Counts = bump ("consumed:" + st) w.Counts }
                 | _ -> w
             if false then w
             else
@@ -5044,6 +5048,7 @@ module Sim =
                 |> Map.ofList
               Dots = []
               Buildup = Map.empty
+              Immune = Map.empty
               StunBuildupAt = 0.0
               Flammability = []
               Db = ModDb.ofList d.Mods }

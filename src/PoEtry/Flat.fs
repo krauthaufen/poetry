@@ -2668,6 +2668,8 @@ module Flat =
           Has: bool[]
           Stacks: int[]
           Expires: float[]
+          /// See `Sim.EnemyState.Immune`.
+          ImmuneUntil: float[]
           DMods: Mod list[]
           /// Nothing of its debuffs and damage over time runs out before this.
           mutable Soonest: float
@@ -3235,9 +3237,10 @@ module Flat =
 
     /// A debuff comes or stacks, for so long (`Sim.addDebuff`).
     let private addDebuff (s: State) (e: Foe) (id: int) (duration: float) (maxStacks: int) (mods: Mod list) =
-        let stacks = if (at e.Has id) && (at e.Expires id) > s.Time then min maxStacks ((at e.Stacks id) + 1) else 1
-        setDebuff e id stacks (s.Time + duration) mods
-        expireAt s (s.Time + duration)
+        if not ((at e.ImmuneUntil id) > s.Time) then
+         let stacks = if (at e.Has id) && (at e.Expires id) > s.Time then min maxStacks ((at e.Stacks id) + 1) else 1
+         setDebuff e id stacks (s.Time + duration) mods
+         expireAt s (s.Time + duration)
 
     /// The damage over time that counts: the strongest of each label, as many as may stack
     /// (`Sim.activeDots`, in its order).
@@ -6216,6 +6219,7 @@ module Flat =
                 for k in 0 .. info.OnlyVs.Length - 1 do
                     if first < 0 && hasStatus ev (at info.OnlyVs k) then first <- k
                 if takeState s e (at info.OnlyVs first) taken then taken <- true
+                put e.ImmuneUntil (at info.OnlyVs first) (s.Time + Constants.consumedImmunity)
                 bump s (at info.CConsumedVs first)
             if not met then ()
             elif not (lands s rng e hitChance) then bump s info.CMiss
@@ -6223,6 +6227,7 @@ module Flat =
                 // a hit that takes a state off the enemy without needing it ("Consumes Shock")
                 if info.Takes >= 0 && hasStatus ev info.Takes then
                     if takeState s e info.Takes taken then taken <- true
+                    put e.ImmuneUntil info.Takes (s.Time + Constants.consumedImmunity)
                     bump s info.CTakes
                 // "Enemies you Curse / Mark take X% increased Damage": additive with what the enemy already takes
                 let nums = numsFor s e (sumQ ev qEnemyTaken)
@@ -7992,6 +7997,7 @@ module Flat =
               Has = Array.create ns false
               Stacks = Array.zeroCreate ns
               Expires = Array.zeroCreate ns
+              ImmuneUntil = Array.zeroCreate ns
               DMods = Array.create ns []
               Soonest = infinity
               Dots = []

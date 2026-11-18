@@ -195,6 +195,9 @@ module Constants =
         | HeavyStun -> gc "HeavyStunThresholdModifier", gc "HeavyStunModifierDuration"
         | Pin -> gc "PinThresholdModifier", gc "PinModifierDuration"
         | _ -> 0.0, 0.0
+    /// "Consuming a Debuff on an enemy causes the enemy to be immune to that Debuff for 1
+    /// seconds" (keyword text, Effect Consumption).
+    let consumedImmunity = 1.0
     /// "Monsters cannot be slowed below 25% of their base speed" (keyword text, Slow).
     let slowFloor = 0.25
     /// "Players have 50% more Light Stun Threshold per time they were Light Stunned in the past
