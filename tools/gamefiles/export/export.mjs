@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Exports the simulator's game data (data/game/*.json) straight from the installed game.
-// Usage: node export/export.mjs [out dir] [--only statdesc,skills,...] [--all-effects] [--tree-version 0_5]
+// Usage: node export/export.mjs [out dir] [--only statdesc,minions,skills,bases,mods,tree,keywords] [--all-effects] [--tree-version 0_5]
 //   --all-effects: every granted effect of the game (8000+, mostly monster skills), not only gems', players' and minions'
 //   out dir defaults to <repo>/out/game-direct
 import * as path from 'node:path';
@@ -19,7 +19,7 @@ for (let i = 0; i < args.length; i++) {
   else pos.push(args[i]);
 }
 const outDir = path.resolve(pos[0] || path.join(GAMEFILES_DIR, '..', '..', 'out', 'game-direct'));
-const steps = ['statdesc', 'minions', 'skills', 'bases', 'mods', 'tree'];
+const steps = ['statdesc', 'minions', 'skills', 'bases', 'mods', 'tree', 'keywords'];
 const game = await openGame();
 console.log(`game: ${game.gameDir}\nout:  ${outDir}`);
 ctx.outDir = outDir;

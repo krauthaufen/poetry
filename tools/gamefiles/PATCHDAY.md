@@ -26,6 +26,7 @@ export/regen.sh
 |---|---|
 | `skills.json gems.json minions.json bases.json mods.json tree.json statdesc_*.json` | `out/game-direct/` |
 | `tree-full.json` (input of `tools/export/tree_ui.py`), `stats-used.json` | `out/game-direct/` |
+| `keywords.txt` (the game's keyword definitions: term, then text), `keywords.json` | `out/game-direct/` |
 | `Tables.fs`, `RarityData.fs`, `RareModsData.fs` | `out/generated/` |
 | `compare.txt` (against `data/game`), `whatsnew.txt` | `out/game-direct/` |
 
@@ -40,7 +41,7 @@ python3 tools/export/tree_ui.py out/game-direct/tree-full.json <pob-web>/package
 The single steps:
 
 ```bash
-node export/export.mjs [out dir] [--only statdesc,skills,minions,bases,mods,tree] [--all-effects] [--tree-version 0_5]
+node export/export.mjs [out dir] [--only statdesc,minions,skills,bases,mods,tree,keywords] [--all-effects] [--tree-version 0_5]
 node export/tables.mjs [out file]                 # Tables.fs (replaces tools/gen_tables.py)
 node export/dump-tables.mjs [out dir]             # tables/English/*.json per config.json, without the network
 node export/compare.mjs [ours] [theirs] [--file skills.json] [--field 'statSets[].label'] [--examples 10] [--keys]

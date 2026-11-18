@@ -59,6 +59,22 @@ if (oT && nT) {
   if (rem.length) console.log('  removed: ' + rem.join(', '));
 }
 
+// ---- keywords: the game's own definitions ----
+{
+  const a = load(oldDir, 'keywords.json'), b = load(newDir, 'keywords.json');
+  if (!a || !b) console.log('\n## Keywords: keywords.json is not in both exports');
+  else {
+    const added = Object.keys(b).filter(k => !(k in a)), removed = Object.keys(a).filter(k => !(k in b));
+    const changed = Object.keys(b).filter(k => k in a && (a[k].text !== b[k].text || a[k].term !== b[k].term));
+    console.log(`\n## Keywords: ${added.length} added, ${removed.length} removed, ${changed.length} with a changed text (of ${Object.keys(b).length})`);
+    const cut = l => (all ? l : l.slice(0, 40));
+    if (added.length) console.log('  added: ' + cut(added).map(k => b[k].term).join(', ') + (!all && added.length > 40 ? ', ...' : ''));
+    if (removed.length) console.log('  removed: ' + cut(removed).map(k => a[k].term).join(', ') + (!all && removed.length > 40 ? ', ...' : ''));
+    // a changed definition is a changed rule: always shown in full
+    for (const k of changed) console.log(`  changed: ${b[k].term} [${k}]\n    was: ${a[k].text.replace(/\n+/g, ' / ')}\n    now: ${b[k].text.replace(/\n+/g, ' / ')}`);
+  }
+}
+
 // ---- stat ids ----
 // every stat id an export knows: used by a skill, a mod or a passive (stats-used.json, written by the direct
 // export), or at least described in a stat description file
