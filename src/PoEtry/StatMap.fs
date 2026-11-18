@@ -430,6 +430,7 @@ module StatMap =
         | "grim_pillars_number_of_pillars_to_create" -> one (Mod.base' (Named "CrystalsCreated") v)
         | "base_number_of_grim_pillars_allowed" -> one (Mod.base' (Named "CrystalLimit") v)
         | "flicker_strike_additional_flickers_from_power_charges" -> one (Mod.base' (Named "FlickersPerPowerCharge") v)
+        | "cannot_gain_power_charges_during_skill" -> one (Mod.flag (Named "NoPowerChargesDuringSkill"))
         | "empower_barrage_base_number_of_barrage_repeats" -> one (Mod.base' (Named "BarrageRepeats") v)
         | "empower_barrage_number_of_barrage_repeats_per_frenzy_charge" -> one (Mod.base' (Named "BarrageRepeatsPerFrenzy") v)
         | "empower_barrage_damage_-%_final_with_repeated_projectiles" -> one (Mod.base' (Named "BarrageRepeatLess") v)

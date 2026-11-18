@@ -1482,6 +1482,14 @@ let run (test: string -> (unit -> unit) -> unit) =
         // "has a maximum chance of 75%": kept three times in four, whatever more the character has
         let kept, gone = count "kept:PowerCharge", count "consumed:PowerCharge"
         if gone = 0 || float kept / float (kept + gone) > 0.9 then failwithf "kept %d times, consumed %d times" kept gone
+        // "Cannot gain Power Charges while using this Skill": what its own strikes would give is
+        // barred, so it has fewer strikes
+        let barred = { player with Skills = [ { flicker with Mods = flicker.Mods @ [ Mod.flag (Named "NoPowerChargesDuringSkill") ] } ] }
+        let locked = Fight.single boss barred 60.0
+        same locked [ 1u; 2u; 3u ]
+        let lo = Sim.run locked 1u
+        let barredCount, lockedHits = (Map.tryFind "barred:PowerCharge" lo.Counts |> Option.defaultValue 0), lo.Counts.["hits:Flicker"]
+        if barredCount = 0 || lockedHits >= hits then failwithf "expected charges barred and fewer strikes: %d barred, %d hits against %d" barredCount lockedHits hits
         // a map: both engines the same, and the player gets through it sooner than on foot alone
         let pack (k: int) =
             if k >= 4 then [ { EnemyDef.make Rarity.defaults 75 Unique "Boss" (Vec.make 0.0 0.0) with Life = 6000.0; Speed = 25.0 } ]

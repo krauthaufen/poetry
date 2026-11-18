@@ -2783,6 +2783,12 @@ module Sim =
                     st.Buffs |> Map.toList |> List.filter (fun (k, _) -> k.StartsWith "EmpoweredRepeatable:")
                     |> List.fold (fun w (k, _) -> schedule (last + 1e-9) (SpendBuff(actor.Name, k)) w) w
                 else w
+            // "Cannot gain Power Charges while using this Skill": until its last strike
+            let w =
+                if partFlag skill "NoPowerChargesDuringSkill" then
+                    let last = times |> List.map fst |> List.fold max w.Time
+                    updateActor actor.Name (fun st -> { st with Energy = Map.add "PowerChargeLock" last st.Energy }) w
+                else w
             let w =
                 match skill.Consumes with
                 | Some charge ->
@@ -5003,6 +5009,8 @@ module Sim =
                 killed |> Seq.fold (fun w k -> killedOverTime env rng k (name = env.Fight.Player.Name) w) w
             // Conduit: "If you would gain a Charge, Allies in your Presence gain that Charge
             // instead": the actor gains nothing (what an ally holds, no minion reads)
+            | GainStacks (name, r, _) when r = "PowerCharge" && ((Map.find name w.Actors).Energy |> Map.tryFind "PowerChargeLock" |> Option.exists (fun t -> w.Time <= t)) ->
+                { w with Counts = bump "barred:PowerCharge" w.Counts }
             | GainStacks (name, r, _) when conduit (actorDef env name) r ->
                 { w with Counts = bump ("conduit:" + r) w.Counts }
             | GainStacks (name, r, n) ->

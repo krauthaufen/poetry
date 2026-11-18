@@ -997,6 +997,8 @@ module Flat =
           BarragePerFrenzy: float
           /// Flicker Strike: additional strikes per Power Charge.
           Flickers: float
+          /// "Cannot gain Power Charges while using this Skill".
+          LocksPowerCharges: bool
           BarrageMods: Mod list
           CBarraged: int
           /// A seed planted in the enemy that the damage the enemy takes sets off: the damage
@@ -1157,6 +1159,8 @@ module Flat =
               Banners: (Banner * int * int)[]
               HasSigil: bool
               CSigil: int
+              BPowerCharge: int
+              CBarred: int
               /// Whether anything of the actor's makes a skill cost life (`Sim.splitCost`).
               LifeCosts: bool
               /// Whether anything of the actor's makes life leech go by more than physical damage.
@@ -2099,6 +2103,7 @@ module Flat =
                       CSeals = counts.Id("seals:" + s.Name)
                       BarrageRepeats = ownBase s "BarrageRepeats"
                       Flickers = ownBase s "FlickersPerPowerCharge"
+                      LocksPowerCharges = flag "NoPowerChargesDuringSkill"
                       BarragePerFrenzy = ownBase s "BarrageRepeatsPerFrenzy"
                       BarrageMods = (match barrageMods.TryGetValue s.Name with | true, mods -> mods | _ -> [])
                       CBarraged = counts.Id("barraged:" + s.Name)
@@ -2277,6 +2282,8 @@ module Flat =
                          actor.Mods |> List.exists named || actor.Skills |> List.exists (fun sk -> sk.Mods |> List.exists named))
                       MetaHits = metas |> Array.exists (fun m -> m.FromHits)
                       CSigil = count "sigil stage"
+                      BPowerCharge = buffs.Id "PowerCharge"
+                      CBarred = count "barred:PowerCharge"
                       InfernalBurn = Mods.sumBase Ctx.empty [ Named "InfernalFlameBurn" ] sheet
                       CInfernalBurn = count "infernal flame burn"
                       WardRemnants = actor.WardRemnants
@@ -5245,6 +5252,8 @@ module Flat =
                     for place in 0 .. p.Readied.Length - 1 do
                         let b = at p.Readied place
                         if (at s.A.BHas b) then schedule s (last + 1e-9) ESpendBuff b 0 0.0 0.0
+            // "Cannot gain Power Charges while using this Skill": until its last strike
+            if info.LocksPowerCharges then s.A.Energy <- Map.add "PowerChargeLock" (max last s.Time) s.A.Energy
             // ("Consume it when you leap": at the start, where that is what empowers the use)
             if info.Consumes >= 0 then
                 schedule s ((if info.NoCooldown then s.Time else last) + 1e-9) EConsume info.Consumes sid 0.0 0.0
@@ -7274,8 +7283,9 @@ module Flat =
     /// Stacks of a resource arrive (`Sim.step`, GainStacks).
     let private onGainStacks (s: State) (rng: Rng) (r: int) (n: int) =
         let p = s.P
+        if r = p.BPowerCharge && (match Map.tryFind "PowerChargeLock" s.A.Energy with Some t -> s.Time <= t | None -> false) then bump s p.CBarred
         // Conduit: the charge goes to allies, which nothing reads
-        if (at p.CConduit r) >= 0 then bump s (at p.CConduit r)
+        elif (at p.CConduit r) >= 0 then bump s (at p.CConduit r)
         else
             let maxR = if (at p.ResourceMax r) <> System.Int32.MinValue then (at p.ResourceMax r) else n
             // "N% chance to gain an additional (Power) Charge when you gain a Charge"
