@@ -126,6 +126,193 @@ let infusedVariant (env: Env) (rng: Rng) (actor: Actor) (skill: Skill) (w: World
             if rng.Chance keep then infused, w
             else infused, setStacksWith env actor.Name false r (stacksOf st r - 1) w
 
+/// A strike that has found whom it is aimed at, as the ways of delivering it see it.
+type Strike =
+    { Env: Env
+      Rng: Rng
+      /// Who strikes, with what (the skill, and its name as the event has it).
+      Actor: Actor
+      Who: string
+      Skill: Skill
+      SkillName: string
+      /// The damage multiplier of this hit of the use.
+      Mult: float
+      /// The enemy the use was aimed at, and the one this strike goes for.
+      AimedAt: string
+      Primary: EnemyDef
+      /// A projectile in flight: for how long.
+      Elapsed: float option
+      /// A hit on one enemy worked out when the skill was used.
+      Direct: bool
+      /// Who is alive, the actor's state, and the world as they were when the strike began.
+      Living: EnemyDef list
+      State: ActorState
+      Seen: World }
+
+/// The form one strike takes: the skill (or its infused variant), the actor's modifiers with
+/// it, its area and delivery, and where a nova that starts from a Frostbolt starts.
+type StrikeForm =
+    { Skill: Skill
+      Ctx: Ctx
+      Mods: ModDb
+      AreaMult: float
+      Delivery: Delivery
+      NovaAt: Vec option }
+
+/// Triskelion Cascade: the spell lands on the player and along three arms around it; the empowerment is used up.
+let strikeTriskelion (s: Strike) (arms: int) (w: World) : World =
+    let env, rng, actor, name, skillName, mult, aimedAt, elapsed, direct, primary, living = s.Env, s.Rng, s.Actor, s.Who, s.SkillName, s.Mult, s.AimedAt, s.Elapsed, s.Direct, s.Primary, s.Living
+    // (with the actor and the world as they were when the strike began: its own hits do not change its shape)
+    let shape (sk: Skill) = strikeShape env rng actor s.State s.Seen sk
+    let variant (w: World) = infusedVariant env rng actor s.Skill w
+    let sk, w = variant w
+    let _, _, areaMult, delivery = shape sk
+    let r = match delivery with AreaAtTarget r | AreaAroundSelf r -> Geometry.radius r areaMult | _ -> 0.0
+    let turn = rng.Float() * 2.0 * System.Math.PI
+    let centres =
+        Vec.make 0.0 0.0
+        :: [ for a in 0 .. 2 do
+                for k in 1 .. arms ->
+                    Vec.scale (float k * r * env.Fight.CascadeSpacing) (Vec.ofAngle (turn + float a * 2.0 * System.Math.PI / 3.0)) ]
+    let w = if w.Tracing then { w with Shown = Used(w.Time, name, sk.Name, centres |> List.map (fun c -> Ring(c, r, 0.0))) :: w.Shown } else w
+    let w =
+        centres
+        |> List.fold
+            (fun w centre ->
+                living
+                |> List.filter (fun e -> Vec.dist centre e.Position <= r + e.Size)
+                |> List.fold (fun w e -> hitEnemy env rng actor sk mult e.Name w) w)
+            w
+    updateActor actor.Name (fun st ->
+        { st with Buffs = st.Buffs |> Map.filter (fun _ e -> not (e.Mods |> List.exists (fun m -> m.Stat = Named "TriskelionArms"))) }) w
+
+/// Spell Cascade: the impact on the target, and so many more on either side along a random axis.
+let strikeCascade (s: Strike) (cascades: int) (w: World) : World =
+    let env, rng, actor, name, skillName, mult, aimedAt, elapsed, direct, primary, living = s.Env, s.Rng, s.Actor, s.Who, s.SkillName, s.Mult, s.AimedAt, s.Elapsed, s.Direct, s.Primary, s.Living
+    // (with the actor and the world as they were when the strike began: its own hits do not change its shape)
+    let shape (sk: Skill) = strikeShape env rng actor s.State s.Seen sk
+    let variant (w: World) = infusedVariant env rng actor s.Skill w
+    let axis = Vec.ofAngle (rng.Float() * 2.0 * System.Math.PI)
+    // the centre impact first (it takes the first infusion); its radius sets the spacing
+    let order = 0 :: [ for i in 1 .. cascades do yield -i; yield i ]
+    order
+    |> List.fold
+        (fun (w, step) k ->
+            let sk, w = variant w
+            let ctx, mods, areaMult, delivery = shape sk
+            let r = match delivery with AreaAtTarget r -> r | _ -> 0.0
+            let centreR = Geometry.radius r areaMult
+            let step = if k = 0 then centreR * env.Fight.CascadeSpacing else step
+            let rr = if k = 0 then centreR else Geometry.radius r (areaMult * Mods.more ctx [ Named "CascadeArea" ] mods)
+            let centre = Vec.add primary.Position (Vec.scale (float k * step) axis)
+            let w = if w.Tracing then { w with Shown = Used(w.Time, name, sk.Name, [ Ring(centre, rr, 0.0) ]) :: w.Shown } else w
+            let w =
+                living
+                |> List.filter (fun e -> Vec.dist centre e.Position <= rr + e.Size)
+                |> List.fold (fun w e -> hitEnemy env rng actor sk mult e.Name w) w
+            w, step)
+        (w, 0.0)
+    |> fst
+
+/// A strike that reaches enemies as its delivery says (one, an area, projectiles with their
+/// forks and chains), with a chance of Splash and of a grenade going off twice.
+let strikeReaches (s: Strike) (f: StrikeForm) (w: World) : World =
+    let env, rng, actor, name, skillName, mult, aimedAt, elapsed, direct, primary, living = s.Env, s.Rng, s.Actor, s.Who, s.SkillName, s.Mult, s.AimedAt, s.Elapsed, s.Direct, s.Primary, s.Living
+    let sk, ctx, mods, areaMult, delivery, novaAt = f.Skill, f.Ctx, f.Mods, f.AreaMult, f.Delivery, f.NovaAt
+    // "X% chance to deal Splash Damage": a strike that does also hits the
+    // others around the one it hit, as one with Splash
+    let delivery =
+        match delivery with
+        | Single when (let c = Mods.sumBase ctx [ Named "SplashChance" ] mods in c > 0.0 && rng.Chance c) -> AreaAtTarget Constants.splashRadius
+        | d -> d
+    // forked projectiles: "Forked Projectiles deal N% less damage" (Fork)
+    let forkMult = mult * Mods.mult ctx [ Named "ForkedDamage" ] mods
+    let hit, forked, w =
+        if w.Tracing then
+            let hit, forked, marks = Geometry.targetsShown rng env.Fight.Walls env.Fight.Reach delivery areaMult primary living
+            hit, forked, { w with Shown = Used(w.Time, name, sk.Name, marks) :: w.Shown }
+        else
+            let hit, forked = Geometry.targetsParted rng env.Fight.Walls env.Fight.Reach delivery areaMult primary living
+            hit, forked, w
+    let w = hit |> List.fold (fun w target -> hitEnemy env rng actor sk mult target w) w
+    let w = forked |> List.fold (fun w target -> hitEnemy env rng actor sk forkMult target w) w
+    // a grenade that activates a second time (Payload) hits once more: rolled
+    // for each of its hits (a grenade's second blast hits all it hit together:
+    // the same on average)
+    let twice = Mods.sumBase ctx [ Named "ExplodeTwice" ] mods
+    if twice <= 0.0 then w
+    else hit |> List.fold (fun w target -> if rng.Chance twice then hitEnemy env rng actor sk mult target { w with Counts = bump ("twice:" + sk.Name) w.Counts } else w) w
+
+/// One strike of the form: a nova from a Frostbolt, one hit worked out before, what is
+/// inside a projectile as it travels, or whoever the delivery reaches.
+let strikeOnce (s: Strike) (f: StrikeForm) (w: World) : World =
+    let env, rng, actor, name, skillName, mult, aimedAt, elapsed, direct, primary, living = s.Env, s.Rng, s.Actor, s.Who, s.SkillName, s.Mult, s.AimedAt, s.Elapsed, s.Direct, s.Primary, s.Living
+    let sk, ctx, mods, areaMult, delivery, novaAt = f.Skill, f.Ctx, f.Mods, f.AreaMult, f.Delivery, f.NovaAt
+    match delivery, elapsed with
+    | AreaAroundSelf r, _ when novaAt.IsSome ->
+        let at, rr = novaAt.Value, Geometry.radius r areaMult
+        let w = if w.Tracing then { w with Shown = Used(w.Time, name, sk.Name, [ Ring(at, rr, 0.0) ]) :: w.Shown } else w
+        living |> List.filter (Geometry.within at rr) |> List.fold (fun w e -> hitEnemy env rng actor sk mult e.Name w) w
+    | _ when direct ->
+        let w = if w.Tracing then { w with Shown = Used(w.Time, name, sk.Name, [ Line(Vec.zero, primary.Position) ]) :: w.Shown } else w
+        (if primary.Name = aimedAt then hitEnemy env rng actor sk mult aimedAt w else w)
+    | Projectiles p, None when p.Passing > 0.0 && p.HitInterval > 0.0 ->
+        // what is inside the projectiles as they travel: every hit at its own time
+        let w = if w.Tracing then { w with Shown = Used(w.Time, name, sk.Name, [ Flight [ Vec.zero; primary.Position ] ]) :: w.Shown } else w
+        Geometry.dwellHits rng env.Fight.Walls p env.Fight.Reach areaMult primary living
+        |> List.fold (fun w (t, target) ->
+            if t <= 0.0 then hitEnemy env rng actor sk mult target w
+            else schedule (w.Time + t) (DirectHit(name, skillName, mult, target)) w) w
+    | Projectiles p, Some t when p.Passing > 0.0 ->
+        // where the projectile is by now, on its way towards where it was aimed
+        let at = Vec.scale (p.Speed * t) (Vec.ofAngle (Vec.angle primary.Position))
+        let w = if w.Tracing then { w with Shown = Used(w.Time, name, sk.Name, [ Ring(at, Geometry.radius p.Passing areaMult, 0.0) ]) :: w.Shown } else w
+        living |> List.filter (Geometry.within at (Geometry.radius p.Passing areaMult)) |> List.map (fun e -> e.Name)
+        |> List.fold (fun w target -> hitEnemy env rng actor sk mult target w) w
+    | _ -> strikeReaches s f w
+
+/// A strike delivered the ordinary way: a bolt that leaves is noted, a nova may start from
+/// the bolt, the strike happens, and a slam may have an Aftershock.
+let strikePlain (s: Strike) (w: World) : World =
+    let env, rng, actor, name, skillName, mult, aimedAt, elapsed, direct, primary, living = s.Env, s.Rng, s.Actor, s.Who, s.SkillName, s.Mult, s.AimedAt, s.Elapsed, s.Direct, s.Primary, s.Living
+    // (with the actor and the world as they were when the strike began: its own hits do not change its shape)
+    let shape (sk: Skill) = strikeShape env rng actor s.State s.Seen sk
+    let variant (w: World) = infusedVariant env rng actor s.Skill w
+    let sk, w = variant w
+    let ctx, mods, areaMult, delivery = shape sk
+    // a bolt that leaves now (Frostbolt): when, and towards where it was sent
+    let w =
+        if Mods.flag ctx (Named "LaunchesBolt") mods && not direct && elapsed.IsNone then
+            updateActor name (fun st -> { st with Energy = st.Energy |> Map.add "BoltAt" w.Time |> Map.add "BoltAngle" (Vec.angle primary.Position) }) w
+        else w
+    // "Casting Ice Nova targeting near a Frostbolt Projectile will cause it to originate
+    // from the Frostbolt instead of you": the bolt sent last, while it flies, if it is
+    // nearer the enemy aimed at than the player is
+    let novaAt =
+        match delivery with
+        | AreaAroundSelf _ ->
+            let speed = Mods.sumBase ctx [ Named "NovaOnBoltSpeed" ] mods
+            let st = Map.find name w.Actors
+            match Map.tryFind "BoltAt" st.Energy, Map.tryFind "BoltAngle" st.Energy with
+            | Some t0, Some angle when speed > 0.0 && w.Time - t0 >= 0.0 && w.Time - t0 < Mods.sumBase ctx [ Named "NovaOnBoltLife" ] mods ->
+                let at = Vec.scale (speed * (w.Time - t0)) (Vec.ofAngle angle)
+                if Vec.dist at primary.Position < Vec.length primary.Position then Some at else None
+            | _ -> None
+        | _ -> None
+    let w = if novaAt.IsSome then { w with Counts = bump ("on bolt:" + sk.Name) w.Counts } else w
+    let f = { StrikeForm.Skill = sk; Ctx = ctx; Mods = mods; AreaMult = areaMult; Delivery = delivery; NovaAt = novaAt }
+    let strike (w: World) = strikeOnce s f w
+    let w = strike w
+    // Aftershock: a slam has a chance to hit its area once more
+    if sk.Tags.Contains Slam && rng.Chance(Mods.sumBase ctx [ Named "AftershockChance" ] mods) then
+        // (while it strikes the actor has "Aftershock": for what only an Aftershock's hits do)
+        let again =
+            updateActor actor.Name (fun st -> { st with Buffs = Map.add "Aftershock" { Name = "Aftershock"; Mods = []; Stacks = 1; Expires = infinity } st.Buffs }) w
+            |> strike
+            |> updateActor actor.Name (fun st -> { st with Buffs = Map.remove "Aftershock" st.Buffs })
+        { again with Counts = bump ("aftershock:" + sk.Name) again.Counts }
+    else w
+
 /// A strike lands (an event): whom it reaches, and each of its hits (`hitEnemy`).
 /// `elapsed`: a projectile in flight, so long after it was launched; `direct`: one hit on
 /// the one enemy, worked out when the skill was used.
@@ -141,13 +328,13 @@ let onStrike env (rng: Rng) name skillName mult aimedAt (elapsed: float option) 
     | None -> w
     | Some primary ->
         let st = Map.find name w.Actors
-        // (with the actor and the world as they are here: the strike's own hits do not change its shape)
-        let shape (sk: Skill) = strikeShape env rng actor st w sk
-        let variant (w: World) = infusedVariant env rng actor skill w
+        let s =
+            { Strike.Env = env; Rng = rng; Actor = actor; Who = name; Skill = skill; SkillName = skillName; Mult = mult; AimedAt = aimedAt
+              Primary = primary; Elapsed = elapsed; Direct = direct; Living = living; State = st; Seen = w }
         let w = { w with Player = w.Player |> Option.map (fun p -> { p with StrikeLeech = 0.0; StrikeLifeLeech = 0.0 }) }
         // Spell Cascade: extra impacts on either side of the target "along a randomly chosen
         // axis"; side impacts have their own less area; spacing: user observation
-        let ctx0, mods0, _, _ = shape skill
+        let ctx0, mods0, _, _ = strikeShape env rng actor st s.Seen skill
         let cascades = int (Mods.sumBase ctx0 [ Named "CascadesPerSide" ] mods0)
         // Triskelion Cascade: the empowered spell "becomes centred on your location, and
         // Cascades to six areas around you in a Triskelion pattern": three arms a third of a
@@ -156,125 +343,6 @@ let onStrike env (rng: Rng) name skillName mult aimedAt (elapsed: float option) 
         let arms = int (Mods.sumBase ctx0 [ Named "TriskelionArms" ] mods0)
         // ---- the strike itself, by how the skill is delivered ----
         match skill.Delivery with
-        | AreaAtTarget _ | AreaAroundSelf _ when arms > 0 ->
-            let sk, w = variant w
-            let _, _, areaMult, delivery = shape sk
-            let r = match delivery with AreaAtTarget r | AreaAroundSelf r -> Geometry.radius r areaMult | _ -> 0.0
-            let turn = rng.Float() * 2.0 * System.Math.PI
-            let centres =
-                Vec.make 0.0 0.0
-                :: [ for a in 0 .. 2 do
-                        for k in 1 .. arms ->
-                            Vec.scale (float k * r * env.Fight.CascadeSpacing) (Vec.ofAngle (turn + float a * 2.0 * System.Math.PI / 3.0)) ]
-            let w = if w.Tracing then { w with Shown = Used(w.Time, name, sk.Name, centres |> List.map (fun c -> Ring(c, r, 0.0))) :: w.Shown } else w
-            let w =
-                centres
-                |> List.fold
-                    (fun w centre ->
-                        living
-                        |> List.filter (fun e -> Vec.dist centre e.Position <= r + e.Size)
-                        |> List.fold (fun w e -> hitEnemy env rng actor sk mult e.Name w) w)
-                    w
-            updateActor actor.Name (fun st ->
-                { st with Buffs = st.Buffs |> Map.filter (fun _ e -> not (e.Mods |> List.exists (fun m -> m.Stat = Named "TriskelionArms"))) }) w
-        | AreaAtTarget _ when cascades > 0 ->
-            let axis = Vec.ofAngle (rng.Float() * 2.0 * System.Math.PI)
-            // the centre impact first (it takes the first infusion); its radius sets the spacing
-            let order = 0 :: [ for i in 1 .. cascades do yield -i; yield i ]
-            order
-            |> List.fold
-                (fun (w, step) k ->
-                    let sk, w = variant w
-                    let ctx, mods, areaMult, delivery = shape sk
-                    let r = match delivery with AreaAtTarget r -> r | _ -> 0.0
-                    let centreR = Geometry.radius r areaMult
-                    let step = if k = 0 then centreR * env.Fight.CascadeSpacing else step
-                    let rr = if k = 0 then centreR else Geometry.radius r (areaMult * Mods.more ctx [ Named "CascadeArea" ] mods)
-                    let centre = Vec.add primary.Position (Vec.scale (float k * step) axis)
-                    let w = if w.Tracing then { w with Shown = Used(w.Time, name, sk.Name, [ Ring(centre, rr, 0.0) ]) :: w.Shown } else w
-                    let w =
-                        living
-                        |> List.filter (fun e -> Vec.dist centre e.Position <= rr + e.Size)
-                        |> List.fold (fun w e -> hitEnemy env rng actor sk mult e.Name w) w
-                    w, step)
-                (w, 0.0)
-            |> fst
-        | _ ->
-            let sk, w = variant w
-            let ctx, mods, areaMult, delivery = shape sk
-            // a bolt that leaves now (Frostbolt): when, and towards where it was sent
-            let w =
-                if Mods.flag ctx (Named "LaunchesBolt") mods && not direct && elapsed.IsNone then
-                    updateActor name (fun st -> { st with Energy = st.Energy |> Map.add "BoltAt" w.Time |> Map.add "BoltAngle" (Vec.angle primary.Position) }) w
-                else w
-            // "Casting Ice Nova targeting near a Frostbolt Projectile will cause it to originate
-            // from the Frostbolt instead of you": the bolt sent last, while it flies, if it is
-            // nearer the enemy aimed at than the player is
-            let novaAt =
-                match delivery with
-                | AreaAroundSelf _ ->
-                    let speed = Mods.sumBase ctx [ Named "NovaOnBoltSpeed" ] mods
-                    let st = Map.find name w.Actors
-                    match Map.tryFind "BoltAt" st.Energy, Map.tryFind "BoltAngle" st.Energy with
-                    | Some t0, Some angle when speed > 0.0 && w.Time - t0 >= 0.0 && w.Time - t0 < Mods.sumBase ctx [ Named "NovaOnBoltLife" ] mods ->
-                        let at = Vec.scale (speed * (w.Time - t0)) (Vec.ofAngle angle)
-                        if Vec.dist at primary.Position < Vec.length primary.Position then Some at else None
-                    | _ -> None
-                | _ -> None
-            let w = if novaAt.IsSome then { w with Counts = bump ("on bolt:" + sk.Name) w.Counts } else w
-            let strike (w: World) =
-                match delivery, elapsed with
-                | AreaAroundSelf r, _ when novaAt.IsSome ->
-                    let at, rr = novaAt.Value, Geometry.radius r areaMult
-                    let w = if w.Tracing then { w with Shown = Used(w.Time, name, sk.Name, [ Ring(at, rr, 0.0) ]) :: w.Shown } else w
-                    living |> List.filter (Geometry.within at rr) |> List.fold (fun w e -> hitEnemy env rng actor sk mult e.Name w) w
-                | _ when direct ->
-                    let w = if w.Tracing then { w with Shown = Used(w.Time, name, sk.Name, [ Line(Vec.zero, primary.Position) ]) :: w.Shown } else w
-                    (if primary.Name = aimedAt then hitEnemy env rng actor sk mult aimedAt w else w)
-                | Projectiles p, None when p.Passing > 0.0 && p.HitInterval > 0.0 ->
-                    // what is inside the projectiles as they travel: every hit at its own time
-                    let w = if w.Tracing then { w with Shown = Used(w.Time, name, sk.Name, [ Flight [ Vec.zero; primary.Position ] ]) :: w.Shown } else w
-                    Geometry.dwellHits rng env.Fight.Walls p env.Fight.Reach areaMult primary living
-                    |> List.fold (fun w (t, target) ->
-                        if t <= 0.0 then hitEnemy env rng actor sk mult target w
-                        else schedule (w.Time + t) (DirectHit(name, skillName, mult, target)) w) w
-                | Projectiles p, Some t when p.Passing > 0.0 ->
-                    // where the projectile is by now, on its way towards where it was aimed
-                    let at = Vec.scale (p.Speed * t) (Vec.ofAngle (Vec.angle primary.Position))
-                    let w = if w.Tracing then { w with Shown = Used(w.Time, name, sk.Name, [ Ring(at, Geometry.radius p.Passing areaMult, 0.0) ]) :: w.Shown } else w
-                    living |> List.filter (Geometry.within at (Geometry.radius p.Passing areaMult)) |> List.map (fun e -> e.Name)
-                    |> List.fold (fun w target -> hitEnemy env rng actor sk mult target w) w
-                | _ ->
-                    // "X% chance to deal Splash Damage": a strike that does also hits the
-                    // others around the one it hit, as one with Splash
-                    let delivery =
-                        match delivery with
-                        | Single when (let c = Mods.sumBase ctx [ Named "SplashChance" ] mods in c > 0.0 && rng.Chance c) -> AreaAtTarget Constants.splashRadius
-                        | d -> d
-                    // forked projectiles: "Forked Projectiles deal N% less damage" (Fork)
-                    let forkMult = mult * Mods.mult ctx [ Named "ForkedDamage" ] mods
-                    let hit, forked, w =
-                        if w.Tracing then
-                            let hit, forked, marks = Geometry.targetsShown rng env.Fight.Walls env.Fight.Reach delivery areaMult primary living
-                            hit, forked, { w with Shown = Used(w.Time, name, sk.Name, marks) :: w.Shown }
-                        else
-                            let hit, forked = Geometry.targetsParted rng env.Fight.Walls env.Fight.Reach delivery areaMult primary living
-                            hit, forked, w
-                    let w = hit |> List.fold (fun w target -> hitEnemy env rng actor sk mult target w) w
-                    let w = forked |> List.fold (fun w target -> hitEnemy env rng actor sk forkMult target w) w
-                    // a grenade that activates a second time (Payload) hits once more: rolled
-                    // for each of its hits (a grenade's second blast hits all it hit together:
-                    // the same on average)
-                    let twice = Mods.sumBase ctx [ Named "ExplodeTwice" ] mods
-                    if twice <= 0.0 then w
-                    else hit |> List.fold (fun w target -> if rng.Chance twice then hitEnemy env rng actor sk mult target { w with Counts = bump ("twice:" + sk.Name) w.Counts } else w) w
-            let w = strike w
-            // Aftershock: a slam has a chance to hit its area once more
-            if sk.Tags.Contains Slam && rng.Chance(Mods.sumBase ctx [ Named "AftershockChance" ] mods) then
-                // (while it strikes the actor has "Aftershock": for what only an Aftershock's hits do)
-                let again =
-                    updateActor actor.Name (fun st -> { st with Buffs = Map.add "Aftershock" { Name = "Aftershock"; Mods = []; Stacks = 1; Expires = infinity } st.Buffs }) w
-                    |> strike
-                    |> updateActor actor.Name (fun st -> { st with Buffs = Map.remove "Aftershock" st.Buffs })
-                { again with Counts = bump ("aftershock:" + sk.Name) again.Counts }
-            else w
+        | AreaAtTarget _ | AreaAroundSelf _ when arms > 0 -> strikeTriskelion s arms w
+        | AreaAtTarget _ when cascades > 0 -> strikeCascade s cascades w
+        | _ -> strikePlain s w
