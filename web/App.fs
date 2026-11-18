@@ -2918,6 +2918,13 @@ let view (m : Model) : Node<Msg> =
         if m.Build = "" then
             div {
                 Dom.Class "main landing"
+                div {
+                    Dom.Class "about"
+                    span { "New here?" }
+                    a { Dom.Attr ("href", "about.html"); "How it works" }
+                    a { Dom.Attr ("href", "rules.html"); "Rules" }
+                    a { Dom.Attr ("href", "guesses.html"); "Open guesses" }
+                }
                 if m.CanLogin && m.Player = "" then
                     button { Dom.Class "act enter"; Dom.OnClick (fun _ -> Login); "Log in with your Path of Exile account" }
                 if not m.Asked then
