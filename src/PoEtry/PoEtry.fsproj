@@ -32,6 +32,7 @@
     <Compile Include="Sim/Hitting.fs" />
     <Compile Include="Sim/Striking.fs" />
     <Compile Include="Sim/Monsters.fs" />
+    <Compile Include="Sim/Probe.fs" />
     <Compile Include="Sim/Periodic.fs" />
     <Compile Include="Sim/Events.fs" />
     <Compile Include="Sim/Run.fs" />

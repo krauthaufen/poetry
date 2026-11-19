@@ -1950,7 +1950,7 @@ module Behaviours =
         let db = ModDb.ofList sheet.Mods
         let spectrums = build.Items |> List.filter (fun (slot, text) -> slot.StartsWith "Jewel" && text.Contains "Grand Spectrum") |> List.length
         let idols =
-            build.Items |> List.sumBy (fun (_, text) ->
+            build.Items |> List.filter (fun (slot, _) -> not (slot.Contains "Swap")) |> List.sumBy (fun (_, text) ->
                 text.Split('\n') |> Array.sumBy (fun l ->
                     let l = l.Trim()
                     if l.StartsWith "Idols socketed:" then (match System.Int32.TryParse(l.Substring(15).Trim()) with | true, n -> n | _ -> 0) else 0))

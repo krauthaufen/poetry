@@ -353,3 +353,28 @@ let runWith (trace: (float -> string -> string -> string -> float -> unit) optio
     |> supply fight rng
     |> loop env rng 0
     |> outcomeOf fight
+
+/// The same fight (the same numbers), and what the player could take at every `every`
+/// seconds of it (`Probe.probe`), against the hits of the first monster that attacks.
+let runProbed (every: float) (fight: Fight) (seed: uint32) : Outcome * DefenceSample list =
+    let fight = Fight.apart fight
+    let env = envOf None fight
+    let rng = Rng(seed)
+    let attack = fight.Enemies |> List.tryPick (fun e -> e.Attack)
+    match playerAtStart fight with
+    | None -> runWith None false fight seed, []
+    | Some start ->
+        let rec go n (due: float) (samples: DefenceSample list) (w: World) =
+            // (the world before the event that is due at or after the next sample's time)
+            let samples, due =
+                if not (Map.isEmpty w.Queue) && fst (Seq.head w.Queue).Key >= due && w.Player |> Option.exists (fun p -> p.Died.IsNone) then
+                    { probe env start attack w with Time = due } :: samples, due + every * ceil ((fst (Seq.head w.Queue).Key - due) / every + 1e-9)
+                else samples, due
+            if isOver fight w then w, samples
+            elif n >= maxEvents then { w with Counts = bump "aborted: too many events" w.Counts }, samples
+            else
+                let before = w.Kills
+                go (n + 1) due samples (step env rng w |> supply fight rng |> replaceFallen fight rng before |> noteForShowing fight)
+        let w, samples = blankWorld false fight seed rng |> firstEvents fight rng |> supply fight rng |> go 0 0.0 []
+        outcomeOf fight w, List.rev samples
+

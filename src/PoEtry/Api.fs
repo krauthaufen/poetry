@@ -148,7 +148,9 @@ module Api =
             Json.list (Json.field "socketedItems" item)
             |> List.filter (fun s ->
                 let props = Json.list (Json.field "properties" s) |> List.choose (Json.strField "name")
-                Json.field "support" s <> Some(JBool true) && not (props |> List.exists (fun n -> n = "Level" || n = "Cost" || n.Contains "Support")))
+                Json.field "support" s <> Some(JBool true) && not (props |> List.exists (fun n -> n = "Level" || n = "Cost" || n.Contains "Support"))
+                // (a jewel in the Jewel Socket that Cadigan's Epiphany makes of a glove's sockets is no augment)
+                && Json.strField "inventoryId" s <> Some "EquipmentJewels")
             |> List.length
         // of those, the idols ("per Idol in your Equipment", "per non-Idol Augment")
         let idols = Json.list (Json.field "socketedItems" item) |> List.filter isIdol |> List.length

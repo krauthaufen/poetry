@@ -258,7 +258,8 @@ module Setup =
         // what sits in the items' sockets: idols, and the other augments (runes, soul cores)
         let augments, idols =
             let count (prefix: string) =
-                build.Items |> List.sumBy (fun (_, text) ->
+                // (the other weapon set's items are not worn, as for "Corrupted Item Equipped")
+                build.Items |> List.filter (fun (slot, _) -> not (slot.Contains "Swap")) |> List.sumBy (fun (_, text) ->
                     text.Split('\n') |> Array.sumBy (fun l -> let l = l.Trim() in if l.StartsWith prefix then (match System.Int32.TryParse(l.Substring(prefix.Length).Trim()) with | true, n -> n | _ -> 0) else 0))
             count "Sockets filled:", count "Idols socketed:"
         // a flask whose effect is constant: "during any Flask effect" always holds

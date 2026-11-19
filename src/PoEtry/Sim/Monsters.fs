@@ -128,6 +128,16 @@ let recoverBeforeHit (v: PlayerStats) (w: World) : World =
     | Some p when v.MissingLifeBeforeHit > 0.0 && p.Life < v.Life -> { w with Player = Some { p with Life = p.Life + (v.Life - p.Life) * v.MissingLifeBeforeHit / 100.0 } }
     | _ -> w
 
+/// "<from> damage taken as <to>" moves part of each type of a hit before mitigation.
+let takenAs (v: PlayerStats) (damage: Map<DamageType, float>) : Map<DamageType, float> =
+    v.TakenAs
+    |> List.fold
+        (fun (m: Map<DamageType, float>) (from, into, pct) ->
+            let moved = (Map.tryFind from damage |> Option.defaultValue 0.0) * pct / 100.0
+            m |> Map.add from ((Map.tryFind from m |> Option.defaultValue 0.0) - moved)
+              |> Map.add into ((Map.tryFind into m |> Option.defaultValue 0.0) + moved))
+        damage
+
 /// The rolls of a hit that was not evaded: is it blocked, deflected, critical; and what it
 /// carries by damage type before mitigation.
 let rollIncoming env (rng: Rng) name (e: EnemyState) (st: Map<string, int>) (atk: EnemyAttack) (pools: PlayerStats) (v: PlayerStats) accuracy hitChance : IncomingHit =
@@ -137,15 +147,7 @@ let rollIncoming env (rng: Rng) name (e: EnemyState) (st: Map<string, int>) (atk
         let d = Vitals.deflectChance v.Deflection accuracy
         if v.LuckyDeflect then 100.0 - (100.0 - d) * (100.0 - d) / 100.0 else d
     let deflected = not blocked && rng.Chance deflectChance
-    // "<from> damage taken as <to>" moves part of each type before mitigation
-    let incoming =
-        v.TakenAs
-        |> List.fold
-            (fun (m: Map<DamageType, float>) (from, into, pct) ->
-                let moved = (Map.tryFind from atk.Damage |> Option.defaultValue 0.0) * pct / 100.0
-                m |> Map.add from ((Map.tryFind from m |> Option.defaultValue 0.0) - moved)
-                  |> Map.add into ((Map.tryFind into m |> Option.defaultValue 0.0) + moved))
-            atk.Damage
+    let incoming = takenAs v atk.Damage
     // a critical hit is tested against evasion once more: evaded, it is an ordinary hit
     let crit = rng.Chance(atk.CritChance * v.EnemyCritChanceMult * (if st.ContainsKey "Blinded" then v.BlindedEnemyCritMult else 1.0) * (if st.ContainsKey "Marked" then v.MarkedEnemyCritMult else 1.0)) && not (hitChance < 100.0 && rng.Chance(100.0 - hitChance))
     let critMult = if crit then 1.0 + Constants.monsterBaseCritBonus / 100.0 * (1.0 - v.LessCritDamageTaken / 100.0) * (if st.ContainsKey "Blinded" then v.BlindedEnemyCritBonusMult else 1.0) else 1.0
@@ -156,21 +158,20 @@ let rollIncoming env (rng: Rng) name (e: EnemyState) (st: Map<string, int>) (atk
 /// What the player's defences leave of the hit, by damage type: deflection, armour (against
 /// physical damage, and against the types it also applies to), resistances, damage taken,
 /// Shock on the player, and a block's share.
-let mitigated (h: IncomingHit) (w: World) : Map<DamageType, float> =
-    let v, atk = h.V, h.Attack
+let mitigatedBy (env: Env) (v: PlayerStats) (melee: bool) (crit: bool) (deflected: bool) (blocked: bool) (unmitigated: Map<DamageType, float>) (w: World) : Map<DamageType, float> =
     // "Defend with X% of Armour against Projectile Attacks / Critical Hits"
-    let armourShare = (if atk.Melee then 1.0 else v.ArmourVsProjectiles) * (if h.Crit then v.ArmourVsCrits else 1.0) * v.ArmourDefend
-    let playerSt = Map.find h.Env.Fight.Player.Name w.Actors
+    let armourShare = (if melee then 1.0 else v.ArmourVsProjectiles) * (if crit then v.ArmourVsCrits else 1.0) * v.ArmourDefend
+    let playerSt = Map.find env.Fight.Player.Name w.Actors
     let shocked =
         Map.tryFind Statuses.Shocked playerSt.Buffs |> Option.filter (fun x -> x.Expires > w.Time)
         |> Option.map (fun x -> x.Mods |> List.sumBy (fun m -> m.Value)) |> Option.defaultValue 0.0
-    h.Unmitigated
+    unmitigated
     |> Map.map (fun t d ->
-        let d = if h.Deflected then d * (1.0 - v.DeflectEffect / 100.0) else d
+        let d = if deflected then d * (1.0 - v.DeflectEffect / 100.0) else d
         let d =
             match t with
             | Physical ->
-                let d = if atk.Melee then max 0.0 (d - v.FlatPhysicalTaken) else d
+                let d = if melee then max 0.0 (d - v.FlatPhysicalTaken) else d
                 Vitals.physicalLeft v (v.Armour * armourShare) (match w.Player with Some p -> p.EnergyShield | None -> 0.0) d
             | t ->
                 let d = d * (1.0 - (Map.tryFind t v.Resist |> Option.defaultValue 0.0) / 100.0)
@@ -179,7 +180,11 @@ let mitigated (h: IncomingHit) (w: World) : Map<DamageType, float> =
                 | Some pct -> d * (1.0 - Vitals.armourReduction (v.Armour * armourShare * pct / 100.0) d / 100.0)
                 | None -> d
         d * (Map.tryFind t v.TakenMult |> Option.defaultValue 1.0) * (1.0 + shocked / 100.0)
-          * (if h.Blocked then v.BlockedDamageTaken / 100.0 else 1.0))
+          * (if blocked then v.BlockedDamageTaken / 100.0 else 1.0))
+
+/// What the player's defences leave of this hit.
+let mitigated (h: IncomingHit) (w: World) : Map<DamageType, float> =
+    mitigatedBy h.Env h.V h.Attack.Melee h.Crit h.Deflected h.Blocked h.Unmitigated w
 
 /// The physical damage of the hit that mitigation kept off.
 let preventedPhysical (h: IncomingHit) (taken: Map<DamageType, float>) =
@@ -203,16 +208,18 @@ let preventedAsLife (h: IncomingHit) taken =
 /// "x% of Damage from Hits is taken from your Companion's Life before you": the first
 /// minion that does so and is alive takes its share, as much as it has. What is left for
 /// the player, and the world with the minion hurt.
-let companionTakesShare (h: IncomingHit) (taken: Map<DamageType, float>) (w: World) : Map<DamageType, float> * World =
-    let guard =
-        h.Env.Fight.Minions |> List.tryFind (fun m ->
-            (m.Body |> Option.exists (fun b -> b.TakesForOwner > 0.0)) && not (Map.find m.Name w.Actors).Gone)
-    match guard with
-    | Some m ->
+let companionGuard (env: Env) (taken: Map<DamageType, float>) (w: World) : (Actor * float) option =
+    env.Fight.Minions
+    |> List.tryFind (fun m -> (m.Body |> Option.exists (fun b -> b.TakesForOwner > 0.0)) && not (Map.find m.Name w.Actors).Gone)
+    |> Option.map (fun m ->
         let share = m.Body.Value.TakesForOwner / 100.0
         let its = Map.find m.Name w.Actors
         let total = taken |> Map.toList |> List.sumBy snd
-        let k = if total <= 0.0 then 0.0 else min share ((its.Life + its.Shield) / total)
+        m, (if total <= 0.0 then 0.0 else min share ((its.Life + its.Shield) / total)))
+
+let companionTakesShare (h: IncomingHit) (taken: Map<DamageType, float>) (w: World) : Map<DamageType, float> * World =
+    match companionGuard h.Env taken w with
+    | Some (m, k) ->
         taken |> Map.map (fun _ d -> d * (1.0 - k)),
         hurtMinion h.Env h.Rng m (taken |> Map.map (fun _ d -> d * k)) { w with Counts = bump "minion:took for owner" w.Counts }
     | None -> taken, w
