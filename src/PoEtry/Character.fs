@@ -463,6 +463,8 @@ module Items =
                 elif l.StartsWith "Runic Ward:" then value "Runic Ward:" |> Option.map (fun v -> Named "Ward", v)
                 elif l.StartsWith "Ward:" then value "Ward:" |> Option.map (fun v -> Named "Ward", v)
                 elif l.StartsWith "Spirit:" then value "Spirit:" |> Option.map (fun v -> Named "Spirit", v)
+                // (the Strength the item asks for, where the character data says it)
+                elif l.StartsWith "Str:" then value "Str:" |> Option.map (fun v -> Named "StrRequirement", v)
                 else None)
         let numbers (l: string) =
             l.Split(' ') |> Array.choose (fun w -> match System.Double.TryParse(w.Trim(',')) with | true, v -> Some v | _ -> None) |> List.ofArray

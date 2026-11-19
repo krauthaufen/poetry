@@ -513,7 +513,10 @@ module Pob =
             let slotEffect (slot: string) (text: string) =
                 if slot = "Ring 1" || slot = "Ring 2" || slot = "Amulet" then effect slot
                 elif slot = "Ring3" || slot = "Ring 3" then effect "Ring 3"
-                elif slot = "Weapon 2" && text.Contains "Quiver" then effect "Quiver"
+                // (the bow's line is the bow's weapon set's: it counts for the quiver of that set)
+                elif (slot = "Weapon 2" || slot = "Weapon 2 Swap") && text.Contains "Quiver" then
+                    let ofSet = if slot.EndsWith "Swap" then setTwo else Not setTwo
+                    everything |> List.sumBy (fun m -> if m.Stat = Named "EffectOf:Quiver" && m.Kind = Inc && (m.Conds.IsEmpty || m.Conds = [ ofSet ]) then m.Value else 0.0)
                 elif slot.StartsWith "Jewel " then
                     let socket =
                         match System.Int32.TryParse(slot.Substring 6) with
@@ -686,11 +689,18 @@ module Pob =
                     // the skill itself (a herald's explosion, ...).
                     let characterWide (m: Mod) =
                         not (m.Source.StartsWith "skill-specific:") || Gems.grantsToCharacter db (m.Source.Substring 15)
-                    // auras (Purity of Fire, Discipline) scale with "increased effect of Auras"
-                    let auraEffect =
-                        if skill.Tags.Contains(Tag "Type:Aura") then Mods.inc Ctx.empty [ Named "AuraEffect" ] (ModDb.ofList sheet.Mods) else 1.0
+                    // auras (Purity of Fire, Discipline) scale with "increased effect of Auras": with
+                    // that of the weapon set in hand, where the two sets' passives differ in it
+                    let inSetTwo = SkillIs(Tag "WeaponSet2")
+                    let auraEffect (ctx: Ctx) =
+                        if skill.Tags.Contains(Tag "Type:Aura") then Mods.inc ctx [ Named "AuraEffect" ] (ModDb.ofList sheet.Mods) else 1.0
+                    let one, two = auraEffect Ctx.empty, auraEffect { Ctx.empty with SkillTags = Set.singleton (Tag "WeaponSet2") }
+                    let granted = skill.Mods |> List.filter characterWide
+                    let scaled =
+                        if one = two then granted |> List.map (Mod.scaled one)
+                        else (granted |> List.map (Mod.scaled one >> Mod.whenever (Not inSetTwo))) @ (granted |> List.map (Mod.scaled two >> Mod.whenever inSetTwo))
                     { sheet with
-                        Mods = sheet.Mods @ (skill.Mods |> List.filter characterWide |> List.map (Mod.scaled auraEffect >> Mod.from ("buff:" + skill.Name)))
+                        Mods = sheet.Mods @ (scaled |> List.map (Mod.from ("buff:" + skill.Name)))
                         Coverage = Coverage.merge sheet.Coverage { cov with Unmapped = cov.Unmapped |> List.map (fun (s, v) -> skill.Name + ": " + s, v) } }
                 | Error _ -> sheet)
             sheet

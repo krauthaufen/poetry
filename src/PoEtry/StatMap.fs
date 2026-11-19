@@ -460,6 +460,8 @@ module StatMap =
         | "double_evasion_rating_if_you_havent_been_hit_recently" -> one (Mod.more Evasion 100.0 |> Mod.whenever (Not(WhileBuff "BeenHitRecently")))
         | "evasion_rating_%_to_gain_as_armour" -> one (Mod.base' (Named "EvasionGainedAsArmour") v)
         | "armour_+_per_1_boots_energy_shield" -> one (Mod.base' (Named "ArmourPerBootsES") v)
+        // "Gain Armour equal to X% of total Strength Requirements of Equipped Boots, Gloves and Helmet"
+        | "armour_+_from_%_strength_requirements_from_boots_gloves_helmets" -> one (Mod.base' (Named "ArmourPerStrRequirement") v)
         | "reload_speed_+%" -> one (Mod.inc (Named "ReloadSpeed") v)
         | "%_chance_for_crossbow_reload_to_be_instant" -> one (Mod.base' (Named "InstantReloadChance") v)
         | "crossbow_attack_%_chance_to_not_consume_ammo_if_reloaded_recently" -> one (Mod.base' (Named "KeepAmmoChance") v |> Mod.whenever (WhileBuff "ReloadedRecently"))
@@ -2442,7 +2444,8 @@ module StatMap =
                     if id.StartsWith prefix && (id.EndsWith "_to_apply" || id.EndsWith "_to_grant") then
                         let inner = id.Substring(prefix.Length, id.Length - prefix.Length - 9)
                         match inner with
-                        | "total_maximum_energy_shield_+" -> Some(Mods [ Mod.base' MaxEnergyShield value ])
+                        // ("+X to Total Maximum Energy Shield": added to the total, after the increases)
+                        | "total_maximum_energy_shield_+" -> Some(Mods [ Mod.base' (Named "EnergyShieldTotal") value ])
                         | _ -> direct inner value |> Option.orElse (direct ("base_" + inner) value)
                     else None
 

@@ -167,7 +167,8 @@ module Defence =
         let gainedAsES = lifeFull * Mods.sumBase c [ Named "LifeGainedAsES" ] db / 100.0 + baseLife' * Mods.sumBase c [ Named "BaseLifeGainedAsES" ] db / 100.0
         let life = if ci then 1.0 else lifeFull - converted
         let itemPool = itemPoolIn c
-        let esFull = itemPool MaxEnergyShield esFromBodyEvasion + converted + gainedAsES
+        // (Discipline's "+X to Total Maximum Energy Shield" is added to the total: no increase applies to it)
+        let esFull = itemPool MaxEnergyShield esFromBodyEvasion + converted + gainedAsES + Mods.sumBase c [ Named "EnergyShieldTotal" ] db
         // Eldritch Battery: "Convert 100% of maximum Energy Shield to maximum Mana". Only the
         // energy shield on items (and flat amounts) converts, before any increases to energy
         // shield (user); it becomes base mana. Blood Magic: no mana at all.
@@ -191,7 +192,10 @@ module Defence =
             (itemValue Evasion (fun _ -> true) + evasionFlat + Mods.sumBase c [ Evasion ] db)
             * (if ironReflexes then 1.0 else Mods.sumBase c [ Named "EvasionGainedAsArmour" ] db / 100.0)
         let armour =
-            itemPoolIn cES Armour (itemValue MaxEnergyShield ((=) "Boots") * Mods.sumBase c [ Named "ArmourPerBootsES" ] db + evasionAsArmour)
+            itemPoolIn cES Armour
+                (itemValue MaxEnergyShield ((=) "Boots") * Mods.sumBase c [ Named "ArmourPerBootsES" ] db + evasionAsArmour
+                 // Heavy Armour: of the Strength that boots, gloves and helmet ask for
+                 + floor (itemValue (Named "StrRequirement") (fun slot -> slot = "Boots" || slot = "Gloves" || slot = "Helmet") * Mods.sumBase c [ Named "ArmourPerStrRequirement" ] db / 100.0))
             + mana * Mods.sumBase c [ Named "ManaGainedAsArmour" ] db / 100.0
         let evasion = if ironReflexes then 0.0 else itemPoolIn cES Evasion evasionFlat
         let named n = Mods.sumBase c [ Named n ] db

@@ -130,6 +130,14 @@ module Api =
         let defences =
             [ "Armour", "Armour"; "Evasion Rating", "Evasion Rating"; "Energy Shield", "Energy Shield"; "Block chance", "Block chance"; "Runic Ward", "Runic Ward"; "Spirit", "Spirit" ]
             |> List.choose (fun (prop, label) -> property prop item |> Option.map (fun v -> label + ": " + v))
+        // the Strength the item asks for ("Armour equal to 150% of total Strength Requirements of ...")
+        let defences =
+            defences
+            @ (Json.list (Json.field "requirements" item)
+               |> List.tryFind (fun p -> Json.strField "name" p |> Option.map stripMarkup = Some "Str")
+               |> Option.bind (fun p -> Json.list (Json.field "values" p) |> List.tryHead)
+               |> Option.bind (fun v -> Json.list (Some v) |> List.tryHead |> Option.bind Json.str)
+               |> Option.map (fun v -> "Str: " + v) |> Option.toList)
         // flask properties with placeholders: "Recovers {0} Mana over {1} Seconds" [465; 3.50]
         let templated =
             Json.list (Json.field "properties" item)

@@ -18,7 +18,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
    whose description or behaviour changed.
 5. Go through the lists below; the wiki's version history of a skill says what changed.
 
-## Rules (170)
+## Rules (171)
 
 ### Hit damage
 
@@ -87,6 +87,7 @@ confidence in RULES.md (and the comment in Constants.fs) and add a test.
 | Flask effect duration | "Increased Flask Effect Duration" stretches a flask's recovery over more time without adding to the amount, as in the first game. | stat description; same amount, longer time as in PoE1's flask rules | guess |
 | Mana flask | The mana flask is drunk, at no cost in time, when mana is below twice the next skill's cost. A normal monster's kill gives it one charge. Both are assumed player behaviour and game values. | item / data; base charges per kill and drink policy: guesses | data + guess |
 | Body armour scoped | "+1 Energy Shield per X Evasion on Body Armour" is worked out from the body armour's evasion after that item's own increases. The order is assumed. | game text | guess (order) |
+| The character sheet: Augments counted |  | game text; PoB counts the same | data (other weapon set: guess) |
 | The character sheet: Runic Ward | Runic Ward from items is taken as the item shows it, times its increases. Nothing was available to check the total against. | game item text | guess |
 | Spirit: Total | Spirit from a sceptre counts only while its weapon set is in hand. If the persistent gems would not fit otherwise, the simulator assumes the other set is the one in hand. | game item text; poe.ninja's Spirit for the six corpus characters that differed (a sceptre in the other set, Spirit lines of items under "Cannot gain Spirit from Equipment", Spirit per 2 levels) | data; the other set's Spirit: guess |
 | Spirit: Over budget | The game's API does not say which persistent gems are switched on. All of them are simulated as active, and going over the Spirit budget is only reported. | - | guess |
