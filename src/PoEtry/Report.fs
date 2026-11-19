@@ -573,8 +573,30 @@ module Report =
         let march = f.March.IsSome
         let outcomes = [ for seed in first .. first + runs - 1 -> if tracing && seed = first && not march then Sim.shown f (uint32 seed) else ready.Run (uint32 seed) ]
         let summary = outcomes |> Summary.ofOutcomes
+        // what the character could take while it fights this fight (the reference's first run,
+        // looked at twice a second): the largest hit of each type at the start, at its lowest,
+        // in the middle and at its highest (-1: immune), and how much this monster would have to
+        // deal, were its hits of that type. A map is too long for the reference: not asked there.
+        let takes =
+            // (asked once a fight: with the run that is kept for showing)
+            if march || not tracing then JArr []
+            else
+                let _, samples = Sim.defences 0.5 f (uint32 first)
+                let finite (x: float) = if System.Double.IsInfinity x || System.Double.IsNaN x then -1.0 else x
+                JArr
+                    [ for t in DamageType.all do
+                        let hits = samples |> List.map (fun s -> Map.tryFind t s.MaxHit |> Option.defaultValue infinity)
+                        let ehp = samples |> List.choose (fun s -> Map.tryFind t s.Ehp) |> List.sort
+                        if not hits.IsEmpty then
+                            let sorted = List.sort hits
+                            yield obj [ "name", JStr(DamageType.name t); "start", num (finite hits.Head); "low", num (finite sorted.Head)
+                                        "mid", num (finite sorted.[sorted.Length / 2]); "high", num (finite (List.last sorted))
+                                        "ehp", num (if ehp.IsEmpty then -2.0 else finite ehp.[ehp.Length / 2]) ] ]
+        let monsterHit = f.Enemies |> List.tryPick (fun e -> e.Attack) |> Option.map (fun a -> a.Damage |> Map.toList |> List.sumBy snd) |> Option.defaultValue 0.0
         obj
             [ "gem", JStr gem
+              "takes", takes
+              "monsterHit", num monsterHit
               "engine", JStr ready.Engine
               "way", JStr ready.Way
               "scale", num ready.Scale

@@ -81,6 +81,8 @@
         return {
           gem: f.gem, engine: rs[0].engine || "", way: rs[0].way || "", play: rs[0].play || [], scenario: rs[0].scenario, runs: rs.length, more: (rs.length < f.total || !f.shown) && !f.failed,
           replay: f.replay,
+          // (what the character could take while fighting: worked out with the fight that is shown)
+          takes: f.takes || [],
           killRate: mean(rs.map((r) => r.killRate)),
           clear: clears.length === rs.length ? stats(clears) : null,
           dps: stats(rs.map((r) => r.dps.mean)),
@@ -141,7 +143,7 @@
           // slow engine's work, so the first numbers do not wait for it. It is the next thing
           // a worker does, while the others fight on.
           const picture = (gem, first, scale) => ask({ ...request, runs: 1, seed: 1, trace: 1, ...(gem ? { gem } : {}), ...(scale ? { scale } : {}) }, key, first).then((text) => {
-            try { f.replay = JSON.parse(text).replay || null; } catch { f.replay = null; }
+            try { const shown = JSON.parse(text); f.replay = shown.replay || null; f.takes = shown.takes || []; } catch { f.replay = null; }
             f.shown = true;
             settle(f);
           });

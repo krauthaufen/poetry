@@ -198,3 +198,4 @@ Constants / knockbackUnitsPerDistance	How to read a skill's knockback number as 
 Constants / triggerStray	A triggered skill whose cause has just died still hits whoever is within 2 metres of where it stood.
 Constants / fallingThunderCone	How wide the cone of Falling Thunder's slam is: 45 degrees in all.
 Constants / triggerReach	On a map, how far from the player a triggered skill can find its target: 8 metres.
+The character sheet / Augments counted	Some lines count the runes, soul cores or idols socketed in your gear. We leave out the other weapon set's items, as for other "equipped" counts; whether the game does is not verified.
