@@ -688,7 +688,7 @@ module Setup =
                         |> List.filter (fun (_, q) -> q.Skill.Tags.Contains Spear && q.Skill.Tags.Contains Attack && not q.Skill.Hits.IsEmpty && q.Skill.Cooldown.IsNone)
                         |> List.map (fun (g, _) ->
                             let short = { o with MaxTime = min o.MaxTime 10.0 }
-                            let boss = Encounter.boss 83 Rarity.defaults 30.0 |> List.map (fun e -> { e with Life = 1e13 })
+                            let boss = Encounter.boss 81 Rarity.defaults 30.0 |> List.map (fun e -> { e with Life = 1e13 })
                             let out = Sim.run (fight c short (player c short [ OnCooldown mainGem; Spam g ] None) boss) 1u
                             g, out.DamageBy |> Map.toList |> List.sumBy snd)
                         |> List.sortByDescending snd
@@ -721,7 +721,7 @@ module Setup =
                     | [] -> []
                 go (plain |> List.filter (function Spam g | OnCooldown g -> g <> b.Name | _ -> true))
             let short = { o with MaxTime = min o.MaxTime 10.0 }
-            let boss = Encounter.boss 83 Rarity.defaults 30.0 |> List.map (fun e -> { e with Life = 1e13 })
+            let boss = Encounter.boss 81 Rarity.defaults 30.0 |> List.map (fun e -> { e with Life = 1e13 })
             let dealt (play: Play list) = (Sim.run (fight c short (player c short play None) boss) 1u).DamageBy |> Map.toList |> List.sumBy snd
             (plain, dealt plain) :: [ for k in 1 .. stages -> let pl = before k in pl, dealt pl ]
             |> List.fold (fun (best, most) (pl, d) -> if d > most then pl, d else best, most) (plain, -infinity)

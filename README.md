@@ -15,7 +15,7 @@ dotnet cli/bin/Release/net8.0/poetry-sim.dll character.json
 dotnet cli/bin/Release/net8.0/poetry-sim.dll --help
 ```
 
-With only a file it picks the skill that deals the most when pressed, plays everything else by its skill type (buffs kept up, cooldown skills on cooldown, curses kept on the target) and fights a level 83 boss. It prints the character sheet (pools, defences, maximum hit per damage type), what it did not understand, and then clear time and DPS percentiles, damage share, uptimes and event counts.
+With only a file it picks the skill that deals the most when pressed, plays everything else by its skill type (buffs kept up, cooldown skills on cooldown, curses kept on the target) and fights a level 81 boss. It prints the character sheet (pools, defences, maximum hit per damage type), what it did not understand, and then clear time and DPS percentiles, damage share, uptimes and event counts.
 
 Useful options: `--scenario boss|pinnacle|pack|surrounded`, `--life 1e12 --time 30` for sustained DPS, `--group N` or `--rotation "A,B"` to choose what is pressed, `--runs N`.
 
@@ -39,7 +39,7 @@ let play =
       Spam "Falling Thunder" ]
 
 let player = Setup.player character options play None
-Setup.fight character options player (Encounter.boss 83 Rarity.defaults 30.0)
+Setup.fight character options player (Encounter.boss 81 Rarity.defaults 30.0)
 |> Summary.simulate 200 |> Summary.format |> printfn "%s"
 ```
 

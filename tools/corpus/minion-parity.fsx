@@ -21,7 +21,7 @@ for file, rs in rows |> Array.groupBy (str "file") do
         let build, _ = Setup.parseBuild (System.IO.File.ReadAllText path)
         let o = { Options.defaults with MaxTime = 30.0 }
         let c = Setup.load read build o
-        let boss = Encounter.boss 83 Rarity.defaults 30.0 |> List.map (fun e -> { e with Life = 1e13 })
+        let boss = Encounter.boss 81 Rarity.defaults 30.0 |> List.map (fun e -> { e with Life = 1e13 })
         let gem = Setup.strongest c o boss |> Option.defaultValue ""
         let out = Sim.run (Setup.fight c o (Setup.player c o (Setup.auto c o gem) None) boss) 1u
         for r in rs |> Array.distinctBy (fun r -> str "minion" r, str "skill" r) do

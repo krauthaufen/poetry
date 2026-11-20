@@ -11,7 +11,7 @@ let drop = if args.Length > 1 then args.[1].Split(',') |> Set.ofArray else Set.e
 let o = { Options.defaults with MaxTime = 20.0 }
 let c0 = Setup.load read build o
 let c = { c0 with Sheet = { c0.Sheet with Mods = c0.Sheet.Mods |> List.filter (fun m -> match m.Stat with Named n -> not (drop.Contains n) | _ -> true) } }
-let boss = Encounter.boss 83 Rarity.defaults 30.0 |> List.map (fun e -> { e with Life = 1e13 })
+let boss = Encounter.boss 81 Rarity.defaults 30.0 |> List.map (fun e -> { e with Life = 1e13 })
 let gem = Setup.strongest c o boss |> Option.defaultValue ""
 let player = Setup.player c o (Setup.auto c o gem) None
 let fight = Setup.fight c o player boss

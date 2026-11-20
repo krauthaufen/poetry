@@ -2904,7 +2904,7 @@ let view (m : Model) : Node<Msg> =
                 section {
                     Dom.Class "panel"
                     h3 { "The enemies" }
-                    div { Dom.Class "knob"; span { Dom.Class "what"; "Level" }; input { Dom.Attr ("type", "number"); Dom.Attr ("placeholder", "83"); Dom.OnInput (fun v -> Enemy ("level", v)) } }
+                    div { Dom.Class "knob"; span { Dom.Class "what"; "Level" }; input { Dom.Attr ("type", "number"); Dom.Attr ("placeholder", "81"); Dom.OnInput (fun v -> Enemy ("level", v)) } }
                     div { Dom.Class "knob"; span { Dom.Class "what"; "Elemental resistances" }; input { Dom.Attr ("type", "number"); Dom.Attr ("placeholder", "as they are"); Dom.OnInput (fun v -> Enemy ("eres", v)) } }
                     div { Dom.Class "knob"; span { Dom.Class "what"; "Chaos resistance" }; input { Dom.Attr ("type", "number"); Dom.Attr ("placeholder", "as it is"); Dom.OnInput (fun v -> Enemy ("cres", v)) } }
                 }

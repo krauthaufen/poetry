@@ -110,7 +110,7 @@ let runOne (path: string) : Result =
         | Some (mainGem, _, group) ->
             // a main skill socketed in a meta gem is triggered; press the most supported other skill
             let inMeta = group.Gems |> List.exists (fun x -> not x.IsSupport && Gems.isMeta db x.Name)
-            let boss = Encounter.boss 83 Rarity.defaults 30.0 |> List.map (fun e -> { e with Life = 1e13 })
+            let boss = Encounter.boss 81 Rarity.defaults 30.0 |> List.map (fun e -> { e with Life = 1e13 })
             let pressedGem =
                 if inMeta || not (usable mainGem) || (Setup.pressed c o mainGem).IsNone then Setup.strongest c o boss
                 else Some mainGem

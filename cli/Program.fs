@@ -7,7 +7,7 @@
 ///   --scenario S     boss | pinnacle | pack | surrounded (default boss)
 ///   --pack N,M,R     pack of N normal, M magic, R rare monsters (default 8,3,1)
 ///   --distance D     how far in front the enemies stand, game units (default 30; 10 = 1 m)
-///   --level L        monster level (default 83)
+///   --level L        monster level (default 81)
 ///   --life X         override life of every enemy (e.g. 1e12 to measure sustained DPS)
 ///   --res X          override elemental resistance of every enemy
 ///   --target T       nearest | strongest (default strongest)
@@ -81,7 +81,7 @@ let private usage =
        --scenario S     boss | pinnacle | pack | surrounded (default boss)\n\
        --pack N,M,R     pack of N normal, M magic, R rare monsters (default 8,3,1)\n\
        --distance D     how far in front the enemies stand, game units (default 30; 10 = 1 m)\n\
-       --level L        monster level (default 83)\n\
+       --level L        monster level (default 81)\n\
        --life X         override life of every enemy (e.g. 1e12 to measure sustained DPS)\n\
        --res X          override elemental resistance of every enemy\n\
        --target T       nearest | strongest (default strongest)\n\
@@ -181,7 +181,7 @@ let main argv =
             (DamageType.all |> List.map (fun t ->
                 let m = Defence.maxHit vitals t
                 sprintf "%s %s" (DamageType.name t) (if System.Double.IsInfinity m then "immune" else sprintf "%.0f" m)) |> String.concat ", ")
-        (let level = int (get "level" 83.0)
+        (let level = int (get "level" 81.0)
          let acc = Constants.monsterAccuracy level
          printfn "avoidance vs level %d: hit %.0f%% of the time, %.0f%% of hits deflected (-%.0f%%), %.0f%% blocked; stun threshold %.0f, ailment threshold %.0f"
              level (Vitals.monsterHitChance vitals.Evasion acc) (Vitals.deflectChance vitals.Deflection acc) vitals.DeflectEffect vitals.Block vitals.StunThreshold vitals.AilmentThreshold)
@@ -216,7 +216,7 @@ let main argv =
         // no skill chosen: the one that deals the most when pressed, the rest played by type
         let chosen =
             if Map.containsKey "group" o || Map.containsKey "rotation" o then None
-            else Setup.strongest c options (Encounter.boss (int (get "level" 83.0)) Rarity.defaults 30.0 |> List.map (fun e -> { e with Life = 1e12 }))
+            else Setup.strongest c options (Encounter.boss (int (get "level" 81.0)) Rarity.defaults 30.0 |> List.map (fun e -> { e with Life = 1e12 }))
         // nothing to press, and minions: they fight alone
         let chosen =
             match chosen with
@@ -256,7 +256,7 @@ let main argv =
                         Delivery = (match s.Delivery with Projectiles p -> Projectiles { p with Spread = deg } | d -> d)
                         Parts = s.Parts |> List.map (withSpread deg) }
                 let skill = match Map.tryFind "spread" o with Some d -> withSpread (float d) skill | None -> skill
-                let level = int (get "level" 83.0)
+                let level = int (get "level" 81.0)
                 let profile r =
                     let p = Rarity.defaults r
                     let p = match Map.tryFind "scenario" o, r with

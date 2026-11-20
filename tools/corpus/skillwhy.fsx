@@ -19,7 +19,7 @@ match player.Skills |> List.tryFind (fun s -> s.Name = gem) with
     printfn "  base %s x%.2f, crit %.2f%%, %.3fs, hits %A, %A" (s.BaseDamage |> Map.toList |> List.map (fun (t, r) -> sprintf "%s %.0f-%.0f" (DamageType.name t) r.Min r.Max) |> String.concat " ") s.BaseMultiplier s.BaseCrit s.BaseTime s.Hits s.Delivery
     // what one hit is before the enemy: non-crit average per type, crit chance and multiplier, with
     // what the fight starts with (charges, flags) and nothing on the enemy
-    let fight = Setup.fight c o player (Encounter.boss 83 Rarity.defaults 30.0)
+    let fight = Setup.fight c o player (Encounter.boss 81 Rarity.defaults 30.0)
     let ctx = { Ctx.empty with SkillTags = s.Tags; SkillName = s.Name; Buffs = Map.ofList fight.Player.Resources }
     let expected (sk: Skill) =
         let db = ModDb.ofList (fight.Player.Mods @ sk.Mods)

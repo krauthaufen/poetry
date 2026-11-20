@@ -208,22 +208,22 @@ module Report =
               "movement", (let speed, more = Defence.movement c.Sheet in obj [ "speed", num speed; "percent", num more ])
               "resistances", JArr [ for t in DamageType.all do if t <> Physical then yield obj [ "name", JStr(DamageType.name t); "value", num (Map.tryFind t v.Resist |> Option.defaultValue 0.0) ] ]
               // what a hit must get through: the largest hit of each type survived from full
-              // pools (-1: immune), how often a monster of level 83 connects, what recovers
+              // pools (-1: immune), how often a monster of level 81 connects, what recovers
               "defence",
-              (let acc = Constants.monsterAccuracy 83
+              (let acc = Constants.monsterAccuracy 81
                obj [ "maxHit", JArr [ for t in DamageType.all do
                                         let m = Defence.maxHit v t
                                         yield obj [ "name", JStr(DamageType.name t); "value", num (if System.Double.IsInfinity m then -1.0 else m) ] ]
                      // (the effective hit pool against PoB's enemy: a boss of that level whose hit
                      // deals its damage once as each of physical, lightning, cold and fire, and
                      // two fifths of it as chaos)
-                     "ehp", num (match Encounter.boss 83 Rarity.defaults 0.0 |> List.tryPick (fun e -> e.Attack) with
+                     "ehp", num (match Encounter.boss 81 Rarity.defaults 0.0 |> List.tryPick (fun e -> e.Attack) with
                                  | Some a ->
                                      let hit = a.Damage |> Map.toList |> List.sumBy snd
                                      let e = Defence.ehp v (Map.ofList [ Physical, hit; Lightning, hit; Cold, hit; Fire, hit; Chaos, hit / 2.5 ]) a.Melee a.Accuracy
                                      if System.Double.IsInfinity e then -1.0 else e
                                  | None -> -1.0)
-                     "level", num 83.0
+                     "level", num 81.0
                      "hitChance", num (Vitals.monsterHitChance v.Evasion acc)
                      "deflectChance", num (Vitals.deflectChance v.Deflection acc)
                      "deflectEffect", num v.DeflectEffect
@@ -280,7 +280,7 @@ module Report =
 
     /// A fight as asked for: { scenario: "boss" | "pinnacle" | "endless" | "pack" | "surrounded", level,
     /// time, runs, seed (the first run's, 1), life (0: the enemies' own), gem ("": the strongest to press) }.
-    /// Missing fields take the defaults (a level 83 boss, 30 s, 20 runs).
+    /// Missing fields take the defaults (a level 81 boss, 30 s, 20 runs).
     /// One run for showing: who is there at the start (the player in the middle), and what
     /// happened in order, as short arrays:
     ///   ["u", time, actor, skill, marks]   a use; a mark is ["r", x, y, radius, delay] (an area),
@@ -356,7 +356,7 @@ module Report =
         let s key d = Json.strField key request |> Option.defaultValue d
         // (not said: an endgame map's, or the character's own level while that is lower: a
         // character still in the campaign fights what is there for it)
-        let level = int (n "level" (float (min 83 (max 1 c.Sheet.Level))))
+        let level = int (n "level" (float (min 81 (max 1 c.Sheet.Level))))
         // how the character goes into the fight: "start" is "PowerCharge:3,Rage:0" (counts to
         // begin with), the others are switches (1: on)
         let on key = n key 0.0 > 0.0

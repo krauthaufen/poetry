@@ -9,7 +9,7 @@ let args = fsi.CommandLineArgs |> Array.skip 1
 let build, _ = Setup.parseBuild (System.IO.File.ReadAllText args.[0])
 let o = { Options.defaults with MaxTime = 20.0 }
 let c = Setup.load read build o
-let boss = Encounter.boss 83 Rarity.defaults 30.0 |> List.map (fun e -> { e with Life = 1e13 })
+let boss = Encounter.boss 81 Rarity.defaults 30.0 |> List.map (fun e -> { e with Life = 1e13 })
 let gem = if args.Length > 1 then args.[1] else (Setup.strongest c o boss |> Option.defaultValue "")
 let play = Setup.auto c o gem
 printfn "pressable: %s" (Setup.pressable c |> String.concat ", ")
