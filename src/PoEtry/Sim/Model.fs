@@ -660,13 +660,6 @@ type Shown =
     /// On a march: how far the player has walked by then (game units).
     | Walked of time: float * distance: float
 
-/// What the player could take at one moment of a fight, from unhurt pools and with the
-/// defences of that moment (`Sim.defences`). Infinity: nothing of that type can kill.
-type DefenceSample =
-    { Time: float
-      /// The largest hit of each type lived through, if it lands in full.
-      MaxHit: Map<DamageType, float> }
-
 type Outcome =
     { /// What happened, in order (only of a run that was asked to keep it: `Sim.shown`).
       Shown: Shown list

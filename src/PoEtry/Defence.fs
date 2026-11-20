@@ -415,3 +415,18 @@ module Defence =
         else
             let rec go lo hi n = if n = 0 then lo else (let mid = (lo + hi) / 2.0 in if taken v t false mid < p then go mid hi (n - 1) else go lo mid (n - 1))
             go 0.0 1e9 60
+
+    /// Effective hit pool, as PoB counts it: how many of a monster's attacks it takes on
+    /// average to empty the full pools, nothing recovered, times what one attack deals before
+    /// mitigation. An attack that misses takes nothing, a blocked or deflected one less.
+    /// Infinity: these hits take nothing.
+    let ehp (v: PlayerStats) (damage: Map<DamageType, float>) (melee: bool) (accuracy: float) =
+        // the share of the pools one landed hit takes (each type against its own pool)
+        let plain = damage |> Map.toList |> List.sumBy (fun (t, d) -> taken v t melee d / pool v t)
+        let chance (c: float) (lucky: bool) = (if lucky then 100.0 - (100.0 - c) * (100.0 - c) / 100.0 else c) / 100.0
+        let block = chance v.Block v.LuckyBlock
+        let deflect = chance (Vitals.deflectChance v.Deflection accuracy) v.LuckyDeflect
+        let perAttack =
+            Vitals.monsterHitChance v.Evasion accuracy / 100.0 * plain
+            * (block * v.BlockedDamageTaken / 100.0 + (1.0 - block) * (1.0 - deflect * v.DeflectEffect / 100.0))
+        if perAttack <= 0.0 then infinity else (damage |> Map.toList |> List.sumBy snd) / perAttack

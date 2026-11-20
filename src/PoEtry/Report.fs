@@ -214,6 +214,15 @@ module Report =
                obj [ "maxHit", JArr [ for t in DamageType.all do
                                         let m = Defence.maxHit v t
                                         yield obj [ "name", JStr(DamageType.name t); "value", num (if System.Double.IsInfinity m then -1.0 else m) ] ]
+                     // (the effective hit pool against PoB's enemy: a boss of that level whose hit
+                     // deals its damage once as each of physical, lightning, cold and fire, and
+                     // two fifths of it as chaos)
+                     "ehp", num (match Encounter.boss 83 Rarity.defaults 0.0 |> List.tryPick (fun e -> e.Attack) with
+                                 | Some a ->
+                                     let hit = a.Damage |> Map.toList |> List.sumBy snd
+                                     let e = Defence.ehp v (Map.ofList [ Physical, hit; Lightning, hit; Cold, hit; Fire, hit; Chaos, hit / 2.5 ]) a.Melee a.Accuracy
+                                     if System.Double.IsInfinity e then -1.0 else e
+                                 | None -> -1.0)
                      "level", num 83.0
                      "hitChance", num (Vitals.monsterHitChance v.Evasion acc)
                      "deflectChance", num (Vitals.deflectChance v.Deflection acc)
@@ -561,44 +570,6 @@ module Report =
                    | Some m -> marching (marchOf (min packs 2) m.Engage m.Hold) (Setup.fight c o player enemies)
                    | None -> f) }
 
-    /// What it takes to kill the character: this fight is fought with its monsters dealing
-    /// all their damage as one type and so much of it that the character is dead after about
-    /// `within` seconds (the middle one of five fights), the monsters with life enough to
-    /// last. The character fights back as in any fight, so what its skills give it comes and
-    /// goes as it does, and what it does to the monsters (slowed, weakened, frozen) counts.
-    /// By type: what the monsters throw until then at the pace and size they begin with
-    /// (misses and blocked hits counted), and the size of one hit. None: not killed by any size.
-    let killing (within: float) (f: Fight) : (DamageType * (float * float) option) list =
-        let seeds = [ 7001u .. 7005u ]
-        DamageType.all |> List.map (fun t ->
-            let at (k: float) =
-                { f with
-                    MaxTime = within
-                    Replace = false
-                    Enemies = f.Enemies |> List.map (fun e ->
-                        { e with Life = e.Life * 1e6
-                                 Attack = e.Attack |> Option.map (fun a -> { a with Damage = Map.ofList [ t, k * (a.Damage |> Map.toList |> List.sumBy snd) ] }) }) }
-            let deaths (k: float) =
-                let g = at k
-                let run = match Flat.compile g with | Ok program -> Flat.runner program | Error _ -> Sim.run g
-                seeds |> List.map (fun seed -> (run seed).Died |> Option.defaultValue infinity) |> List.sort
-            let dies (k: float) = (deaths k).[seeds.Length / 2] <= within
-            // per second, at the size 1: what the monsters deal before anything is done to them
-            let pace = f.Enemies |> List.sumBy (fun e -> match e.Attack with Some a -> (a.Damage |> Map.toList |> List.sumBy snd) / a.Interval | None -> 0.0)
-            let size = f.Enemies |> List.tryPick (fun e -> e.Attack) |> Option.map (fun a -> a.Damage |> Map.toList |> List.sumBy snd) |> Option.defaultValue 0.0
-            let rec up (k: float) (left: int) = if dies k then Some k elif left = 0 then None else up (k * 4.0) (left - 1)
-            let rec down (k: float) (left: int) = if left = 0 || not (dies (k / 4.0)) then k else down (k / 4.0) (left - 1)
-            let rec between (lives: float) (dead: float) (left: int) =
-                if left = 0 then dead
-                else
-                    let mid = sqrt (lives * dead)
-                    if dies mid then between lives mid (left - 1) else between mid dead (left - 1)
-            let found =
-                if pace <= 0.0 then None
-                elif dies 1.0 then Some (between (down 1.0 8 / 4.0) (down 1.0 8) 5)
-                else up 4.0 14 |> Option.map (fun k -> between (k / 4.0) k 5)
-            t, found |> Option.map (fun k -> k * pace * (deaths k).[seeds.Length / 2], k * size))
-
     let fought (ready: Ready) (request: Json) : Json =
         let n key d = Json.numField key request |> Option.defaultValue d
         let gem, scenario, steps, f = ready.Gem, ready.Scenario, ready.Steps, ready.Fight
@@ -611,31 +582,8 @@ module Report =
         let march = f.March.IsSome
         let outcomes = [ for seed in first .. first + runs - 1 -> if tracing && seed = first && not march then Sim.shown f (uint32 seed) else ready.Run (uint32 seed) ]
         let summary = outcomes |> Summary.ofOutcomes
-        // what the character could take while it fights this fight (the reference's first run,
-        // looked at twice a second): the largest hit of each type at the start, at its lowest,
-        // in the middle and at its highest (-1: immune); and what kills it in ten seconds
-        // (`killing`; -1: nothing does). A map is too long for the reference: not asked there.
-        let takes =
-            // (asked once a fight: with the run that is kept for showing)
-            if march || not tracing then JArr []
-            else
-                let _, samples = Sim.defences 0.5 f (uint32 first)
-                let finite (x: float) = if System.Double.IsInfinity x || System.Double.IsNaN x then -1.0 else x
-                let killed = killing 10.0 f |> Map.ofList
-                JArr
-                    [ for t in DamageType.all do
-                        let hits = samples |> List.map (fun s -> Map.tryFind t s.MaxHit |> Option.defaultValue infinity)
-                        if not hits.IsEmpty then
-                            let sorted = List.sort hits
-                            yield obj [ "name", JStr(DamageType.name t); "start", num (finite hits.Head); "low", num (finite sorted.Head)
-                                        "mid", num (finite sorted.[sorted.Length / 2]); "high", num (finite (List.last sorted))
-                                        "ehp", num (match Map.tryFind t killed with Some (Some (thrown, _)) -> thrown | _ -> -1.0)
-                                        "hit", num (match Map.tryFind t killed with Some (Some (_, hit)) -> hit | _ -> -1.0) ] ]
-        let monsterHit = f.Enemies |> List.tryPick (fun e -> e.Attack) |> Option.map (fun a -> a.Damage |> Map.toList |> List.sumBy snd) |> Option.defaultValue 0.0
         obj
             [ "gem", JStr gem
-              "takes", takes
-              "monsterHit", num monsterHit
               "engine", JStr ready.Engine
               "way", JStr ready.Way
               "scale", num ready.Scale

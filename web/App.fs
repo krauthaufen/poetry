@@ -1267,6 +1267,7 @@ let private guards (j : Json) : (string * Row list) list =
     let resists = Json.field "resistances" j |> Json.list |> List.map (fun x -> { Label = Json.string (Json.field "name" x); Value = sprintf "%.0f%%" (Json.number (Json.field "value" x)) })
     [ "Pools", [ row "Life" (n [ "pools"; "life" ]); row "Energy Shield" (n [ "pools"; "energyShield" ]); row "Runic Ward" (n [ "pools"; "ward" ]); row "Mana" (n [ "pools"; "mana" ]) ]
       "Largest hit survived", hits
+      "Effective hit pool", [ { Label = "Against a level " + level + " boss"; Value = (let e = d "ehp" in if e < 0.0 then "not killed" else short e) } ]
       "Against a level " + level + " monster",
       [ pct "Its hits land" (d "hitChance"); pct "Hits deflected" (d "deflectChance"); pct "A deflected hit deals less by" (d "deflectEffect")
         { Label = "Hits blocked"; Value = sprintf "%.0f%%" (n [ "defences"; "block" ]) + lucky }
@@ -1908,20 +1909,6 @@ let rec private step (msg : Msg) (m : Model) : Model =
                       { Label = "Damage taken"; Value = short (Json.number (Json.field "damageTakenPerSecond" j)) + " per second" }
                       { Label = "Lowest life, on average"; Value = sprintf "%.0f%%" (100.0 * (Json.field "lowestLife" j |> Json.field "mean" |> Json.number)) }
                       { Label = "Lowest life, worst fight"; Value = sprintf "%.0f%%" (100.0 * (Json.field "lowestLife" j |> Json.field "worst" |> Json.number)) } ]
-                    // what it could take while fighting: the largest hit by type (as it mostly is,
-                    // and from where to where it goes when buffs come and go), then what a
-                    // monster has to throw at it to kill it in ten seconds
-                    @ (let takes = Json.field "takes" j |> Json.list
-                       let v (x : Json) (k : string) = Json.number (Json.field k x)
-                       let amount (a : float) = if a < 0.0 then "immune" else short a
-                       [ for x in takes do
-                           let low, mid, high = v x "low", v x "mid", v x "high"
-                           yield { Label = "Largest " + Json.string (Json.field "name" x) + " hit survived"
-                                   Value = amount mid + (if high > low * 1.02 && low >= 0.0 then " (" + amount low + " to " + amount high + ")" else "") }
-                         for x in takes do
-                           // (found by fighting a monster that hits hard enough to kill in ten seconds)
-                           yield { Label = "Dead in 10 s from " + Json.string (Json.field "name" x) + " damage of"
-                                   Value = if v x "ehp" < 0.0 then "not killed" else short (v x "ehp") + " (hits of " + short (v x "hit") + ")" } ])
                 More = more
                 Round = (if more then m.Round + 1 else m.Round)
                 Gem = Json.string (Json.field "gem" j)

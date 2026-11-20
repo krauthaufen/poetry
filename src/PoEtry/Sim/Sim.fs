@@ -16,11 +16,6 @@ module Sim =
     let traced (tell: float -> string -> string -> string -> float -> unit) (fight: Fight) (seed: uint32) : Outcome =
         Engine.Run.runWith (Some tell) false fight seed
 
-    /// The same fight (the same numbers), with what the player could take at every `every`
-    /// seconds of it: the largest hit of each type, and how much the fight's monster would
-    /// have to deal. Read off the worlds the fight goes through; it changes nothing in it.
-    let defences (every: float) (fight: Fight) (seed: uint32) : Outcome * DefenceSample list = Engine.Run.runProbed every fight seed
-
     // ---- parts of the engine that the fast engine (`Flat`) and the setup use as they are ----
 
     let streamHash (key: string) : uint32 = Engine.State.streamHash key
