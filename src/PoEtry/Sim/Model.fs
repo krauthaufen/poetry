@@ -665,10 +665,7 @@ type Shown =
 type DefenceSample =
     { Time: float
       /// The largest hit of each type lived through, if it lands in full.
-      MaxHit: Map<DamageType, float>
-      /// Against the fight's monster, were its hits of that type: the damage it has to deal
-      /// before the player is dead, misses, blocks and deflected hits counted, nothing recovered.
-      Ehp: Map<DamageType, float> }
+      MaxHit: Map<DamageType, float> }
 
 type Outcome =
     { /// What happened, in order (only of a run that was asked to keep it: `Sim.shown`).

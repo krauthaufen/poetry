@@ -1909,8 +1909,8 @@ let rec private step (msg : Msg) (m : Model) : Model =
                       { Label = "Lowest life, on average"; Value = sprintf "%.0f%%" (100.0 * (Json.field "lowestLife" j |> Json.field "mean" |> Json.number)) }
                       { Label = "Lowest life, worst fight"; Value = sprintf "%.0f%%" (100.0 * (Json.field "lowestLife" j |> Json.field "worst" |> Json.number)) } ]
                     // what it could take while fighting: the largest hit by type (as it mostly is,
-                    // and from where to where it goes when buffs come and go), then what this
-                    // monster would have to deal before the character is dead
+                    // and from where to where it goes when buffs come and go), then what a
+                    // monster has to throw at it to kill it in ten seconds
                     @ (let takes = Json.field "takes" j |> Json.list
                        let v (x : Json) (k : string) = Json.number (Json.field k x)
                        let amount (a : float) = if a < 0.0 then "immune" else short a
@@ -1919,8 +1919,9 @@ let rec private step (msg : Msg) (m : Model) : Model =
                            yield { Label = "Largest " + Json.string (Json.field "name" x) + " hit survived"
                                    Value = amount mid + (if high > low * 1.02 && low >= 0.0 then " (" + amount low + " to " + amount high + ")" else "") }
                          for x in takes do
-                           if v x "ehp" > -2.0 then
-                               yield { Label = "This monster must deal, as " + Json.string (Json.field "name" x); Value = amount (v x "ehp") } ])
+                           // (found by fighting a monster that hits hard enough to kill in ten seconds)
+                           yield { Label = "Dead in 10 s from " + Json.string (Json.field "name" x) + " damage of"
+                                   Value = if v x "ehp" < 0.0 then "not killed" else short (v x "ehp") + " (hits of " + short (v x "hit") + ")" } ])
                 More = more
                 Round = (if more then m.Round + 1 else m.Round)
                 Gem = Json.string (Json.field "gem" j)
